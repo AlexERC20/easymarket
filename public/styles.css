@@ -78,11 +78,12 @@ p {
 }
 
 .topbar {
-  margin: 2px 0 10px;
+  margin: 2px 0 8px;
 }
 
 h1 {
-  font-size: 24px;
+  color: var(--fire);
+  font-size: 28px;
   font-weight: 900;
   letter-spacing: 0;
 }
@@ -126,17 +127,20 @@ h2 {
 }
 
 .wallet-strip {
-  padding: 12px 14px;
+  padding: 9px 11px;
   margin-bottom: 10px;
 }
 
-.wallet-strip strong {
-  display: block;
-  margin-top: 2px;
-  color: var(--fire);
-  font-size: 23px;
-  font-weight: 950;
-  line-height: 1;
+.wallet-hint {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .icon-button,
@@ -152,6 +156,12 @@ h2 {
   width: 42px;
   height: 42px;
   font-size: 20px;
+}
+
+.icon-button.accent {
+  border-color: rgba(255, 184, 77, 0.48);
+  background: linear-gradient(180deg, rgba(255, 184, 77, 0.24), rgba(255, 184, 77, 0.09));
+  color: var(--fire);
 }
 
 .ghost-button {
@@ -229,11 +239,11 @@ h2 {
 
 .chart-frame {
   position: relative;
-  height: 178px;
+  height: 204px;
   margin: 10px 0 13px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.075);
-  border-radius: 16px;
+  border: 0;
+  border-radius: 0;
   background: #080d16;
 }
 

@@ -43,6 +43,7 @@ function mapUser(row) {
     telegram_id: row.telegram_id,
     username: row.username,
     first_name: row.first_name,
+    referred_by_telegram_id: row.referred_by_telegram_id,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -199,15 +200,22 @@ export async function upsertUser(input) {
   if (!telegramId) {
     throw new Error("telegram_id_required");
   }
+  const referredByTelegramId = String(input.referred_by_telegram_id ?? input.ref ?? "")
+    .trim()
+    .replace(/^ref_/, "");
+  const safeReferredBy = referredByTelegramId && referredByTelegramId !== telegramId
+    ? referredByTelegramId
+    : null;
 
   return withTransaction(async (client) => {
     const userResult = await client.query(
       `
-        INSERT INTO users (telegram_id, username, first_name, updated_at)
-        VALUES ($1, $2, $3, now())
+        INSERT INTO users (telegram_id, username, first_name, referred_by_telegram_id, updated_at)
+        VALUES ($1, $2, $3, $4, now())
         ON CONFLICT (telegram_id) DO UPDATE SET
           username = EXCLUDED.username,
           first_name = EXCLUDED.first_name,
+          referred_by_telegram_id = COALESCE(users.referred_by_telegram_id, EXCLUDED.referred_by_telegram_id),
           updated_at = now()
         RETURNING *
       `,
@@ -215,6 +223,7 @@ export async function upsertUser(input) {
         telegramId,
         input.username ? String(input.username).replace(/^@/, "") : null,
         input.first_name ? String(input.first_name) : null,
+        safeReferredBy,
       ],
     );
     const user = userResult.rows[0];
@@ -577,6 +586,72 @@ export async function getMarketChart(market, limit = 240) {
   return result.rows.map(mapMarketChartPoint);
 }
 
+async function awardReferralBetBonus(client, buyerUser, marketId) {
+  const bonusAmount = Math.round(Number(config.referralBetBonusFire || 0));
+  const inviterTelegramId = String(buyerUser.referred_by_telegram_id || "").trim();
+  if (bonusAmount <= 0 || !inviterTelegramId || inviterTelegramId === String(buyerUser.telegram_id)) {
+    return null;
+  }
+
+  const inviterResult = await client.query(
+    `
+      SELECT *
+      FROM users
+      WHERE telegram_id = $1
+      LIMIT 1
+    `,
+    [inviterTelegramId],
+  );
+  const inviter = inviterResult.rows[0];
+  if (!inviter) {
+    return null;
+  }
+
+  const dayKey = new Date().toISOString().slice(0, 10);
+  const bonusResult = await client.query(
+    `
+      INSERT INTO fire_referral_bonuses (
+        inviter_user_id,
+        referred_user_id,
+        market_id,
+        amount,
+        day_key
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT DO NOTHING
+      RETURNING *
+    `,
+    [inviter.id, buyerUser.id, marketId, bonusAmount, dayKey],
+  );
+  if (!bonusResult.rows[0]) {
+    return null;
+  }
+
+  await client.query(
+    `
+      UPDATE fire_balances
+      SET balance = balance + $2,
+          updated_at = now()
+      WHERE user_id = $1
+    `,
+    [inviter.id, bonusAmount],
+  );
+  await client.query(
+    `
+      INSERT INTO fire_ledger (user_id, amount, reason, source)
+      VALUES ($1, $2, 'referral_bet_bonus', $3)
+    `,
+    [inviter.id, bonusAmount, `referral:${buyerUser.telegram_id}:market:${marketId}`],
+  );
+
+  return {
+    inviter: mapUser(inviter),
+    referred: mapUser(buyerUser),
+    amount: bonusAmount,
+    day_key: dayKey,
+  };
+}
+
 export async function buyOutcome(input) {
   const marketId = Number(input.marketId);
   const side = String(input.side || "").toUpperCase();
@@ -719,6 +794,8 @@ export async function buyOutcome(input) {
       [user.id, marketId, side, amount, fee, price, shares],
     );
 
+    const referralBonus = await awardReferralBetBonus(client, user, marketId);
+
     const finalBalanceResult = await client.query(
       `
         SELECT balance
@@ -733,6 +810,7 @@ export async function buyOutcome(input) {
       balance: toNumber(finalBalanceResult.rows[0]?.balance),
       position: mapPosition(positionResult.rows[0]),
       trade: mapTrade(tradeResult.rows[0]),
+      referral_bonus: referralBonus,
       market: mapMarket({
         ...market,
         yes_price: nextYesPrice,

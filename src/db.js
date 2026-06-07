@@ -80,6 +80,7 @@ export async function runMigrations() {
       telegram_id TEXT UNIQUE NOT NULL,
       username TEXT,
       first_name TEXT,
+      referred_by_telegram_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
@@ -121,6 +122,18 @@ export async function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_markets_status_end_time
       ON markets(status, end_time);
+
+    CREATE TABLE IF NOT EXISTS fire_referral_bonuses (
+      id BIGSERIAL PRIMARY KEY,
+      inviter_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      referred_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      market_id BIGINT REFERENCES markets(id) ON DELETE SET NULL,
+      amount NUMERIC(20, 8) NOT NULL,
+      day_key TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(referred_user_id),
+      UNIQUE(inviter_user_id, day_key)
+    );
 
     CREATE TABLE IF NOT EXISTS positions (
       id BIGSERIAL PRIMARY KEY,
@@ -170,6 +183,9 @@ export async function runMigrations() {
 
     ALTER TABLE trades
       ADD COLUMN IF NOT EXISTS action TEXT NOT NULL DEFAULT 'BUY';
+
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS referred_by_telegram_id TEXT;
   `);
 }
 

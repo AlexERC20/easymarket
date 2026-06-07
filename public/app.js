@@ -16,9 +16,14 @@ const state = {
   seenActivityIds: new Set(),
   pendingBuy: false,
   pendingSellSide: null,
-  chart: null,
-  priceSeries: null,
-  openPriceSeries: null,
+  publicConfig: {
+    av_bot_url: "https://t.me/voit_help_bot?start=buy_fire",
+    referral_bonus_fire: 100,
+  },
+  chartRaf: null,
+  smoothedPrice: null,
+  chartYMin: null,
+  chartYMax: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -62,120 +67,172 @@ function triggerHaptic(type = "light") {
   }
 }
 
-function initMarketChart() {
-  if (state.chart || !window.LightweightCharts) {
+function resizeCanvas(canvas) {
+  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(1, Math.round(rect.width * dpr));
+  const height = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  return { dpr, width, height };
+}
+
+function drawSmoothPath(ctx, points) {
+  if (points.length < 2) {
     return;
   }
 
-  const container = $("marketChart");
-  state.chart = window.LightweightCharts.createChart(container, {
-    width: container.clientWidth,
-    height: container.clientHeight,
-    autoSize: true,
-    layout: {
-      background: { color: "#080d16" },
-      textColor: "#8d98aa",
-      fontFamily: "Inter, system-ui, sans-serif",
-    },
-    grid: {
-      vertLines: { color: "rgba(255,255,255,0.035)" },
-      horzLines: { color: "rgba(255,255,255,0.055)" },
-    },
-    crosshair: {
-      mode: window.LightweightCharts.CrosshairMode.Normal,
-      vertLine: { color: "rgba(255,255,255,0.18)" },
-      horzLine: { color: "rgba(255,255,255,0.18)" },
-    },
-    rightPriceScale: {
-      borderColor: "rgba(255,255,255,0.08)",
-      scaleMargins: {
-        top: 0.18,
-        bottom: 0.18,
-      },
-    },
-    timeScale: {
-      borderColor: "rgba(255,255,255,0.08)",
-      timeVisible: true,
-      secondsVisible: true,
-      rightOffset: 4,
-      barSpacing: 7,
-      fixLeftEdge: false,
-      fixRightEdge: false,
-    },
-    handleScale: {
-      axisPressedMouseMove: false,
-      mouseWheel: false,
-      pinch: true,
-    },
-    handleScroll: {
-      horzTouchDrag: true,
-      vertTouchDrag: false,
-      mouseWheel: false,
-      pressedMouseMove: true,
-    },
-  });
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const midX = (previous.x + current.x) / 2;
+    const midY = (previous.y + current.y) / 2;
+    ctx.quadraticCurveTo(previous.x, previous.y, midX, midY);
+  }
+  const last = points[points.length - 1];
+  ctx.lineTo(last.x, last.y);
+  ctx.stroke();
+}
 
-  state.priceSeries = state.chart.addLineSeries({
-    color: "#19c37d",
-    lineWidth: 3,
-    priceLineVisible: false,
-    lastValueVisible: false,
-    crosshairMarkerVisible: false,
-  });
+function drawMarketChartFrame() {
+  const canvas = $("marketChart");
+  if (!(canvas instanceof HTMLCanvasElement) || !state.market) {
+    state.chartRaf = null;
+    return;
+  }
 
-  state.openPriceSeries = state.chart.addLineSeries({
-    color: "rgba(255,255,255,0.34)",
-    lineWidth: 1,
-    lineStyle: window.LightweightCharts.LineStyle.Dashed,
-    priceLineVisible: false,
-    lastValueVisible: false,
-    crosshairMarkerVisible: false,
-  });
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    state.chartRaf = null;
+    return;
+  }
+
+  const { width, height } = resizeCanvas(canvas);
+  const openPrice = Number(state.market.open_price || 0);
+  const currentPrice = Number(state.market.current_price || openPrice || 0);
+  if (!state.smoothedPrice || Math.abs(state.smoothedPrice - currentPrice) > Math.max(250, currentPrice * 0.015)) {
+    state.smoothedPrice = currentPrice;
+  } else {
+    state.smoothedPrice += (currentPrice - state.smoothedPrice) * 0.045;
+  }
+
+  const startTime = new Date(state.market.start_time).getTime();
+  const endTime = new Date(state.market.end_time).getTime();
+  const duration = Math.max(1, endTime - startTime);
+  const rawPoints = state.chartPoints
+    .filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at))
+    .map((point) => ({ ...point }));
+
+  if (rawPoints.length === 0 && currentPrice > 0) {
+    rawPoints.push({ price: currentPrice, at: Date.now() });
+  }
+  if (rawPoints.length > 0) {
+    rawPoints[rawPoints.length - 1] = {
+      ...rawPoints[rawPoints.length - 1],
+      price: state.smoothedPrice,
+      at: Math.min(endTime, Math.max(startTime, Date.now())),
+    };
+  }
+
+  const prices = [...rawPoints.map((point) => point.price), openPrice].filter(Number.isFinite);
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  const padding = Math.max(4, (maxPrice - minPrice) * 0.42);
+  const targetMin = minPrice - padding;
+  const targetMax = maxPrice + padding;
+  state.chartYMin = state.chartYMin === null ? targetMin : state.chartYMin + (targetMin - state.chartYMin) * 0.08;
+  state.chartYMax = state.chartYMax === null ? targetMax : state.chartYMax + (targetMax - state.chartYMax) * 0.08;
+
+  const left = width * 0.15;
+  const right = width * 0.95;
+  const top = height * 0.12;
+  const bottom = height * 0.82;
+  const plotWidth = Math.max(1, right - left);
+  const plotHeight = Math.max(1, bottom - top);
+  const scaleY = (price) => bottom - ((price - state.chartYMin) / Math.max(1, state.chartYMax - state.chartYMin)) * plotHeight;
+  const scaleX = (at) => left + ((Math.min(endTime, Math.max(startTime, at)) - startTime) / duration) * plotWidth;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#080d16";
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.055)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 4; i += 1) {
+    const y = top + (plotHeight / 3) * i;
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(right, y);
+    ctx.stroke();
+  }
+
+  const openY = scaleY(openPrice);
+  ctx.setLineDash([8, 9]);
+  ctx.strokeStyle = "rgba(255,255,255,0.24)";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(left, openY);
+  ctx.lineTo(right, openY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const pathPoints = rawPoints.map((point) => ({
+    x: scaleX(point.at),
+    y: scaleY(point.price),
+  }));
+  const isUp = state.smoothedPrice >= openPrice;
+  const gradient = ctx.createLinearGradient(0, top, 0, bottom);
+  gradient.addColorStop(0, isUp ? "rgba(25,195,125,0.24)" : "rgba(239,70,111,0.22)");
+  gradient.addColorStop(1, "rgba(8,13,22,0)");
+
+  if (pathPoints.length > 1) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(pathPoints[0].x, bottom);
+    for (const point of pathPoints) {
+      ctx.lineTo(point.x, point.y);
+    }
+    ctx.lineTo(pathPoints[pathPoints.length - 1].x, bottom);
+    ctx.closePath();
+    ctx.fillStyle = gradient;
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = isUp ? "#19c37d" : "#ef466f";
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    drawSmoothPath(ctx, pathPoints);
+  }
+
+  const latest = pathPoints[pathPoints.length - 1];
+  if (latest) {
+    ctx.fillStyle = isUp ? "#19c37d" : "#ef466f";
+    ctx.shadowColor = isUp ? "rgba(25,195,125,0.55)" : "rgba(239,70,111,0.52)";
+    ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.arc(latest.x, latest.y, 5.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  if (Math.abs((state.smoothedPrice || 0) - currentPrice) > 0.04) {
+    state.chartRaf = requestAnimationFrame(drawMarketChartFrame);
+    return;
+  }
+
+  state.chartRaf = null;
 }
 
 function renderMarketChart() {
-  initMarketChart();
-  if (!state.chart || !state.priceSeries || !state.openPriceSeries || !state.market) {
+  if (state.chartRaf) {
     return;
   }
-
-  const points = state.chartPoints
-    .filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at))
-    .map((point) => ({
-      time: Math.floor(point.at / 1000),
-      value: point.price,
-    }));
-
-  const deduped = [];
-  for (const point of points) {
-    if (deduped.length && deduped[deduped.length - 1].time >= point.time) {
-      deduped[deduped.length - 1] = point;
-    } else {
-      deduped.push(point);
-    }
-  }
-
-  if (deduped.length < 2) {
-    state.priceSeries.setData([]);
-    state.openPriceSeries.setData([]);
-    return;
-  }
-
-  const openPrice = Number(state.market.open_price || deduped[0].value);
-  const latest = deduped[deduped.length - 1];
-  const lineColor = latest.value >= openPrice ? "#19c37d" : "#ef466f";
-  state.priceSeries.applyOptions({ color: lineColor });
-  state.priceSeries.setData(deduped);
-  state.openPriceSeries.setData([
-    { time: deduped[0].time, value: openPrice },
-    { time: latest.time, value: openPrice },
-  ]);
-
-  const leftPadding = Math.max(6, Math.ceil(deduped.length * 0.15));
-  state.chart.timeScale().setVisibleLogicalRange({
-    from: -leftPadding,
-    to: deduped.length + 5,
-  });
+  state.chartRaf = requestAnimationFrame(drawMarketChartFrame);
 }
 
 function showToast(message) {
@@ -255,6 +312,18 @@ function parseTelegramInitDataUser(initData) {
   }
 }
 
+function parseTelegramStartParam(initData) {
+  if (!initData) {
+    return null;
+  }
+
+  try {
+    return new URLSearchParams(initData).get("start_param");
+  } catch {
+    return null;
+  }
+}
+
 function getTelegramDebugInfo() {
   const tg = window.Telegram?.WebApp;
   if (!tg) {
@@ -273,17 +342,27 @@ function getTelegramDebugInfo() {
 
 function getTelegramUser() {
   const tg = window.Telegram?.WebApp;
+  const params = new URLSearchParams(window.location.search);
+  const refParam = params.get("ref") || params.get("startapp") || params.get("start_param");
+  const normalizeRef = (value) => {
+    const normalized = String(value || "").trim().replace(/^ref_/, "");
+    return /^\d+$/.test(normalized) ? normalized : null;
+  };
+
   if (tg) {
     tg.ready();
     tg.expand();
     const user = tg.initDataUnsafe?.user || parseTelegramInitDataUser(tg.initData);
+    const telegramRef = tg.initDataUnsafe?.start_param || parseTelegramStartParam(tg.initData);
     const normalizedUser = normalizeTelegramUser(user, "telegram");
     if (normalizedUser) {
-      return normalizedUser;
+      return {
+        ...normalizedUser,
+        referred_by_telegram_id: normalizeRef(telegramRef) || normalizeRef(refParam),
+      };
     }
   }
 
-  const params = new URLSearchParams(window.location.search);
   const telegramId = params.get("telegram_id");
   if (telegramId) {
     return {
@@ -291,10 +370,23 @@ function getTelegramUser() {
       username: params.get("username"),
       first_name: params.get("first_name"),
       auth_source: "dev",
+      referred_by_telegram_id: normalizeRef(refParam),
     };
   }
 
   return null;
+}
+
+async function loadPublicConfig() {
+  try {
+    const data = await api("/api/public/config");
+    state.publicConfig = {
+      ...state.publicConfig,
+      ...data,
+    };
+  } catch {
+    // The UI can still work with local fallback config.
+  }
 }
 
 async function api(path, options = {}) {
@@ -718,6 +810,48 @@ $("refreshBtn").addEventListener("click", () => {
   void refreshAll();
 });
 
+$("walletBtn").addEventListener("click", () => {
+  triggerHaptic("selection");
+  const url = state.publicConfig.av_bot_url || "https://t.me/voit_help_bot?start=buy_fire";
+  if (window.Telegram?.WebApp?.openTelegramLink && /^https:\/\/t\.me\//i.test(url)) {
+    window.Telegram.WebApp.openTelegramLink(url);
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+});
+
+$("inviteBtn").addEventListener("click", async () => {
+  triggerHaptic("selection");
+  if (!state.user?.telegram_id) {
+    showToast("Сначала нужен пользователь.");
+    return;
+  }
+
+  const bonus = Math.round(Number(state.publicConfig.referral_bonus_fire || 100));
+  const inviteUrl = `${window.location.origin}/?ref=${encodeURIComponent(state.user.telegram_id)}`;
+  const text = `Залетай в EasyMarket. После первой ставки мне дадут ${bonus} FIRE.`;
+  try {
+    if (navigator.share) {
+      await navigator.share({
+        title: "EasyMarket",
+        text,
+        url: inviteUrl,
+      });
+      return;
+    }
+  } catch {
+    // Fall through to Telegram share link.
+  }
+
+  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
+  if (window.Telegram?.WebApp?.openTelegramLink) {
+    window.Telegram.WebApp.openTelegramLink(shareUrl);
+  } else {
+    window.open(shareUrl, "_blank", "noopener,noreferrer");
+  }
+  showToast(`+${bonus} FIRE за друга после его первой ставки. 1 раз в день.`);
+});
+
 document.addEventListener("click", (event) => {
   const button = event.target.closest(".sell-button");
   if (!button) {
@@ -732,7 +866,11 @@ setInterval(() => void loadMarket().catch(() => setConnection("Ошибка", "e
 setInterval(() => void loadMe().catch(() => undefined), 3_000);
 setInterval(() => void loadRecentMarkets().catch(() => undefined), 10_000);
 
-window.addEventListener("resize", renderMarketChart);
+window.addEventListener("resize", () => {
+  state.chartYMin = null;
+  state.chartYMax = null;
+  renderMarketChart();
+});
 
 AMOUNTS.forEach((amount, index) => {
   const button = document.querySelector(`.amount-button[data-amount="${amount}"]`);
@@ -741,7 +879,8 @@ AMOUNTS.forEach((amount, index) => {
   }
 });
 
-upsertMe()
+loadPublicConfig()
+  .then(upsertMe)
   .then(refreshAll)
   .catch((error) => {
     setConnection("Ошибка входа", "error");

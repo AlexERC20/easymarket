@@ -21,11 +21,17 @@ export const config = {
   allowDevAuth: process.env.NODE_ENV !== "production" || parseBoolean(process.env.ALLOW_DEV_AUTH, false),
   allowDevTools: parseBoolean(process.env.ALLOW_DEV_TOOLS, false),
   botBridgeSecret: process.env.BOT_BRIDGE_SECRET || "",
+  publicAvBotUrl: (
+    process.env.PUBLIC_AV_BOT_URL
+      || process.env.AV_BOT_URL
+      || "https://t.me/voit_help_bot?start=buy_fire"
+  ).trim(),
   marketIntervalSeconds: parseNumber(process.env.MARKET_INTERVAL_SECONDS, 10, 1),
   marketDurationMinutes: parseNumber(process.env.MARKET_DURATION_MINUTES, 5, 1),
   marketLiquidity: parseNumber(process.env.MARKET_LIQUIDITY, 10_000, 100),
   marketFeeBps: parseNumber(process.env.MARKET_FEE_BPS, 200, 0),
   pricePollMs: parseNumber(process.env.PRICE_POLL_MS, 1_000, 250),
+  referralBetBonusFire: parseNumber(process.env.REFERRAL_BET_BONUS_FIRE, 100, 0),
 };
 
 export function clamp(value, min, max) {

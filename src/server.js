@@ -150,6 +150,14 @@ app.get("/api/status", async (_req, res) => {
   }
 });
 
+app.get("/api/public/config", (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    av_bot_url: config.publicAvBotUrl,
+    referral_bonus_fire: config.referralBetBonusFire,
+  });
+});
+
 app.post("/api/me/upsert", async (req, res) => {
   try {
     const authSource = String(req.body?.auth_source || "telegram");
@@ -165,6 +173,7 @@ app.post("/api/me/upsert", async (req, res) => {
       telegram_id: req.body?.telegram_id,
       username: req.body?.username,
       first_name: req.body?.first_name,
+      referred_by_telegram_id: req.body?.referred_by_telegram_id,
     });
     const snapshot = await getUserSnapshot(user.telegram_id);
     res.status(200).json({

@@ -61,6 +61,8 @@ MARKET_DURATION_MINUTES=5
 MARKET_LIQUIDITY=10000
 MARKET_FEE_BPS=200
 PRICE_POLL_MS=1000
+PUBLIC_AV_BOT_URL=https://t.me/voit_help_bot?start=buy_fire
+REFERRAL_BET_BONUS_FIRE=100
 ```
 
 `DATABASE_URL` must be set in the Render environment. Do not commit real database credentials.
@@ -95,6 +97,7 @@ After deploy:
 ```bash
 curl https://easymarket-rcuj.onrender.com/health
 curl https://easymarket-rcuj.onrender.com/api/status
+curl https://easymarket-rcuj.onrender.com/api/public/config
 curl https://easymarket-rcuj.onrender.com/api/market/active
 curl https://easymarket-rcuj.onrender.com/api/markets/recent
 ```
@@ -122,6 +125,7 @@ Expected `/api/status` response when the database is connected:
 Public frontend API:
 
 ```text
+GET  /api/public/config
 GET  /api/market/active
 GET  /api/market/:marketId/activity
 POST /api/market/:marketId/buy
