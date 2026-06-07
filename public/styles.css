@@ -297,3 +297,10 @@ code {
   color: var(--fire);
   word-break: break-word;
 }
+
+.debug-text {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}

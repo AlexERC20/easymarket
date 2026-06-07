@@ -31,19 +31,58 @@ function setConnection(status, type = "") {
   }
 }
 
+function normalizeTelegramUser(user, authSource) {
+  if (!user?.id) {
+    return null;
+  }
+
+  return {
+    telegram_id: String(user.id),
+    username: user.username || null,
+    first_name: user.first_name || null,
+    auth_source: authSource,
+  };
+}
+
+function parseTelegramInitDataUser(initData) {
+  if (!initData) {
+    return null;
+  }
+
+  try {
+    const params = new URLSearchParams(initData);
+    const rawUser = params.get("user");
+    return rawUser ? JSON.parse(rawUser) : null;
+  } catch {
+    return null;
+  }
+}
+
+function getTelegramDebugInfo() {
+  const tg = window.Telegram?.WebApp;
+  if (!tg) {
+    return "Telegram.WebApp: нет · initData: нет · user: нет";
+  }
+
+  const unsafeUser = tg.initDataUnsafe?.user;
+  const parsedUser = parseTelegramInitDataUser(tg.initData);
+  return [
+    "Telegram.WebApp: да",
+    `initData: ${tg.initData ? "да" : "нет"}`,
+    `unsafe user: ${unsafeUser?.id ? "да" : "нет"}`,
+    `parsed user: ${parsedUser?.id ? "да" : "нет"}`,
+  ].join(" · ");
+}
+
 function getTelegramUser() {
   const tg = window.Telegram?.WebApp;
   if (tg) {
     tg.ready();
     tg.expand();
-    const user = tg.initDataUnsafe?.user;
-    if (user?.id) {
-      return {
-        telegram_id: String(user.id),
-        username: user.username || null,
-        first_name: user.first_name || null,
-        auth_source: "telegram",
-      };
+    const user = tg.initDataUnsafe?.user || parseTelegramInitDataUser(tg.initData);
+    const normalizedUser = normalizeTelegramUser(user, "telegram");
+    if (normalizedUser) {
+      return normalizedUser;
     }
   }
 
@@ -80,6 +119,7 @@ async function upsertMe() {
   const user = getTelegramUser();
   if (!user) {
     $("authCard").classList.remove("hidden");
+    $("authDebug").textContent = getTelegramDebugInfo();
     setConnection("Нет пользователя", "error");
     return;
   }
