@@ -31,6 +31,32 @@ const formatCents = (value) => `${Math.round(Number(value || 0) * 100)}¢`;
 const sideLabel = (side) => (side === "YES" ? "UP" : "DOWN");
 const sideClass = (side) => (side === "YES" ? "yes" : "no");
 
+function triggerHaptic(type = "light") {
+  const haptic = window.Telegram?.WebApp?.HapticFeedback;
+  try {
+    if (type === "selection") {
+      haptic?.selectionChanged?.();
+    } else if (type === "success" || type === "error" || type === "warning") {
+      haptic?.notificationOccurred?.(type);
+    } else {
+      haptic?.impactOccurred?.(type);
+    }
+  } catch {
+    // Haptic feedback is best-effort and must never block trading UI.
+  }
+
+  if (!haptic && "vibrate" in navigator) {
+    const pattern = type === "success"
+      ? [12, 28, 18]
+      : type === "error"
+        ? [35, 30, 35]
+        : type === "selection"
+          ? 8
+          : 16;
+    navigator.vibrate(pattern);
+  }
+}
+
 function showToast(message) {
   const toast = $("toast");
   toast.textContent = message;
@@ -548,10 +574,12 @@ function drawChart() {
 
 async function buy() {
   if (!state.user || !state.market || state.pendingBuy) {
+    triggerHaptic("warning");
     showToast("Сначала нужен пользователь и активный рынок.");
     return;
   }
 
+  triggerHaptic("medium");
   state.pendingBuy = true;
   renderTradeTicket();
   try {
@@ -565,9 +593,11 @@ async function buy() {
     });
     state.balance = result.balance ?? state.balance;
     state.market = result.market ?? state.market;
+    triggerHaptic("success");
     showToast(`Куплено ${sideLabel(state.selectedSide)} на ${state.selectedAmount} FIRE`);
     await Promise.all([loadMarket(), loadMe()]);
   } catch (error) {
+    triggerHaptic("error");
     showToast(error.message === "insufficient_fire" ? "Не хватает FIRE." : "Покупка не прошла.");
   } finally {
     state.pendingBuy = false;
@@ -590,6 +620,7 @@ async function refreshAll() {
 
 document.querySelectorAll(".outcome-button").forEach((button) => {
   button.addEventListener("click", () => {
+    triggerHaptic("selection");
     state.selectedSide = button.dataset.side;
     renderTradeTicket();
   });
@@ -597,6 +628,7 @@ document.querySelectorAll(".outcome-button").forEach((button) => {
 
 document.querySelectorAll(".amount-button").forEach((button) => {
   button.addEventListener("click", () => {
+    triggerHaptic("selection");
     state.selectedAmount = Number(button.dataset.amount);
     renderTradeTicket();
   });
@@ -607,6 +639,7 @@ $("placeBetBtn").addEventListener("click", () => {
 });
 
 $("refreshBtn").addEventListener("click", () => {
+  triggerHaptic("light");
   void refreshAll();
 });
 
