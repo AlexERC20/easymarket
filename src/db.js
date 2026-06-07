@@ -145,6 +145,7 @@ export async function runMigrations() {
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       market_id BIGINT NOT NULL REFERENCES markets(id) ON DELETE CASCADE,
+      action TEXT NOT NULL DEFAULT 'BUY',
       side TEXT NOT NULL,
       amount NUMERIC(20, 8) NOT NULL,
       fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
@@ -166,6 +167,9 @@ export async function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_price_ticks_symbol_created
       ON price_ticks(symbol, created_at DESC);
+
+    ALTER TABLE trades
+      ADD COLUMN IF NOT EXISTS action TEXT NOT NULL DEFAULT 'BUY';
   `);
 }
 

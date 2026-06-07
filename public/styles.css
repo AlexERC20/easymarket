@@ -237,7 +237,7 @@ h2 {
   background: #080d16;
 }
 
-canvas {
+.market-chart {
   display: block;
   width: 100%;
   height: 100%;
@@ -478,6 +478,39 @@ canvas {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.04);
   padding: 11px;
+}
+
+.position-actions {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sell-button {
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.sell-button.yes {
+  border-color: rgba(25, 195, 125, 0.38);
+  color: var(--yes);
+}
+
+.sell-button.no {
+  border-color: rgba(239, 70, 111, 0.38);
+  color: var(--no);
+}
+
+.sell-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .mini-row strong,

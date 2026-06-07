@@ -58,7 +58,7 @@
         </div>
 
         <div class="chart-frame">
-          <canvas id="marketChart" aria-label="BTC price chart"></canvas>
+          <div id="marketChart" class="market-chart" aria-label="BTC price chart"></div>
           <div id="tradeBubbles" class="trade-bubbles" aria-hidden="true"></div>
         </div>
 
@@ -144,6 +144,7 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
+    <script src="/vendor/lightweight-charts.js"></script>
     <script src="/app.js" type="module"></script>
   </body>
 </html>

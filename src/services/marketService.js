@@ -72,6 +72,7 @@ function mapTrade(row) {
     id: Number(row.id),
     user_id: Number(row.user_id),
     market_id: Number(row.market_id),
+    action: row.action || "BUY",
     side: row.side,
     amount: toNumber(row.amount),
     fee: toNumber(row.fee),
@@ -88,6 +89,7 @@ function mapMarketActivity(row) {
     telegram_id: row.telegram_id,
     username: row.username,
     first_name: row.first_name,
+    action: row.action || "BUY",
     side: row.side,
     amount: toNumber(row.amount),
     fee: toNumber(row.fee),
@@ -182,6 +184,14 @@ function ensureNonNegativeAmount(amount) {
   }
 
   return Math.round(value * 100) / 100;
+}
+
+function getFeeBps() {
+  return Number.isFinite(config.marketFeeBps) ? config.marketFeeBps : DEFAULT_FEE_BPS;
+}
+
+function calculateFee(amount) {
+  return Math.round(Number(amount || 0) * (getFeeBps() / 10_000) * 100) / 100;
 }
 
 export async function upsertUser(input) {
@@ -623,8 +633,7 @@ export async function buyOutcome(input) {
       throw new Error("invalid_market_price");
     }
 
-    const feeBps = Number.isFinite(config.marketFeeBps) ? config.marketFeeBps : DEFAULT_FEE_BPS;
-    const fee = Math.round(amount * (feeBps / 10_000) * 100) / 100;
+    const fee = calculateFee(amount);
     const netAmount = Math.max(0, amount - fee);
     const shares = netAmount / price;
     const liquidity = toNumber(market.liquidity, config.marketLiquidity);
@@ -703,8 +712,8 @@ export async function buyOutcome(input) {
 
     const tradeResult = await client.query(
       `
-        INSERT INTO trades (user_id, market_id, side, amount, fee, price, shares)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO trades (user_id, market_id, action, side, amount, fee, price, shares)
+        VALUES ($1, $2, 'BUY', $3, $4, $5, $6, $7)
         RETURNING *
       `,
       [user.id, marketId, side, amount, fee, price, shares],
@@ -731,6 +740,210 @@ export async function buyOutcome(input) {
         yes_volume: toNumber(market.yes_volume) + (side === "YES" ? netAmount : 0),
         no_volume: toNumber(market.no_volume) + (side === "NO" ? netAmount : 0),
       }),
+    };
+  });
+}
+
+export async function sellOutcome(input) {
+  const marketId = Number(input.marketId);
+  const side = String(input.side || "").toUpperCase();
+
+  if (!Number.isSafeInteger(marketId) || marketId <= 0) {
+    throw new Error("invalid_market_id");
+  }
+
+  if (!["YES", "NO"].includes(side)) {
+    throw new Error("invalid_side");
+  }
+
+  const user = await getUserByTelegramId(input.telegram_id);
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+
+  return withTransaction(async (client) => {
+    const marketResult = await client.query(
+      `
+        SELECT *
+        FROM markets
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [marketId],
+    );
+    const market = marketResult.rows[0];
+    if (!market || market.status !== "open") {
+      throw new Error("market_not_open");
+    }
+
+    if (new Date(market.end_time).getTime() <= Date.now()) {
+      throw new Error("market_closed");
+    }
+
+    const positionResult = await client.query(
+      `
+        SELECT *
+        FROM positions
+        WHERE user_id = $1
+          AND market_id = $2
+          AND side = $3
+          AND status = 'open'
+        FOR UPDATE
+      `,
+      [user.id, marketId, side],
+    );
+    const position = positionResult.rows[0];
+    if (!position) {
+      throw new Error("position_not_open");
+    }
+
+    const positionShares = toNumber(position.shares);
+    if (positionShares <= 0) {
+      throw new Error("position_not_open");
+    }
+
+    const requestedShares = input.shares === undefined || input.shares === null
+      ? positionShares
+      : Number(input.shares);
+    if (!Number.isFinite(requestedShares) || requestedShares <= 0) {
+      throw new Error("invalid_sell_shares");
+    }
+    if (requestedShares > positionShares + 0.00000001) {
+      throw new Error("insufficient_shares");
+    }
+
+    const price = side === "YES" ? toNumber(market.yes_price) : toNumber(market.no_price);
+    if (price < MIN_PRICE || price > MAX_PRICE) {
+      throw new Error("invalid_market_price");
+    }
+
+    const sharesToSell = Math.min(positionShares, requestedShares);
+    const gross = Math.round(sharesToSell * price * 100) / 100;
+    const fee = calculateFee(gross);
+    const proceeds = Math.max(0, Math.round((gross - fee) * 100) / 100);
+    const soldRatio = sharesToSell / positionShares;
+    const spentSold = toNumber(position.spent) * soldRatio;
+    const realizedPnl = proceeds - spentSold;
+    const remainingShares = Math.max(0, positionShares - sharesToSell);
+    const remainingSpent = Math.max(0, toNumber(position.spent) - spentSold);
+    const isFullExit = remainingShares <= 0.00000001;
+
+    await client.query(
+      `
+        UPDATE fire_balances
+        SET balance = balance + $2,
+            updated_at = now()
+        WHERE user_id = $1
+      `,
+      [user.id, proceeds],
+    );
+
+    await client.query(
+      `
+        INSERT INTO fire_ledger (user_id, amount, reason, source)
+        VALUES ($1, $2, $3, $4)
+      `,
+      [user.id, proceeds, side === "YES" ? "sell_yes" : "sell_no", `market:${marketId}`],
+    );
+
+    const positionUpdateResult = await client.query(
+      `
+        UPDATE positions
+        SET shares = $2,
+            spent = $3,
+            avg_price = CASE WHEN $2 > 0 THEN $3 / $2 ELSE 0 END,
+            payout = payout + $4,
+            pnl = pnl + $5,
+            status = $6,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [
+        position.id,
+        isFullExit ? 0 : remainingShares,
+        isFullExit ? 0 : remainingSpent,
+        proceeds,
+        realizedPnl,
+        isFullExit ? "sold" : "open",
+      ],
+    );
+
+    const liquidity = toNumber(market.liquidity, config.marketLiquidity);
+    const tradeShift = (side === "YES" ? -1 : 1) * (proceeds / liquidity) * 0.75;
+    const repricedMarket = {
+      ...market,
+      yes_volume: side === "YES"
+        ? Math.max(0, toNumber(market.yes_volume) - gross)
+        : toNumber(market.yes_volume),
+      no_volume: side === "NO"
+        ? Math.max(0, toNumber(market.no_volume) - gross)
+        : toNumber(market.no_volume),
+    };
+    const nextYesPrice = getMarketMakerYesPrice(
+      repricedMarket,
+      toNumber(market.current_price, toNumber(market.open_price)),
+      { fast: true, tradeShift },
+    );
+    const nextNoPrice = 1 - nextYesPrice;
+
+    await client.query(
+      `
+        UPDATE markets
+        SET yes_price = $2,
+            no_price = $3,
+            yes_volume = $4,
+            no_volume = $5
+        WHERE id = $1
+      `,
+      [
+        marketId,
+        nextYesPrice,
+        nextNoPrice,
+        repricedMarket.yes_volume,
+        repricedMarket.no_volume,
+      ],
+    );
+
+    const tradeResult = await client.query(
+      `
+        INSERT INTO trades (user_id, market_id, action, side, amount, fee, price, shares)
+        VALUES ($1, $2, 'SELL', $3, $4, $5, $6, $7)
+        RETURNING *
+      `,
+      [user.id, marketId, side, proceeds, fee, price, sharesToSell],
+    );
+
+    const finalBalanceResult = await client.query(
+      `
+        SELECT balance
+        FROM fire_balances
+        WHERE user_id = $1
+      `,
+      [user.id],
+    );
+
+    return {
+      ok: true,
+      balance: toNumber(finalBalanceResult.rows[0]?.balance),
+      position: mapPosition(positionUpdateResult.rows[0]),
+      trade: mapTrade(tradeResult.rows[0]),
+      market: mapMarket({
+        ...market,
+        yes_price: nextYesPrice,
+        no_price: nextNoPrice,
+        yes_volume: repricedMarket.yes_volume,
+        no_volume: repricedMarket.no_volume,
+      }),
+      sale: {
+        side,
+        price,
+        shares: sharesToSell,
+        gross,
+        fee,
+        proceeds,
+        pnl: realizedPnl,
+      },
     };
   });
 }

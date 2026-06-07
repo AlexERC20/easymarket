@@ -16,6 +16,7 @@ import {
   getRecentMarkets,
   getUserSnapshot,
   resolveExpiredMarkets,
+  sellOutcome,
   syncFireBalance,
   updateLiveBtcPrice,
   upsertUser,
@@ -49,6 +50,9 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "market_not_open",
     "market_closed",
     "insufficient_fire",
+    "position_not_open",
+    "invalid_sell_shares",
+    "insufficient_shares",
     "invalid_market_price",
   ]);
 
@@ -236,6 +240,20 @@ app.post("/api/market/:marketId/buy", async (req, res) => {
       telegram_id: req.body?.telegram_id,
       side: req.body?.side,
       amount: req.body?.amount,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/market/:marketId/sell", async (req, res) => {
+  try {
+    const result = await sellOutcome({
+      marketId: req.params.marketId,
+      telegram_id: req.body?.telegram_id,
+      side: req.body?.side,
+      shares: req.body?.shares,
     });
     res.status(200).json(result);
   } catch (error) {

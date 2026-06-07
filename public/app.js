@@ -15,6 +15,10 @@ const state = {
   activityLoaded: false,
   seenActivityIds: new Set(),
   pendingBuy: false,
+  pendingSellSide: null,
+  chart: null,
+  priceSeries: null,
+  openPriceSeries: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -30,6 +34,7 @@ const formatPercent = (value) => `${Math.round(Number(value || 0))}%`;
 const formatCents = (value) => `${Math.round(Number(value || 0) * 100)}¢`;
 const sideLabel = (side) => (side === "YES" ? "UP" : "DOWN");
 const sideClass = (side) => (side === "YES" ? "yes" : "no");
+const actionLabel = (action) => (action === "SELL" ? "продал" : "купил");
 
 function triggerHaptic(type = "light") {
   const haptic = window.Telegram?.WebApp?.HapticFeedback;
@@ -55,6 +60,122 @@ function triggerHaptic(type = "light") {
           : 16;
     navigator.vibrate(pattern);
   }
+}
+
+function initMarketChart() {
+  if (state.chart || !window.LightweightCharts) {
+    return;
+  }
+
+  const container = $("marketChart");
+  state.chart = window.LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: container.clientHeight,
+    autoSize: true,
+    layout: {
+      background: { color: "#080d16" },
+      textColor: "#8d98aa",
+      fontFamily: "Inter, system-ui, sans-serif",
+    },
+    grid: {
+      vertLines: { color: "rgba(255,255,255,0.035)" },
+      horzLines: { color: "rgba(255,255,255,0.055)" },
+    },
+    crosshair: {
+      mode: window.LightweightCharts.CrosshairMode.Normal,
+      vertLine: { color: "rgba(255,255,255,0.18)" },
+      horzLine: { color: "rgba(255,255,255,0.18)" },
+    },
+    rightPriceScale: {
+      borderColor: "rgba(255,255,255,0.08)",
+      scaleMargins: {
+        top: 0.18,
+        bottom: 0.18,
+      },
+    },
+    timeScale: {
+      borderColor: "rgba(255,255,255,0.08)",
+      timeVisible: true,
+      secondsVisible: true,
+      rightOffset: 4,
+      barSpacing: 7,
+      fixLeftEdge: false,
+      fixRightEdge: false,
+    },
+    handleScale: {
+      axisPressedMouseMove: false,
+      mouseWheel: false,
+      pinch: true,
+    },
+    handleScroll: {
+      horzTouchDrag: true,
+      vertTouchDrag: false,
+      mouseWheel: false,
+      pressedMouseMove: true,
+    },
+  });
+
+  state.priceSeries = state.chart.addLineSeries({
+    color: "#19c37d",
+    lineWidth: 3,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+
+  state.openPriceSeries = state.chart.addLineSeries({
+    color: "rgba(255,255,255,0.34)",
+    lineWidth: 1,
+    lineStyle: window.LightweightCharts.LineStyle.Dashed,
+    priceLineVisible: false,
+    lastValueVisible: false,
+    crosshairMarkerVisible: false,
+  });
+}
+
+function renderMarketChart() {
+  initMarketChart();
+  if (!state.chart || !state.priceSeries || !state.openPriceSeries || !state.market) {
+    return;
+  }
+
+  const points = state.chartPoints
+    .filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at))
+    .map((point) => ({
+      time: Math.floor(point.at / 1000),
+      value: point.price,
+    }));
+
+  const deduped = [];
+  for (const point of points) {
+    if (deduped.length && deduped[deduped.length - 1].time >= point.time) {
+      deduped[deduped.length - 1] = point;
+    } else {
+      deduped.push(point);
+    }
+  }
+
+  if (deduped.length < 2) {
+    state.priceSeries.setData([]);
+    state.openPriceSeries.setData([]);
+    return;
+  }
+
+  const openPrice = Number(state.market.open_price || deduped[0].value);
+  const latest = deduped[deduped.length - 1];
+  const lineColor = latest.value >= openPrice ? "#19c37d" : "#ef466f";
+  state.priceSeries.applyOptions({ color: lineColor });
+  state.priceSeries.setData(deduped);
+  state.openPriceSeries.setData([
+    { time: deduped[0].time, value: openPrice },
+    { time: latest.time, value: openPrice },
+  ]);
+
+  const leftPadding = Math.max(6, Math.ceil(deduped.length * 0.15));
+  state.chart.timeScale().setVisibleLogicalRange({
+    from: -leftPadding,
+    to: deduped.length + 5,
+  });
 }
 
 function showToast(message) {
@@ -261,7 +382,7 @@ async function loadMarket() {
   renderMarket();
   renderTradeTicket();
   renderActivity();
-  drawChart();
+  renderMarketChart();
 }
 
 async function loadMe() {
@@ -374,18 +495,27 @@ function renderMe() {
   container.innerHTML = positions.map((position) => {
     const payout = Number(position.shares || 0);
     const spent = Number(position.spent || 0);
-    const pnl = payout - spent;
+    const marketPrice = Number(position.side === "YES" ? state.market?.yes_price : state.market?.no_price) || 0;
+    const exitValue = payout * marketPrice * (1 - FEE_RATE);
+    const pnl = exitValue - spent;
+    const isSelling = state.pendingSellSide === position.side;
     return `
       <div class="mini-row">
         <div>
           <strong class="side-${position.side}">${sideLabel(position.side)} ${payout.toFixed(2)} shares</strong>
           <br />
-          <small>Avg ${formatCents(position.avg_price)} · Spent ${formatFire(spent)} FIRE</small>
+          <small>Avg ${formatCents(position.avg_price)} · Sell ${formatCents(marketPrice)} · Spent ${formatFire(spent)}</small>
         </div>
-        <div>
+        <div class="position-actions">
           <strong class="${pnl >= 0 ? "positive" : "negative"}">${pnl >= 0 ? "+" : ""}${formatFireDecimal(pnl)}</strong>
-          <br />
-          <small>если ${sideLabel(position.side)}</small>
+          <button
+            class="sell-button ${sideClass(position.side)}"
+            data-side="${position.side}"
+            type="button"
+            ${isSelling ? "disabled" : ""}
+          >
+            ${isSelling ? "Продаю..." : `Продать ${formatFireDecimal(exitValue)}`}
+          </button>
         </div>
       </div>
     `;
@@ -434,10 +564,11 @@ function renderActivity() {
 
   container.innerHTML = state.activity.slice(0, 8).map((trade) => {
     const name = trade.username || trade.first_name || `user ${trade.telegram_id}`;
+    const action = trade.action || "BUY";
     return `
       <div class="activity-row">
         <div>
-          <strong class="side-${trade.side}">${name} купил ${sideLabel(trade.side)}</strong>
+          <strong class="side-${trade.side}">${name} ${actionLabel(action)} ${sideLabel(trade.side)}</strong>
           <br />
           <small>${formatCents(trade.price)} · ${trade.shares.toFixed(2)} shares</small>
         </div>
@@ -474,102 +605,12 @@ function showTradeBubble(trade) {
   const container = $("tradeBubbles");
   const bubble = document.createElement("div");
   const name = trade.username || trade.first_name || "user";
+  const action = trade.action || "BUY";
   bubble.className = `trade-bubble ${sideClass(trade.side)}`;
-  bubble.textContent = `${name} ${sideLabel(trade.side)} ${formatFire(trade.amount)}`;
+  bubble.textContent = `${name} ${actionLabel(action)} ${sideLabel(trade.side)} ${formatFire(trade.amount)}`;
   bubble.style.left = `${24 + Math.random() * 52}%`;
   container.appendChild(bubble);
   setTimeout(() => bubble.remove(), 2600);
-}
-
-function drawChart() {
-  const canvas = $("marketChart");
-  const frame = canvas.parentElement;
-  const dpr = window.devicePixelRatio || 1;
-  const width = Math.max(1, Math.floor(frame.clientWidth * dpr));
-  const height = Math.max(1, Math.floor(frame.clientHeight * dpr));
-  if (canvas.width !== width || canvas.height !== height) {
-    canvas.width = width;
-    canvas.height = height;
-  }
-
-  const context = canvas.getContext("2d");
-  context.clearRect(0, 0, width, height);
-
-  const gradientBg = context.createLinearGradient(0, 0, 0, height);
-  gradientBg.addColorStop(0, "#0b111d");
-  gradientBg.addColorStop(1, "#070b12");
-  context.fillStyle = gradientBg;
-  context.fillRect(0, 0, width, height);
-
-  context.strokeStyle = "rgba(255,255,255,0.07)";
-  context.lineWidth = 1 * dpr;
-  for (let i = 1; i < 4; i += 1) {
-    const y = (height / 4) * i;
-    context.beginPath();
-    context.moveTo(0, y);
-    context.lineTo(width, y);
-    context.stroke();
-  }
-
-  const market = state.market;
-  const points = state.chartPoints;
-  if (!market || points.length < 2) {
-    return;
-  }
-
-  const openPrice = Number(market.open_price || points[0].price);
-  const prices = points.map((point) => point.price).concat(openPrice);
-  const min = Math.min(...prices);
-  const max = Math.max(...prices);
-  const padding = Math.max(1, (max - min) * 0.16);
-  const minY = min - padding;
-  const maxY = max + padding;
-  const range = Math.max(1, maxY - minY);
-  const yForPrice = (price) => height - ((price - minY) / range) * height;
-
-  const openY = yForPrice(openPrice);
-  context.setLineDash([7 * dpr, 6 * dpr]);
-  context.strokeStyle = "rgba(255,255,255,0.26)";
-  context.beginPath();
-  context.moveTo(0, openY);
-  context.lineTo(width, openY);
-  context.stroke();
-  context.setLineDash([]);
-
-  const lineGradient = context.createLinearGradient(0, 0, width, 0);
-  lineGradient.addColorStop(0, "#5ea1ff");
-  lineGradient.addColorStop(0.5, Number(market.current_price) >= openPrice ? "#19c37d" : "#ef466f");
-  lineGradient.addColorStop(1, Number(market.current_price) >= openPrice ? "#42f2a4" : "#ff6f91");
-
-  context.lineWidth = 3 * dpr;
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  context.strokeStyle = lineGradient;
-  context.beginPath();
-  points.forEach((point, index) => {
-    const x = points.length === 1 ? 0 : (index / (points.length - 1)) * width;
-    const y = yForPrice(point.price);
-    if (index === 0) {
-      context.moveTo(x, y);
-      return;
-    }
-
-    const previous = points[index - 1];
-    const previousX = ((index - 1) / (points.length - 1)) * width;
-    const previousY = yForPrice(previous.price);
-    const midX = (previousX + x) / 2;
-    context.quadraticCurveTo(previousX, previousY, midX, (previousY + y) / 2);
-    context.quadraticCurveTo(x, y, x, y);
-  });
-  context.stroke();
-
-  const last = points[points.length - 1];
-  const lastX = width;
-  const lastY = yForPrice(last.price);
-  context.fillStyle = Number(last.price) >= openPrice ? "#19c37d" : "#ef466f";
-  context.beginPath();
-  context.arc(lastX - 10 * dpr, lastY, 4.5 * dpr, 0, Math.PI * 2);
-  context.fill();
 }
 
 async function buy() {
@@ -602,6 +643,40 @@ async function buy() {
   } finally {
     state.pendingBuy = false;
     renderMarket();
+    renderTradeTicket();
+  }
+}
+
+async function sellPosition(side) {
+  if (!state.user || !state.market || state.pendingSellSide) {
+    triggerHaptic("warning");
+    showToast("Нет активной позиции для продажи.");
+    return;
+  }
+
+  triggerHaptic("medium");
+  state.pendingSellSide = side;
+  renderMe();
+  try {
+    const result = await api(`/api/market/${state.market.id}/sell`, {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        side,
+      }),
+    });
+    state.balance = result.balance ?? state.balance;
+    state.market = result.market ?? state.market;
+    triggerHaptic("success");
+    const pnl = Number(result.sale?.pnl || 0);
+    showToast(`Продано ${sideLabel(side)}: ${pnl >= 0 ? "+" : ""}${formatFireDecimal(pnl)} FIRE`);
+    await Promise.all([loadMarket(), loadMe()]);
+  } catch (error) {
+    triggerHaptic("error");
+    showToast(error.message === "position_not_open" ? "Открытой позиции нет." : "Продажа не прошла.");
+  } finally {
+    state.pendingSellSide = null;
+    renderMe();
     renderTradeTicket();
   }
 }
@@ -643,12 +718,21 @@ $("refreshBtn").addEventListener("click", () => {
   void refreshAll();
 });
 
+document.addEventListener("click", (event) => {
+  const button = event.target.closest(".sell-button");
+  if (!button) {
+    return;
+  }
+
+  void sellPosition(button.dataset.side);
+});
+
 setInterval(updateTimer, 250);
 setInterval(() => void loadMarket().catch(() => setConnection("Ошибка", "error")), 1_000);
 setInterval(() => void loadMe().catch(() => undefined), 3_000);
 setInterval(() => void loadRecentMarkets().catch(() => undefined), 10_000);
 
-window.addEventListener("resize", drawChart);
+window.addEventListener("resize", renderMarketChart);
 
 AMOUNTS.forEach((amount, index) => {
   const button = document.querySelector(`.amount-button[data-amount="${amount}"]`);

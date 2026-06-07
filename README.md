@@ -125,6 +125,7 @@ Public frontend API:
 GET  /api/market/active
 GET  /api/market/:marketId/activity
 POST /api/market/:marketId/buy
+POST /api/market/:marketId/sell
 GET  /api/me?telegram_id=123
 POST /api/me/upsert
 GET  /api/markets/recent
