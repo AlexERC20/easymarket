@@ -80,6 +80,19 @@ function mapTrade(row) {
   };
 }
 
+function mapFireLedgerEvent(row) {
+  return {
+    id: Number(row.id),
+    telegram_id: row.telegram_id,
+    username: row.username,
+    first_name: row.first_name,
+    amount: toNumber(row.amount),
+    reason: row.reason,
+    source: row.source,
+    created_at: row.created_at,
+  };
+}
+
 function questionForPrice(price) {
   return `BTC будет выше ${Math.round(price).toLocaleString("ru-RU")} через 5 минут?`;
 }
@@ -300,6 +313,32 @@ export async function syncFireBalance(input) {
     user,
     ...result,
   };
+}
+
+export async function getFireLedgerEvents(input = {}) {
+  const afterId = Math.max(0, Math.floor(Number(input.after_id ?? input.afterId ?? 0) || 0));
+  const limit = Math.max(1, Math.min(250, Math.floor(Number(input.limit ?? 100) || 100)));
+  const result = await query(
+    `
+      SELECT
+        ledger.id,
+        users.telegram_id,
+        users.username,
+        users.first_name,
+        ledger.amount,
+        ledger.reason,
+        ledger.source,
+        ledger.created_at
+      FROM fire_ledger ledger
+      JOIN users ON users.id = ledger.user_id
+      WHERE ledger.id > $1
+      ORDER BY ledger.id ASC
+      LIMIT $2
+    `,
+    [afterId, limit],
+  );
+
+  return result.rows.map(mapFireLedgerEvent);
 }
 
 export async function createBtc5mMarket() {

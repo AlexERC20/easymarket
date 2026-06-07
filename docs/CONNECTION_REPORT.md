@@ -11,7 +11,8 @@
 - [x] FIRE ledger and balances
 - [x] Bridge API skeleton for local Telegram bot
 - [x] Exact FIRE balance sync endpoint for local Telegram bot
-- [ ] Next step: call `/api/bridge/fire/sync` from the local Telegram bot after FIRE balance changes
+- [x] FIRE ledger pull endpoint for EasyMarket-to-bot sync
+- [ ] Next step: call `/api/bridge/fire/ledger` from the local Telegram bot and apply market deltas
 
 ## Not Implemented Yet
 

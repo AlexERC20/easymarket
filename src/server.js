@@ -10,6 +10,7 @@ import {
   createBtc5mMarket,
   ensureActiveMarket,
   getActiveMarket,
+  getFireLedgerEvents,
   getRecentMarkets,
   getUserSnapshot,
   resolveExpiredMarkets,
@@ -329,6 +330,22 @@ app.get("/api/bridge/fire/balance", requireBridgeSecret, async (req, res) => {
       ok: true,
       user: snapshot?.user ?? null,
       balance: snapshot?.balance ?? 0,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/fire/ledger", requireBridgeSecret, async (req, res) => {
+  try {
+    const events = await getFireLedgerEvents({
+      after_id: req.query.after_id ?? req.query.afterId,
+      limit: req.query.limit,
+    });
+    res.status(200).json({
+      ok: true,
+      events,
+      last_id: events.length > 0 ? events[events.length - 1].id : Number(req.query.after_id ?? req.query.afterId ?? 0) || 0,
     });
   } catch (error) {
     sendApiError(res, error);

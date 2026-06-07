@@ -143,6 +143,7 @@ POST /api/bridge/users/upsert
 POST /api/bridge/fire/add
 POST /api/bridge/fire/sync
 GET  /api/bridge/fire/balance?telegram_id=123
+GET  /api/bridge/fire/ledger?after_id=0&limit=100
 ```
 
 Use `/api/bridge/fire/sync` when the local bot is the source of truth and EasyMarket must mirror the exact bot balance:
@@ -159,3 +160,5 @@ curl -X POST https://easymarket-rcuj.onrender.com/api/bridge/fire/sync \
     "reason": "bot_balance_sync"
   }'
 ```
+
+Use `/api/bridge/fire/ledger` when the local bot needs to pull EasyMarket-side FIRE changes such as prediction-market buys and payouts.
