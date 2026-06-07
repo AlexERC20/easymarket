@@ -123,11 +123,14 @@ Public frontend API:
 
 ```text
 GET  /api/market/active
+GET  /api/market/:marketId/activity
 POST /api/market/:marketId/buy
 GET  /api/me?telegram_id=123
 POST /api/me/upsert
 GET  /api/markets/recent
 ```
+
+`/api/market/active` returns the active market plus recent market `activity` and BTC `chart` points for the Mini App UI.
 
 Dev tools, only when `ALLOW_DEV_TOOLS=true`:
 

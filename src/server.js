@@ -11,6 +11,8 @@ import {
   ensureActiveMarket,
   getActiveMarket,
   getFireLedgerEvents,
+  getMarketActivity,
+  getMarketChart,
   getRecentMarkets,
   getUserSnapshot,
   resolveExpiredMarkets,
@@ -198,9 +200,29 @@ app.get("/api/me", async (req, res) => {
 app.get("/api/market/active", async (_req, res) => {
   try {
     const market = await getActiveMarket();
+    const [activity, chart] = market
+      ? await Promise.all([
+        getMarketActivity(market.id, 24),
+        getMarketChart(market, 260),
+      ])
+      : [[], []];
     res.status(200).json({
       ok: true,
       market,
+      activity,
+      chart,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/market/:marketId/activity", async (req, res) => {
+  try {
+    const activity = await getMarketActivity(req.params.marketId, req.query.limit);
+    res.status(200).json({
+      ok: true,
+      activity,
     });
   } catch (error) {
     sendApiError(res, error);

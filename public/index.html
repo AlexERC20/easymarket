@@ -11,18 +11,18 @@
     <main class="app-shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Telegram Mini App</p>
+          <p class="eyebrow">BTC 5M MARKET</p>
           <h1>EasyMarket</h1>
         </div>
-        <button id="refreshBtn" class="ghost-button" type="button">Refresh</button>
+        <button id="refreshBtn" class="icon-button" type="button" aria-label="Обновить">R</button>
       </header>
 
-      <section class="balance-card">
+      <section class="wallet-strip">
         <div>
-          <p class="label">Баланс FIRE</p>
-          <div id="fireBalance" class="balance-value">0</div>
+          <p class="label">FIRE баланс</p>
+          <strong><span id="fireBalance">0</span> FIRE</strong>
         </div>
-        <div id="connectionStatus" class="status-pill">Подключение...</div>
+        <span id="connectionStatus" class="status-pill">Подключение...</span>
       </section>
 
       <section id="authCard" class="card hidden">
@@ -35,83 +35,107 @@
       </section>
 
       <section class="market-card card">
-        <div class="section-header">
-          <div>
-            <p class="eyebrow">Live BTC 5M</p>
-            <h2>Активный рынок</h2>
-          </div>
+        <div class="market-meta">
           <span id="marketStatus" class="status-pill">...</span>
+          <span class="timer-pill">Закрытие через <b id="timeLeft">--:--</b></span>
         </div>
 
-        <h3 id="marketQuestion" class="question">Загружаем рынок...</h3>
+        <h2 id="marketQuestion" class="market-title">Загружаем рынок...</h2>
 
-        <div class="price-grid">
+        <div class="price-board">
           <div>
-            <p class="label">Open BTC</p>
+            <p class="label">Price to beat</p>
             <strong id="openPrice">-</strong>
           </div>
           <div>
-            <p class="label">Current BTC</p>
+            <p class="label">BTC live</p>
             <strong id="currentPrice">-</strong>
           </div>
           <div>
-            <p class="label">До конца</p>
-            <strong id="timeLeft">--:--</strong>
+            <p class="label">Move</p>
+            <strong id="priceMove">-</strong>
           </div>
         </div>
 
-        <canvas id="marketChart" width="720" height="240" aria-label="BTC market chart"></canvas>
+        <div class="chart-frame">
+          <canvas id="marketChart" aria-label="BTC price chart"></canvas>
+          <div id="tradeBubbles" class="trade-bubbles" aria-hidden="true"></div>
+        </div>
 
-        <div class="odds-row">
-          <div class="odds yes">
-            <span>YES</span>
+        <div class="outcome-grid">
+          <button id="yesOutcome" class="outcome-button yes active" type="button" data-side="YES">
+            <span>UP</span>
             <strong id="yesProbability">50%</strong>
-          </div>
-          <div class="odds no">
-            <span>NO</span>
+            <small id="yesPrice">50¢</small>
+          </button>
+          <button id="noOutcome" class="outcome-button no" type="button" data-side="NO">
+            <span>DOWN</span>
             <strong id="noProbability">50%</strong>
+            <small id="noPrice">50¢</small>
+          </button>
+        </div>
+
+        <div class="market-depth">
+          <div class="depth-track">
+            <span id="depthYesBar"></span>
+            <span id="depthNoBar"></span>
+          </div>
+          <div class="depth-labels">
+            <span>UP <b id="yesVolume">0</b> FIRE</span>
+            <span>DOWN <b id="noVolume">0</b> FIRE</span>
           </div>
         </div>
+      </section>
 
-        <div class="volume-row">
-          <span>YES объём: <b id="yesVolume">0</b> FIRE</span>
-          <span>NO объём: <b id="noVolume">0</b> FIRE</span>
+      <section class="trade-card card">
+        <div class="ticket-head">
+          <div>
+            <p class="label">Сделка</p>
+            <h2 id="ticketTitle">Купить UP</h2>
+          </div>
+          <span id="ticketPrice" class="price-chip">50¢</span>
         </div>
+
+        <div id="amountGrid" class="amount-grid">
+          <button class="amount-button active" data-amount="5" type="button"></button>
+          <button class="amount-button" data-amount="10" type="button"></button>
+          <button class="amount-button" data-amount="50" type="button"></button>
+          <button class="amount-button" data-amount="100" type="button"></button>
+        </div>
+
+        <div class="ticket-preview">
+          <span id="sharesPreview">0 shares</span>
+          <strong id="profitPreview">+0 FIRE</strong>
+        </div>
+
+        <button id="placeBetBtn" class="place-button yes" type="button">Купить UP на 5 FIRE</button>
       </section>
 
       <section class="card">
-        <div class="section-header">
-          <h2>Купить YES</h2>
-          <span class="price-tag" id="yesPrice">0.50</span>
+        <div class="section-title">
+          <h2>Моя позиция</h2>
+          <span class="subtle">потенциальная выплата</span>
         </div>
-        <div class="button-grid">
-          <button class="buy-button yes" data-side="YES" data-amount="10">YES 10 FIRE</button>
-          <button class="buy-button yes" data-side="YES" data-amount="50">YES 50 FIRE</button>
-          <button class="buy-button yes" data-side="YES" data-amount="100">YES 100 FIRE</button>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="section-header">
-          <h2>Купить NO</h2>
-          <span class="price-tag" id="noPrice">0.50</span>
-        </div>
-        <div class="button-grid">
-          <button class="buy-button no" data-side="NO" data-amount="10">NO 10 FIRE</button>
-          <button class="buy-button no" data-side="NO" data-amount="50">NO 50 FIRE</button>
-          <button class="buy-button no" data-side="NO" data-amount="100">NO 100 FIRE</button>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>Моя позиция</h2>
         <div id="positionList" class="position-list">
           <p class="muted">Позиции пока нет.</p>
         </div>
       </section>
 
       <section class="card">
-        <h2>Последние рынки</h2>
+        <div class="section-title">
+          <h2>Live сделки</h2>
+          <span class="subtle">последние ставки</span>
+        </div>
+        <div id="activityTape" class="activity-tape">
+          <p class="muted">Пока нет ставок.</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">
+          <h2>Последние рынки</h2>
+          <span class="subtle">результаты</span>
+        </div>
         <div id="recentMarkets" class="recent-list">
           <p class="muted">Пока нет закрытых рынков.</p>
         </div>

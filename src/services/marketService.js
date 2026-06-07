@@ -5,6 +5,7 @@ import { getBtcPrice, PriceUnavailableError } from "./priceService.js";
 const MARKET_SYMBOL = "BTCUSDT";
 const MIN_PRICE = 0.05;
 const MAX_PRICE = 0.95;
+const DEFAULT_FEE_BPS = 200;
 
 function mapMarket(row) {
   if (!row) {
@@ -80,6 +81,30 @@ function mapTrade(row) {
   };
 }
 
+function mapMarketActivity(row) {
+  return {
+    id: Number(row.id),
+    market_id: Number(row.market_id),
+    telegram_id: row.telegram_id,
+    username: row.username,
+    first_name: row.first_name,
+    side: row.side,
+    amount: toNumber(row.amount),
+    fee: toNumber(row.fee),
+    price: toNumber(row.price),
+    shares: toNumber(row.shares),
+    created_at: row.created_at,
+  };
+}
+
+function mapMarketChartPoint(row) {
+  return {
+    price: toNumber(row.price),
+    source: row.source,
+    created_at: row.created_at,
+  };
+}
+
 function mapFireLedgerEvent(row) {
   return {
     id: Number(row.id),
@@ -95,6 +120,50 @@ function mapFireLedgerEvent(row) {
 
 function questionForPrice(price) {
   return `BTC будет выше ${Math.round(price).toLocaleString("ru-RU")} через 5 минут?`;
+}
+
+function getMarketProgress(market) {
+  const start = new Date(market.start_time).getTime();
+  const end = new Date(market.end_time).getTime();
+  const duration = Math.max(1, end - start);
+  return clamp((Date.now() - start) / duration, 0, 1);
+}
+
+function getMarketMakerYesPrice(market, currentPrice, options = {}) {
+  const openPrice = toNumber(market.open_price);
+  const previousYesPrice = clamp(toNumber(market.yes_price, 0.5), MIN_PRICE, MAX_PRICE);
+  if (!openPrice || !currentPrice) {
+    return previousYesPrice;
+  }
+
+  const progress = getMarketProgress(market);
+  const movementPct = ((currentPrice - openPrice) / openPrice) * 100;
+  const previousPrice = toNumber(market.current_price, openPrice);
+  const momentumPct = ((currentPrice - previousPrice) / openPrice) * 100;
+
+  const signalScalePct = Math.max(0.025, 0.22 - progress * 0.16);
+  const directionalSignal = Math.tanh(movementPct / signalScalePct);
+  const momentumSignal = Math.tanh(momentumPct / 0.025);
+  const directionalWeight = 0.28 + progress * 0.22;
+  const priceProbability = 0.5 + directionalSignal * directionalWeight + momentumSignal * 0.035;
+
+  const yesVolume = toNumber(market.yes_volume);
+  const noVolume = toNumber(market.no_volume);
+  const liquidity = toNumber(market.liquidity, config.marketLiquidity);
+  const volumeTotal = yesVolume + noVolume;
+  const imbalance = volumeTotal > 0
+    ? (yesVolume - noVolume) / (volumeTotal + liquidity * 0.08)
+    : 0;
+  const orderProbability = 0.5 + clamp(imbalance, -1, 1) * 0.32;
+
+  const target = clamp(priceProbability * 0.8 + orderProbability * 0.2, MIN_PRICE, MAX_PRICE);
+  const adaptiveInertia = options.fast
+    ? 0.24
+    : Math.max(0.2, 0.7 - progress * 0.5);
+  const panicInertia = Math.abs(target - previousYesPrice) > 0.22 ? 0.18 : adaptiveInertia;
+  const tradeShift = Number(options.tradeShift || 0);
+
+  return clamp(previousYesPrice * panicInertia + target * (1 - panicInertia) + tradeShift, MIN_PRICE, MAX_PRICE);
 }
 
 function ensurePositiveAmount(amount) {
@@ -430,11 +499,7 @@ export async function updateLiveBtcPrice() {
     );
 
     for (const market of markets.rows) {
-      const openPrice = toNumber(market.open_price);
-      const currentYesPrice = toNumber(market.yes_price, 0.5);
-      const movement = openPrice > 0 ? (btc.price - openPrice) / openPrice : 0;
-      const btcSignal = clamp(0.5 + movement * 20, MIN_PRICE, MAX_PRICE);
-      const yesPrice = clamp(currentYesPrice * 0.92 + btcSignal * 0.08, MIN_PRICE, MAX_PRICE);
+      const yesPrice = getMarketMakerYesPrice(market, btc.price);
       const noPrice = 1 - yesPrice;
 
       await client.query(
@@ -456,6 +521,50 @@ export async function updateLiveBtcPrice() {
 export async function getActiveMarket() {
   const market = await ensureActiveMarket();
   return market;
+}
+
+export async function getMarketActivity(marketId, limit = 20) {
+  const result = await query(
+    `
+      SELECT
+        trades.*,
+        users.telegram_id,
+        users.username,
+        users.first_name
+      FROM trades
+      JOIN users ON users.id = trades.user_id
+      WHERE trades.market_id = $1
+      ORDER BY trades.created_at DESC
+      LIMIT $2
+    `,
+    [Number(marketId), Math.max(1, Math.min(50, Number(limit) || 20))],
+  );
+
+  return result.rows.map(mapMarketActivity);
+}
+
+export async function getMarketChart(market, limit = 240) {
+  if (!market) {
+    return [];
+  }
+
+  const result = await query(
+    `
+      SELECT price, source, created_at
+      FROM (
+        SELECT price, source, created_at
+        FROM price_ticks
+        WHERE symbol = $1
+          AND created_at >= $2
+        ORDER BY created_at DESC
+        LIMIT $3
+      ) recent_ticks
+      ORDER BY created_at ASC
+    `,
+    [market.symbol, market.start_time, Math.max(30, Math.min(600, Number(limit) || 240))],
+  );
+
+  return result.rows.map(mapMarketChartPoint);
 }
 
 export async function buyOutcome(input) {
@@ -514,14 +623,21 @@ export async function buyOutcome(input) {
       throw new Error("invalid_market_price");
     }
 
-    const fee = Math.round(amount * (config.marketFeeBps / 10_000) * 100) / 100;
+    const feeBps = Number.isFinite(config.marketFeeBps) ? config.marketFeeBps : DEFAULT_FEE_BPS;
+    const fee = Math.round(amount * (feeBps / 10_000) * 100) / 100;
     const netAmount = Math.max(0, amount - fee);
     const shares = netAmount / price;
-    const impact = amount / toNumber(market.liquidity, config.marketLiquidity);
-    const nextYesPrice = clamp(
-      toNumber(market.yes_price) + (side === "YES" ? impact : -impact),
-      MIN_PRICE,
-      MAX_PRICE,
+    const liquidity = toNumber(market.liquidity, config.marketLiquidity);
+    const tradeShift = (side === "YES" ? 1 : -1) * (amount / liquidity) * 0.85;
+    const repricedMarket = {
+      ...market,
+      yes_volume: toNumber(market.yes_volume) + (side === "YES" ? netAmount : 0),
+      no_volume: toNumber(market.no_volume) + (side === "NO" ? netAmount : 0),
+    };
+    const nextYesPrice = getMarketMakerYesPrice(
+      repricedMarket,
+      toNumber(market.current_price, toNumber(market.open_price)),
+      { fast: true, tradeShift },
     );
     const nextNoPrice = 1 - nextYesPrice;
 

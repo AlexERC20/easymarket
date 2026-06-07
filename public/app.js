@@ -1,19 +1,35 @@
+const FEE_RATE = 0.02;
+const AMOUNTS = [5, 10, 50, 100];
+
 const state = {
   user: null,
   market: null,
   balance: 0,
   positions: [],
+  recentTrades: [],
   recentMarkets: [],
+  activity: [],
   chartPoints: [],
+  selectedSide: "YES",
+  selectedAmount: 5,
+  activityLoaded: false,
+  seenActivityIds: new Set(),
+  pendingBuy: false,
 };
 
 const $ = (id) => document.getElementById(id);
 
 const formatFire = (value) => Math.floor(Number(value || 0)).toLocaleString("ru-RU");
+const formatFireDecimal = (value) => Number(value || 0).toLocaleString("ru-RU", {
+  maximumFractionDigits: 1,
+});
 const formatPrice = (value) => Number(value || 0).toLocaleString("ru-RU", {
   maximumFractionDigits: 2,
 });
-const formatOdds = (value) => `${Math.round(Number(value || 0) * 100)}%`;
+const formatPercent = (value) => `${Math.round(Number(value || 0))}%`;
+const formatCents = (value) => `${Math.round(Number(value || 0) * 100)}¢`;
+const sideLabel = (side) => (side === "YES" ? "UP" : "DOWN");
+const sideClass = (side) => (side === "YES" ? "yes" : "no");
 
 function showToast(message) {
   const toast = $("toast");
@@ -29,6 +45,40 @@ function setConnection(status, type = "") {
   if (type) {
     element.classList.add(type);
   }
+}
+
+function animateText(element, nextValue, formatter, duration = 360) {
+  const numericValue = Number(nextValue || 0);
+  const previousValue = Number(element.dataset.value);
+  if (!Number.isFinite(previousValue)) {
+    element.dataset.value = String(numericValue);
+    element.textContent = formatter(numericValue);
+    return;
+  }
+
+  if (Math.abs(previousValue - numericValue) < 0.001) {
+    element.textContent = formatter(numericValue);
+    return;
+  }
+
+  const startedAt = performance.now();
+  const delta = numericValue - previousValue;
+
+  function step(now) {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const current = previousValue + delta * eased;
+    element.textContent = formatter(current);
+    if (progress < 1) {
+      requestAnimationFrame(step);
+      return;
+    }
+
+    element.dataset.value = String(numericValue);
+    element.textContent = formatter(numericValue);
+  }
+
+  requestAnimationFrame(step);
 }
 
 function normalizeTelegramUser(user, authSource) {
@@ -135,18 +185,56 @@ async function upsertMe() {
   setConnection("Online", "online");
 }
 
+function mergeChartPoints(points, market) {
+  const mapped = (points || []).map((point) => ({
+    price: Number(point.price),
+    at: new Date(point.created_at).getTime(),
+  })).filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at));
+
+  if (market?.current_price) {
+    mapped.push({
+      price: Number(market.current_price),
+      at: Date.now(),
+    });
+  }
+
+  const deduped = [];
+  const seen = new Set();
+  for (const point of mapped) {
+    const key = `${Math.round(point.at / 1000)}:${point.price}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(point);
+    }
+  }
+
+  deduped.sort((a, b) => a.at - b.at);
+  return deduped.slice(-260);
+}
+
+function handleActivity(activity) {
+  const nextActivity = activity || [];
+  if (state.activityLoaded) {
+    nextActivity
+      .filter((trade) => !state.seenActivityIds.has(trade.id))
+      .slice()
+      .reverse()
+      .forEach(showTradeBubble);
+  }
+
+  nextActivity.forEach((trade) => state.seenActivityIds.add(trade.id));
+  state.activityLoaded = true;
+  state.activity = nextActivity;
+}
+
 async function loadMarket() {
   const data = await api("/api/market/active");
   state.market = data.market;
-  if (state.market?.current_price) {
-    state.chartPoints.push({
-      price: Number(state.market.current_price),
-      yes: Number(state.market.yes_price),
-      at: Date.now(),
-    });
-    state.chartPoints = state.chartPoints.slice(-90);
-  }
+  state.chartPoints = mergeChartPoints(data.chart, data.market);
+  handleActivity(data.activity || []);
   renderMarket();
+  renderTradeTicket();
+  renderActivity();
   drawChart();
 }
 
@@ -168,23 +256,64 @@ async function loadRecentMarkets() {
   renderRecentMarkets();
 }
 
+function getSelectedPrice() {
+  if (!state.market) {
+    return 0.5;
+  }
+
+  return Number(state.selectedSide === "YES" ? state.market.yes_price : state.market.no_price) || 0.5;
+}
+
+function getPreview(amount = state.selectedAmount, side = state.selectedSide) {
+  const price = state.market
+    ? Number(side === "YES" ? state.market.yes_price : state.market.no_price)
+    : 0.5;
+  const safePrice = Math.max(0.05, price || 0.5);
+  const net = Number(amount || 0) * (1 - FEE_RATE);
+  const shares = net / safePrice;
+  const profit = shares - Number(amount || 0);
+
+  return {
+    shares,
+    profit,
+    price: safePrice,
+  };
+}
+
 function renderMarket() {
   const market = state.market;
   const hasMarket = Boolean(market);
+  const currentPrice = Number(market?.current_price || market?.open_price || 0);
+  const openPrice = Number(market?.open_price || 0);
+  const movePct = openPrice > 0 ? ((currentPrice - openPrice) / openPrice) * 100 : 0;
+  const yes = Number(market?.yes_price || 0.5);
+  const no = Number(market?.no_price || 0.5);
+  const yesVolume = Number(market?.yes_volume || 0);
+  const noVolume = Number(market?.no_volume || 0);
+  const volumeTotal = Math.max(1, yesVolume + noVolume);
+  const yesDepth = Math.max(6, Math.min(94, (yesVolume / volumeTotal) * 100));
+
   $("marketStatus").textContent = market?.status || "нет рынка";
-  $("marketQuestion").textContent = market?.question || "Рынок пока не создан.";
-  $("openPrice").textContent = hasMarket ? `$${formatPrice(market.open_price)}` : "-";
-  $("currentPrice").textContent = hasMarket ? `$${formatPrice(market.current_price || market.open_price)}` : "-";
-  $("yesProbability").textContent = hasMarket ? formatOdds(market.yes_price) : "50%";
-  $("noProbability").textContent = hasMarket ? formatOdds(market.no_price) : "50%";
-  $("yesPrice").textContent = hasMarket ? Number(market.yes_price).toFixed(2) : "0.50";
-  $("noPrice").textContent = hasMarket ? Number(market.no_price).toFixed(2) : "0.50";
-  $("yesVolume").textContent = hasMarket ? formatFire(market.yes_volume) : "0";
-  $("noVolume").textContent = hasMarket ? formatFire(market.no_volume) : "0";
+  $("marketQuestion").textContent = hasMarket ? "BTC закроется выше цены открытия?" : "Рынок пока не создан.";
+  animateText($("openPrice"), openPrice, (value) => `$${formatPrice(value)}`);
+  animateText($("currentPrice"), currentPrice, (value) => `$${formatPrice(value)}`);
+
+  const moveElement = $("priceMove");
+  moveElement.classList.toggle("positive", movePct >= 0);
+  moveElement.classList.toggle("negative", movePct < 0);
+  animateText(moveElement, movePct, (value) => `${value >= 0 ? "+" : ""}${value.toFixed(3)}%`);
+
+  animateText($("yesProbability"), yes * 100, formatPercent);
+  animateText($("noProbability"), no * 100, formatPercent);
+  $("yesPrice").textContent = formatCents(yes);
+  $("noPrice").textContent = formatCents(no);
+  animateText($("yesVolume"), yesVolume, formatFire);
+  animateText($("noVolume"), noVolume, formatFire);
+  $("depthYesBar").parentElement.style.setProperty("--yes-depth", `${yesDepth}%`);
 
   updateTimer();
-  document.querySelectorAll(".buy-button").forEach((button) => {
-    button.disabled = !hasMarket || !state.user;
+  document.querySelectorAll(".outcome-button, .amount-button, #placeBetBtn").forEach((button) => {
+    button.disabled = !hasMarket || !state.user || state.pendingBuy;
   });
 }
 
@@ -203,7 +332,7 @@ function updateTimer() {
 }
 
 function renderMe() {
-  $("fireBalance").textContent = formatFire(state.balance);
+  animateText($("fireBalance"), state.balance, formatFire);
 
   const activeMarketId = state.market?.id;
   const positions = state.positions.filter((position) => (
@@ -218,19 +347,75 @@ function renderMe() {
 
   container.innerHTML = positions.map((position) => {
     const payout = Number(position.shares || 0);
-    const pnl = payout - Number(position.spent || 0);
+    const spent = Number(position.spent || 0);
+    const pnl = payout - spent;
     return `
       <div class="mini-row">
         <div>
-          <strong class="side-${position.side}">${position.side} shares: ${payout.toFixed(2)}</strong>
+          <strong class="side-${position.side}">${sideLabel(position.side)} ${payout.toFixed(2)} shares</strong>
           <br />
-          <small>Avg: ${Number(position.avg_price).toFixed(3)} · Spent: ${formatFire(position.spent)} FIRE</small>
+          <small>Avg ${formatCents(position.avg_price)} · Spent ${formatFire(spent)} FIRE</small>
         </div>
         <div>
-          <strong>${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}</strong>
+          <strong class="${pnl >= 0 ? "positive" : "negative"}">${pnl >= 0 ? "+" : ""}${formatFireDecimal(pnl)}</strong>
           <br />
-          <small>если ${position.side}</small>
+          <small>если ${sideLabel(position.side)}</small>
         </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderTradeTicket() {
+  const side = state.selectedSide;
+  const price = getSelectedPrice();
+  const preview = getPreview();
+  const isYes = side === "YES";
+
+  document.querySelectorAll(".outcome-button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.side === side);
+  });
+  document.querySelectorAll(".amount-button").forEach((button) => {
+    const amount = Number(button.dataset.amount);
+    const amountPreview = getPreview(amount, side);
+    button.classList.toggle("active", amount === state.selectedAmount);
+    button.innerHTML = `
+      <strong>${amount} FIRE</strong>
+      <small>+${formatFireDecimal(amountPreview.profit)}</small>
+    `;
+  });
+
+  $("ticketTitle").textContent = `Купить ${sideLabel(side)}`;
+  $("ticketPrice").textContent = formatCents(price);
+  $("sharesPreview").textContent = `${preview.shares.toFixed(2)} shares`;
+  $("profitPreview").textContent = `${preview.profit >= 0 ? "+" : ""}${formatFireDecimal(preview.profit)} FIRE`;
+  $("profitPreview").classList.toggle("positive", preview.profit >= 0);
+  $("profitPreview").classList.toggle("negative", preview.profit < 0);
+
+  const placeButton = $("placeBetBtn");
+  placeButton.textContent = `Купить ${sideLabel(side)} на ${state.selectedAmount} FIRE`;
+  placeButton.classList.toggle("yes", isYes);
+  placeButton.classList.toggle("no", !isYes);
+  placeButton.disabled = !state.market || !state.user || state.pendingBuy;
+}
+
+function renderActivity() {
+  const container = $("activityTape");
+  if (!state.activity.length) {
+    container.innerHTML = '<p class="muted">Пока нет ставок.</p>';
+    return;
+  }
+
+  container.innerHTML = state.activity.slice(0, 8).map((trade) => {
+    const name = trade.username || trade.first_name || `user ${trade.telegram_id}`;
+    return `
+      <div class="activity-row">
+        <div>
+          <strong class="side-${trade.side}">${name} купил ${sideLabel(trade.side)}</strong>
+          <br />
+          <small>${formatCents(trade.price)} · ${trade.shares.toFixed(2)} shares</small>
+        </div>
+        <strong>${formatFire(trade.amount)} FIRE</strong>
       </div>
     `;
   }).join("");
@@ -243,33 +428,55 @@ function renderRecentMarkets() {
     return;
   }
 
-  container.innerHTML = state.recentMarkets.slice(0, 5).map((market) => `
-    <div class="mini-row">
-      <div>
-        <strong>${market.winner || market.status}</strong>
-        <br />
-        <small>Open $${formatPrice(market.open_price)} → Close $${formatPrice(market.close_price)}</small>
+  container.innerHTML = state.recentMarkets.slice(0, 5).map((market) => {
+    const winner = market.winner ? sideLabel(market.winner) : market.status;
+    const move = Number(market.close_price || 0) - Number(market.open_price || 0);
+    return `
+      <div class="mini-row">
+        <div>
+          <strong class="side-${market.winner || "YES"}">${winner}</strong>
+          <br />
+          <small>$${formatPrice(market.open_price)} -> $${formatPrice(market.close_price)}</small>
+        </div>
+        <small class="${move >= 0 ? "positive" : "negative"}">${move >= 0 ? "+" : ""}${formatPrice(move)}</small>
       </div>
-      <small>${new Date(market.resolved_at || market.end_time).toLocaleTimeString("ru-RU", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })}</small>
-    </div>
-  `).join("");
+    `;
+  }).join("");
+}
+
+function showTradeBubble(trade) {
+  const container = $("tradeBubbles");
+  const bubble = document.createElement("div");
+  const name = trade.username || trade.first_name || "user";
+  bubble.className = `trade-bubble ${sideClass(trade.side)}`;
+  bubble.textContent = `${name} ${sideLabel(trade.side)} ${formatFire(trade.amount)}`;
+  bubble.style.left = `${24 + Math.random() * 52}%`;
+  container.appendChild(bubble);
+  setTimeout(() => bubble.remove(), 2600);
 }
 
 function drawChart() {
   const canvas = $("marketChart");
+  const frame = canvas.parentElement;
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.floor(frame.clientWidth * dpr));
+  const height = Math.max(1, Math.floor(frame.clientHeight * dpr));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
   const context = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
   context.clearRect(0, 0, width, height);
 
-  context.fillStyle = "#080d18";
+  const gradientBg = context.createLinearGradient(0, 0, 0, height);
+  gradientBg.addColorStop(0, "#0b111d");
+  gradientBg.addColorStop(1, "#070b12");
+  context.fillStyle = gradientBg;
   context.fillRect(0, 0, width, height);
 
-  context.strokeStyle = "rgba(148, 163, 184, 0.12)";
-  context.lineWidth = 1;
+  context.strokeStyle = "rgba(255,255,255,0.07)";
+  context.lineWidth = 1 * dpr;
   for (let i = 1; i < 4; i += 1) {
     const y = (height / 4) * i;
     context.beginPath();
@@ -278,64 +485,94 @@ function drawChart() {
     context.stroke();
   }
 
+  const market = state.market;
   const points = state.chartPoints;
-  if (points.length < 2) {
+  if (!market || points.length < 2) {
     return;
   }
 
-  const prices = points.map((point) => point.price);
+  const openPrice = Number(market.open_price || points[0].price);
+  const prices = points.map((point) => point.price).concat(openPrice);
   const min = Math.min(...prices);
   const max = Math.max(...prices);
-  const range = Math.max(1, max - min);
+  const padding = Math.max(1, (max - min) * 0.16);
+  const minY = min - padding;
+  const maxY = max + padding;
+  const range = Math.max(1, maxY - minY);
+  const yForPrice = (price) => height - ((price - minY) / range) * height;
 
-  context.strokeStyle = "#60a5fa";
-  context.lineWidth = 3;
+  const openY = yForPrice(openPrice);
+  context.setLineDash([7 * dpr, 6 * dpr]);
+  context.strokeStyle = "rgba(255,255,255,0.26)";
+  context.beginPath();
+  context.moveTo(0, openY);
+  context.lineTo(width, openY);
+  context.stroke();
+  context.setLineDash([]);
+
+  const lineGradient = context.createLinearGradient(0, 0, width, 0);
+  lineGradient.addColorStop(0, "#5ea1ff");
+  lineGradient.addColorStop(0.5, Number(market.current_price) >= openPrice ? "#19c37d" : "#ef466f");
+  lineGradient.addColorStop(1, Number(market.current_price) >= openPrice ? "#42f2a4" : "#ff6f91");
+
+  context.lineWidth = 3 * dpr;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.strokeStyle = lineGradient;
   context.beginPath();
   points.forEach((point, index) => {
-    const x = (index / (points.length - 1)) * width;
-    const y = height - ((point.price - min) / range) * (height - 24) - 12;
+    const x = points.length === 1 ? 0 : (index / (points.length - 1)) * width;
+    const y = yForPrice(point.price);
     if (index === 0) {
       context.moveTo(x, y);
-    } else {
-      context.lineTo(x, y);
+      return;
     }
+
+    const previous = points[index - 1];
+    const previousX = ((index - 1) / (points.length - 1)) * width;
+    const previousY = yForPrice(previous.price);
+    const midX = (previousX + x) / 2;
+    context.quadraticCurveTo(previousX, previousY, midX, (previousY + y) / 2);
+    context.quadraticCurveTo(x, y, x, y);
   });
   context.stroke();
 
-  context.strokeStyle = "#20d47b";
-  context.lineWidth = 2;
+  const last = points[points.length - 1];
+  const lastX = width;
+  const lastY = yForPrice(last.price);
+  context.fillStyle = Number(last.price) >= openPrice ? "#19c37d" : "#ef466f";
   context.beginPath();
-  points.forEach((point, index) => {
-    const x = (index / (points.length - 1)) * width;
-    const y = height - point.yes * (height - 24) - 12;
-    if (index === 0) {
-      context.moveTo(x, y);
-    } else {
-      context.lineTo(x, y);
-    }
-  });
-  context.stroke();
+  context.arc(lastX - 10 * dpr, lastY, 4.5 * dpr, 0, Math.PI * 2);
+  context.fill();
 }
 
-async function buy(side, amount) {
-  if (!state.user || !state.market) {
+async function buy() {
+  if (!state.user || !state.market || state.pendingBuy) {
     showToast("Сначала нужен пользователь и активный рынок.");
     return;
   }
 
+  state.pendingBuy = true;
+  renderTradeTicket();
   try {
-    await api(`/api/market/${state.market.id}/buy`, {
+    const result = await api(`/api/market/${state.market.id}/buy`, {
       method: "POST",
       body: JSON.stringify({
         telegram_id: state.user.telegram_id,
-        side,
-        amount,
+        side: state.selectedSide,
+        amount: state.selectedAmount,
       }),
     });
-    showToast(`Куплено ${side} на ${amount} FIRE`);
+    state.balance = result.balance ?? state.balance;
+    state.market = result.market ?? state.market;
+    showToast(`Куплено ${sideLabel(state.selectedSide)} на ${state.selectedAmount} FIRE`);
     await Promise.all([loadMarket(), loadMe()]);
   } catch (error) {
     showToast(error.message === "insufficient_fire" ? "Не хватает FIRE." : "Покупка не прошла.");
+  } finally {
+    state.pendingBuy = false;
+    renderMarket();
+    renderTradeTicket();
   }
 }
 
@@ -351,20 +588,41 @@ async function refreshAll() {
   }
 }
 
-document.querySelectorAll(".buy-button").forEach((button) => {
+document.querySelectorAll(".outcome-button").forEach((button) => {
   button.addEventListener("click", () => {
-    void buy(button.dataset.side, Number(button.dataset.amount));
+    state.selectedSide = button.dataset.side;
+    renderTradeTicket();
   });
+});
+
+document.querySelectorAll(".amount-button").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.selectedAmount = Number(button.dataset.amount);
+    renderTradeTicket();
+  });
+});
+
+$("placeBetBtn").addEventListener("click", () => {
+  void buy();
 });
 
 $("refreshBtn").addEventListener("click", () => {
   void refreshAll();
 });
 
-setInterval(updateTimer, 500);
+setInterval(updateTimer, 250);
 setInterval(() => void loadMarket().catch(() => setConnection("Ошибка", "error")), 1_000);
-setInterval(() => void loadMe().catch(() => undefined), 5_000);
+setInterval(() => void loadMe().catch(() => undefined), 3_000);
 setInterval(() => void loadRecentMarkets().catch(() => undefined), 10_000);
+
+window.addEventListener("resize", drawChart);
+
+AMOUNTS.forEach((amount, index) => {
+  const button = document.querySelector(`.amount-button[data-amount="${amount}"]`);
+  if (button && index === 0) {
+    button.classList.add("active");
+  }
+});
 
 upsertMe()
   .then(refreshAll)
