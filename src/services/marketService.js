@@ -93,6 +93,15 @@ function ensurePositiveAmount(amount) {
   return Math.round(value * 100) / 100;
 }
 
+function ensureNonNegativeAmount(amount) {
+  const value = Number(amount);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error("amount_must_be_non_negative");
+  }
+
+  return Math.round(value * 100) / 100;
+}
+
 export async function upsertUser(input) {
   const telegramId = String(input.telegram_id ?? "").trim();
   if (!telegramId) {
@@ -234,6 +243,62 @@ export async function addFireToUser(input) {
   return {
     user,
     balance: result,
+  };
+}
+
+export async function syncFireBalance(input) {
+  const balance = ensureNonNegativeAmount(input.amount ?? input.balance);
+  const reason = input.reason || "admin_adjustment";
+  const source = input.source || "bridge_sync";
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+
+  const result = await withTransaction(async (client) => {
+    const balanceResult = await client.query(
+      `
+        SELECT balance
+        FROM fire_balances
+        WHERE user_id = $1
+        FOR UPDATE
+      `,
+      [user.id],
+    );
+    const previousBalance = toNumber(balanceResult.rows[0]?.balance);
+    const delta = Math.round((balance - previousBalance) * 100) / 100;
+
+    await client.query(
+      `
+        UPDATE fire_balances
+        SET balance = $2,
+            updated_at = now()
+        WHERE user_id = $1
+      `,
+      [user.id, balance],
+    );
+
+    if (Math.abs(delta) >= 0.01) {
+      await client.query(
+        `
+          INSERT INTO fire_ledger (user_id, amount, reason, source)
+          VALUES ($1, $2, $3, $4)
+        `,
+        [user.id, delta, reason, source],
+      );
+    }
+
+    return {
+      balance,
+      previous_balance: previousBalance,
+      delta,
+    };
+  });
+
+  return {
+    user,
+    ...result,
   };
 }
 

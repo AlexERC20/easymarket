@@ -10,7 +10,8 @@
 - [x] BTC 5M market API
 - [x] FIRE ledger and balances
 - [x] Bridge API skeleton for local Telegram bot
-- [ ] Next step: connect the local Telegram bot to bridge API
+- [x] Exact FIRE balance sync endpoint for local Telegram bot
+- [ ] Next step: call `/api/bridge/fire/sync` from the local Telegram bot after FIRE balance changes
 
 ## Not Implemented Yet
 

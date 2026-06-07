@@ -141,5 +141,21 @@ Bridge API for the local Telegram bot, protected by `x-bridge-secret`:
 ```text
 POST /api/bridge/users/upsert
 POST /api/bridge/fire/add
+POST /api/bridge/fire/sync
 GET  /api/bridge/fire/balance?telegram_id=123
+```
+
+Use `/api/bridge/fire/sync` when the local bot is the source of truth and EasyMarket must mirror the exact bot balance:
+
+```bash
+curl -X POST https://easymarket-rcuj.onrender.com/api/bridge/fire/sync \
+  -H "Content-Type: application/json" \
+  -H "x-bridge-secret: $BOT_BRIDGE_SECRET" \
+  -d '{
+    "telegram_id": "123",
+    "username": "alex",
+    "first_name": "Alex",
+    "amount": 1000,
+    "reason": "bot_balance_sync"
+  }'
 ```

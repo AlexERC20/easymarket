@@ -13,6 +13,7 @@ import {
   getRecentMarkets,
   getUserSnapshot,
   resolveExpiredMarkets,
+  syncFireBalance,
   updateLiveBtcPrice,
   upsertUser,
 } from "./services/marketService.js";
@@ -38,6 +39,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "telegram_id_required",
     "telegram_id_missing",
     "amount_must_be_positive",
+    "amount_must_be_non_negative",
     "invalid_market_id",
     "invalid_side",
     "user_not_found",
@@ -286,6 +288,25 @@ app.post("/api/bridge/fire/add", requireBridgeSecret, async (req, res) => {
       amount: req.body?.amount,
       reason: req.body?.reason || "admin_adjustment",
       source: "bridge",
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/fire/sync", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await syncFireBalance({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      amount: req.body?.amount ?? req.body?.balance,
+      reason: req.body?.reason || "admin_adjustment",
+      source: "bridge_sync",
     });
     res.status(200).json({
       ok: true,
