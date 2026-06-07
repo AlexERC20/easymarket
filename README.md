@@ -1,10 +1,14 @@
-# Easymarket
+# EasyMarket
 
-Minimal connection-check skeleton for the Easymarket service.
+Telegram Mini App / Web App MVP with a FIRE-based YES/NO prediction market.
 
-This project verifies the chain:
+The first market type is BTC 5M:
 
-Local Codex workspace -> GitHub -> Render service -> Render Postgres -> public web/API.
+```text
+BTC будет выше цены открытия через 5 минут?
+```
+
+This is not a real-money market and does not include payments, cashout, leverage, futures, or Telegram Stars.
 
 ## Run Locally
 
@@ -26,6 +30,13 @@ Open:
 http://localhost:3000/
 http://localhost:3000/health
 http://localhost:3000/api/status
+http://localhost:3000/api/market/active
+```
+
+For browser dev auth outside Telegram:
+
+```text
+http://localhost:3000/?telegram_id=123&username=alex&first_name=Alex
 ```
 
 ## Environment Variables
@@ -40,10 +51,20 @@ Optional:
 
 ```text
 PORT=3000
+NODE_ENV=production
 PGSSLMODE=require
+BOT_BRIDGE_SECRET=
+ALLOW_DEV_AUTH=false
+ALLOW_DEV_TOOLS=false
+MARKET_INTERVAL_SECONDS=10
+MARKET_DURATION_MINUTES=5
+MARKET_LIQUIDITY=10000
+MARKET_FEE_BPS=200
+PRICE_POLL_MS=1000
 ```
 
 `DATABASE_URL` must be set in the Render environment. Do not commit real database credentials.
+`BOT_BRIDGE_SECRET` protects future local Telegram bot bridge endpoints through the `x-bridge-secret` header.
 
 ## Render
 
@@ -74,6 +95,8 @@ After deploy:
 ```bash
 curl https://easymarket-rcuj.onrender.com/health
 curl https://easymarket-rcuj.onrender.com/api/status
+curl https://easymarket-rcuj.onrender.com/api/market/active
+curl https://easymarket-rcuj.onrender.com/api/markets/recent
 ```
 
 Expected `/health` response:
@@ -92,4 +115,31 @@ Expected `/api/status` response when the database is connected:
   "ok": true,
   "database": "connected"
 }
+```
+
+## API
+
+Public frontend API:
+
+```text
+GET  /api/market/active
+POST /api/market/:marketId/buy
+GET  /api/me?telegram_id=123
+POST /api/me/upsert
+GET  /api/markets/recent
+```
+
+Dev tools, only when `ALLOW_DEV_TOOLS=true`:
+
+```text
+POST /api/dev/fire/add
+POST /api/dev/market/create
+```
+
+Bridge API for the local Telegram bot, protected by `x-bridge-secret`:
+
+```text
+POST /api/bridge/users/upsert
+POST /api/bridge/fire/add
+GET  /api/bridge/fire/balance?telegram_id=123
 ```

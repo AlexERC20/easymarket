@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>EasyMarket</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Telegram Mini App</p>
+          <h1>EasyMarket</h1>
+        </div>
+        <button id="refreshBtn" class="ghost-button" type="button">Refresh</button>
+      </header>
+
+      <section class="balance-card">
+        <div>
+          <p class="label">Баланс FIRE</p>
+          <div id="fireBalance" class="balance-value">0</div>
+        </div>
+        <div id="connectionStatus" class="status-pill">Подключение...</div>
+      </section>
+
+      <section id="authCard" class="card hidden">
+        <h2>Нужен пользователь</h2>
+        <p>
+          Открой через Telegram Mini App или добавь dev query:
+          <code>?telegram_id=123&amp;username=alex&amp;first_name=Alex</code>
+        </p>
+      </section>
+
+      <section class="market-card card">
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Live BTC 5M</p>
+            <h2>Активный рынок</h2>
+          </div>
+          <span id="marketStatus" class="status-pill">...</span>
+        </div>
+
+        <h3 id="marketQuestion" class="question">Загружаем рынок...</h3>
+
+        <div class="price-grid">
+          <div>
+            <p class="label">Open BTC</p>
+            <strong id="openPrice">-</strong>
+          </div>
+          <div>
+            <p class="label">Current BTC</p>
+            <strong id="currentPrice">-</strong>
+          </div>
+          <div>
+            <p class="label">До конца</p>
+            <strong id="timeLeft">--:--</strong>
+          </div>
+        </div>
+
+        <canvas id="marketChart" width="720" height="240" aria-label="BTC market chart"></canvas>
+
+        <div class="odds-row">
+          <div class="odds yes">
+            <span>YES</span>
+            <strong id="yesProbability">50%</strong>
+          </div>
+          <div class="odds no">
+            <span>NO</span>
+            <strong id="noProbability">50%</strong>
+          </div>
+        </div>
+
+        <div class="volume-row">
+          <span>YES объём: <b id="yesVolume">0</b> FIRE</span>
+          <span>NO объём: <b id="noVolume">0</b> FIRE</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-header">
+          <h2>Купить YES</h2>
+          <span class="price-tag" id="yesPrice">0.50</span>
+        </div>
+        <div class="button-grid">
+          <button class="buy-button yes" data-side="YES" data-amount="10">YES 10 FIRE</button>
+          <button class="buy-button yes" data-side="YES" data-amount="50">YES 50 FIRE</button>
+          <button class="buy-button yes" data-side="YES" data-amount="100">YES 100 FIRE</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-header">
+          <h2>Купить NO</h2>
+          <span class="price-tag" id="noPrice">0.50</span>
+        </div>
+        <div class="button-grid">
+          <button class="buy-button no" data-side="NO" data-amount="10">NO 10 FIRE</button>
+          <button class="buy-button no" data-side="NO" data-amount="50">NO 50 FIRE</button>
+          <button class="buy-button no" data-side="NO" data-amount="100">NO 100 FIRE</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Моя позиция</h2>
+        <div id="positionList" class="position-list">
+          <p class="muted">Позиции пока нет.</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Последние рынки</h2>
+        <div id="recentMarkets" class="recent-list">
+          <p class="muted">Пока нет закрытых рынков.</p>
+        </div>
+      </section>
+
+      <div id="toast" class="toast hidden"></div>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
