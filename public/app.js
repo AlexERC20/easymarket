@@ -1,5 +1,5 @@
 const FEE_RATE = 0.02;
-const AMOUNTS = [5, 10, 50, 100];
+const AMOUNTS = [50, 100, 500, 1000];
 const MIN_OUTCOME_PRICE = 0.001;
 const CHART_WINDOW_MS = 10_000;
 
@@ -13,7 +13,7 @@ const state = {
   activity: [],
   chartPoints: [],
   selectedSide: "YES",
-  selectedAmount: 5,
+  selectedAmount: 50,
   activityLoaded: false,
   seenActivityIds: new Set(),
   pendingBuy: false,
