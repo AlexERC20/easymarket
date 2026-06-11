@@ -61,6 +61,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "invalid_sell_shares",
     "insufficient_shares",
     "invalid_market_price",
+    "sell_failed",
   ]);
 
   if (message === "DATABASE_URL is not configured.") {
@@ -282,13 +283,34 @@ app.post("/api/market/:marketId/sell", async (req, res) => {
     });
     res.status(200).json(result);
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     console.warn("[EasyMarket] sell failed", {
       telegram_id: req.body?.telegram_id,
       market_id: req.params.marketId,
       position_id: req.body?.position_id,
       side: req.body?.side,
-      message: error instanceof Error ? error.message : String(error),
+      message,
     });
+    const sellPublicErrors = new Set([
+      "invalid_market_id",
+      "invalid_side",
+      "user_not_found",
+      "market_not_open",
+      "market_closed",
+      "position_not_open",
+      "invalid_position_id",
+      "invalid_sell_shares",
+      "insufficient_shares",
+      "invalid_market_price",
+      "sell_failed",
+    ]);
+    if (!(error instanceof PriceUnavailableError) && message !== "DATABASE_URL is not configured." && !sellPublicErrors.has(message)) {
+      res.status(500).json({
+        ok: false,
+        message: "sell_failed",
+      });
+      return;
+    }
     sendApiError(res, error);
   }
 });

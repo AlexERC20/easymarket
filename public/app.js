@@ -630,7 +630,9 @@ function renderMarket() {
   const marketStatus = $("marketStatus");
   marketStatus.textContent = marketStatusLabel(market?.status);
   marketStatus.classList.toggle("live", market?.status === "open");
-  $("marketQuestion").textContent = hasMarket ? "BTC закроется выше цены открытия?" : "Рынок пока не создан.";
+  $("marketQuestion").textContent = hasMarket
+    ? "Bitcoin закроется выше или ниже в течение 5 минут?"
+    : "Рынок пока не создан.";
   animateText($("openPrice"), openPrice, (value) => `$${formatPrice(value)}`);
   animateText($("currentPrice"), currentPrice, (value) => `$${formatPrice(value)}`);
 
@@ -833,7 +835,6 @@ async function buy() {
     state.balance = result.balance ?? state.balance;
     state.market = result.market ?? state.market;
     triggerHaptic("success");
-    showToast(`Куплено ${sideLabel(state.selectedSide)} на ${state.selectedAmount} FIRE`);
     await Promise.all([loadMarket(), loadMe()]);
   } catch (error) {
     triggerHaptic("error");
@@ -880,6 +881,7 @@ async function sellPosition({ side, positionId, marketId }) {
       invalid_market_price: "Цена рынка обновляется. Попробуй ещё раз.",
       insufficient_shares: "Не хватает shares для продажи.",
       user_not_found: "Пользователь не найден.",
+      sell_failed: "Продажа не прошла. Попробуй ещё раз.",
     };
     showToast(messages[error.message] || `Продажа не прошла: ${error.message || "ошибка"}`);
   } finally {

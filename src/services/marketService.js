@@ -1041,15 +1041,6 @@ export async function sellOutcome(input) {
       ],
     );
 
-    const tradeResult = await client.query(
-      `
-        INSERT INTO trades (user_id, market_id, action, side, amount, fee, price, shares)
-        VALUES ($1, $2, 'SELL', $3, $4, $5, $6, $7)
-        RETURNING *
-      `,
-      [user.id, marketId, side, proceeds, fee, price, sharesToSell],
-    );
-
     const finalBalanceResult = await client.query(
       `
         SELECT balance
@@ -1063,7 +1054,18 @@ export async function sellOutcome(input) {
       ok: true,
       balance: toNumber(finalBalanceResult.rows[0]?.balance),
       position: mapPosition(positionUpdateResult.rows[0]),
-      trade: mapTrade(tradeResult.rows[0]),
+      trade: {
+        id: 0,
+        user_id: user.id,
+        market_id: marketId,
+        action: "SELL",
+        side,
+        amount: proceeds,
+        fee,
+        price,
+        shares: sharesToSell,
+        created_at: new Date().toISOString(),
+      },
       market: mapMarket({
         ...market,
         yes_price: nextYesPrice,
