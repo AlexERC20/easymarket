@@ -18,6 +18,7 @@ const state = {
   seenActivityIds: new Set(),
   pendingBuy: false,
   pendingSellSide: null,
+  pendingSellPositionId: null,
   publicConfig: {
     av_bot_url: "https://t.me/voit_help_bot?start=buy_fire",
     mini_app_url: "https://t.me/voit_help_bot?startapp=easymarket",
@@ -429,11 +430,20 @@ function getTelegramUser() {
   };
 
   if (tg) {
+    const applyTelegramViewport = () => {
+      const height = Number(tg.viewportStableHeight || tg.viewportHeight || 0);
+      if (height > 0) {
+        document.documentElement.style.setProperty("--tg-app-height", `${height}px`);
+      }
+    };
     try {
+      document.body.classList.add("telegram-shell");
       tg.ready();
       tg.expand();
       tg.requestFullscreen?.();
       tg.disableVerticalSwipes?.();
+      applyTelegramViewport();
+      tg.onEvent?.("viewportChanged", applyTelegramViewport);
     } catch {
       // Older Telegram clients may not support every Mini App display method.
     }
@@ -660,10 +670,7 @@ function updateTimer() {
 function renderMe() {
   animateText($("fireBalance"), state.balance, formatFire);
 
-  const activeMarketId = state.market?.id;
-  const positions = state.positions.filter((position) => (
-    position.market_id === activeMarketId && position.status === "open"
-  ));
+  const positions = state.positions.filter((position) => position.status === "open");
 
   const container = $("positionList");
   if (!positions.length) {
@@ -674,16 +681,26 @@ function renderMe() {
   container.innerHTML = positions.map((position) => {
     const payout = Number(position.shares || 0);
     const spent = Number(position.spent || 0);
-    const marketPrice = Number(position.side === "YES" ? state.market?.yes_price : state.market?.no_price) || 0;
+    const isActiveMarket = position.market_id === state.market?.id;
+    const positionMarketPrice = Number(position.side === "YES" ? position.yes_price : position.no_price);
+    const liveMarketPrice = Number(position.side === "YES" ? state.market?.yes_price : state.market?.no_price);
+    const marketPrice = (isActiveMarket ? liveMarketPrice : positionMarketPrice) || 0;
     const exitValue = payout * marketPrice * (1 - FEE_RATE);
     const pnl = exitValue - spent;
-    const isSelling = state.pendingSellSide === position.side;
+    const isSelling = state.pendingSellPositionId === position.id;
+    const expiresAt = position.market_end_time ? new Date(position.market_end_time).getTime() : 0;
+    const secondsLeft = expiresAt > 0 ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 1_000)) : null;
+    const marketBadge = secondsLeft === null
+      ? ""
+      : secondsLeft > 0
+        ? ` · ${secondsLeft}с`
+        : " · закрывается";
     return `
       <div class="mini-row">
         <div>
           <strong class="side-${position.side}">${sideLabel(position.side)} ${payout.toFixed(2)} shares</strong>
           <br />
-          <small>Avg ${formatCents(position.avg_price)} · Sell ${formatCents(marketPrice)} · Spent ${formatFire(spent)}</small>
+          <small>Avg ${formatCents(position.avg_price)} · Sell ${formatCents(marketPrice)} · Spent ${formatFire(spent)}${marketBadge}</small>
         </div>
         <div class="position-actions">
           <strong class="${pnl >= 0 ? "positive" : "negative"}">${pnl >= 0 ? "+" : ""}${formatFireDecimal(pnl)}</strong>
@@ -829,7 +846,7 @@ async function buy() {
 }
 
 async function sellPosition({ side, positionId, marketId }) {
-  if (!state.user || !marketId || !positionId || state.pendingSellSide) {
+  if (!state.user || !marketId || !positionId || state.pendingSellPositionId) {
     triggerHaptic("warning");
     showToast("Нет активной позиции для продажи.");
     return;
@@ -837,6 +854,7 @@ async function sellPosition({ side, positionId, marketId }) {
 
   triggerHaptic("medium");
   state.pendingSellSide = side;
+  state.pendingSellPositionId = positionId;
   renderMe();
   try {
     const result = await api(`/api/market/${marketId}/sell`, {
@@ -866,6 +884,7 @@ async function sellPosition({ side, positionId, marketId }) {
     showToast(messages[error.message] || `Продажа не прошла: ${error.message || "ошибка"}`);
   } finally {
     state.pendingSellSide = null;
+    state.pendingSellPositionId = null;
     renderMe();
     renderTradeTicket();
   }

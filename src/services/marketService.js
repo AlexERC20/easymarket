@@ -65,6 +65,10 @@ function mapPosition(row) {
     updated_at: row.updated_at,
     question: row.question,
     winner: row.winner,
+    market_status: row.market_status,
+    market_end_time: row.market_end_time,
+    yes_price: row.yes_price === undefined ? undefined : toNumber(row.yes_price),
+    no_price: row.no_price === undefined ? undefined : toNumber(row.no_price),
   };
 }
 
@@ -284,7 +288,14 @@ export async function getUserSnapshot(telegramId) {
     getBalanceByUserId(user.id),
     query(
       `
-        SELECT p.*, m.question, m.winner
+        SELECT
+          p.*,
+          m.question,
+          m.winner,
+          m.status AS market_status,
+          m.end_time AS market_end_time,
+          m.yes_price,
+          m.no_price
         FROM positions p
         JOIN markets m ON m.id = p.market_id
         WHERE p.user_id = $1
