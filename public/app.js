@@ -692,6 +692,13 @@ function renderMe() {
     const isSelling = state.pendingSellPositionId === position.id;
     const expiresAt = position.market_end_time ? new Date(position.market_end_time).getTime() : 0;
     const secondsLeft = expiresAt > 0 ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 1_000)) : null;
+    const marketIsLive = position.market_status === "open";
+    const canSell = marketIsLive && secondsLeft !== null && secondsLeft > 0;
+    const sellLockMessage = !marketIsLive
+      ? "Рынок уже рассчитан."
+      : secondsLeft === 0
+        ? "Рынок уже закрылся, ждём расчёт."
+        : "";
     const marketBadge = secondsLeft === null
       ? ""
       : secondsLeft > 0
@@ -711,10 +718,12 @@ function renderMe() {
             data-side="${position.side}"
             data-position-id="${position.id}"
             data-market-id="${position.market_id}"
+            data-sell-locked="${canSell ? "0" : "1"}"
+            data-lock-message="${sellLockMessage}"
             type="button"
-            ${isSelling ? "disabled" : ""}
+            ${isSelling || !canSell ? "disabled" : ""}
           >
-            ${isSelling ? "Продаю..." : `Продать ${formatFireDecimal(exitValue)}`}
+            ${isSelling ? "Продаю..." : canSell ? `Продать ${formatFireDecimal(exitValue)}` : "Ждём итог"}
           </button>
         </div>
       </div>
@@ -875,8 +884,8 @@ async function sellPosition({ side, positionId, marketId }) {
   } catch (error) {
     triggerHaptic("error");
     const messages = {
-      position_not_open: "Открытой позиции нет.",
-      market_closed: "Рынок уже закрывается, продать нельзя.",
+      position_not_open: "Позиция уже закрыта или рассчитана.",
+      market_closed: "Рынок уже закрылся, ждём расчёт.",
       market_not_open: "Рынок сейчас не открыт.",
       invalid_market_price: "Цена рынка обновляется. Попробуй ещё раз.",
       insufficient_shares: "Не хватает shares для продажи.",
@@ -884,6 +893,10 @@ async function sellPosition({ side, positionId, marketId }) {
       sell_failed: "Продажа не прошла. Попробуй ещё раз.",
     };
     showToast(messages[error.message] || `Продажа не прошла: ${error.message || "ошибка"}`);
+    await Promise.all([
+      loadMarket().catch(() => undefined),
+      loadMe().catch(() => undefined),
+    ]);
   } finally {
     state.pendingSellSide = null;
     state.pendingSellPositionId = null;
@@ -1013,6 +1026,16 @@ document.addEventListener("click", (event) => {
   }
 
   event.preventDefault();
+  if (button.dataset.sellLocked === "1") {
+    triggerHaptic("warning");
+    showToast(button.dataset.lockMessage || "Эта позиция уже не продаётся.");
+    void Promise.all([
+      loadMarket().catch(() => undefined),
+      loadMe().catch(() => undefined),
+    ]);
+    return;
+  }
+
   void sellPosition({
     side: button.dataset.side,
     positionId: Number(button.dataset.positionId),
