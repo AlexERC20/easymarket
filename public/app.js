@@ -429,8 +429,14 @@ function getTelegramUser() {
   };
 
   if (tg) {
-    tg.ready();
-    tg.expand();
+    try {
+      tg.ready();
+      tg.expand();
+      tg.requestFullscreen?.();
+      tg.disableVerticalSwipes?.();
+    } catch {
+      // Older Telegram clients may not support every Mini App display method.
+    }
     const user = tg.initDataUnsafe?.user || parseTelegramInitDataUser(tg.initData);
     const telegramRef = tg.initDataUnsafe?.start_param || parseTelegramStartParam(tg.initData);
     const normalizedUser = normalizeTelegramUser(user, "telegram");
