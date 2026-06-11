@@ -829,13 +829,20 @@ export async function buyOutcome(input) {
 
 export async function sellOutcome(input) {
   const marketId = Number(input.marketId);
-  const side = String(input.side || "").toUpperCase();
+  const requestedSide = String(input.side || "").toUpperCase();
+  const positionId = input.positionId === undefined || input.positionId === null
+    ? null
+    : Number(input.positionId);
 
   if (!Number.isSafeInteger(marketId) || marketId <= 0) {
     throw new Error("invalid_market_id");
   }
 
-  if (!["YES", "NO"].includes(side)) {
+  if (positionId !== null && (!Number.isSafeInteger(positionId) || positionId <= 0)) {
+    throw new Error("invalid_position_id");
+  }
+
+  if (positionId === null && !["YES", "NO"].includes(requestedSide)) {
     throw new Error("invalid_side");
   }
 
@@ -863,22 +870,37 @@ export async function sellOutcome(input) {
       throw new Error("market_closed");
     }
 
-    const positionResult = await client.query(
-      `
-        SELECT *
-        FROM positions
-        WHERE user_id = $1
-          AND market_id = $2
-          AND side = $3
-          AND status = 'open'
-        FOR UPDATE
-      `,
-      [user.id, marketId, side],
-    );
+    const positionResult = positionId === null
+      ? await client.query(
+        `
+          SELECT *
+          FROM positions
+          WHERE user_id = $1
+            AND market_id = $2
+            AND side = $3
+            AND status = 'open'
+          FOR UPDATE
+        `,
+        [user.id, marketId, requestedSide],
+      )
+      : await client.query(
+        `
+          SELECT *
+          FROM positions
+          WHERE id = $1
+            AND user_id = $2
+            AND market_id = $3
+            AND status = 'open'
+          FOR UPDATE
+        `,
+        [positionId, user.id, marketId],
+      );
     const position = positionResult.rows[0];
     if (!position) {
       throw new Error("position_not_open");
     }
+
+    const side = String(position.side || requestedSide).toUpperCase();
 
     const positionShares = toNumber(position.shares);
     if (positionShares <= 0) {

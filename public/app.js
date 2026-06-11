@@ -684,6 +684,8 @@ function renderMe() {
           <button
             class="sell-button ${sideClass(position.side)}"
             data-side="${position.side}"
+            data-position-id="${position.id}"
+            data-market-id="${position.market_id}"
             type="button"
             ${isSelling ? "disabled" : ""}
           >
@@ -820,8 +822,8 @@ async function buy() {
   }
 }
 
-async function sellPosition(side) {
-  if (!state.user || !state.market || state.pendingSellSide) {
+async function sellPosition({ side, positionId, marketId }) {
+  if (!state.user || !marketId || !positionId || state.pendingSellSide) {
     triggerHaptic("warning");
     showToast("Нет активной позиции для продажи.");
     return;
@@ -831,10 +833,11 @@ async function sellPosition(side) {
   state.pendingSellSide = side;
   renderMe();
   try {
-    const result = await api(`/api/market/${state.market.id}/sell`, {
+    const result = await api(`/api/market/${marketId}/sell`, {
       method: "POST",
       body: JSON.stringify({
         telegram_id: state.user.telegram_id,
+        position_id: positionId,
         side,
       }),
     });
@@ -983,7 +986,11 @@ document.addEventListener("click", (event) => {
   }
 
   event.preventDefault();
-  void sellPosition(button.dataset.side);
+  void sellPosition({
+    side: button.dataset.side,
+    positionId: Number(button.dataset.positionId),
+    marketId: Number(button.dataset.marketId),
+  });
 });
 
 setInterval(updateTimer, 250);

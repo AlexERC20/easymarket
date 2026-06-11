@@ -57,6 +57,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "market_closed",
     "insufficient_fire",
     "position_not_open",
+    "invalid_position_id",
     "invalid_sell_shares",
     "insufficient_shares",
     "invalid_market_price",
@@ -268,6 +269,7 @@ app.post("/api/market/:marketId/sell", async (req, res) => {
     const result = await sellOutcome({
       marketId: req.params.marketId,
       telegram_id: req.body?.telegram_id,
+      positionId: req.body?.position_id,
       side: req.body?.side,
       shares: req.body?.shares,
     });
