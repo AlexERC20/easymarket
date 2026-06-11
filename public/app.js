@@ -1,5 +1,7 @@
 const FEE_RATE = 0.02;
 const AMOUNTS = [5, 10, 50, 100];
+const MIN_OUTCOME_PRICE = 0.001;
+const CHART_WINDOW_MS = 10_000;
 
 const state = {
   user: null,
@@ -37,7 +39,16 @@ const formatPrice = (value) => Number(value || 0).toLocaleString("ru-RU", {
   maximumFractionDigits: 2,
 });
 const formatPercent = (value) => `${Math.round(Number(value || 0))}%`;
-const formatCents = (value) => `${Math.round(Number(value || 0) * 100)}¢`;
+const formatCents = (value) => {
+  const cents = Number(value || 0) * 100;
+  if (cents > 0 && cents < 1) {
+    return `${cents.toFixed(1)}¢`;
+  }
+  if (cents > 99) {
+    return `${cents.toFixed(1)}¢`;
+  }
+  return `${Math.round(cents)}¢`;
+};
 const sideLabel = (side) => (side === "YES" ? "UP" : "DOWN");
 const sideClass = (side) => (side === "YES" ? "yes" : "no");
 const actionLabel = (action) => (action === "SELL" ? "продал" : "купил");
@@ -121,11 +132,14 @@ function drawMarketChartFrame() {
     state.smoothedPrice += (currentPrice - state.smoothedPrice) * 0.045;
   }
 
-  const startTime = new Date(state.market.start_time).getTime();
   const endTime = new Date(state.market.end_time).getTime();
-  const duration = Math.max(1, endTime - startTime);
+  const nowMs = Date.now();
+  const windowEnd = Math.min(endTime, nowMs);
+  const windowStart = Math.max(new Date(state.market.start_time).getTime(), windowEnd - CHART_WINDOW_MS);
+  const duration = Math.max(1, windowEnd - windowStart);
   const rawPoints = state.chartPoints
     .filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at))
+    .filter((point) => point.at >= windowStart - 1_500 && point.at <= windowEnd + 1_500)
     .map((point) => ({ ...point }));
 
   if (rawPoints.length === 0 && currentPrice > 0) {
@@ -135,7 +149,7 @@ function drawMarketChartFrame() {
     rawPoints[rawPoints.length - 1] = {
       ...rawPoints[rawPoints.length - 1],
       price: state.smoothedPrice,
-      at: Math.min(endTime, Math.max(startTime, Date.now())),
+      at: windowEnd,
     };
   }
 
@@ -155,7 +169,7 @@ function drawMarketChartFrame() {
   const plotWidth = Math.max(1, right - left);
   const plotHeight = Math.max(1, bottom - top);
   const scaleY = (price) => bottom - ((price - state.chartYMin) / Math.max(1, state.chartYMax - state.chartYMin)) * plotHeight;
-  const scaleX = (at) => left + ((Math.min(endTime, Math.max(startTime, at)) - startTime) / duration) * plotWidth;
+  const scaleX = (at) => left + ((Math.min(windowEnd, Math.max(windowStart, at)) - windowStart) / duration) * plotWidth;
 
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#080d16";
@@ -511,7 +525,7 @@ function getPreview(amount = state.selectedAmount, side = state.selectedSide) {
   const price = state.market
     ? Number(side === "YES" ? state.market.yes_price : state.market.no_price)
     : 0.5;
-  const safePrice = Math.max(0.05, price || 0.5);
+  const safePrice = Math.max(MIN_OUTCOME_PRICE, price || 0.5);
   const net = Number(amount || 0) * (1 - FEE_RATE);
   const shares = net / safePrice;
   const profit = shares - Number(amount || 0);
@@ -769,7 +783,15 @@ async function sellPosition(side) {
     await Promise.all([loadMarket(), loadMe()]);
   } catch (error) {
     triggerHaptic("error");
-    showToast(error.message === "position_not_open" ? "Открытой позиции нет." : "Продажа не прошла.");
+    const messages = {
+      position_not_open: "Открытой позиции нет.",
+      market_closed: "Рынок уже закрывается, продать нельзя.",
+      market_not_open: "Рынок сейчас не открыт.",
+      invalid_market_price: "Цена рынка обновляется. Попробуй ещё раз.",
+      insufficient_shares: "Не хватает shares для продажи.",
+      user_not_found: "Пользователь не найден.",
+    };
+    showToast(messages[error.message] || `Продажа не прошла: ${error.message || "ошибка"}`);
   } finally {
     state.pendingSellSide = null;
     renderMe();
@@ -809,10 +831,13 @@ $("placeBetBtn").addEventListener("click", () => {
   void buy();
 });
 
-$("refreshBtn").addEventListener("click", () => {
-  triggerHaptic("light");
-  void refreshAll();
-});
+const refreshButton = $("refreshBtn");
+if (refreshButton) {
+  refreshButton.addEventListener("click", () => {
+    triggerHaptic("light");
+    void refreshAll();
+  });
+}
 
 $("walletBtn").addEventListener("click", () => {
   triggerHaptic("selection");
@@ -851,6 +876,13 @@ $("inviteBtn").addEventListener("click", async () => {
   const bonus = Math.round(Number(state.publicConfig.referral_bonus_fire || 100));
   const inviteUrl = buildInviteUrl(state.user.telegram_id);
   const text = `Залетай в EasyMarket. После первой ставки мне дадут ${bonus} FIRE.`;
+  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
+  if (window.Telegram?.WebApp?.openTelegramLink) {
+    window.Telegram.WebApp.openTelegramLink(shareUrl);
+    showToast(`+${bonus} FIRE за друга после его первой ставки. 1 раз в день.`);
+    return;
+  }
+
   try {
     if (navigator.share) {
       await navigator.share({
@@ -864,12 +896,7 @@ $("inviteBtn").addEventListener("click", async () => {
     // Fall through to Telegram share link.
   }
 
-  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
-  if (window.Telegram?.WebApp?.openTelegramLink) {
-    window.Telegram.WebApp.openTelegramLink(shareUrl);
-  } else {
-    window.open(shareUrl, "_blank", "noopener,noreferrer");
-  }
+  window.open(shareUrl, "_blank", "noopener,noreferrer");
   showToast(`+${bonus} FIRE за друга после его первой ставки. 1 раз в день.`);
 });
 
@@ -879,6 +906,7 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  event.preventDefault();
   void sellPosition(button.dataset.side);
 });
 

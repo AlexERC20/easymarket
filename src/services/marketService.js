@@ -3,8 +3,8 @@ import { query, toNumber, withTransaction } from "../db.js";
 import { getBtcPrice, PriceUnavailableError } from "./priceService.js";
 
 const MARKET_SYMBOL = "BTCUSDT";
-const MIN_PRICE = 0.05;
-const MAX_PRICE = 0.95;
+const MIN_PRICE = 0.001;
+const MAX_PRICE = 0.999;
 const DEFAULT_FEE_BPS = 200;
 
 function mapMarket(row) {
@@ -144,11 +144,16 @@ function getMarketMakerYesPrice(market, currentPrice, options = {}) {
   const previousPrice = toNumber(market.current_price, openPrice);
   const momentumPct = ((currentPrice - previousPrice) / openPrice) * 100;
 
-  const signalScalePct = Math.max(0.025, 0.22 - progress * 0.16);
+  const signalScalePct = Math.max(0.006, 0.12 - progress * 0.105);
   const directionalSignal = Math.tanh(movementPct / signalScalePct);
-  const momentumSignal = Math.tanh(momentumPct / 0.025);
-  const directionalWeight = 0.28 + progress * 0.22;
-  const priceProbability = 0.5 + directionalSignal * directionalWeight + momentumSignal * 0.035;
+  const momentumSignal = Math.tanh(momentumPct / 0.012);
+  const deadlineSignal = Math.tanh(movementPct / Math.max(0.004, 0.04 - progress * 0.034));
+  const directionalWeight = 0.36 + progress * 0.38;
+  const deadlineWeight = Math.max(0, progress - 0.72) * 0.68;
+  const priceProbability = 0.5
+    + directionalSignal * directionalWeight
+    + deadlineSignal * deadlineWeight
+    + momentumSignal * (0.04 + progress * 0.035);
 
   const yesVolume = toNumber(market.yes_volume);
   const noVolume = toNumber(market.no_volume);
@@ -157,13 +162,13 @@ function getMarketMakerYesPrice(market, currentPrice, options = {}) {
   const imbalance = volumeTotal > 0
     ? (yesVolume - noVolume) / (volumeTotal + liquidity * 0.08)
     : 0;
-  const orderProbability = 0.5 + clamp(imbalance, -1, 1) * 0.32;
+  const orderProbability = 0.5 + clamp(imbalance, -1, 1) * 0.42;
 
-  const target = clamp(priceProbability * 0.8 + orderProbability * 0.2, MIN_PRICE, MAX_PRICE);
+  const target = clamp(priceProbability * 0.86 + orderProbability * 0.14, MIN_PRICE, MAX_PRICE);
   const adaptiveInertia = options.fast
     ? 0.24
-    : Math.max(0.2, 0.7 - progress * 0.5);
-  const panicInertia = Math.abs(target - previousYesPrice) > 0.22 ? 0.18 : adaptiveInertia;
+    : Math.max(0.08, 0.48 - progress * 0.4);
+  const panicInertia = Math.abs(target - previousYesPrice) > 0.18 ? 0.08 : adaptiveInertia;
   const tradeShift = Number(options.tradeShift || 0);
 
   return clamp(previousYesPrice * panicInertia + target * (1 - panicInertia) + tradeShift, MIN_PRICE, MAX_PRICE);
