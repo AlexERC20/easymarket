@@ -845,7 +845,7 @@ export async function sellOutcome(input) {
     ? null
     : Number(input.positionId);
 
-  if (!Number.isSafeInteger(requestedMarketId) || requestedMarketId <= 0) {
+  if (positionId === null && (!Number.isSafeInteger(requestedMarketId) || requestedMarketId <= 0)) {
     throw new Error("invalid_market_id");
   }
 
@@ -1016,12 +1016,13 @@ export async function sellOutcome(input) {
         ? Math.max(0, toNumber(market.no_volume) - gross)
         : toNumber(market.no_volume),
     };
-    const nextYesPrice = getMarketMakerYesPrice(
+    const nextYesPriceRaw = getMarketMakerYesPrice(
       repricedMarket,
       toNumber(market.current_price, toNumber(market.open_price)),
       { fast: true, tradeShift },
     );
-    const nextNoPrice = 1 - nextYesPrice;
+    const nextYesPrice = Math.round(nextYesPriceRaw * 100_000_000) / 100_000_000;
+    const nextNoPrice = Math.round((1 - nextYesPrice) * 100_000_000) / 100_000_000;
 
     await client.query(
       `

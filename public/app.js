@@ -494,7 +494,9 @@ async function api(path, options = {}) {
   });
   const data = await response.json();
   if (!response.ok || data.ok === false) {
-    throw new Error(data.message || data.status || "request_failed");
+    const error = new Error(data.message || data.status || "request_failed");
+    error.detail = data.detail || "";
+    throw error;
   }
   return data;
 }
@@ -892,7 +894,8 @@ async function sellPosition({ side, positionId, marketId }) {
       user_not_found: "Пользователь не найден.",
       sell_failed: "Продажа не прошла. Попробуй ещё раз.",
     };
-    showToast(messages[error.message] || `Продажа не прошла: ${error.message || "ошибка"}`);
+    const detail = error.detail ? ` (${error.detail})` : "";
+    showToast(messages[error.message] ? `${messages[error.message]}${detail}` : `Продажа не прошла: ${error.message || "ошибка"}${detail}`);
     await Promise.all([
       loadMarket().catch(() => undefined),
       loadMe().catch(() => undefined),

@@ -88,6 +88,13 @@ function sendApiError(res, error, fallbackStatus = 500) {
   });
 }
 
+function getSafePublicErrorDetail(message) {
+  return String(message || "unknown")
+    .replace(process.env.DATABASE_URL || "", "[redacted]")
+    .replace(/postgres:\/\/[^\s]+/gi, "[redacted]")
+    .slice(0, 180);
+}
+
 function requireDevTools(req, res, next) {
   if (!config.allowDevTools) {
     res.status(403).json({
@@ -308,6 +315,7 @@ app.post("/api/market/:marketId/sell", async (req, res) => {
       res.status(500).json({
         ok: false,
         message: "sell_failed",
+        detail: getSafePublicErrorDetail(message),
       });
       return;
     }
