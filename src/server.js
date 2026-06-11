@@ -273,8 +273,22 @@ app.post("/api/market/:marketId/sell", async (req, res) => {
       side: req.body?.side,
       shares: req.body?.shares,
     });
+    console.log("[EasyMarket] sell ok", {
+      telegram_id: req.body?.telegram_id,
+      market_id: req.params.marketId,
+      position_id: req.body?.position_id || result.position?.id,
+      side: result.sale?.side,
+      proceeds: result.sale?.proceeds,
+    });
     res.status(200).json(result);
   } catch (error) {
+    console.warn("[EasyMarket] sell failed", {
+      telegram_id: req.body?.telegram_id,
+      market_id: req.params.marketId,
+      position_id: req.body?.position_id,
+      side: req.body?.side,
+      message: error instanceof Error ? error.message : String(error),
+    });
     sendApiError(res, error);
   }
 });

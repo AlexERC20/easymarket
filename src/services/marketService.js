@@ -828,13 +828,13 @@ export async function buyOutcome(input) {
 }
 
 export async function sellOutcome(input) {
-  const marketId = Number(input.marketId);
+  const requestedMarketId = Number(input.marketId);
   const requestedSide = String(input.side || "").toUpperCase();
   const positionId = input.positionId === undefined || input.positionId === null
     ? null
     : Number(input.positionId);
 
-  if (!Number.isSafeInteger(marketId) || marketId <= 0) {
+  if (!Number.isSafeInteger(requestedMarketId) || requestedMarketId <= 0) {
     throw new Error("invalid_market_id");
   }
 
@@ -852,6 +852,58 @@ export async function sellOutcome(input) {
   }
 
   return withTransaction(async (client) => {
+    let positionResult;
+    if (positionId !== null) {
+      positionResult = await client.query(
+        `
+          SELECT *
+          FROM positions
+          WHERE id = $1
+            AND user_id = $2
+            AND status = 'open'
+          FOR UPDATE
+        `,
+        [positionId, user.id],
+      );
+    } else {
+      positionResult = await client.query(
+        `
+          SELECT *
+          FROM positions
+          WHERE user_id = $1
+            AND market_id = $2
+            AND side = $3
+            AND status = 'open'
+          FOR UPDATE
+        `,
+        [user.id, requestedMarketId, requestedSide],
+      );
+    }
+    if (!positionResult.rows[0] && positionId === null) {
+      positionResult = await client.query(
+        `
+          SELECT p.*
+          FROM positions p
+          JOIN markets m ON m.id = p.market_id
+          WHERE p.user_id = $1
+            AND p.side = $2
+            AND p.status = 'open'
+            AND m.status = 'open'
+            AND m.end_time > now()
+          ORDER BY p.updated_at DESC, p.id DESC
+          LIMIT 1
+          FOR UPDATE OF p
+        `,
+        [user.id, requestedSide],
+      );
+    }
+    const position = positionResult.rows[0];
+    if (!position) {
+      throw new Error("position_not_open");
+    }
+
+    const side = String(position.side || requestedSide).toUpperCase();
+    const marketId = Number(position.market_id);
     const marketResult = await client.query(
       `
         SELECT *
@@ -869,38 +921,6 @@ export async function sellOutcome(input) {
     if (new Date(market.end_time).getTime() <= Date.now()) {
       throw new Error("market_closed");
     }
-
-    const positionResult = positionId === null
-      ? await client.query(
-        `
-          SELECT *
-          FROM positions
-          WHERE user_id = $1
-            AND market_id = $2
-            AND side = $3
-            AND status = 'open'
-          FOR UPDATE
-        `,
-        [user.id, marketId, requestedSide],
-      )
-      : await client.query(
-        `
-          SELECT *
-          FROM positions
-          WHERE id = $1
-            AND user_id = $2
-            AND market_id = $3
-            AND status = 'open'
-          FOR UPDATE
-        `,
-        [positionId, user.id, marketId],
-      );
-    const position = positionResult.rows[0];
-    if (!position) {
-      throw new Error("position_not_open");
-    }
-
-    const side = String(position.side || requestedSide).toUpperCase();
 
     const positionShares = toNumber(position.shares);
     if (positionShares <= 0) {
