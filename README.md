@@ -62,11 +62,13 @@ MARKET_LIQUIDITY=10000
 MARKET_FEE_BPS=200
 PRICE_POLL_MS=1000
 PUBLIC_AV_BOT_URL=https://t.me/voit_help_bot?start=buy_fire
+PUBLIC_MINI_APP_URL=https://t.me/voit_help_bot?startapp=easymarket
 REFERRAL_BET_BONUS_FIRE=100
 ```
 
 `DATABASE_URL` must be set in the Render environment. Do not commit real database credentials.
 `BOT_BRIDGE_SECRET` protects future local Telegram bot bridge endpoints through the `x-bridge-secret` header.
+`PUBLIC_MINI_APP_URL` should point to the Telegram Mini App deep link, so referral shares open inside Telegram instead of the plain website.
 
 ## Render
 

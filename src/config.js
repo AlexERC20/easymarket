@@ -26,6 +26,11 @@ export const config = {
       || process.env.AV_BOT_URL
       || "https://t.me/voit_help_bot?start=buy_fire"
   ).trim(),
+  publicMiniAppUrl: (
+    process.env.PUBLIC_MINI_APP_URL
+      || process.env.TELEGRAM_MINI_APP_URL
+      || "https://t.me/voit_help_bot?startapp=easymarket"
+  ).trim(),
   marketIntervalSeconds: parseNumber(process.env.MARKET_INTERVAL_SECONDS, 10, 1),
   marketDurationMinutes: parseNumber(process.env.MARKET_DURATION_MINUTES, 5, 1),
   marketLiquidity: parseNumber(process.env.MARKET_LIQUIDITY, 10_000, 100),

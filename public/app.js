@@ -18,6 +18,7 @@ const state = {
   pendingSellSide: null,
   publicConfig: {
     av_bot_url: "https://t.me/voit_help_bot?start=buy_fire",
+    mini_app_url: "https://t.me/voit_help_bot?startapp=easymarket",
     referral_bonus_fire: 100,
   },
   chartRaf: null,
@@ -343,7 +344,10 @@ function getTelegramDebugInfo() {
 function getTelegramUser() {
   const tg = window.Telegram?.WebApp;
   const params = new URLSearchParams(window.location.search);
-  const refParam = params.get("ref") || params.get("startapp") || params.get("start_param");
+  const refParam = params.get("ref")
+    || params.get("startapp")
+    || params.get("start_param")
+    || params.get("tgWebAppStartParam");
   const normalizeRef = (value) => {
     const normalized = String(value || "").trim().replace(/^ref_/, "");
     return /^\d+$/.test(normalized) ? normalized : null;
@@ -820,6 +824,23 @@ $("walletBtn").addEventListener("click", () => {
   window.open(url, "_blank", "noopener,noreferrer");
 });
 
+function buildInviteUrl(inviterTelegramId) {
+  const refValue = `ref_${inviterTelegramId}`;
+  const baseUrl = state.publicConfig.mini_app_url || "https://t.me/voit_help_bot?startapp=easymarket";
+  try {
+    const url = new URL(baseUrl, window.location.origin);
+    if (/^(www\.)?t\.me$/i.test(url.hostname) || /^(www\.)?telegram\.me$/i.test(url.hostname)) {
+      url.searchParams.set("startapp", refValue);
+      return url.toString();
+    }
+
+    url.searchParams.set("ref", String(inviterTelegramId));
+    return url.toString();
+  } catch {
+    return `${window.location.origin}/?ref=${encodeURIComponent(String(inviterTelegramId))}`;
+  }
+}
+
 $("inviteBtn").addEventListener("click", async () => {
   triggerHaptic("selection");
   if (!state.user?.telegram_id) {
@@ -828,7 +849,7 @@ $("inviteBtn").addEventListener("click", async () => {
   }
 
   const bonus = Math.round(Number(state.publicConfig.referral_bonus_fire || 100));
-  const inviteUrl = `${window.location.origin}/?ref=${encodeURIComponent(state.user.telegram_id)}`;
+  const inviteUrl = buildInviteUrl(state.user.telegram_id);
   const text = `Залетай в EasyMarket. После первой ставки мне дадут ${bonus} FIRE.`;
   try {
     if (navigator.share) {

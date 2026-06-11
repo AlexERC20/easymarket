@@ -154,6 +154,7 @@ app.get("/api/public/config", (_req, res) => {
   res.status(200).json({
     ok: true,
     av_bot_url: config.publicAvBotUrl,
+    mini_app_url: config.publicMiniAppUrl,
     referral_bonus_fire: config.referralBetBonusFire,
   });
 });
