@@ -31,7 +31,13 @@ const app = express();
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: "128kb" }));
-app.use(express.static(publicDir));
+app.use(express.static(publicDir, {
+  setHeaders(res, filePath) {
+    if (/\.(html|js|css)$/i.test(filePath)) {
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+    }
+  },
+}));
 
 let marketEngineStarted = false;
 let marketEngineBusy = false;
