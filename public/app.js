@@ -52,6 +52,15 @@ const formatCents = (value) => {
 const sideLabel = (side) => (side === "YES" ? "UP" : "DOWN");
 const sideClass = (side) => (side === "YES" ? "yes" : "no");
 const actionLabel = (action) => (action === "SELL" ? "продал" : "купил");
+const marketStatusLabel = (status) => {
+  if (status === "open") {
+    return "LIVE";
+  }
+  if (status === "resolved") {
+    return "CLOSED";
+  }
+  return status || "нет рынка";
+};
 
 function triggerHaptic(type = "light") {
   const haptic = window.Telegram?.WebApp?.HapticFeedback;
@@ -110,6 +119,24 @@ function drawSmoothPath(ctx, points) {
   ctx.stroke();
 }
 
+function roundedRectPath(ctx, x, y, width, height, radius) {
+  if (typeof ctx.roundRect === "function") {
+    ctx.roundRect(x, y, width, height, radius);
+    return;
+  }
+
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+}
+
 function drawMarketChartFrame() {
   const canvas = $("marketChart");
   if (!(canvas instanceof HTMLCanvasElement) || !state.market) {
@@ -162,11 +189,12 @@ function drawMarketChartFrame() {
   state.chartYMin = state.chartYMin === null ? targetMin : state.chartYMin + (targetMin - state.chartYMin) * 0.08;
   state.chartYMax = state.chartYMax === null ? targetMax : state.chartYMax + (targetMax - state.chartYMax) * 0.08;
 
-  const left = width * 0.15;
-  const right = width * 0.95;
+  const left = width * 0.04;
+  const currentX = width * 0.70;
+  const right = width * 0.98;
   const top = height * 0.12;
   const bottom = height * 0.82;
-  const plotWidth = Math.max(1, right - left);
+  const plotWidth = Math.max(1, currentX - left);
   const plotHeight = Math.max(1, bottom - top);
   const scaleY = (price) => bottom - ((price - state.chartYMin) / Math.max(1, state.chartYMax - state.chartYMin)) * plotHeight;
   const scaleX = (at) => left + ((Math.min(windowEnd, Math.max(windowStart, at)) - windowStart) / duration) * plotWidth;
@@ -194,6 +222,20 @@ function drawMarketChartFrame() {
   ctx.lineTo(right, openY);
   ctx.stroke();
   ctx.setLineDash([]);
+
+  const targetAbove = openY < scaleY(state.smoothedPrice || currentPrice);
+  const targetLabel = `TARGET ${targetAbove ? "↑" : "↓"}`;
+  ctx.font = `${Math.max(10, width * 0.026)}px Inter, system-ui, sans-serif`;
+  const targetTextWidth = ctx.measureText(targetLabel).width + 20;
+  const targetX = Math.min(right - targetTextWidth, Math.max(left, currentX + width * 0.08));
+  const targetY = Math.max(top + 4, Math.min(bottom - 22, openY - 14));
+  ctx.fillStyle = "rgba(101, 113, 132, 0.88)";
+  ctx.beginPath();
+  roundedRectPath(ctx, targetX, targetY, targetTextWidth, 24, 10);
+  ctx.fill();
+  ctx.fillStyle = "#f3f6fb";
+  ctx.textBaseline = "middle";
+  ctx.fillText(targetLabel, targetX + 10, targetY + 12);
 
   const pathPoints = rawPoints.map((point) => ({
     x: scaleX(point.at),
@@ -233,6 +275,22 @@ function drawMarketChartFrame() {
     ctx.arc(latest.x, latest.y, 5.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
+
+    const currentLabel = `$${formatPrice(state.smoothedPrice || currentPrice)}`;
+    ctx.font = `${Math.max(12, width * 0.034)}px Inter, system-ui, sans-serif`;
+    const currentTextWidth = ctx.measureText(currentLabel).width + 18;
+    const labelX = Math.min(width - currentTextWidth - 8, latest.x + 12);
+    const labelY = Math.max(top + 4, Math.min(bottom - 28, latest.y - 14));
+    ctx.fillStyle = isUp ? "rgba(25,195,125,0.16)" : "rgba(239,70,111,0.16)";
+    ctx.strokeStyle = isUp ? "rgba(25,195,125,0.52)" : "rgba(239,70,111,0.52)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    roundedRectPath(ctx, labelX, labelY, currentTextWidth, 28, 12);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = isUp ? "#19c37d" : "#ef466f";
+    ctx.textBaseline = "middle";
+    ctx.fillText(currentLabel, labelX + 9, labelY + 14);
   }
 
   if (Math.abs((state.smoothedPrice || 0) - currentPrice) > 0.04) {
@@ -259,6 +317,9 @@ function showToast(message) {
 
 function setConnection(status, type = "") {
   const element = $("connectionStatus");
+  if (!element) {
+    return;
+  }
   element.textContent = status;
   element.classList.remove("online", "error");
   if (type) {
@@ -550,7 +611,9 @@ function renderMarket() {
   const volumeTotal = Math.max(1, yesVolume + noVolume);
   const yesDepth = Math.max(6, Math.min(94, (yesVolume / volumeTotal) * 100));
 
-  $("marketStatus").textContent = market?.status || "нет рынка";
+  const marketStatus = $("marketStatus");
+  marketStatus.textContent = marketStatusLabel(market?.status);
+  marketStatus.classList.toggle("live", market?.status === "open");
   $("marketQuestion").textContent = hasMarket ? "BTC закроется выше цены открытия?" : "Рынок пока не создан.";
   animateText($("openPrice"), openPrice, (value) => `$${formatPrice(value)}`);
   animateText($("currentPrice"), currentPrice, (value) => `$${formatPrice(value)}`);
@@ -842,11 +905,7 @@ if (refreshButton) {
 $("walletBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   const url = state.publicConfig.av_bot_url || "https://t.me/voit_help_bot?start=buy_fire";
-  if (window.Telegram?.WebApp?.openTelegramLink && /^https:\/\/t\.me\//i.test(url)) {
-    window.Telegram.WebApp.openTelegramLink(url);
-    return;
-  }
-  window.open(url, "_blank", "noopener,noreferrer");
+  openBotTopup(url);
 });
 
 function buildInviteUrl(inviterTelegramId) {
@@ -864,6 +923,23 @@ function buildInviteUrl(inviterTelegramId) {
   } catch {
     return `${window.location.origin}/?ref=${encodeURIComponent(String(inviterTelegramId))}`;
   }
+}
+
+function openBotTopup(url) {
+  const tg = window.Telegram?.WebApp;
+  if (tg?.openTelegramLink && /^https:\/\/t\.me\//i.test(url)) {
+    tg.openTelegramLink(url);
+    window.setTimeout(() => {
+      try {
+        tg.close?.();
+      } catch {
+        // Closing the Mini App is a convenience only.
+      }
+    }, 350);
+    return;
+  }
+
+  window.location.href = url;
 }
 
 $("inviteBtn").addEventListener("click", async () => {
