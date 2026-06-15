@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260612-2" />
+    <link rel="stylesheet" href="/styles.css?v=20260615-1" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -39,25 +39,37 @@
       </section>
 
       <section class="market-card card">
-        <div class="market-meta">
-          <span id="marketStatus" class="status-pill">...</span>
-          <span class="timer-pill">Закрытие через <b id="timeLeft">--:--</b></span>
+        <div class="market-hero">
+          <div class="coin-badge">₿</div>
+          <div class="market-heading">
+            <h2>BTC Up or Down 5m</h2>
+            <p id="marketWindow">--</p>
+          </div>
+          <div class="countdown">
+            <div>
+              <strong id="timeLeftMinutes">--</strong>
+              <span>MINS</span>
+            </div>
+            <div>
+              <strong id="timeLeftSeconds">--</strong>
+              <span>SECS</span>
+            </div>
+          </div>
         </div>
 
-        <h2 id="marketQuestion" class="market-title">Bitcoin закроется выше или ниже в течение 5 минут?</h2>
+        <div class="market-meta">
+          <span id="marketStatus" class="status-pill">...</span>
+          <span id="marketQuestion" class="market-title">Bitcoin закроется выше или ниже в течение 5 минут?</span>
+        </div>
 
         <div class="price-board">
           <div>
-            <p class="label">Price to beat</p>
+            <p class="label">Price To Beat</p>
             <strong id="openPrice">-</strong>
           </div>
           <div>
-            <p class="label">BTC live</p>
+            <p class="label current-label">Current Price <span id="priceMove">-</span></p>
             <strong id="currentPrice">-</strong>
-          </div>
-          <div>
-            <p class="label">Move</p>
-            <strong id="priceMove">-</strong>
           </div>
         </div>
 
@@ -68,14 +80,10 @@
 
         <div class="outcome-grid">
           <button id="yesOutcome" class="outcome-button yes active" type="button" data-side="YES">
-            <span>UP</span>
-            <strong id="yesProbability">50%</strong>
-            <small id="yesPrice">50¢</small>
+            <strong id="yesOptionText">Up 50¢</strong>
           </button>
           <button id="noOutcome" class="outcome-button no" type="button" data-side="NO">
-            <span>DOWN</span>
-            <strong id="noProbability">50%</strong>
-            <small id="noPrice">50¢</small>
+            <strong id="noOptionText">Down 50¢</strong>
           </button>
         </div>
 
@@ -94,10 +102,10 @@
       <section class="trade-card card">
         <div class="ticket-head">
           <div>
-            <p class="label">Сделка</p>
-            <h2 id="ticketTitle">Купить UP</h2>
+            <p class="label">Ставка</p>
+            <h2 id="ticketTitle">Выбери сумму</h2>
           </div>
-          <span id="ticketPrice" class="price-chip">50¢</span>
+          <span id="ticketPrice" class="price-chip">UP 50¢</span>
         </div>
 
         <div id="amountGrid" class="amount-grid">
@@ -106,13 +114,6 @@
           <button class="amount-button" data-amount="500" type="button"></button>
           <button class="amount-button" data-amount="1000" type="button"></button>
         </div>
-
-        <div class="ticket-preview">
-          <span id="sharesPreview">0 shares</span>
-          <strong id="profitPreview">+0 FIRE</strong>
-        </div>
-
-        <button id="placeBetBtn" class="place-button yes" type="button">Купить UP на 5 FIRE</button>
       </section>
 
       <section class="card">
@@ -148,6 +149,6 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
-    <script src="/app.js?v=20260612-2" type="module"></script>
+    <script src="/app.js?v=20260615-1" type="module"></script>
   </body>
 </html>

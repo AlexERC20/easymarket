@@ -80,6 +80,7 @@ p {
 
 .topbar,
 .wallet-strip,
+.market-hero,
 .market-meta,
 .price-board,
 .outcome-grid,
@@ -262,34 +263,140 @@ h2 {
   overflow: hidden;
 }
 
+.market-hero {
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.coin-badge {
+  display: grid;
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffb23f, #ff9418);
+  box-shadow: 0 14px 30px rgba(255, 148, 24, 0.22);
+  color: #fff;
+  font-size: 36px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.market-heading {
+  min-width: 0;
+  flex: 1;
+}
+
+.market-heading h2 {
+  font-size: clamp(25px, 7vw, 38px);
+  line-height: 1.02;
+}
+
+.market-heading p {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: clamp(17px, 4.8vw, 25px);
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.countdown {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 15px;
+  text-align: center;
+}
+
+.countdown strong,
+.countdown span {
+  display: block;
+}
+
+.countdown strong {
+  color: var(--no);
+  font-size: clamp(34px, 10vw, 52px);
+  font-weight: 950;
+  line-height: 0.96;
+  font-variant-numeric: tabular-nums;
+}
+
+.countdown span {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+}
+
+.market-meta {
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
 .market-title {
-  margin: 11px 0 12px;
-  font-size: 19px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
   line-height: 1.18;
 }
 
 .price-board {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  margin: 12px 0;
+  grid-template-columns: 1fr 1.22fr;
+  gap: 0;
+  margin: 18px 0 12px;
 }
 
 .price-board div {
   min-width: 0;
-  border: 1px solid var(--line-soft);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  padding: 9px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 14px 0 0;
+}
+
+.price-board div + div {
+  border-left: 2px solid rgba(255, 255, 255, 0.08);
+  padding: 0 0 0 18px;
 }
 
 .price-board strong {
   display: block;
-  margin-top: 5px;
+  margin-top: 7px;
   overflow: hidden;
-  font-size: 13px;
+  color: #98a2b5;
+  font-size: clamp(30px, 8vw, 48px);
   font-weight: 950;
+  line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.price-board div:nth-child(2) strong,
+.current-label {
+  color: var(--fire);
+}
+
+.current-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.current-label span {
+  color: var(--yes);
+  font-size: clamp(14px, 4vw, 20px);
+  font-weight: 950;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.current-label span.negative {
+  color: var(--no);
 }
 
 .positive {
@@ -366,56 +473,47 @@ h2 {
 
 .outcome-grid {
   align-items: stretch;
+  gap: 12px;
+  margin-top: 14px;
 }
 
 .outcome-button {
   flex: 1;
-  min-height: 90px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.045);
+  min-height: 74px;
+  border: 0;
+  border-radius: 14px;
+  background: #202832;
   color: var(--text);
   padding: 12px;
-  text-align: left;
-  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+  text-align: center;
+  transition: background 160ms ease, filter 160ms ease, transform 160ms ease;
 }
 
 .outcome-button:active,
 .amount-button:active,
-.place-button:active,
 .icon-button:active {
   transform: translateY(1px) scale(0.99);
 }
 
-.outcome-button span {
-  display: block;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 950;
-}
-
 .outcome-button strong {
   display: block;
-  margin: 5px 0 2px;
-  font-size: 34px;
+  margin: 0;
+  color: rgba(243, 246, 251, 0.72);
+  font-size: clamp(24px, 7vw, 36px);
   font-weight: 950;
   line-height: 1;
 }
 
-.outcome-button small {
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 900;
-}
-
 .outcome-button.yes.active {
-  border-color: rgba(25, 195, 125, 0.78);
-  background: linear-gradient(180deg, rgba(25, 195, 125, 0.2), rgba(25, 195, 125, 0.08));
+  background: #329b5f;
 }
 
 .outcome-button.no.active {
-  border-color: rgba(239, 70, 111, 0.78);
-  background: linear-gradient(180deg, rgba(239, 70, 111, 0.2), rgba(239, 70, 111, 0.08));
+  background: #a93150;
+}
+
+.outcome-button.active strong {
+  color: #f3f6fb;
 }
 
 .market-depth {
@@ -447,8 +545,8 @@ h2 {
 }
 
 .trade-card {
-  position: sticky;
-  bottom: max(10px, env(safe-area-inset-bottom));
+  position: relative;
+  bottom: auto;
   z-index: 5;
   border-color: rgba(255, 255, 255, 0.12);
 }
@@ -459,18 +557,18 @@ h2 {
 
 .amount-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-top: 12px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 14px;
 }
 
 .amount-button {
-  min-height: 58px;
+  min-height: 102px;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: 18px;
+  background: #10151f;
   color: var(--text);
-  padding: 8px 5px;
+  padding: 14px 10px;
   transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
 }
 
@@ -480,62 +578,25 @@ h2 {
 }
 
 .amount-button strong {
-  font-size: 14px;
+  font-size: clamp(30px, 9vw, 42px);
   font-weight: 950;
+  line-height: 1;
 }
 
 .amount-button small {
-  margin-top: 3px;
+  margin-top: 10px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: clamp(16px, 4.8vw, 22px);
   font-weight: 900;
 }
 
-.amount-button.active {
-  border-color: rgba(94, 161, 255, 0.75);
-  background: rgba(94, 161, 255, 0.14);
-}
-
-.ticket-preview {
-  margin: 12px 0;
-  border: 1px solid var(--line-soft);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  padding: 10px;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.ticket-preview strong {
+.amount-button small b {
   color: var(--yes);
-  font-size: 16px;
-  font-weight: 950;
 }
 
-.place-button {
-  width: 100%;
-  min-height: 54px;
-  border: 0;
-  border-radius: 15px;
-  color: #04110a;
-  font-weight: 950;
-  transition: filter 160ms ease, transform 160ms ease;
-}
-
-.place-button.yes {
-  background: linear-gradient(180deg, #3be99a, var(--yes));
-}
-
-.place-button.no {
-  background: linear-gradient(180deg, #ff6b8f, var(--no));
-  color: #21060d;
-}
-
-.place-button:disabled {
-  cursor: not-allowed;
-  filter: grayscale(1);
-  opacity: 0.55;
+.amount-button.active {
+  border-color: rgba(25, 195, 125, 0.42);
+  background: #121a25;
 }
 
 .position-list,

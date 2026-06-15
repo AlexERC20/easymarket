@@ -39,7 +39,6 @@ const formatFireDecimal = (value) => Number(value || 0).toLocaleString("ru-RU", 
 const formatPrice = (value) => Number(value || 0).toLocaleString("ru-RU", {
   maximumFractionDigits: 2,
 });
-const formatPercent = (value) => `${Math.round(Number(value || 0))}%`;
 const formatCents = (value) => {
   const cents = Number(value || 0) * 100;
   if (cents > 0 && cents < 1) {
@@ -326,6 +325,29 @@ function setConnection(status, type = "") {
   if (type) {
     element.classList.add(type);
   }
+}
+
+function formatMarketWindow(market) {
+  if (!market?.start_time || !market?.end_time) {
+    return "--";
+  }
+
+  const start = new Date(market.start_time);
+  const end = new Date(market.end_time);
+  const day = start.toLocaleDateString("ru-RU", {
+    day: "numeric",
+    month: "short",
+  });
+  const startTime = start.toLocaleTimeString("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const endTime = end.toLocaleTimeString("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  return `${day}, ${startTime}-${endTime}`;
 }
 
 function animateText(element, nextValue, formatter, duration = 360) {
@@ -621,7 +643,7 @@ function renderMarket() {
   const hasMarket = Boolean(market);
   const currentPrice = Number(market?.current_price || market?.open_price || 0);
   const openPrice = Number(market?.open_price || 0);
-  const movePct = openPrice > 0 ? ((currentPrice - openPrice) / openPrice) * 100 : 0;
+  const priceMove = currentPrice - openPrice;
   const yes = Number(market?.yes_price || 0.5);
   const no = Number(market?.no_price || 0.5);
   const yesVolume = Number(market?.yes_volume || 0);
@@ -635,24 +657,23 @@ function renderMarket() {
   $("marketQuestion").textContent = hasMarket
     ? "Bitcoin закроется выше или ниже в течение 5 минут?"
     : "Рынок пока не создан.";
+  $("marketWindow").textContent = hasMarket ? formatMarketWindow(market) : "--";
   animateText($("openPrice"), openPrice, (value) => `$${formatPrice(value)}`);
   animateText($("currentPrice"), currentPrice, (value) => `$${formatPrice(value)}`);
 
   const moveElement = $("priceMove");
-  moveElement.classList.toggle("positive", movePct >= 0);
-  moveElement.classList.toggle("negative", movePct < 0);
-  animateText(moveElement, movePct, (value) => `${value >= 0 ? "+" : ""}${value.toFixed(3)}%`);
+  moveElement.classList.toggle("positive", priceMove >= 0);
+  moveElement.classList.toggle("negative", priceMove < 0);
+  animateText(moveElement, priceMove, (value) => `${value >= 0 ? "▲" : "▼"} $${formatPrice(Math.abs(value))}`);
 
-  animateText($("yesProbability"), yes * 100, formatPercent);
-  animateText($("noProbability"), no * 100, formatPercent);
-  $("yesPrice").textContent = formatCents(yes);
-  $("noPrice").textContent = formatCents(no);
+  $("yesOptionText").textContent = `Up ${formatCents(yes)}`;
+  $("noOptionText").textContent = `Down ${formatCents(no)}`;
   animateText($("yesVolume"), yesVolume, formatFire);
   animateText($("noVolume"), noVolume, formatFire);
   $("depthYesBar").parentElement.style.setProperty("--yes-depth", `${yesDepth}%`);
 
   updateTimer();
-  document.querySelectorAll(".outcome-button, .amount-button, #placeBetBtn").forEach((button) => {
+  document.querySelectorAll(".outcome-button, .amount-button").forEach((button) => {
     button.disabled = !hasMarket || !state.user || state.pendingBuy;
   });
 }
@@ -660,7 +681,8 @@ function renderMarket() {
 function updateTimer() {
   const market = state.market;
   if (!market?.end_time) {
-    $("timeLeft").textContent = "--:--";
+    $("timeLeftMinutes").textContent = "--";
+    $("timeLeftSeconds").textContent = "--";
     return;
   }
 
@@ -668,7 +690,8 @@ function updateTimer() {
   const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
   const minutesPart = String(Math.floor(seconds / 60)).padStart(2, "0");
   const secondsPart = String(seconds % 60).padStart(2, "0");
-  $("timeLeft").textContent = `${minutesPart}:${secondsPart}`;
+  $("timeLeftMinutes").textContent = minutesPart;
+  $("timeLeftSeconds").textContent = secondsPart;
 }
 
 function renderMe() {
@@ -736,8 +759,6 @@ function renderMe() {
 function renderTradeTicket() {
   const side = state.selectedSide;
   const price = getSelectedPrice();
-  const preview = getPreview();
-  const isYes = side === "YES";
 
   document.querySelectorAll(".outcome-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.side === side);
@@ -746,24 +767,17 @@ function renderTradeTicket() {
     const amount = Number(button.dataset.amount);
     const amountPreview = getPreview(amount, side);
     button.classList.toggle("active", amount === state.selectedAmount);
+    button.disabled = !state.market || !state.user || state.pendingBuy;
     button.innerHTML = `
-      <strong>${amount} FIRE</strong>
-      <small>+${formatFireDecimal(amountPreview.profit)}</small>
+      <strong>${formatFire(amount)}</strong>
+      <small>win <b>${formatFireDecimal(amountPreview.shares)}</b></small>
     `;
   });
 
-  $("ticketTitle").textContent = `Купить ${sideLabel(side)}`;
-  $("ticketPrice").textContent = formatCents(price);
-  $("sharesPreview").textContent = `${preview.shares.toFixed(2)} shares`;
-  $("profitPreview").textContent = `${preview.profit >= 0 ? "+" : ""}${formatFireDecimal(preview.profit)} FIRE`;
-  $("profitPreview").classList.toggle("positive", preview.profit >= 0);
-  $("profitPreview").classList.toggle("negative", preview.profit < 0);
-
-  const placeButton = $("placeBetBtn");
-  placeButton.textContent = `Купить ${sideLabel(side)} на ${state.selectedAmount} FIRE`;
-  placeButton.classList.toggle("yes", isYes);
-  placeButton.classList.toggle("no", !isYes);
-  placeButton.disabled = !state.market || !state.user || state.pendingBuy;
+  $("ticketTitle").textContent = state.pendingBuy
+    ? "Ставка отправляется..."
+    : `Нажми сумму для ${sideLabel(side)}`;
+  $("ticketPrice").textContent = `${sideLabel(side)} ${formatCents(price)}`;
 }
 
 function renderActivity() {
@@ -824,13 +838,14 @@ function showTradeBubble(trade) {
   setTimeout(() => bubble.remove(), 2600);
 }
 
-async function buy() {
+async function buy(amount = state.selectedAmount) {
   if (!state.user || !state.market || state.pendingBuy) {
     triggerHaptic("warning");
     showToast("Сначала нужен пользователь и активный рынок.");
     return;
   }
 
+  state.selectedAmount = Number(amount || state.selectedAmount);
   triggerHaptic("medium");
   state.pendingBuy = true;
   renderTradeTicket();
@@ -930,15 +945,18 @@ document.querySelectorAll(".outcome-button").forEach((button) => {
 
 document.querySelectorAll(".amount-button").forEach((button) => {
   button.addEventListener("click", () => {
-    triggerHaptic("selection");
     state.selectedAmount = Number(button.dataset.amount);
     renderTradeTicket();
+    void buy(state.selectedAmount);
   });
 });
 
-$("placeBetBtn").addEventListener("click", () => {
-  void buy();
-});
+const placeBetButton = $("placeBetBtn");
+if (placeBetButton) {
+  placeBetButton.addEventListener("click", () => {
+    void buy();
+  });
+}
 
 const refreshButton = $("refreshBtn");
 if (refreshButton) {
