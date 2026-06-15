@@ -654,9 +654,10 @@ function renderMarket() {
   const marketStatus = $("marketStatus");
   marketStatus.textContent = marketStatusLabel(market?.status);
   marketStatus.classList.toggle("live", market?.status === "open");
-  $("marketQuestion").textContent = hasMarket
-    ? "Bitcoin закроется выше или ниже в течение 5 минут?"
-    : "Рынок пока не создан.";
+  const marketQuestion = $("marketQuestion");
+  if (marketQuestion) {
+    marketQuestion.textContent = hasMarket ? "" : "Рынок пока не создан.";
+  }
   $("marketWindow").textContent = hasMarket ? formatMarketWindow(market) : "--";
   animateText($("openPrice"), openPrice, (value) => `$${formatPrice(value)}`);
   animateText($("currentPrice"), currentPrice, (value) => `$${formatPrice(value)}`);
