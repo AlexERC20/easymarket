@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260615-7" />
+    <link rel="stylesheet" href="/styles.css?v=20260615-8" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -17,17 +17,48 @@
         <div class="top-actions">
           <button id="walletBtn" class="icon-button fire-action" type="button" aria-label="Пополнить огни">
             <span class="icon-emoji">🔥</span>
-            <span class="icon-plus">+</span>
           </button>
-          <button id="inviteBtn" class="icon-button accent" type="button" aria-label="Позвать друга">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
-              <path d="M12 15V4" />
-              <path d="m7 9 5-5 5 5" />
-            </svg>
+          <button id="tasksBtn" class="icon-button accent plus-action" type="button" aria-label="Открыть задания">
+            +
           </button>
         </div>
       </header>
+
+      <section id="tasksSheet" class="task-sheet hidden" aria-label="Задания">
+        <div class="task-panel">
+          <div class="task-head">
+            <div>
+              <p class="eyebrow">Bonus tasks</p>
+              <h2>Задания за FIRE</h2>
+            </div>
+            <button id="tasksCloseBtn" class="icon-button" type="button" aria-label="Закрыть задания">×</button>
+          </div>
+          <div class="task-list">
+            <div class="task-row">
+              <div>
+                <strong>Подписаться на канал AV</strong>
+                <small>+<span id="channelTaskReward">500</span> FIRE после проверки ботом</small>
+              </div>
+              <button id="taskChannelBtn" class="task-button" type="button">Открыть</button>
+            </div>
+            <div class="task-row">
+              <div>
+                <strong>Вступить в наш чат</strong>
+                <small>+<span id="chatTaskReward">500</span> FIRE после проверки ботом</small>
+              </div>
+              <button id="taskChatBtn" class="task-button" type="button">Открыть</button>
+            </div>
+            <div class="task-row">
+              <div>
+                <strong>Рассказать друзьям</strong>
+                <small>+<span id="shareTaskReward">100</span> FIRE за share, +<span id="refTaskReward">500</span> FIRE после первой ставки друга</small>
+              </div>
+              <button id="taskShareBtn" class="task-button gold" type="button">Share</button>
+            </div>
+          </div>
+          <p class="task-limit">Дневной лимит бонусов: <span id="taskDailyCap">10 000</span> FIRE.</p>
+        </div>
+      </section>
 
       <section id="authCard" class="card hidden">
         <h2>Нужен пользователь</h2>
@@ -144,6 +175,6 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
-    <script src="/app.js?v=20260615-7" type="module"></script>
+    <script src="/app.js?v=20260615-8" type="module"></script>
   </body>
 </html>

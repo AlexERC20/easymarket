@@ -7,6 +7,8 @@ import { getPool, getSafeDatabaseErrorMessage, query, runMigrations } from "./db
 import {
   addFireToUser,
   buyOutcome,
+  claimShareTask,
+  completeVerifiedTask,
   createBtc5mMarket,
   ensureActiveMarket,
   getActiveMarket,
@@ -59,6 +61,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "position_not_open",
     "invalid_position_id",
     "invalid_sell_shares",
+    "invalid_task",
     "insufficient_shares",
     "invalid_market_price",
     "sell_failed",
@@ -171,6 +174,11 @@ app.get("/api/public/config", (_req, res) => {
     av_bot_url: config.publicAvBotUrl,
     mini_app_url: config.publicMiniAppUrl,
     referral_bonus_fire: config.referralBetBonusFire,
+    task_share_fire: config.taskShareFire,
+    task_subscribe_fire: config.taskSubscribeFire,
+    task_daily_cap_fire: config.taskDailyCapFire,
+    av_channel_url: config.publicAvChannelUrl,
+    av_chat_url: config.publicAvChatUrl,
   });
 });
 
@@ -335,6 +343,19 @@ app.get("/api/markets/recent", async (req, res) => {
   }
 });
 
+app.post("/api/tasks/share", async (req, res) => {
+  try {
+    const result = await claimShareTask({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
 app.post("/api/dev/fire/add", requireDevTools, async (req, res) => {
   try {
     const result = await addFireToUser({
@@ -449,6 +470,22 @@ app.get("/api/bridge/fire/ledger", requireBridgeSecret, async (req, res) => {
       events,
       last_id: events.length > 0 ? events[events.length - 1].id : Number(req.query.after_id ?? req.query.afterId ?? 0) || 0,
     });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/tasks/complete", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await completeVerifiedTask({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      task_key: req.body?.task_key ?? req.body?.taskKey,
+      amount: req.body?.amount,
+      source: "bridge_task",
+    });
+    res.status(200).json(result);
   } catch (error) {
     sendApiError(res, error);
   }

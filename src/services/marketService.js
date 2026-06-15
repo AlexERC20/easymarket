@@ -204,6 +204,71 @@ function calculateFee(amount) {
   return Math.round(Number(amount || 0) * (getFeeBps() / 10_000) * 100) / 100;
 }
 
+function getDayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getTaskReason(taskKey) {
+  return `task_${String(taskKey || "").replace(/[^a-z0-9_]/gi, "_").toLowerCase()}`;
+}
+
+async function getDailyBonusRemaining(client, userId) {
+  const result = await client.query(
+    `
+      SELECT COALESCE(SUM(amount), 0) AS total
+      FROM fire_ledger
+      WHERE user_id = $1
+        AND amount > 0
+        AND reason IN (
+          'task_share_friend',
+          'task_av_channel',
+          'task_av_chat',
+          'referral_bet_bonus'
+        )
+        AND created_at >= date_trunc('day', now())
+    `,
+    [userId],
+  );
+  const used = Math.max(0, toNumber(result.rows[0]?.total));
+  return Math.max(0, Math.round((config.taskDailyCapFire - used) * 100) / 100);
+}
+
+async function awardBonusWithDailyCap(client, userId, amount, reason, source) {
+  const requestedAmount = Math.max(0, Math.round(Number(amount || 0) * 100) / 100);
+  const remaining = await getDailyBonusRemaining(client, userId);
+  const awarded = Math.min(requestedAmount, remaining);
+  if (awarded <= 0) {
+    return {
+      awarded: 0,
+      daily_remaining: remaining,
+      cap_reached: true,
+    };
+  }
+
+  await client.query(
+    `
+      UPDATE fire_balances
+      SET balance = balance + $2,
+          updated_at = now()
+      WHERE user_id = $1
+    `,
+    [userId, awarded],
+  );
+  await client.query(
+    `
+      INSERT INTO fire_ledger (user_id, amount, reason, source)
+      VALUES ($1, $2, $3, $4)
+    `,
+    [userId, awarded, reason, source],
+  );
+
+  return {
+    awarded,
+    daily_remaining: Math.max(0, Math.round((remaining - awarded) * 100) / 100),
+    cap_reached: awarded < requestedAmount,
+  };
+}
+
 export async function upsertUser(input) {
   const telegramId = String(input.telegram_id ?? "").trim();
   if (!telegramId) {
@@ -417,6 +482,115 @@ export async function syncFireBalance(input) {
     user,
     ...result,
   };
+}
+
+export async function claimShareTask(input) {
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+  const taskKey = "share_friend";
+  const dayKey = getDayKey();
+  const amount = Math.round(Number(config.taskShareFire || 0));
+
+  return withTransaction(async (client) => {
+    const claimResult = await client.query(
+      `
+        INSERT INTO fire_task_claims (user_id, task_key, amount, day_key, source)
+        VALUES ($1, $2, $3, $4, 'mini_app')
+        ON CONFLICT DO NOTHING
+        RETURNING *
+      `,
+      [user.id, taskKey, amount, dayKey],
+    );
+
+    let bonus = {
+      awarded: 0,
+      daily_remaining: await getDailyBonusRemaining(client, user.id),
+      cap_reached: false,
+    };
+    if (claimResult.rows[0] && amount > 0) {
+      bonus = await awardBonusWithDailyCap(
+        client,
+        user.id,
+        amount,
+        getTaskReason(taskKey),
+        `task:${taskKey}:${dayKey}`,
+      );
+    }
+
+    const balanceResult = await client.query(
+      "SELECT balance FROM fire_balances WHERE user_id = $1",
+      [user.id],
+    );
+
+    return {
+      ok: true,
+      user,
+      task_key: taskKey,
+      already_claimed: !claimResult.rows[0],
+      ...bonus,
+      balance: toNumber(balanceResult.rows[0]?.balance),
+    };
+  });
+}
+
+export async function completeVerifiedTask(input) {
+  const taskKey = String(input.task_key || input.taskKey || "").trim();
+  const allowedTasks = new Set(["av_channel", "av_chat"]);
+  if (!allowedTasks.has(taskKey)) {
+    throw new Error("invalid_task");
+  }
+
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+  const amount = Math.round(Number(input.amount ?? config.taskSubscribeFire ?? 0));
+  const dayKey = "once";
+
+  return withTransaction(async (client) => {
+    const claimResult = await client.query(
+      `
+        INSERT INTO fire_task_claims (user_id, task_key, amount, day_key, source)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT DO NOTHING
+        RETURNING *
+      `,
+      [user.id, taskKey, amount, dayKey, input.source || "bridge_task"],
+    );
+
+    let bonus = {
+      awarded: 0,
+      daily_remaining: await getDailyBonusRemaining(client, user.id),
+      cap_reached: false,
+    };
+    if (claimResult.rows[0] && amount > 0) {
+      bonus = await awardBonusWithDailyCap(
+        client,
+        user.id,
+        amount,
+        getTaskReason(taskKey),
+        `task:${taskKey}`,
+      );
+    }
+
+    const balanceResult = await client.query(
+      "SELECT balance FROM fire_balances WHERE user_id = $1",
+      [user.id],
+    );
+
+    return {
+      ok: true,
+      user,
+      task_key: taskKey,
+      already_claimed: !claimResult.rows[0],
+      ...bonus,
+      balance: toNumber(balanceResult.rows[0]?.balance),
+    };
+  });
 }
 
 export async function getFireLedgerEvents(input = {}) {
@@ -643,27 +817,20 @@ async function awardReferralBetBonus(client, buyerUser, marketId) {
     return null;
   }
 
-  await client.query(
-    `
-      UPDATE fire_balances
-      SET balance = balance + $2,
-          updated_at = now()
-      WHERE user_id = $1
-    `,
-    [inviter.id, bonusAmount],
-  );
-  await client.query(
-    `
-      INSERT INTO fire_ledger (user_id, amount, reason, source)
-      VALUES ($1, $2, 'referral_bet_bonus', $3)
-    `,
-    [inviter.id, bonusAmount, `referral:${buyerUser.telegram_id}:market:${marketId}`],
+  const bonus = await awardBonusWithDailyCap(
+    client,
+    inviter.id,
+    bonusAmount,
+    "referral_bet_bonus",
+    `referral:${buyerUser.telegram_id}:market:${marketId}`,
   );
 
   return {
     inviter: mapUser(inviter),
     referred: mapUser(buyerUser),
-    amount: bonusAmount,
+    amount: bonus.awarded,
+    daily_remaining: bonus.daily_remaining,
+    cap_reached: bonus.cap_reached,
     day_key: dayKey,
   };
 }

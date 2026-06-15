@@ -135,6 +135,20 @@ export async function runMigrations() {
       UNIQUE(inviter_user_id, day_key)
     );
 
+    ALTER TABLE fire_referral_bonuses
+      DROP CONSTRAINT IF EXISTS fire_referral_bonuses_inviter_user_id_day_key_key;
+
+    CREATE TABLE IF NOT EXISTS fire_task_claims (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      task_key TEXT NOT NULL,
+      amount NUMERIC(20, 8) NOT NULL,
+      day_key TEXT NOT NULL,
+      source TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(user_id, task_key, day_key)
+    );
+
     CREATE TABLE IF NOT EXISTS positions (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

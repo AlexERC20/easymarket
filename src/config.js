@@ -36,7 +36,18 @@ export const config = {
   marketLiquidity: parseNumber(process.env.MARKET_LIQUIDITY, 10_000, 100),
   marketFeeBps: parseNumber(process.env.MARKET_FEE_BPS, 200, 0),
   pricePollMs: parseNumber(process.env.PRICE_POLL_MS, 1_000, 250),
-  referralBetBonusFire: parseNumber(process.env.REFERRAL_BET_BONUS_FIRE, 100, 0),
+  referralBetBonusFire: parseNumber(process.env.REFERRAL_BET_BONUS_FIRE, 500, 0),
+  taskShareFire: parseNumber(process.env.TASK_SHARE_FIRE, 100, 0),
+  taskSubscribeFire: parseNumber(process.env.TASK_SUBSCRIBE_FIRE, 500, 0),
+  taskDailyCapFire: parseNumber(process.env.TASK_DAILY_CAP_FIRE, 10_000, 0),
+  publicAvChannelUrl: (
+    process.env.PUBLIC_AV_CHANNEL_URL
+      || "https://t.me/erc20coin"
+  ).trim(),
+  publicAvChatUrl: (
+    process.env.PUBLIC_AV_CHAT_URL
+      || "https://t.me/voit_help_bot?start=check_chat_task"
+  ).trim(),
 };
 
 export function clamp(value, min, max) {

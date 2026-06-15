@@ -23,7 +23,12 @@ const state = {
   publicConfig: {
     av_bot_url: "https://t.me/voit_help_bot?start=buy_fire",
     mini_app_url: "https://t.me/voit_help_bot?startapp=easymarket",
-    referral_bonus_fire: 100,
+    referral_bonus_fire: 500,
+    task_share_fire: 100,
+    task_subscribe_fire: 500,
+    task_daily_cap_fire: 10000,
+    av_channel_url: "https://t.me/erc20coin",
+    av_chat_url: "https://t.me/voit_help_bot?start=check_chat_task",
   },
   chartRaf: null,
   smoothedPrice: null,
@@ -499,9 +504,22 @@ async function loadPublicConfig() {
       ...state.publicConfig,
       ...data,
     };
+    renderTaskRewards();
   } catch {
     // The UI can still work with local fallback config.
   }
+}
+
+function renderTaskRewards() {
+  const share = Math.round(Number(state.publicConfig.task_share_fire || 100));
+  const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 500));
+  const ref = Math.round(Number(state.publicConfig.referral_bonus_fire || 500));
+  const cap = Math.round(Number(state.publicConfig.task_daily_cap_fire || 10000));
+  if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
+  if ($("channelTaskReward")) $("channelTaskReward").textContent = formatFire(sub);
+  if ($("chatTaskReward")) $("chatTaskReward").textContent = formatFire(sub);
+  if ($("refTaskReward")) $("refTaskReward").textContent = formatFire(ref);
+  if ($("taskDailyCap")) $("taskDailyCap").textContent = formatFire(cap);
 }
 
 async function api(path, options = {}) {
@@ -766,13 +784,11 @@ function renderTradeTicket() {
   document.querySelectorAll(".amount-button").forEach((button) => {
     const amount = Number(button.dataset.amount);
     const amountPreview = getPreview(amount, side);
-    const profitClass = amountPreview.profit >= 0 ? "positive" : "negative";
-    const profitSign = amountPreview.profit >= 0 ? "+" : "";
     button.classList.toggle("active", amount === state.selectedAmount);
     button.disabled = !state.market || !state.user;
     button.innerHTML = `
       <strong>${formatFire(amount)}</strong>
-      <small>profit <b class="${profitClass}">${profitSign}${formatFireDecimal(amountPreview.profit)}</b></small>
+      <small>win <b>${formatFire(amountPreview.shares)}</b></small>
     `;
   });
 
@@ -838,6 +854,33 @@ function showTradeBubble(trade) {
   setTimeout(() => bubble.remove(), 2600);
 }
 
+function upsertLocalPosition(position) {
+  if (!position?.id) return;
+  const index = state.positions.findIndex((item) => item.id === position.id);
+  if (index >= 0) {
+    state.positions[index] = {
+      ...state.positions[index],
+      ...position,
+    };
+    return;
+  }
+
+  state.positions.unshift(position);
+}
+
+function addLocalActivity(trade) {
+  if (!trade) return;
+  const enriched = {
+    ...trade,
+    telegram_id: state.user?.telegram_id,
+    username: state.user?.username,
+    first_name: state.user?.first_name,
+  };
+  state.activity = [enriched, ...state.activity].slice(0, 24);
+  state.seenActivityIds.add(enriched.id);
+  showTradeBubble(enriched);
+}
+
 async function buy(amount = state.selectedAmount) {
   if (!state.user || !state.market) {
     triggerHaptic("warning");
@@ -863,8 +906,17 @@ async function buy(amount = state.selectedAmount) {
     });
     state.balance = result.balance ?? state.balance;
     state.market = result.market ?? state.market;
+    upsertLocalPosition(result.position);
+    addLocalActivity(result.trade);
     triggerHaptic("success");
-    await Promise.all([loadMarket(), loadMe()]);
+    renderMarket();
+    renderMe();
+    renderActivity();
+    renderTradeTicket();
+    void Promise.all([
+      loadMarket().catch(() => undefined),
+      loadMe().catch(() => undefined),
+    ]);
   } catch (error) {
     triggerHaptic("error");
     showToast(error.message === "insufficient_fire" ? "Не хватает FIRE." : "Покупка не прошла.");
@@ -898,10 +950,19 @@ async function sellPosition({ side, positionId, marketId, shares }) {
     });
     state.balance = result.balance ?? state.balance;
     state.market = result.market ?? state.market;
+    upsertLocalPosition(result.position);
+    addLocalActivity(result.trade);
     triggerHaptic("success");
     const pnl = Number(result.sale?.pnl || 0);
     showToast(`Продано ${sideLabel(side)}: ${pnl >= 0 ? "+" : ""}${formatFireDecimal(pnl)} FIRE`);
-    await Promise.all([loadMarket(), loadMe()]);
+    renderMarket();
+    renderMe();
+    renderActivity();
+    renderTradeTicket();
+    void Promise.all([
+      loadMarket().catch(() => undefined),
+      loadMe().catch(() => undefined),
+    ]);
   } catch (error) {
     triggerHaptic("error");
     const messages = {
@@ -993,6 +1054,17 @@ function buildInviteUrl(inviterTelegramId) {
   }
 }
 
+function openTelegramUrl(url) {
+  const tg = window.Telegram?.WebApp;
+  if (tg?.openTelegramLink && /^https:\/\/t\.me\//i.test(url)) {
+    tg.openTelegramLink(url);
+    return true;
+  }
+
+  window.open(url, "_blank", "noopener,noreferrer");
+  return false;
+}
+
 function openBotTopup(url) {
   const tg = window.Telegram?.WebApp;
   if (tg?.openTelegramLink && /^https:\/\/t\.me\//i.test(url)) {
@@ -1010,20 +1082,54 @@ function openBotTopup(url) {
   window.location.href = url;
 }
 
-$("inviteBtn").addEventListener("click", async () => {
+async function claimShareTask() {
+  if (!state.user?.telegram_id) {
+    return;
+  }
+
+  try {
+    const result = await api("/api/tasks/share", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        username: state.user.username,
+        first_name: state.user.first_name,
+      }),
+    });
+    state.balance = result.balance ?? state.balance;
+    renderMe();
+    if (result.already_claimed) {
+      showToast("Share-бонус сегодня уже забран.");
+      return;
+    }
+    if (Number(result.awarded || 0) > 0) {
+      showToast(`+${formatFire(result.awarded)} FIRE за share.`);
+      return;
+    }
+    showToast("Дневной лимит бонусов уже достигнут.");
+  } catch {
+    showToast("Share отправлен. Бонус начислим после обновления.");
+  }
+}
+
+async function shareInvite({ awardShareTask = false } = {}) {
   triggerHaptic("selection");
   if (!state.user?.telegram_id) {
     showToast("Сначала нужен пользователь.");
     return;
   }
 
-  const bonus = Math.round(Number(state.publicConfig.referral_bonus_fire || 100));
+  const bonus = Math.round(Number(state.publicConfig.referral_bonus_fire || 500));
   const inviteUrl = buildInviteUrl(state.user.telegram_id);
   const text = `Залетай в EasyMarket. После первой ставки мне дадут ${bonus} FIRE.`;
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
-    showToast(`+${bonus} FIRE за друга после его первой ставки. 1 раз в день.`);
+    if (awardShareTask) {
+      await claimShareTask();
+    } else {
+      showToast(`+${bonus} FIRE после первой ставки друга.`);
+    }
     return;
   }
 
@@ -1034,6 +1140,9 @@ $("inviteBtn").addEventListener("click", async () => {
         text,
         url: inviteUrl,
       });
+      if (awardShareTask) {
+        await claimShareTask();
+      }
       return;
     }
   } catch {
@@ -1041,7 +1150,50 @@ $("inviteBtn").addEventListener("click", async () => {
   }
 
   window.open(shareUrl, "_blank", "noopener,noreferrer");
-  showToast(`+${bonus} FIRE за друга после его первой ставки. 1 раз в день.`);
+  if (awardShareTask) {
+    await claimShareTask();
+  } else {
+    showToast(`+${bonus} FIRE после первой ставки друга.`);
+  }
+}
+
+function setTasksSheetOpen(open) {
+  const sheet = $("tasksSheet");
+  if (!sheet) return;
+  sheet.classList.toggle("hidden", !open);
+}
+
+$("tasksBtn").addEventListener("click", () => {
+  triggerHaptic("selection");
+  renderTaskRewards();
+  setTasksSheetOpen(true);
+});
+
+$("tasksCloseBtn").addEventListener("click", () => {
+  triggerHaptic("selection");
+  setTasksSheetOpen(false);
+});
+
+$("tasksSheet").addEventListener("click", (event) => {
+  if (event.target === $("tasksSheet")) {
+    setTasksSheetOpen(false);
+  }
+});
+
+$("taskChannelBtn").addEventListener("click", () => {
+  triggerHaptic("selection");
+  openTelegramUrl(state.publicConfig.av_channel_url || "https://t.me/erc20coin");
+  showToast("После подписки AV-бот проверит канал и начислит FIRE.");
+});
+
+$("taskChatBtn").addEventListener("click", () => {
+  triggerHaptic("selection");
+  openTelegramUrl(state.publicConfig.av_chat_url || state.publicConfig.av_bot_url);
+  showToast("После вступления AV-бот проверит чат и начислит FIRE.");
+});
+
+$("taskShareBtn").addEventListener("click", () => {
+  void shareInvite({ awardShareTask: true });
 });
 
 document.addEventListener("click", (event) => {
