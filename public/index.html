@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260615-6" />
+    <link rel="stylesheet" href="/styles.css?v=20260615-7" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -42,7 +42,7 @@
         <div class="market-hero">
           <div class="coin-badge">₿</div>
           <div class="market-heading">
-            <h2>BTC Up or Down 5m</h2>
+            <h2>BTC Up or Down 5m <span id="marketStatus" class="status-pill">...</span></h2>
             <p id="marketWindow">--</p>
           </div>
           <div class="countdown">
@@ -57,13 +57,9 @@
           </div>
         </div>
 
-        <div class="market-meta">
-          <span id="marketStatus" class="status-pill">...</span>
-        </div>
-
         <div class="price-board">
           <div>
-            <p class="label">Price To Beat</p>
+            <p class="label">Target Price</p>
             <strong id="openPrice">-</strong>
           </div>
           <div>
@@ -148,6 +144,6 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
-    <script src="/app.js?v=20260615-6" type="module"></script>
+    <script src="/app.js?v=20260615-7" type="module"></script>
   </body>
 </html>

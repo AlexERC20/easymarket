@@ -908,6 +908,26 @@ export async function sellOutcome(input) {
         [user.id, requestedSide],
       );
     }
+    if (
+      !positionResult.rows[0]
+      && positionId !== null
+      && Number.isSafeInteger(requestedMarketId)
+      && requestedMarketId > 0
+      && ["YES", "NO"].includes(requestedSide)
+    ) {
+      positionResult = await client.query(
+        `
+          SELECT *
+          FROM positions
+          WHERE user_id = $1
+            AND market_id = $2
+            AND side = $3
+            AND status = 'open'
+          FOR UPDATE
+        `,
+        [user.id, requestedMarketId, requestedSide],
+      );
+    }
     const position = positionResult.rows[0];
     if (!position) {
       throw new Error("position_not_open");
@@ -980,6 +1000,15 @@ export async function sellOutcome(input) {
         VALUES ($1, $2, $3, $4)
       `,
       [user.id, proceeds, side === "YES" ? "sell_yes" : "sell_no", `market:${marketId}`],
+    );
+
+    const tradeResult = await client.query(
+      `
+        INSERT INTO trades (user_id, market_id, action, side, amount, fee, price, shares)
+        VALUES ($1, $2, 'SELL', $3, $4, $5, $6, $7)
+        RETURNING *
+      `,
+      [user.id, marketId, side, proceeds, fee, price, sharesToSell],
     );
 
     const positionUpdateResult = await client.query(
@@ -1055,18 +1084,7 @@ export async function sellOutcome(input) {
       ok: true,
       balance: toNumber(finalBalanceResult.rows[0]?.balance),
       position: mapPosition(positionUpdateResult.rows[0]),
-      trade: {
-        id: 0,
-        user_id: user.id,
-        market_id: marketId,
-        action: "SELL",
-        side,
-        amount: proceeds,
-        fee,
-        price,
-        shares: sharesToSell,
-        created_at: new Date().toISOString(),
-      },
+      trade: mapTrade(tradeResult.rows[0]),
       market: mapMarket({
         ...market,
         yes_price: nextYesPrice,

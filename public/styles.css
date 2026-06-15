@@ -260,6 +260,15 @@ h2 {
 
 .market-card {
   overflow: hidden;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(16, 20, 29, 0.98) 0%,
+      rgba(11, 17, 27, 0.98) 28%,
+      var(--bg) 48%,
+      var(--bg) 73%,
+      rgba(13, 18, 28, 0.98) 100%
+    );
 }
 
 .market-hero {
@@ -289,8 +298,18 @@ h2 {
 }
 
 .market-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
   font-size: clamp(20px, 5.6vw, 30px);
   line-height: 1.02;
+}
+
+.market-heading .status-pill {
+  padding: 4px 7px;
+  font-size: 9px;
+  line-height: 1;
 }
 
 .market-heading p {
@@ -587,6 +606,10 @@ h2 {
 
 .amount-button small b {
   color: var(--yes);
+}
+
+.amount-button small b.negative {
+  color: var(--no);
 }
 
 .amount-button.active {

@@ -2,7 +2,7 @@ const FEE_RATE = 0.02;
 const AMOUNTS = [50, 100, 500, 1000];
 const MIN_OUTCOME_PRICE = 0.001;
 const CHART_WINDOW_MS = 10_000;
-const CHART_RENDER_INTERVAL_MS = 333;
+const CHART_RENDER_INTERVAL_MS = 66;
 
 const state = {
   user: null,
@@ -152,6 +152,7 @@ function drawMarketChartFrame() {
   }
 
   const { width, height } = resizeCanvas(canvas);
+  const appBg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#080d16";
   const openPrice = Number(state.market.open_price || 0);
   const currentPrice = Number(state.market.current_price || openPrice || 0);
   if (!state.smoothedPrice || Math.abs(state.smoothedPrice - currentPrice) > Math.max(250, currentPrice * 0.015)) {
@@ -201,7 +202,7 @@ function drawMarketChartFrame() {
   const scaleX = (at) => left + ((Math.min(windowEnd, Math.max(windowStart, at)) - windowStart) / duration) * plotWidth;
 
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#080d16";
+  ctx.fillStyle = appBg;
   ctx.fillRect(0, 0, width, height);
 
   ctx.strokeStyle = "rgba(255,255,255,0.055)";
@@ -282,16 +283,12 @@ function drawMarketChartFrame() {
     const currentTextWidth = ctx.measureText(currentLabel).width + 18;
     const labelX = Math.min(width - currentTextWidth - 8, latest.x + 12);
     const labelY = Math.max(top + 4, Math.min(bottom - 28, latest.y - 14));
-    ctx.fillStyle = isUp ? "rgba(25,195,125,0.16)" : "rgba(239,70,111,0.16)";
-    ctx.strokeStyle = isUp ? "rgba(25,195,125,0.52)" : "rgba(239,70,111,0.52)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    roundedRectPath(ctx, labelX, labelY, currentTextWidth, 28, 12);
-    ctx.fill();
-    ctx.stroke();
     ctx.fillStyle = isUp ? "#19c37d" : "#ef466f";
+    ctx.shadowColor = "rgba(0,0,0,0.42)";
+    ctx.shadowBlur = 9;
     ctx.textBaseline = "middle";
     ctx.fillText(currentLabel, labelX + 9, labelY + 14);
+    ctx.shadowBlur = 0;
   }
 
   if (Math.abs((state.smoothedPrice || 0) - currentPrice) > 0.04) {
@@ -676,7 +673,7 @@ function renderMarket() {
 
   updateTimer();
   document.querySelectorAll(".outcome-button, .amount-button").forEach((button) => {
-    button.disabled = !hasMarket || !state.user || state.pendingBuy;
+    button.disabled = !hasMarket || !state.user;
   });
 }
 
@@ -745,6 +742,7 @@ function renderMe() {
             data-side="${position.side}"
             data-position-id="${position.id}"
             data-market-id="${position.market_id}"
+            data-shares="${payout}"
             data-sell-locked="${canSell ? "0" : "1"}"
             data-lock-message="${sellLockMessage}"
             type="button"
@@ -768,17 +766,17 @@ function renderTradeTicket() {
   document.querySelectorAll(".amount-button").forEach((button) => {
     const amount = Number(button.dataset.amount);
     const amountPreview = getPreview(amount, side);
+    const profitClass = amountPreview.profit >= 0 ? "positive" : "negative";
+    const profitSign = amountPreview.profit >= 0 ? "+" : "";
     button.classList.toggle("active", amount === state.selectedAmount);
-    button.disabled = !state.market || !state.user || state.pendingBuy;
+    button.disabled = !state.market || !state.user;
     button.innerHTML = `
       <strong>${formatFire(amount)}</strong>
-      <small>win <b>${formatFireDecimal(amountPreview.shares)}</b></small>
+      <small>profit <b class="${profitClass}">${profitSign}${formatFireDecimal(amountPreview.profit)}</b></small>
     `;
   });
 
-  $("ticketTitle").textContent = state.pendingBuy
-    ? "Ставка отправляется..."
-    : `Нажми сумму для ${sideLabel(side)}`;
+  $("ticketTitle").textContent = `Нажми сумму для ${sideLabel(side)}`;
   $("ticketPrice").textContent = `${sideLabel(side)} ${formatCents(price)}`;
 }
 
@@ -841,23 +839,26 @@ function showTradeBubble(trade) {
 }
 
 async function buy(amount = state.selectedAmount) {
-  if (!state.user || !state.market || state.pendingBuy) {
+  if (!state.user || !state.market) {
     triggerHaptic("warning");
     showToast("Сначала нужен пользователь и активный рынок.");
     return;
   }
 
-  state.selectedAmount = Number(amount || state.selectedAmount);
+  const marketId = state.market.id;
+  const side = state.selectedSide;
+  const buyAmount = Number(amount || state.selectedAmount);
+  state.selectedAmount = buyAmount;
   triggerHaptic("medium");
   state.pendingBuy = true;
   renderTradeTicket();
   try {
-    const result = await api(`/api/market/${state.market.id}/buy`, {
+    const result = await api(`/api/market/${marketId}/buy`, {
       method: "POST",
       body: JSON.stringify({
         telegram_id: state.user.telegram_id,
-        side: state.selectedSide,
-        amount: state.selectedAmount,
+        side,
+        amount: buyAmount,
       }),
     });
     state.balance = result.balance ?? state.balance;
@@ -874,7 +875,7 @@ async function buy(amount = state.selectedAmount) {
   }
 }
 
-async function sellPosition({ side, positionId, marketId }) {
+async function sellPosition({ side, positionId, marketId, shares }) {
   if (!state.user || !marketId || !positionId || state.pendingSellPositionId) {
     triggerHaptic("warning");
     showToast("Нет активной позиции для продажи.");
@@ -892,6 +893,7 @@ async function sellPosition({ side, positionId, marketId }) {
         telegram_id: state.user.telegram_id,
         position_id: positionId,
         side,
+        shares,
       }),
     });
     state.balance = result.balance ?? state.balance;
@@ -1063,6 +1065,7 @@ document.addEventListener("click", (event) => {
     side: button.dataset.side,
     positionId: Number(button.dataset.positionId),
     marketId: Number(button.dataset.marketId),
+    shares: Number(button.dataset.shares),
   });
 });
 
