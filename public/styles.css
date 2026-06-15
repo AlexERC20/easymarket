@@ -295,11 +295,7 @@ h2 {
 }
 
 .market-heading p {
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: clamp(14px, 3.9vw, 20px);
-  font-weight: 800;
-  line-height: 1.1;
+  display: none;
 }
 
 .countdown {
@@ -557,18 +553,18 @@ h2 {
 
 .amount-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-  margin-top: 11px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 9px;
 }
 
 .amount-button {
-  min-height: 82px;
+  min-height: 49px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 10px;
   background: #10151f;
   color: var(--text);
-  padding: 11px 8px;
+  padding: 7px 4px;
   transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
 }
 
@@ -578,15 +574,15 @@ h2 {
 }
 
 .amount-button strong {
-  font-size: clamp(24px, 7.2vw, 34px);
+  font-size: clamp(15px, 4.3vw, 20px);
   font-weight: 950;
   line-height: 1;
 }
 
 .amount-button small {
-  margin-top: 8px;
+  margin-top: 4px;
   color: var(--muted);
-  font-size: clamp(13px, 3.8vw, 18px);
+  font-size: clamp(9px, 2.7vw, 12px);
   font-weight: 900;
 }
 
@@ -709,7 +705,8 @@ code {
 
 @media (max-width: 360px) {
   .amount-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(4, 1fr);
+    gap: 5px;
   }
 
   .price-board strong {
