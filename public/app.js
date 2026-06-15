@@ -2,6 +2,7 @@ const FEE_RATE = 0.02;
 const AMOUNTS = [50, 100, 500, 1000];
 const MIN_OUTCOME_PRICE = 0.001;
 const CHART_WINDOW_MS = 10_000;
+const CHART_RENDER_INTERVAL_MS = 333;
 
 const state = {
   user: null,
@@ -1066,6 +1067,7 @@ document.addEventListener("click", (event) => {
 });
 
 setInterval(updateTimer, 250);
+setInterval(renderMarketChart, CHART_RENDER_INTERVAL_MS);
 setInterval(() => void loadMarket().catch(() => setConnection("Ошибка", "error")), 1_000);
 setInterval(() => void loadMe().catch(() => undefined), 3_000);
 setInterval(() => void loadRecentMarkets().catch(() => undefined), 10_000);
