@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark;
-  --bg: #06080d;
+  --bg: #080d16;
   --panel: #10141d;
   --panel-soft: #151b27;
   --panel-rise: #1b2331;
@@ -33,9 +33,7 @@ body {
   margin: 0;
   height: 100%;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 50% -8rem, rgba(57, 105, 255, 0.18), transparent 23rem),
-    linear-gradient(180deg, #070a11 0%, #06080d 48%, #05070b 100%);
+  background: var(--bg);
   color: var(--text);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   overflow: hidden;
@@ -64,6 +62,7 @@ p {
   min-height: 100dvh;
   height: 100dvh;
   margin: 0 auto;
+  background: var(--bg);
   padding: max(18px, env(safe-area-inset-top)) 12px max(20px, env(safe-area-inset-bottom));
   overflow-x: hidden;
   overflow-y: auto;
@@ -411,7 +410,7 @@ h2 {
   overflow: hidden;
   border: 0;
   border-radius: 0;
-  background: #080d16;
+  background: var(--bg);
 }
 
 .market-chart {
