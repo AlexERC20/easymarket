@@ -150,12 +150,28 @@ function triggerHaptic(type = "light") {
         light: ["light"],
         medium: ["medium", "light"],
         success: ["success", "light"],
-        win: ["success", "medium", "light", "medium", "success"],
+        win: [
+          { pulse: "success", delay: 0 },
+          { pulse: "light", delay: 130 },
+          { pulse: "medium", delay: 310 },
+          { pulse: "light", delay: 500 },
+          { pulse: "medium", delay: 760 },
+          { pulse: "heavy", delay: 1080 },
+          { pulse: "light", delay: 1390 },
+          { pulse: "medium", delay: 1700 },
+          { pulse: "success", delay: 2050 },
+          { pulse: "light", delay: 2380 },
+          { pulse: "medium", delay: 2700 },
+          { pulse: "success", delay: 3100 },
+        ],
         warning: ["warning", "medium"],
         error: ["error", "heavy", "medium"],
       };
       (sequences[type] || sequences.light).forEach((pulse, index) => {
-        window.setTimeout(() => telegramPulse(pulse), index * 48);
+        const item = typeof pulse === "string"
+          ? { pulse, delay: index * 48 }
+          : pulse;
+        window.setTimeout(() => telegramPulse(item.pulse), item.delay);
       });
     }
   } catch {
@@ -166,7 +182,7 @@ function triggerHaptic(type = "light") {
     const pattern = type === "success"
       ? [18, 32, 24]
       : type === "win"
-        ? [80, 50, 110, 60, 60, 45, 140, 70, 220]
+        ? [70, 55, 105, 70, 55, 55, 135, 90, 180, 110, 75, 70, 160, 95, 240, 130, 85, 75, 330]
       : type === "error"
         ? [55, 35, 42]
         : type === "warning"
