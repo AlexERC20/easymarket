@@ -1,4 +1,6 @@
 const PROFIT_FEE_RATE = 0.05;
+const MARKET_MAKER_SPREAD_RATE = 0.03;
+const SELL_IMPACT_MULTIPLIER = 1.1;
 const AMOUNTS = [50, 100, 500, 1000];
 const MIN_OUTCOME_PRICE = 0.001;
 const CHART_WINDOW_MS = 10_000;
@@ -1033,6 +1035,26 @@ function getRecentMarketLabel(market) {
   return `#${market.id} · ${winner} ${market.symbol}`;
 }
 
+function estimateSellQuote({ position, market, outcomePrice }) {
+  const shares = Number(position.shares || 0);
+  const price = Math.max(MIN_OUTCOME_PRICE, Number(outcomePrice || 0));
+  const liquidity = Math.max(100, Number(market?.liquidity || state.market?.liquidity || 10_000));
+  const estimatedGross = shares * price;
+  const impact = (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER;
+  const nextPrice = Math.max(MIN_OUTCOME_PRICE, price - impact);
+  const bidPrice = Math.max(MIN_OUTCOME_PRICE, ((price + nextPrice) / 2) * (1 - MARKET_MAKER_SPREAD_RATE));
+  const grossExitValue = shares * bidPrice;
+  const spent = Number(position.spent || 0);
+  const exitProfit = grossExitValue - spent;
+  const exitValue = Math.max(0, grossExitValue - Math.max(0, exitProfit) * PROFIT_FEE_RATE);
+
+  return {
+    bidPrice,
+    exitValue,
+    pnl: exitValue - spent,
+  };
+}
+
 function renderMe() {
   animateText($("fireBalance"), state.balance, formatFire);
 
@@ -1056,10 +1078,9 @@ function renderMe() {
     const positionMarketPrice = Number(position.side === "YES" ? position.yes_price : position.no_price);
     const liveMarketPrice = Number(position.side === "YES" ? activeMarket?.yes_price : activeMarket?.no_price);
     const marketPrice = (isActiveMarket ? liveMarketPrice : positionMarketPrice) || 0;
-    const grossExitValue = payout * marketPrice;
-    const exitProfit = grossExitValue - spent;
-    const exitValue = grossExitValue - Math.max(0, exitProfit) * PROFIT_FEE_RATE;
-    const pnl = exitValue - spent;
+    const exitQuote = estimateSellQuote({ position, market: activeMarket, outcomePrice: marketPrice });
+    const exitValue = exitQuote.exitValue;
+    const pnl = exitQuote.pnl;
     const isSelling = state.pendingSellPositionId === position.id;
     const expiresAt = position.market_end_time ? new Date(position.market_end_time).getTime() : 0;
     const secondsLeft = expiresAt > 0 ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 1_000)) : null;
@@ -1081,7 +1102,7 @@ function renderMe() {
         <div>
           <strong class="side-${position.side}">${escapeHtml(marketLabel)} · ${marketSideLabel(activeMarket, position.side)}</strong>
           <br />
-          <small>${payout.toFixed(2)} shares · Avg ${formatCents(position.avg_price)} · Sell ${formatCents(marketPrice)} · Spent ${formatFire(spent)}${marketBadge}</small>
+          <small>${payout.toFixed(2)} shares · Avg ${formatCents(position.avg_price)} · Sell ${formatCents(exitQuote.bidPrice)} · Spent ${formatFire(spent)}${marketBadge}</small>
         </div>
         <div class="position-actions">
           <strong class="${pnl >= 0 ? "positive" : "negative"}">${pnl >= 0 ? "+" : ""}${formatFireDecimal(pnl)}</strong>

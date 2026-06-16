@@ -9,6 +9,9 @@ const MIN_PRICE = 0.001;
 const MAX_PRICE = 0.999;
 const DEFAULT_FEE_BPS = 200;
 const DEFAULT_PROFIT_FEE_BPS = 500;
+const DEFAULT_MARKET_MAKER_SPREAD_BPS = 300;
+const BUY_IMPACT_MULTIPLIER = 0.85;
+const SELL_IMPACT_MULTIPLIER = 1.1;
 
 const WORLD_CUP_FALLBACK_MARKETS = [
   { polymarketId: "fallback-france", team: "France", icon: "🇫🇷", yesPrice: 0.171, volume: 54_606_121 },
@@ -266,6 +269,96 @@ function getProfitFeeBps() {
 
 function calculateProfitFee(profit) {
   return Math.round(Math.max(0, Number(profit || 0)) * (getProfitFeeBps() / 10_000) * 100) / 100;
+}
+
+function getMarketMakerSpreadBps() {
+  return Number.isFinite(config.marketMakerSpreadBps)
+    ? config.marketMakerSpreadBps
+    : DEFAULT_MARKET_MAKER_SPREAD_BPS;
+}
+
+function roundMoney(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function roundOutcomePrice(value) {
+  return Math.round(clamp(Number(value || 0), MIN_PRICE, MAX_PRICE) * 100_000_000) / 100_000_000;
+}
+
+function getOutcomePriceFromYes(yesPrice, side) {
+  const normalizedYesPrice = roundOutcomePrice(yesPrice);
+  return side === "YES" ? normalizedYesPrice : roundOutcomePrice(1 - normalizedYesPrice);
+}
+
+function getMarketOutcomePrice(market, side) {
+  return side === "YES"
+    ? roundOutcomePrice(toNumber(market.yes_price))
+    : roundOutcomePrice(toNumber(market.no_price));
+}
+
+function getCurrentPriceForMarket(market) {
+  return toNumber(market.current_price, toNumber(market.open_price));
+}
+
+function getBuyExecutionQuote(market, side, amount) {
+  const oldOutcomePrice = getMarketOutcomePrice(market, side);
+  const liquidity = toNumber(market.liquidity, config.marketLiquidity);
+  const tradeShift = (side === "YES" ? 1 : -1) * (amount / liquidity) * BUY_IMPACT_MULTIPLIER;
+  const repricedMarket = {
+    ...market,
+    yes_volume: toNumber(market.yes_volume) + (side === "YES" ? amount : 0),
+    no_volume: toNumber(market.no_volume) + (side === "NO" ? amount : 0),
+  };
+  const nextYesPrice = roundOutcomePrice(getMarketMakerYesPrice(
+    repricedMarket,
+    getCurrentPriceForMarket(market),
+    { fast: true, tradeShift },
+  ));
+  const nextOutcomePrice = getOutcomePriceFromYes(nextYesPrice, side);
+  const spread = getMarketMakerSpreadBps() / 10_000;
+  const executionPrice = roundOutcomePrice(((oldOutcomePrice + nextOutcomePrice) / 2) * (1 + spread));
+
+  return {
+    oldOutcomePrice,
+    executionPrice,
+    nextYesPrice,
+    nextNoPrice: roundOutcomePrice(1 - nextYesPrice),
+  };
+}
+
+function getSellExecutionQuote(market, side, sharesToSell) {
+  const oldOutcomePrice = getMarketOutcomePrice(market, side);
+  const liquidity = toNumber(market.liquidity, config.marketLiquidity);
+  const estimatedGross = Math.max(0, sharesToSell * oldOutcomePrice);
+  const tradeShift = (side === "YES" ? -1 : 1) * (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER;
+  const repricedMarket = {
+    ...market,
+    yes_volume: side === "YES"
+      ? Math.max(0, toNumber(market.yes_volume) - estimatedGross)
+      : toNumber(market.yes_volume),
+    no_volume: side === "NO"
+      ? Math.max(0, toNumber(market.no_volume) - estimatedGross)
+      : toNumber(market.no_volume),
+  };
+  const nextYesPrice = roundOutcomePrice(getMarketMakerYesPrice(
+    repricedMarket,
+    getCurrentPriceForMarket(market),
+    { fast: true, tradeShift },
+  ));
+  const nextOutcomePrice = getOutcomePriceFromYes(nextYesPrice, side);
+  const spread = getMarketMakerSpreadBps() / 10_000;
+  const executionPrice = roundOutcomePrice(((oldOutcomePrice + nextOutcomePrice) / 2) * (1 - spread));
+  const gross = roundMoney(sharesToSell * executionPrice);
+
+  return {
+    oldOutcomePrice,
+    executionPrice,
+    gross,
+    nextYesPrice,
+    nextNoPrice: roundOutcomePrice(1 - nextYesPrice),
+    nextYesVolume: repricedMarket.yes_volume,
+    nextNoVolume: repricedMarket.no_volume,
+  };
 }
 
 function normalizeWorldCupTeam(question) {
@@ -1248,32 +1341,21 @@ export async function buyOutcome(input) {
       throw new Error("insufficient_fire");
     }
 
-    const price = side === "YES" ? toNumber(market.yes_price) : toNumber(market.no_price);
-    if (price < MIN_PRICE || price > MAX_PRICE) {
+    const quote = getBuyExecutionQuote(market, side, amount);
+    if (quote.executionPrice < MIN_PRICE || quote.executionPrice > MAX_PRICE) {
       throw new Error("invalid_market_price");
     }
 
     const fee = 0;
     const netAmount = Math.max(0, amount - fee);
-    const shares = netAmount / price;
-    const liquidity = toNumber(market.liquidity, config.marketLiquidity);
-    const tradeShift = (side === "YES" ? 1 : -1) * (amount / liquidity) * 0.85;
-    const repricedMarket = {
-      ...market,
-      yes_volume: toNumber(market.yes_volume) + (side === "YES" ? netAmount : 0),
-      no_volume: toNumber(market.no_volume) + (side === "NO" ? netAmount : 0),
-    };
-    const nextYesPrice = getMarketMakerYesPrice(
-      repricedMarket,
-      toNumber(market.current_price, toNumber(market.open_price)),
-      { fast: true, tradeShift },
-    );
-    const nextNoPrice = 1 - nextYesPrice;
+    const shares = netAmount / quote.executionPrice;
+    const nextYesPrice = quote.nextYesPrice;
+    const nextNoPrice = quote.nextNoPrice;
 
     await client.query(
       `
         UPDATE fire_balances
-        SET balance = balance - $2,
+        SET balance = balance - $2::numeric,
             updated_at = now()
         WHERE user_id = $1
       `,
@@ -1283,7 +1365,7 @@ export async function buyOutcome(input) {
     await client.query(
       `
         INSERT INTO fire_ledger (user_id, amount, reason, source)
-        VALUES ($1, $2, $3, $4)
+        VALUES ($1, $2::numeric, $3, $4)
       `,
       [user.id, -amount, side === "YES" ? "buy_yes" : "buy_no", `market:${marketId}`],
     );
@@ -1291,10 +1373,10 @@ export async function buyOutcome(input) {
     await client.query(
       `
         UPDATE markets
-        SET yes_price = $2,
-            no_price = $3,
-            yes_volume = yes_volume + $4,
-            no_volume = no_volume + $5
+        SET yes_price = $2::numeric,
+            no_price = $3::numeric,
+            yes_volume = yes_volume + $4::numeric,
+            no_volume = no_volume + $5::numeric
         WHERE id = $1
       `,
       [
@@ -1327,16 +1409,16 @@ export async function buyOutcome(input) {
           updated_at = now()
         RETURNING *
       `,
-      [user.id, marketId, side, shares, amount, amount / shares],
+      [user.id, marketId, side, shares, amount, quote.executionPrice],
     );
 
     const tradeResult = await client.query(
       `
         INSERT INTO trades (user_id, market_id, action, side, amount, fee, price, shares)
-        VALUES ($1, $2, 'BUY', $3, $4, $5, $6, $7)
+        VALUES ($1, $2, 'BUY', $3, $4::numeric, $5::numeric, $6::numeric, $7::numeric)
         RETURNING *
       `,
-      [user.id, marketId, side, amount, fee, price, shares],
+      [user.id, marketId, side, amount, fee, quote.executionPrice, shares],
     );
 
     const referralBonus = await awardReferralBetBonus(client, user, marketId);
@@ -1497,13 +1579,13 @@ export async function sellOutcome(input) {
       throw new Error("insufficient_shares");
     }
 
-    const price = side === "YES" ? toNumber(market.yes_price) : toNumber(market.no_price);
-    if (price < MIN_PRICE || price > MAX_PRICE) {
+    const sharesToSell = Math.min(positionShares, requestedShares);
+    const quote = getSellExecutionQuote(market, side, sharesToSell);
+    if (quote.executionPrice < MIN_PRICE || quote.executionPrice > MAX_PRICE) {
       throw new Error("invalid_market_price");
     }
 
-    const sharesToSell = Math.min(positionShares, requestedShares);
-    const gross = Math.round(sharesToSell * price * 100) / 100;
+    const gross = quote.gross;
     const soldRatio = sharesToSell / positionShares;
     const spentSold = toNumber(position.spent) * soldRatio;
     const fee = calculateProfitFee(gross - spentSold);
@@ -1516,7 +1598,7 @@ export async function sellOutcome(input) {
     await client.query(
       `
         UPDATE fire_balances
-        SET balance = balance + $2,
+        SET balance = balance + $2::numeric,
             updated_at = now()
         WHERE user_id = $1
       `,
@@ -1526,7 +1608,7 @@ export async function sellOutcome(input) {
     await client.query(
       `
         INSERT INTO fire_ledger (user_id, amount, reason, source)
-        VALUES ($1, $2, $3, $4)
+        VALUES ($1, $2::numeric, $3, $4)
       `,
       [user.id, proceeds, side === "YES" ? "sell_yes" : "sell_no", `market:${marketId}`],
     );
@@ -1534,10 +1616,10 @@ export async function sellOutcome(input) {
     const tradeResult = await client.query(
       `
         INSERT INTO trades (user_id, market_id, action, side, amount, fee, price, shares)
-        VALUES ($1, $2, 'SELL', $3, $4, $5, $6, $7)
+        VALUES ($1, $2, 'SELL', $3, $4::numeric, $5::numeric, $6::numeric, $7::numeric)
         RETURNING *
       `,
-      [user.id, marketId, side, proceeds, fee, price, sharesToSell],
+      [user.id, marketId, side, proceeds, fee, quote.executionPrice, sharesToSell],
     );
 
     const positionUpdateResult = await client.query(
@@ -1548,7 +1630,7 @@ export async function sellOutcome(input) {
             avg_price = CASE WHEN $2::numeric > 0 THEN $3::numeric / $2::numeric ELSE 0 END,
             payout = payout + $4::numeric,
             pnl = pnl + $5::numeric,
-            status = $6,
+            status = $6::text,
             updated_at = now()
         WHERE id = $1
         RETURNING *
@@ -1563,40 +1645,24 @@ export async function sellOutcome(input) {
       ],
     );
 
-    const liquidity = toNumber(market.liquidity, config.marketLiquidity);
-    const tradeShift = (side === "YES" ? -1 : 1) * (proceeds / liquidity) * 0.75;
-    const repricedMarket = {
-      ...market,
-      yes_volume: side === "YES"
-        ? Math.max(0, toNumber(market.yes_volume) - gross)
-        : toNumber(market.yes_volume),
-      no_volume: side === "NO"
-        ? Math.max(0, toNumber(market.no_volume) - gross)
-        : toNumber(market.no_volume),
-    };
-    const nextYesPriceRaw = getMarketMakerYesPrice(
-      repricedMarket,
-      toNumber(market.current_price, toNumber(market.open_price)),
-      { fast: true, tradeShift },
-    );
-    const nextYesPrice = Math.round(nextYesPriceRaw * 100_000_000) / 100_000_000;
-    const nextNoPrice = Math.round((1 - nextYesPrice) * 100_000_000) / 100_000_000;
+    const nextYesPrice = quote.nextYesPrice;
+    const nextNoPrice = quote.nextNoPrice;
 
     await client.query(
       `
         UPDATE markets
-        SET yes_price = $2,
-            no_price = $3,
-            yes_volume = $4,
-            no_volume = $5
+        SET yes_price = $2::numeric,
+            no_price = $3::numeric,
+            yes_volume = $4::numeric,
+            no_volume = $5::numeric
         WHERE id = $1
       `,
       [
         marketId,
         nextYesPrice,
         nextNoPrice,
-        repricedMarket.yes_volume,
-        repricedMarket.no_volume,
+        quote.nextYesVolume,
+        quote.nextNoVolume,
       ],
     );
 
@@ -1618,12 +1684,12 @@ export async function sellOutcome(input) {
         ...market,
         yes_price: nextYesPrice,
         no_price: nextNoPrice,
-        yes_volume: repricedMarket.yes_volume,
-        no_volume: repricedMarket.no_volume,
+        yes_volume: quote.nextYesVolume,
+        no_volume: quote.nextNoVolume,
       }),
       sale: {
         side,
-        price,
+        price: quote.executionPrice,
         shares: sharesToSell,
         gross,
         fee,

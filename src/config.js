@@ -41,6 +41,7 @@ export const config = {
   marketLiquidity: parseNumber(process.env.MARKET_LIQUIDITY, 10_000, 100),
   marketFeeBps: parseNumber(process.env.MARKET_FEE_BPS, 200, 0),
   marketProfitFeeBps: parseNumber(process.env.MARKET_PROFIT_FEE_BPS, 500, 0),
+  marketMakerSpreadBps: parseNumber(process.env.MARKET_MAKER_SPREAD_BPS, 300, 0),
   pricePollMs: parseNumber(process.env.PRICE_POLL_MS, 1_000, 250),
   referralBetBonusFire: parseNumber(process.env.REFERRAL_BET_BONUS_FIRE, 500, 0),
   taskShareFire: parseNumber(process.env.TASK_SHARE_FIRE, 100, 0),
