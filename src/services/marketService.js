@@ -146,6 +146,7 @@ function mapWorldCupMarket(row) {
     external_volume: externalVolume,
     yes_volume: toNumber(row.yes_volume),
     no_volume: toNumber(row.no_volume),
+    chart: row.chart || [],
     start_time: row.start_time,
     status: row.status,
     end_time: row.end_time,
@@ -1057,14 +1058,47 @@ export async function getWorldCupMarkets() {
       JOIN world_cup_market_meta meta ON meta.symbol = markets.symbol
       WHERE markets.status = 'open'
         AND markets.symbol LIKE $1
-      ORDER BY meta.volume DESC, markets.yes_price DESC
+      ORDER BY markets.yes_price DESC, meta.volume DESC
     `,
     [`${WORLD_CUP_SYMBOL_PREFIX}%`],
   );
+  const symbols = result.rows.map((row) => row.symbol);
+  let chartBySymbol = new Map();
+  if (symbols.length) {
+    const chartResult = await query(
+      `
+        SELECT symbol, price, created_at
+        FROM (
+          SELECT
+            symbol,
+            price,
+            created_at,
+            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY created_at DESC) AS rn
+          FROM price_ticks
+          WHERE symbol = ANY($1)
+        ) ranked_ticks
+        WHERE rn <= 120
+        ORDER BY symbol ASC, created_at ASC
+      `,
+      [symbols],
+    );
+    chartBySymbol = chartResult.rows.reduce((map, row) => {
+      const current = map.get(row.symbol) || [];
+      current.push({
+        price: toNumber(row.price),
+        created_at: row.created_at,
+      });
+      map.set(row.symbol, current);
+      return map;
+    }, new Map());
+  }
 
   return {
     source,
-    markets: result.rows.map(mapWorldCupMarket),
+    markets: result.rows.map((row) => mapWorldCupMarket({
+      ...row,
+      chart: chartBySymbol.get(row.symbol) || [],
+    })),
   };
 }
 

@@ -854,6 +854,27 @@ code {
   text-align: center;
 }
 
+.topup-packages {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.topup-packages button {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #141b27;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.topup-packages button.active {
+  border-color: rgba(18, 153, 243, 0.58);
+  background: rgba(18, 153, 243, 0.18);
+}
+
 .world-cup-panel {
   max-height: min(82dvh, 740px);
   display: flex;

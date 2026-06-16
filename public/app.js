@@ -14,7 +14,6 @@ const state = {
   activity: [],
   chartPoints: [],
   worldCupMarkets: [],
-  worldCupOrder: [],
   worldCupListRenderedOrder: "",
   selectedWorldCupMarketId: null,
   worldCupCharts: new Map(),
@@ -57,7 +56,6 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 const formatFire = (value) => Math.floor(Number(value || 0)).toLocaleString("ru-RU");
-const formatStars = (value) => `${formatFire(value)}⭐`;
 const formatFireDecimal = (value) => Number(value || 0).toLocaleString("ru-RU", {
   maximumFractionDigits: 1,
 });
@@ -230,6 +228,14 @@ function getDisplayChartPoints(market) {
   }));
 }
 
+function normalizeChartPrice(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  return numeric <= 1.5 ? numeric * 100 : numeric;
+}
+
 function drawMarketChartFrame() {
   const canvas = $("marketChart");
   const market = getDisplayMarket();
@@ -259,16 +265,24 @@ function drawMarketChartFrame() {
     state.smoothedPrice += (currentPrice - state.smoothedPrice) * 0.045;
   }
 
+  const sourcePoints = getDisplayChartPoints(market)
+    .filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at))
+    .map((point) => ({ ...point }))
+    .sort((a, b) => a.at - b.at);
   const endTime = new Date(market.end_time).getTime();
   const nowMs = Date.now();
-  const windowEnd = worldCup ? nowMs : Math.min(endTime, nowMs);
-  const startTime = worldCup ? windowEnd - CHART_WINDOW_MS : new Date(market.start_time).getTime();
-  const windowStart = Math.max(startTime, windowEnd - CHART_WINDOW_MS);
+  const historyStart = sourcePoints[0]?.at;
+  const historyEnd = sourcePoints[sourcePoints.length - 1]?.at;
+  const windowEnd = worldCup ? Math.max(nowMs, historyEnd || nowMs) : Math.min(endTime, nowMs);
+  const startTime = worldCup && sourcePoints.length > 1
+    ? historyStart
+    : (worldCup ? windowEnd - CHART_WINDOW_MS : new Date(market.start_time).getTime());
+  const windowStart = worldCup && sourcePoints.length > 1
+    ? startTime
+    : Math.max(startTime, windowEnd - CHART_WINDOW_MS);
   const duration = Math.max(1, windowEnd - windowStart);
-  const rawPoints = getDisplayChartPoints(market)
-    .filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at))
-    .filter((point) => point.at >= windowStart - 1_500 && point.at <= windowEnd + 1_500)
-    .map((point) => ({ ...point }));
+  const rawPoints = sourcePoints
+    .filter((point) => worldCup || (point.at >= windowStart - 1_500 && point.at <= windowEnd + 1_500));
 
   if (rawPoints.length === 0 && currentPrice > 0) {
     rawPoints.push({ price: currentPrice, at: Date.now() });
@@ -613,13 +627,11 @@ function renderTaskRewards() {
   const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 500));
   const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 15000));
   const ref = Math.round(Number(state.publicConfig.referral_bonus_fire || 500));
-  const cap = Math.round(Number(state.publicConfig.task_daily_cap_fire || 10000));
   if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
   if ($("channelTaskReward")) $("channelTaskReward").textContent = formatFire(sub);
   if ($("chatTaskReward")) $("chatTaskReward").textContent = formatFire(sub);
   if ($("privateChatTaskReward")) $("privateChatTaskReward").textContent = formatFire(privateChat);
   if ($("refTaskReward")) $("refTaskReward").textContent = formatFire(ref);
-  if ($("taskDailyCap")) $("taskDailyCap").textContent = formatFire(cap);
 }
 
 async function api(path, options = {}) {
@@ -735,7 +747,14 @@ function mergeWorldCupChartPoint(market) {
     return;
   }
 
-  const points = state.worldCupCharts.get(market.id) || [];
+  const existing = state.worldCupCharts.get(market.id) || [];
+  const history = (market.chart || [])
+    .map((point) => ({
+      price: normalizeChartPrice(point.price),
+      at: new Date(point.created_at).getTime(),
+    }))
+    .filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at));
+  const points = existing.length ? existing : history;
   const nextPoint = {
     price: Math.max(0.1, Math.min(99.9, Number(market.yes_price || 0.5) * 100)),
     at: Date.now(),
@@ -750,21 +769,7 @@ function mergeWorldCupChartPoint(market) {
 async function loadWorldCupMarkets() {
   const data = await api("/api/world-cup/markets");
   const incomingMarkets = data.markets || [];
-  if (!state.worldCupOrder.length) {
-    state.worldCupOrder = incomingMarkets.map((market) => market.id);
-  } else {
-    for (const market of incomingMarkets) {
-      if (!state.worldCupOrder.includes(market.id)) {
-        state.worldCupOrder.push(market.id);
-      }
-    }
-    const existingIds = new Set(incomingMarkets.map((market) => market.id));
-    state.worldCupOrder = state.worldCupOrder.filter((id) => existingIds.has(id));
-  }
-  const orderIndex = new Map(state.worldCupOrder.map((id, index) => [id, index]));
-  state.worldCupMarkets = incomingMarkets
-    .slice()
-    .sort((a, b) => (orderIndex.get(a.id) ?? 9999) - (orderIndex.get(b.id) ?? 9999));
+  state.worldCupMarkets = incomingMarkets;
   state.worldCupMarkets.forEach(mergeWorldCupChartPoint);
   if (
     state.selectedWorldCupMarketId
@@ -835,6 +840,8 @@ function renderMarket() {
     if (worldCup) {
       setTeamIconElement(coinBadge, market.icon, market.team);
     } else {
+      coinBadge.dataset.icon = "";
+      coinBadge.dataset.alt = "";
       coinBadge.textContent = "₿";
     }
     coinBadge.classList.toggle("team", worldCup);
@@ -845,12 +852,12 @@ function renderMarket() {
   }
   $("marketWindow").textContent = hasMarket ? formatMarketWindow(market) : "--";
   const priceLabels = document.querySelectorAll(".price-board .label");
-  if (priceLabels[0]) priceLabels[0].textContent = worldCup ? "Stars Volume" : "Target Price";
+  if (priceLabels[0]) priceLabels[0].textContent = worldCup ? "Volume" : "Target Price";
   if (priceLabels[1]) {
     priceLabels[1].childNodes[0].nodeValue = worldCup ? "Yes Chance " : "Current Price ";
   }
   animateText($("openPrice"), worldCup ? Number(market?.volume || 0) : openPrice, (value) => (
-    worldCup ? `${formatFire(value)}⭐ Vol.` : `$${formatPrice(value)}`
+    worldCup ? formatFire(value) : `$${formatPrice(value)}`
   ));
   animateText($("currentPrice"), currentPrice, (value) => (
     worldCup ? `${value.toFixed(1)}%` : `$${formatPrice(value)}`
@@ -950,7 +957,7 @@ function renderMe() {
         <div>
           <strong class="side-${position.side}">${marketSideLabel(activeMarket, position.side)} ${payout.toFixed(2)} shares</strong>
           <br />
-          <small>Avg ${formatCents(position.avg_price)} · Sell ${formatCents(marketPrice)} · Spent ${formatStars(spent)}${marketBadge}</small>
+          <small>Avg ${formatCents(position.avg_price)} · Sell ${formatCents(marketPrice)} · Spent ${formatFire(spent)}${marketBadge}</small>
         </div>
         <div class="position-actions">
           <strong class="${pnl >= 0 ? "positive" : "negative"}">${pnl >= 0 ? "+" : ""}${formatFireDecimal(pnl)}</strong>
@@ -965,7 +972,7 @@ function renderMe() {
             type="button"
             ${isSelling || !canSell ? "disabled" : ""}
           >
-            ${isSelling ? "Продаю..." : canSell ? `Продать ${formatStars(exitValue)}` : "Ждём итог"}
+            ${isSelling ? "Продаю..." : canSell ? `Продать ${formatFire(exitValue)}` : "Ждём итог"}
           </button>
         </div>
       </div>
@@ -987,8 +994,8 @@ function renderTradeTicket() {
     button.classList.toggle("active", amount === state.selectedAmount);
     button.disabled = !market || !state.user || state.pendingBuy;
     button.innerHTML = `
-      <strong>${formatStars(amount)}</strong>
-      <small>win <b>${formatFire(amountPreview.shares)}</b>⭐</small>
+      <strong>${formatFire(amount)}</strong>
+      <small>win <b>${formatFire(amountPreview.shares)}</b></small>
     `;
   });
 
@@ -1013,7 +1020,7 @@ function renderActivity() {
           <br />
           <small>${formatCents(trade.price)} · ${trade.shares.toFixed(2)} shares</small>
         </div>
-        <strong>${formatStars(trade.amount)}</strong>
+        <strong>${formatFire(trade.amount)}</strong>
       </div>
     `;
   }).join("");
@@ -1073,7 +1080,7 @@ function renderWorldCupList() {
       const chance = row.querySelector("[data-world-cup-chance]");
       const yesButton = row.querySelector("[data-side='YES']");
       const noButton = row.querySelector("[data-side='NO']");
-      if (volume) volume.textContent = `${formatVolume(market.volume)}⭐ Vol.`;
+      if (volume) volume.textContent = `${formatVolume(market.volume)} Vol.`;
       if (chance) {
         chance.textContent = `${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%`;
       }
@@ -1090,7 +1097,7 @@ function renderWorldCupList() {
         <span class="team-flag">${teamIconMarkup(market.icon, market.team)}</span>
         <span>
           <strong>${escapeHtml(market.team)}</strong>
-          <small data-world-cup-volume>${formatVolume(market.volume)}⭐ Vol.</small>
+          <small data-world-cup-volume>${formatVolume(market.volume)} Vol.</small>
         </span>
         <b data-world-cup-chance>${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%</b>
       </button>
@@ -1146,7 +1153,7 @@ function renderBetSheet() {
   $("betSideNoBtn")?.classList.toggle("active", side === "NO");
   if ($("betConfirmBtn")) {
     $("betConfirmBtn").disabled = !amount || !state.user;
-    $("betConfirmBtn").textContent = amount ? `Trade ${formatStars(amount)}` : "Trade";
+    $("betConfirmBtn").textContent = amount ? `Trade ${formatFire(amount)}` : "Trade";
   }
 }
 
@@ -1172,8 +1179,11 @@ function renderTopupSheet() {
   }
   if ($("topupBuyBtn")) {
     $("topupBuyBtn").disabled = state.topup.pending || !state.user;
-    $("topupBuyBtn").textContent = state.topup.pending ? "Открываю оплату..." : `Купить ${formatStars(amount)}`;
+    $("topupBuyBtn").textContent = state.topup.pending ? "Открываю оплату..." : `Купить ${formatFire(amount)}`;
   }
+  document.querySelectorAll("[data-topup-package]").forEach((button) => {
+    button.classList.toggle("active", Number(button.dataset.topupPackage) === amount);
+  });
 }
 
 function openTopupSheet(amount, reason = "") {
@@ -1254,7 +1264,7 @@ function showTradeBubble(trade) {
   const name = trade.username || trade.first_name || "user";
   const action = trade.action || "BUY";
   bubble.className = `trade-bubble ${sideClass(trade.side)}`;
-  bubble.textContent = `${name} ${actionLabel(action)} ${sideLabel(trade.side)} ${formatStars(trade.amount)}`;
+  bubble.textContent = `${name} ${actionLabel(action)} ${sideLabel(trade.side)} ${formatFire(trade.amount)}`;
   bubble.style.left = `${24 + Math.random() * 52}%`;
   container.appendChild(bubble);
   setTimeout(() => bubble.remove(), 2600);
@@ -1302,7 +1312,7 @@ async function buy(amount = state.selectedAmount) {
   if (buyAmount > Number(state.balance || 0)) {
     const missing = Math.max(1, Math.ceil(buyAmount - Number(state.balance || 0)));
     triggerHaptic("warning");
-    openTopupSheet(missing, `Для ставки ${formatStars(buyAmount)} не хватает ${formatStars(missing)}.`);
+    openTopupSheet(missing, `Для ставки ${formatFire(buyAmount)} не хватает ${formatFire(missing)}.`);
     return;
   }
   triggerHaptic("medium");
@@ -1337,7 +1347,7 @@ async function buy(amount = state.selectedAmount) {
     triggerHaptic("error");
     if (error.message === "insufficient_fire") {
       const missing = Math.max(1, Math.ceil(buyAmount - Number(state.balance || 0)));
-      openTopupSheet(missing, `Для ставки ${formatStars(buyAmount)} не хватает ${formatStars(missing)}.`);
+      openTopupSheet(missing, `Для ставки ${formatFire(buyAmount)} не хватает ${formatFire(missing)}.`);
     } else {
       showToast("Покупка не прошла.");
     }
@@ -1377,7 +1387,7 @@ async function sellPosition({ side, positionId, marketId, shares }) {
     addLocalActivity(result.trade);
     triggerHaptic("success");
     const pnl = Number(result.sale?.pnl || 0);
-    showToast(`Продано ${sideLabel(side)}: ${pnl >= 0 ? "+" : ""}${formatFireDecimal(pnl)}⭐`);
+    showToast(`Продано ${sideLabel(side)}: ${pnl >= 0 ? "+" : ""}${formatFireDecimal(pnl)}`);
     renderMarket();
     renderMe();
     renderActivity();
@@ -1457,7 +1467,7 @@ if (refreshButton) {
 
 $("walletBtn").addEventListener("click", () => {
   triggerHaptic("selection");
-  openTopupSheet(100, "Выбери сумму пополнения. 1 Telegram Star = 1⭐.");
+  openTopupSheet(100);
 });
 
 $("withdrawBtn")?.addEventListener("click", () => {
@@ -1490,6 +1500,15 @@ $("topupSheet")?.addEventListener("click", (event) => {
 $("topupBuyBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   void startStarsTopup();
+});
+
+document.querySelectorAll("[data-topup-package]").forEach((button) => {
+  button.addEventListener("click", () => {
+    triggerHaptic("selection");
+    state.topup.amount = Number(button.dataset.topupPackage);
+    state.topup.reason = "";
+    renderTopupSheet();
+  });
 });
 
 function buildInviteUrl(inviterTelegramId) {
@@ -1558,7 +1577,7 @@ async function claimShareTask() {
       return;
     }
     if (Number(result.awarded || 0) > 0) {
-      showToast(`+${formatStars(result.awarded)} за share.`);
+      showToast(`+${formatFire(result.awarded)} за share.`);
       return;
     }
     showToast("Дневной лимит бонусов уже достигнут.");
@@ -1576,14 +1595,14 @@ async function shareInvite({ awardShareTask = false } = {}) {
 
   const bonus = Math.round(Number(state.publicConfig.referral_bonus_fire || 500));
   const inviteUrl = buildInviteUrl(state.user.telegram_id);
-  const text = `Залетай в EasyMarket. После первой ставки мне дадут ${formatStars(bonus)}.`;
+  const text = `Залетай в EasyMarket. После первой ставки мне дадут ${formatFire(bonus)}.`;
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
     if (awardShareTask) {
       await claimShareTask();
     } else {
-      showToast(`+${formatStars(bonus)} после первой ставки друга.`);
+      showToast(`+${formatFire(bonus)} после первой ставки друга.`);
     }
     return;
   }
@@ -1608,7 +1627,7 @@ async function shareInvite({ awardShareTask = false } = {}) {
   if (awardShareTask) {
     await claimShareTask();
   } else {
-    showToast(`+${formatStars(bonus)} после первой ставки друга.`);
+    showToast(`+${formatFire(bonus)} после первой ставки друга.`);
   }
 }
 
@@ -1638,19 +1657,19 @@ $("tasksSheet").addEventListener("click", (event) => {
 $("taskChannelBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   openTelegramUrl(state.publicConfig.av_channel_url || "https://t.me/erc20coin");
-  showToast("После подписки AV-бот проверит канал и начислит ⭐.");
+  showToast("После подписки AV-бот проверит канал и начислит звезды.");
 });
 
 $("taskChatBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   openTelegramUrl(state.publicConfig.av_chat_url || "https://t.me/thedaomaker");
-  showToast("После вступления AV-бот проверит чат и начислит ⭐.");
+  showToast("После вступления AV-бот проверит чат и начислит звезды.");
 });
 
 $("taskPrivateChatBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   openTelegramUrl(state.publicConfig.private_chat_url || state.publicConfig.av_bot_url);
-  showToast(`После подписки на приватку AV-бот начислит аванс ${formatStars(Number(state.publicConfig.task_private_chat_fire || 15000))}.`);
+  showToast(`После подписки на приватку AV-бот начислит аванс ${formatFire(Number(state.publicConfig.task_private_chat_fire || 15000))}.`);
 });
 
 $("taskShareBtn").addEventListener("click", () => {
@@ -1725,7 +1744,7 @@ document.querySelectorAll("[data-bet-add]").forEach((button) => {
     if (nextAmount > Number(state.balance || 0)) {
       const missing = Math.max(1, Math.ceil(nextAmount - Number(state.balance || 0)));
       triggerHaptic("warning");
-      openTopupSheet(missing, `Для ставки ${formatStars(nextAmount)} не хватает ${formatStars(missing)}.`);
+      openTopupSheet(missing, `Для ставки ${formatFire(nextAmount)} не хватает ${formatFire(missing)}.`);
       return;
     }
     state.betSheet.amount = nextAmount;
