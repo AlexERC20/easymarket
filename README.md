@@ -63,12 +63,20 @@ MARKET_FEE_BPS=200
 PRICE_POLL_MS=1000
 PUBLIC_AV_BOT_URL=https://t.me/voit_help_bot?start=buy_fire
 PUBLIC_MINI_APP_URL=https://t.me/voit_help_bot?startapp=easymarket
-REFERRAL_BET_BONUS_FIRE=100
+REFERRAL_BET_BONUS_FIRE=500
+TASK_SHARE_FIRE=100
+TASK_SUBSCRIBE_FIRE=500
+TASK_PRIVATE_CHAT_FIRE=100000
+TASK_DAILY_CAP_FIRE=10000
+PUBLIC_AV_CHANNEL_URL=https://t.me/erc20coin
+PUBLIC_AV_CHAT_URL=
+PUBLIC_PRIVATE_CHAT_URL=https://t.me/tribute/app?startapp=stKL
 ```
 
 `DATABASE_URL` must be set in the Render environment. Do not commit real database credentials.
 `BOT_BRIDGE_SECRET` protects future local Telegram bot bridge endpoints through the `x-bridge-secret` header.
 `PUBLIC_MINI_APP_URL` should point to the Telegram Mini App deep link, so referral shares open inside Telegram instead of the plain website.
+`TASK_PRIVATE_CHAT_FIRE` is a one-time private chat subscriber bonus completed through `/api/bridge/tasks/complete` with `task_key=private_chat`; it is not counted against the ordinary daily task cap.
 
 ## Render
 

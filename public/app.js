@@ -26,9 +26,11 @@ const state = {
     referral_bonus_fire: 500,
     task_share_fire: 100,
     task_subscribe_fire: 500,
+    task_private_chat_fire: 100000,
     task_daily_cap_fire: 10000,
     av_channel_url: "https://t.me/erc20coin",
     av_chat_url: "https://t.me/voit_help_bot?start=check_chat_task",
+    private_chat_url: "https://t.me/tribute/app?startapp=stKL",
   },
   chartRaf: null,
   smoothedPrice: null,
@@ -513,11 +515,13 @@ async function loadPublicConfig() {
 function renderTaskRewards() {
   const share = Math.round(Number(state.publicConfig.task_share_fire || 100));
   const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 500));
+  const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 100000));
   const ref = Math.round(Number(state.publicConfig.referral_bonus_fire || 500));
   const cap = Math.round(Number(state.publicConfig.task_daily_cap_fire || 10000));
   if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
   if ($("channelTaskReward")) $("channelTaskReward").textContent = formatFire(sub);
   if ($("chatTaskReward")) $("chatTaskReward").textContent = formatFire(sub);
+  if ($("privateChatTaskReward")) $("privateChatTaskReward").textContent = formatFire(privateChat);
   if ($("refTaskReward")) $("refTaskReward").textContent = formatFire(ref);
   if ($("taskDailyCap")) $("taskDailyCap").textContent = formatFire(cap);
 }
@@ -1190,6 +1194,12 @@ $("taskChatBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   openTelegramUrl(state.publicConfig.av_chat_url || state.publicConfig.av_bot_url);
   showToast("После вступления AV-бот проверит чат и начислит FIRE.");
+});
+
+$("taskPrivateChatBtn").addEventListener("click", () => {
+  triggerHaptic("selection");
+  openTelegramUrl(state.publicConfig.private_chat_url || state.publicConfig.av_bot_url);
+  showToast("После подписки на приватку AV-бот начислит аванс 100 000 FIRE.");
 });
 
 $("taskShareBtn").addEventListener("click", () => {

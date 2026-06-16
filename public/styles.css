@@ -755,6 +755,11 @@ code {
   padding: 11px;
 }
 
+.task-row.featured {
+  border-color: rgba(255, 184, 77, 0.44);
+  background: linear-gradient(135deg, rgba(255, 184, 77, 0.14), rgba(51, 178, 116, 0.08));
+}
+
 .task-row strong,
 .task-row small {
   display: block;

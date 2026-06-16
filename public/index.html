@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260615-8" />
+    <link rel="stylesheet" href="/styles.css?v=20260616-1" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -48,6 +48,13 @@
               </div>
               <button id="taskChatBtn" class="task-button" type="button">Открыть</button>
             </div>
+            <div class="task-row featured">
+              <div>
+                <strong>Подписаться на приватку</strong>
+                <small>+<span id="privateChatTaskReward">100 000</span> FIRE авансом после проверки подписки</small>
+              </div>
+              <button id="taskPrivateChatBtn" class="task-button gold" type="button">Открыть</button>
+            </div>
             <div class="task-row">
               <div>
                 <strong>Рассказать друзьям</strong>
@@ -56,7 +63,7 @@
               <button id="taskShareBtn" class="task-button gold" type="button">Share</button>
             </div>
           </div>
-          <p class="task-limit">Дневной лимит бонусов: <span id="taskDailyCap">10 000</span> FIRE.</p>
+          <p class="task-limit">Дневной лимит обычных бонусов: <span id="taskDailyCap">10 000</span> FIRE. Приватка начисляется отдельно.</p>
         </div>
       </section>
 
@@ -175,6 +182,6 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
-    <script src="/app.js?v=20260615-8" type="module"></script>
+    <script src="/app.js?v=20260616-1" type="module"></script>
   </body>
 </html>

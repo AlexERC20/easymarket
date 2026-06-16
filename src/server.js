@@ -176,9 +176,11 @@ app.get("/api/public/config", (_req, res) => {
     referral_bonus_fire: config.referralBetBonusFire,
     task_share_fire: config.taskShareFire,
     task_subscribe_fire: config.taskSubscribeFire,
+    task_private_chat_fire: config.taskPrivateChatFire,
     task_daily_cap_fire: config.taskDailyCapFire,
     av_channel_url: config.publicAvChannelUrl,
     av_chat_url: config.publicAvChatUrl,
+    private_chat_url: config.publicPrivateChatUrl,
   });
 });
 

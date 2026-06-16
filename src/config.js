@@ -39,6 +39,7 @@ export const config = {
   referralBetBonusFire: parseNumber(process.env.REFERRAL_BET_BONUS_FIRE, 500, 0),
   taskShareFire: parseNumber(process.env.TASK_SHARE_FIRE, 100, 0),
   taskSubscribeFire: parseNumber(process.env.TASK_SUBSCRIBE_FIRE, 500, 0),
+  taskPrivateChatFire: parseNumber(process.env.TASK_PRIVATE_CHAT_FIRE, 100_000, 0),
   taskDailyCapFire: parseNumber(process.env.TASK_DAILY_CAP_FIRE, 10_000, 0),
   publicAvChannelUrl: (
     process.env.PUBLIC_AV_CHANNEL_URL
@@ -47,6 +48,10 @@ export const config = {
   publicAvChatUrl: (
     process.env.PUBLIC_AV_CHAT_URL
       || "https://t.me/voit_help_bot?start=check_chat_task"
+  ).trim(),
+  publicPrivateChatUrl: (
+    process.env.PUBLIC_PRIVATE_CHAT_URL
+      || "https://t.me/tribute/app?startapp=stKL"
   ).trim(),
 };
 

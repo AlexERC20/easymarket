@@ -538,7 +538,7 @@ export async function claimShareTask(input) {
 
 export async function completeVerifiedTask(input) {
   const taskKey = String(input.task_key || input.taskKey || "").trim();
-  const allowedTasks = new Set(["av_channel", "av_chat"]);
+  const allowedTasks = new Set(["av_channel", "av_chat", "private_chat"]);
   if (!allowedTasks.has(taskKey)) {
     throw new Error("invalid_task");
   }
@@ -548,7 +548,10 @@ export async function completeVerifiedTask(input) {
     username: input.username,
     first_name: input.first_name,
   });
-  const amount = Math.round(Number(input.amount ?? config.taskSubscribeFire ?? 0));
+  const defaultAmount = taskKey === "private_chat"
+    ? config.taskPrivateChatFire
+    : config.taskSubscribeFire;
+  const amount = Math.round(Number(input.amount ?? defaultAmount ?? 0));
   const dayKey = "once";
 
   return withTransaction(async (client) => {
@@ -568,13 +571,28 @@ export async function completeVerifiedTask(input) {
       cap_reached: false,
     };
     if (claimResult.rows[0] && amount > 0) {
-      bonus = await awardBonusWithDailyCap(
-        client,
-        user.id,
-        amount,
-        getTaskReason(taskKey),
-        `task:${taskKey}`,
-      );
+      if (taskKey === "private_chat") {
+        await adjustBalance(
+          client,
+          user.id,
+          amount,
+          getTaskReason(taskKey),
+          `task:${taskKey}`,
+        );
+        bonus = {
+          awarded: amount,
+          daily_remaining: await getDailyBonusRemaining(client, user.id),
+          cap_reached: false,
+        };
+      } else {
+        bonus = await awardBonusWithDailyCap(
+          client,
+          user.id,
+          amount,
+          getTaskReason(taskKey),
+          `task:${taskKey}`,
+        );
+      }
     }
 
     const balanceResult = await client.query(
