@@ -124,6 +124,8 @@ function mapMarketActivity(row) {
 
 function mapWorldCupMarket(row) {
   const yesPrice = toNumber(row.yes_price);
+  const localVolume = toNumber(row.yes_volume) + toNumber(row.no_volume);
+  const externalVolume = toNumber(row.meta_volume ?? row.volume);
   return {
     id: Number(row.id),
     symbol: row.symbol,
@@ -140,7 +142,8 @@ function mapWorldCupMarket(row) {
     yes_price: yesPrice,
     no_price: toNumber(row.no_price, 1 - yesPrice),
     chance_pct: Math.round(yesPrice * 1000) / 10,
-    volume: toNumber(row.meta_volume ?? row.volume),
+    volume: localVolume,
+    external_volume: externalVolume,
     yes_volume: toNumber(row.yes_volume),
     no_volume: toNumber(row.no_volume),
     start_time: row.start_time,
@@ -1054,7 +1057,7 @@ export async function getWorldCupMarkets() {
       JOIN world_cup_market_meta meta ON meta.symbol = markets.symbol
       WHERE markets.status = 'open'
         AND markets.symbol LIKE $1
-      ORDER BY markets.yes_price DESC, meta.volume DESC
+      ORDER BY meta.volume DESC, markets.yes_price DESC
     `,
     [`${WORLD_CUP_SYMBOL_PREFIX}%`],
   );

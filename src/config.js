@@ -21,6 +21,11 @@ export const config = {
   allowDevAuth: process.env.NODE_ENV !== "production" || parseBoolean(process.env.ALLOW_DEV_AUTH, false),
   allowDevTools: parseBoolean(process.env.ALLOW_DEV_TOOLS, false),
   botBridgeSecret: process.env.BOT_BRIDGE_SECRET || "",
+  telegramBotToken: (
+    process.env.TELEGRAM_BOT_TOKEN
+      || process.env.BOT_TOKEN
+      || ""
+  ).trim(),
   publicAvBotUrl: (
     process.env.PUBLIC_AV_BOT_URL
       || process.env.AV_BOT_URL
@@ -40,7 +45,7 @@ export const config = {
   referralBetBonusFire: parseNumber(process.env.REFERRAL_BET_BONUS_FIRE, 500, 0),
   taskShareFire: parseNumber(process.env.TASK_SHARE_FIRE, 100, 0),
   taskSubscribeFire: parseNumber(process.env.TASK_SUBSCRIBE_FIRE, 500, 0),
-  taskPrivateChatFire: parseNumber(process.env.TASK_PRIVATE_CHAT_FIRE, 100_000, 0),
+  taskPrivateChatFire: parseNumber(process.env.TASK_PRIVATE_CHAT_FIRE, 15_000, 0),
   taskDailyCapFire: parseNumber(process.env.TASK_DAILY_CAP_FIRE, 10_000, 0),
   publicAvChannelUrl: (
     process.env.PUBLIC_AV_CHANNEL_URL
@@ -48,7 +53,7 @@ export const config = {
   ).trim(),
   publicAvChatUrl: (
     process.env.PUBLIC_AV_CHAT_URL
-      || "https://t.me/voit_help_bot?start=check_chat_task"
+      || "https://t.me/thedaomaker"
   ).trim(),
   publicPrivateChatUrl: (
     process.env.PUBLIC_PRIVATE_CHAT_URL

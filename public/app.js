@@ -14,12 +14,19 @@ const state = {
   activity: [],
   chartPoints: [],
   worldCupMarkets: [],
+  worldCupOrder: [],
+  worldCupListRenderedOrder: "",
   selectedWorldCupMarketId: null,
   worldCupCharts: new Map(),
   betSheet: {
     market: null,
     side: "YES",
     amount: 0,
+  },
+  topup: {
+    amount: 0,
+    reason: "",
+    pending: false,
   },
   selectedSide: "YES",
   selectedAmount: 50,
@@ -34,11 +41,12 @@ const state = {
     referral_bonus_fire: 500,
     task_share_fire: 100,
     task_subscribe_fire: 500,
-    task_private_chat_fire: 100000,
+    task_private_chat_fire: 15000,
     task_daily_cap_fire: 10000,
     av_channel_url: "https://t.me/erc20coin",
-    av_chat_url: "https://t.me/voit_help_bot?start=check_chat_task",
+    av_chat_url: "https://t.me/thedaomaker",
     private_chat_url: "https://t.me/tribute/app?startapp=stKL",
+    stars_invoice_enabled: false,
   },
   chartRaf: null,
   smoothedPrice: null,
@@ -99,7 +107,7 @@ function isImageUrl(value) {
 
 function teamIconMarkup(icon, alt = "team") {
   if (isImageUrl(icon)) {
-    return `<img src="${escapeHtml(icon)}" alt="${escapeHtml(alt)}" loading="lazy" />`;
+    return `<img src="${escapeHtml(icon)}" alt="${escapeHtml(alt)}" loading="eager" decoding="async" />`;
   }
   return `<span>${escapeHtml(icon || "🏆")}</span>`;
 }
@@ -108,6 +116,12 @@ function setTeamIconElement(element, icon, alt = "team") {
   if (!element) {
     return;
   }
+  const normalizedIcon = String(icon || "");
+  if (element.dataset.icon === normalizedIcon && element.dataset.alt === String(alt || "")) {
+    return;
+  }
+  element.dataset.icon = normalizedIcon;
+  element.dataset.alt = String(alt || "");
   element.innerHTML = teamIconMarkup(icon, alt);
 }
 
@@ -597,7 +611,7 @@ async function loadPublicConfig() {
 function renderTaskRewards() {
   const share = Math.round(Number(state.publicConfig.task_share_fire || 100));
   const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 500));
-  const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 100000));
+  const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 15000));
   const ref = Math.round(Number(state.publicConfig.referral_bonus_fire || 500));
   const cap = Math.round(Number(state.publicConfig.task_daily_cap_fire || 10000));
   if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
@@ -735,7 +749,22 @@ function mergeWorldCupChartPoint(market) {
 
 async function loadWorldCupMarkets() {
   const data = await api("/api/world-cup/markets");
-  state.worldCupMarkets = data.markets || [];
+  const incomingMarkets = data.markets || [];
+  if (!state.worldCupOrder.length) {
+    state.worldCupOrder = incomingMarkets.map((market) => market.id);
+  } else {
+    for (const market of incomingMarkets) {
+      if (!state.worldCupOrder.includes(market.id)) {
+        state.worldCupOrder.push(market.id);
+      }
+    }
+    const existingIds = new Set(incomingMarkets.map((market) => market.id));
+    state.worldCupOrder = state.worldCupOrder.filter((id) => existingIds.has(id));
+  }
+  const orderIndex = new Map(state.worldCupOrder.map((id, index) => [id, index]));
+  state.worldCupMarkets = incomingMarkets
+    .slice()
+    .sort((a, b) => (orderIndex.get(a.id) ?? 9999) - (orderIndex.get(b.id) ?? 9999));
   state.worldCupMarkets.forEach(mergeWorldCupChartPoint);
   if (
     state.selectedWorldCupMarketId
@@ -816,7 +845,7 @@ function renderMarket() {
   }
   $("marketWindow").textContent = hasMarket ? formatMarketWindow(market) : "--";
   const priceLabels = document.querySelectorAll(".price-board .label");
-  if (priceLabels[0]) priceLabels[0].textContent = worldCup ? "Volume" : "Target Price";
+  if (priceLabels[0]) priceLabels[0].textContent = worldCup ? "Stars Volume" : "Target Price";
   if (priceLabels[1]) {
     priceLabels[1].childNodes[0].nodeValue = worldCup ? "Yes Chance " : "Current Price ";
   }
@@ -839,6 +868,7 @@ function renderMarket() {
   animateText($("yesVolume"), yesVolume, formatFire);
   animateText($("noVolume"), noVolume, formatFire);
   $("depthYesBar").parentElement.style.setProperty("--yes-depth", `${yesDepth}%`);
+  document.querySelector(".market-depth")?.classList.toggle("hidden", !worldCup);
 
   updateTimer();
   document.querySelectorAll(".outcome-button, .amount-button").forEach((button) => {
@@ -848,18 +878,31 @@ function renderMarket() {
 
 function updateTimer() {
   const market = getDisplayMarket();
+  const minuteLabel = $("timeLeftMinutes")?.nextElementSibling;
+  const secondLabel = $("timeLeftSeconds")?.nextElementSibling;
   if (!market?.end_time) {
     $("timeLeftMinutes").textContent = "--";
     $("timeLeftSeconds").textContent = "--";
+    if (minuteLabel) minuteLabel.textContent = "MINS";
+    if (secondLabel) secondLabel.textContent = "SECS";
     return;
   }
 
   const remainingMs = new Date(market.end_time).getTime() - Date.now();
   const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
+  if (isWorldCupMarket(market) && seconds > 172_800) {
+    $("timeLeftMinutes").textContent = String(Math.ceil(seconds / 86_400));
+    $("timeLeftSeconds").textContent = "";
+    if (minuteLabel) minuteLabel.textContent = "DAYS";
+    if (secondLabel) secondLabel.textContent = "LEFT";
+    return;
+  }
   const minutesPart = String(Math.floor(seconds / 60)).padStart(2, "0");
   const secondsPart = String(seconds % 60).padStart(2, "0");
   $("timeLeftMinutes").textContent = minutesPart;
   $("timeLeftSeconds").textContent = secondsPart;
+  if (minuteLabel) minuteLabel.textContent = "MINS";
+  if (secondLabel) secondLabel.textContent = "SECS";
 }
 
 function renderMe() {
@@ -1021,15 +1064,35 @@ function renderWorldCupList() {
     return;
   }
 
+  const orderKey = state.worldCupMarkets.map((market) => market.id).join(",");
+  if (state.worldCupListRenderedOrder === orderKey) {
+    for (const market of state.worldCupMarkets) {
+      const row = container.querySelector(`[data-market-id="${market.id}"]`);
+      if (!row) continue;
+      const volume = row.querySelector("[data-world-cup-volume]");
+      const chance = row.querySelector("[data-world-cup-chance]");
+      const yesButton = row.querySelector("[data-side='YES']");
+      const noButton = row.querySelector("[data-side='NO']");
+      if (volume) volume.textContent = `${formatVolume(market.volume)}⭐ Vol.`;
+      if (chance) {
+        chance.textContent = `${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%`;
+      }
+      if (yesButton) yesButton.textContent = `Buy Yes ${formatCents(market.yes_price)}`;
+      if (noButton) noButton.textContent = `Buy No ${formatCents(market.no_price)}`;
+    }
+    return;
+  }
+
+  state.worldCupListRenderedOrder = orderKey;
   container.innerHTML = state.worldCupMarkets.map((market) => `
     <article class="world-cup-row" data-market-id="${market.id}">
       <button class="world-cup-main" data-world-cup-open="${market.id}" type="button">
         <span class="team-flag">${teamIconMarkup(market.icon, market.team)}</span>
         <span>
           <strong>${escapeHtml(market.team)}</strong>
-          <small>${formatVolume(market.volume)} Vol.</small>
+          <small data-world-cup-volume>${formatVolume(market.volume)}⭐ Vol.</small>
         </span>
-        <b>${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%</b>
+        <b data-world-cup-chance>${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%</b>
       </button>
       <div class="world-cup-actions">
         <button class="wc-yes" data-world-cup-buy="${market.id}" data-side="YES" type="button">Buy Yes ${formatCents(market.yes_price)}</button>
@@ -1101,6 +1164,90 @@ function closeBetSheet() {
   $("betSheet")?.classList.add("hidden");
 }
 
+function renderTopupSheet() {
+  const amount = Math.max(1, Math.round(Number(state.topup.amount || 0)));
+  if ($("topupAmountValue")) $("topupAmountValue").textContent = formatFire(amount);
+  if ($("topupReason")) {
+    $("topupReason").textContent = state.topup.reason || "Звезды зачислятся в баланс после оплаты.";
+  }
+  if ($("topupBuyBtn")) {
+    $("topupBuyBtn").disabled = state.topup.pending || !state.user;
+    $("topupBuyBtn").textContent = state.topup.pending ? "Открываю оплату..." : `Купить ${formatStars(amount)}`;
+  }
+}
+
+function openTopupSheet(amount, reason = "") {
+  state.topup.amount = Math.max(1, Math.round(Number(amount || 0)));
+  state.topup.reason = reason;
+  renderTopupSheet();
+  $("topupSheet")?.classList.remove("hidden");
+}
+
+function closeTopupSheet() {
+  $("topupSheet")?.classList.add("hidden");
+}
+
+function setWithdrawSheetOpen(open) {
+  $("withdrawSheet")?.classList.toggle("hidden", !open);
+}
+
+async function refreshBalanceAfterInvoice() {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, attempt < 2 ? 900 : 1500));
+    await loadMe().catch(() => undefined);
+  }
+}
+
+async function startStarsTopup() {
+  if (!state.user?.telegram_id) {
+    triggerHaptic("warning");
+    showToast("Сначала нужен пользователь.");
+    return;
+  }
+
+  const amount = Math.max(1, Math.round(Number(state.topup.amount || 0)));
+  state.topup.pending = true;
+  renderTopupSheet();
+  try {
+    const result = await api("/api/stars/invoice", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        amount,
+      }),
+    });
+    const invoiceUrl = result.invoice_url;
+    const tg = window.Telegram?.WebApp;
+    if (tg?.openInvoice) {
+      tg.openInvoice(invoiceUrl, (status) => {
+        if (status === "paid") {
+          triggerHaptic("success");
+          showToast("Оплата прошла. Обновляю баланс...");
+          closeTopupSheet();
+          void refreshBalanceAfterInvoice();
+          return;
+        }
+        if (status === "cancelled") {
+          showToast("Оплата отменена.");
+        }
+      });
+    } else {
+      window.open(invoiceUrl, "_blank", "noopener,noreferrer");
+      showToast("После оплаты баланс обновится автоматически.");
+      void refreshBalanceAfterInvoice();
+    }
+  } catch (error) {
+    triggerHaptic("error");
+    const message = error.message === "invoice_not_configured"
+      ? "Покупка внутри Mini App ещё не настроена на сервере."
+      : "Не получилось открыть оплату.";
+    showToast(message);
+  } finally {
+    state.topup.pending = false;
+    renderTopupSheet();
+  }
+}
+
 function showTradeBubble(trade) {
   const container = $("tradeBubbles");
   const bubble = document.createElement("div");
@@ -1152,6 +1299,12 @@ async function buy(amount = state.selectedAmount) {
   const side = state.selectedSide;
   const buyAmount = Number(amount || state.selectedAmount);
   state.selectedAmount = buyAmount;
+  if (buyAmount > Number(state.balance || 0)) {
+    const missing = Math.max(1, Math.ceil(buyAmount - Number(state.balance || 0)));
+    triggerHaptic("warning");
+    openTopupSheet(missing, `Для ставки ${formatStars(buyAmount)} не хватает ${formatStars(missing)}.`);
+    return;
+  }
   triggerHaptic("medium");
   state.pendingBuy = true;
   renderTradeTicket();
@@ -1182,7 +1335,12 @@ async function buy(amount = state.selectedAmount) {
     ]);
   } catch (error) {
     triggerHaptic("error");
-    showToast(error.message === "insufficient_fire" ? "Не хватает ⭐." : "Покупка не прошла.");
+    if (error.message === "insufficient_fire") {
+      const missing = Math.max(1, Math.ceil(buyAmount - Number(state.balance || 0)));
+      openTopupSheet(missing, `Для ставки ${formatStars(buyAmount)} не хватает ${formatStars(missing)}.`);
+    } else {
+      showToast("Покупка не прошла.");
+    }
   } finally {
     state.pendingBuy = false;
     renderMarket();
@@ -1299,8 +1457,39 @@ if (refreshButton) {
 
 $("walletBtn").addEventListener("click", () => {
   triggerHaptic("selection");
-  const url = state.publicConfig.av_bot_url || "https://t.me/voit_help_bot?start=buy_stars";
-  openBotTopup(url);
+  openTopupSheet(100, "Выбери сумму пополнения. 1 Telegram Star = 1⭐.");
+});
+
+$("withdrawBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  setWithdrawSheetOpen(true);
+});
+
+$("withdrawCloseBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  setWithdrawSheetOpen(false);
+});
+
+$("withdrawSheet")?.addEventListener("click", (event) => {
+  if (event.target === $("withdrawSheet")) {
+    setWithdrawSheetOpen(false);
+  }
+});
+
+$("topupCloseBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  closeTopupSheet();
+});
+
+$("topupSheet")?.addEventListener("click", (event) => {
+  if (event.target === $("topupSheet")) {
+    closeTopupSheet();
+  }
+});
+
+$("topupBuyBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  void startStarsTopup();
 });
 
 function buildInviteUrl(inviterTelegramId) {
@@ -1454,14 +1643,14 @@ $("taskChannelBtn").addEventListener("click", () => {
 
 $("taskChatBtn").addEventListener("click", () => {
   triggerHaptic("selection");
-  openTelegramUrl(state.publicConfig.av_chat_url || state.publicConfig.av_bot_url);
+  openTelegramUrl(state.publicConfig.av_chat_url || "https://t.me/thedaomaker");
   showToast("После вступления AV-бот проверит чат и начислит ⭐.");
 });
 
 $("taskPrivateChatBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   openTelegramUrl(state.publicConfig.private_chat_url || state.publicConfig.av_bot_url);
-  showToast("После подписки на приватку AV-бот начислит аванс 100 000⭐.");
+  showToast(`После подписки на приватку AV-бот начислит аванс ${formatStars(Number(state.publicConfig.task_private_chat_fire || 15000))}.`);
 });
 
 $("taskShareBtn").addEventListener("click", () => {
@@ -1531,7 +1720,15 @@ $("betSideNoBtn")?.addEventListener("click", () => {
 document.querySelectorAll("[data-bet-add]").forEach((button) => {
   button.addEventListener("click", () => {
     triggerHaptic("selection");
-    state.betSheet.amount += Number(button.dataset.betAdd || 0);
+    const addAmount = Number(button.dataset.betAdd || 0);
+    const nextAmount = state.betSheet.amount + addAmount;
+    if (nextAmount > Number(state.balance || 0)) {
+      const missing = Math.max(1, Math.ceil(nextAmount - Number(state.balance || 0)));
+      triggerHaptic("warning");
+      openTopupSheet(missing, `Для ставки ${formatStars(nextAmount)} не хватает ${formatStars(missing)}.`);
+      return;
+    }
+    state.betSheet.amount = nextAmount;
     renderBetSheet();
   });
 });

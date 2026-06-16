@@ -1,4 +1,5 @@
 import express from "express";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -65,6 +66,8 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "invalid_task",
     "insufficient_shares",
     "invalid_market_price",
+    "invoice_failed",
+    "invoice_not_configured",
     "sell_failed",
   ]);
 
@@ -182,7 +185,61 @@ app.get("/api/public/config", (_req, res) => {
     av_channel_url: config.publicAvChannelUrl,
     av_chat_url: config.publicAvChatUrl,
     private_chat_url: config.publicPrivateChatUrl,
+    stars_invoice_enabled: Boolean(config.telegramBotToken),
   });
+});
+
+function buildStarsTopupPayload(input) {
+  const nonce = randomBytes(4).toString("hex");
+  return ["fire_topup", input.telegramId, input.amount, input.amount, nonce].join(":");
+}
+
+app.post("/api/stars/invoice", async (req, res) => {
+  try {
+    if (!config.telegramBotToken) {
+      throw new Error("invoice_not_configured");
+    }
+
+    const telegramId = String(req.body?.telegram_id || "").trim();
+    const amount = Math.round(Number(req.body?.amount || 0));
+    if (!telegramId) {
+      throw new Error("telegram_id_missing");
+    }
+    if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 100_000) {
+      throw new Error("amount_must_be_positive");
+    }
+
+    const payload = buildStarsTopupPayload({ telegramId, amount });
+    const response = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/createInvoiceLink`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: `${amount.toLocaleString("ru-RU")} звезд`,
+        description: `Пополнение баланса EasyMarket: ${amount.toLocaleString("ru-RU")}⭐`,
+        payload,
+        provider_token: "",
+        currency: "XTR",
+        prices: [
+          {
+            label: `${amount.toLocaleString("ru-RU")}⭐`,
+            amount,
+          },
+        ],
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok || !data.result) {
+      throw new Error("invoice_failed");
+    }
+
+    res.status(200).json({
+      ok: true,
+      invoice_url: data.result,
+      amount,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
 });
 
 app.post("/api/me/upsert", async (req, res) => {

@@ -54,6 +54,7 @@ PORT=3000
 NODE_ENV=production
 PGSSLMODE=require
 BOT_BRIDGE_SECRET=
+TELEGRAM_BOT_TOKEN=
 ALLOW_DEV_AUTH=false
 ALLOW_DEV_TOOLS=false
 MARKET_INTERVAL_SECONDS=10
@@ -67,12 +68,14 @@ PUBLIC_MINI_APP_URL=https://t.me/voit_help_bot?startapp=easymarket
 REFERRAL_BET_BONUS_FIRE=500
 TASK_SHARE_FIRE=100
 TASK_SUBSCRIBE_FIRE=500
-TASK_PRIVATE_CHAT_FIRE=100000
+TASK_PRIVATE_CHAT_FIRE=15000
 TASK_DAILY_CAP_FIRE=10000
 PUBLIC_AV_CHANNEL_URL=https://t.me/erc20coin
-PUBLIC_AV_CHAT_URL=
+PUBLIC_AV_CHAT_URL=https://t.me/thedaomaker
 PUBLIC_PRIVATE_CHAT_URL=https://t.me/tribute/app?startapp=stKL
 ```
+
+`TELEGRAM_BOT_TOKEN` is optional and is used only for creating Telegram Stars invoice links inside the Mini App. Do not commit real tokens.
 
 `DATABASE_URL` must be set in the Render environment. Do not commit real database credentials.
 `BOT_BRIDGE_SECRET` protects future local Telegram bot bridge endpoints through the `x-bridge-secret` header.
