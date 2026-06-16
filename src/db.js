@@ -123,6 +123,19 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_markets_status_end_time
       ON markets(status, end_time);
 
+    CREATE INDEX IF NOT EXISTS idx_markets_symbol_status
+      ON markets(symbol, status);
+
+    CREATE TABLE IF NOT EXISTS world_cup_market_meta (
+      symbol TEXT PRIMARY KEY,
+      polymarket_id TEXT,
+      team TEXT NOT NULL,
+      slug TEXT,
+      icon TEXT,
+      volume NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS fire_referral_bonuses (
       id BIGSERIAL PRIMARY KEY,
       inviter_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

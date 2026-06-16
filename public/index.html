@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260616-1" />
+    <link rel="stylesheet" href="/styles.css?v=20260616-2" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -12,11 +12,14 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">EasyMarket</p>
-          <h1><span id="fireBalance">0</span> FIRE</h1>
+          <h1><span class="balance-star">⭐</span> <span id="fireBalance">0</span></h1>
         </div>
         <div class="top-actions">
-          <button id="walletBtn" class="icon-button fire-action" type="button" aria-label="Пополнить огни">
-            <span class="icon-emoji">🔥</span>
+          <button id="worldCupBtn" class="icon-button sport-action" type="button" aria-label="World Cup markets">
+            🏆
+          </button>
+          <button id="walletBtn" class="icon-button fire-action" type="button" aria-label="Пополнить звезды">
+            <span class="icon-emoji">⭐</span>
           </button>
           <button id="tasksBtn" class="icon-button accent plus-action" type="button" aria-label="Открыть задания">
             +
@@ -29,7 +32,7 @@
           <div class="task-head">
             <div>
               <p class="eyebrow">Bonus tasks</p>
-              <h2>Задания за FIRE</h2>
+              <h2>Задания за ⭐</h2>
             </div>
             <button id="tasksCloseBtn" class="icon-button" type="button" aria-label="Закрыть задания">×</button>
           </div>
@@ -37,33 +40,77 @@
             <div class="task-row">
               <div>
                 <strong>Подписаться на канал AV</strong>
-                <small>+<span id="channelTaskReward">500</span> FIRE после проверки ботом</small>
+                <small>+<span id="channelTaskReward">500</span>⭐ после проверки ботом</small>
               </div>
               <button id="taskChannelBtn" class="task-button" type="button">Открыть</button>
             </div>
             <div class="task-row">
               <div>
                 <strong>Вступить в наш чат</strong>
-                <small>+<span id="chatTaskReward">500</span> FIRE после проверки ботом</small>
+                <small>+<span id="chatTaskReward">500</span>⭐ после проверки ботом</small>
               </div>
               <button id="taskChatBtn" class="task-button" type="button">Открыть</button>
             </div>
             <div class="task-row featured">
               <div>
                 <strong>Подписаться на приватку</strong>
-                <small>+<span id="privateChatTaskReward">100 000</span> FIRE авансом после проверки подписки</small>
+                <small>+<span id="privateChatTaskReward">100 000</span>⭐ авансом после проверки подписки</small>
               </div>
               <button id="taskPrivateChatBtn" class="task-button gold" type="button">Открыть</button>
             </div>
             <div class="task-row">
               <div>
                 <strong>Рассказать друзьям</strong>
-                <small>+<span id="shareTaskReward">100</span> FIRE за share, +<span id="refTaskReward">500</span> FIRE после первой ставки друга</small>
+                <small>+<span id="shareTaskReward">100</span>⭐ за share, +<span id="refTaskReward">500</span>⭐ после первой ставки друга</small>
               </div>
               <button id="taskShareBtn" class="task-button gold" type="button">Share</button>
             </div>
           </div>
-          <p class="task-limit">Дневной лимит обычных бонусов: <span id="taskDailyCap">10 000</span> FIRE. Приватка начисляется отдельно.</p>
+          <p class="task-limit">Дневной лимит обычных бонусов: <span id="taskDailyCap">10 000</span>⭐. Приватка начисляется отдельно.</p>
+        </div>
+      </section>
+
+      <section id="worldCupSheet" class="task-sheet hidden" aria-label="World Cup markets">
+        <div class="task-panel world-cup-panel">
+          <div class="task-head">
+            <div>
+              <p class="eyebrow">Football markets</p>
+              <h2>World Cup Winner</h2>
+            </div>
+            <button id="worldCupCloseBtn" class="icon-button" type="button" aria-label="Закрыть World Cup">×</button>
+          </div>
+          <div id="worldCupList" class="world-cup-list">
+            <p class="muted">Загружаю команды...</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="betSheet" class="task-sheet hidden" aria-label="Ставка">
+        <div class="bet-panel">
+          <div class="sheet-grabber"></div>
+          <div class="bet-sheet-head">
+            <span id="betTeamIcon" class="team-flag">🏆</span>
+            <div>
+              <p id="betMarketTitle" class="eyebrow">World Cup Winner</p>
+              <h2><span id="betTeamName">Team</span> · <span id="betSideName">Yes</span></h2>
+            </div>
+            <button id="betCloseBtn" class="icon-button" type="button" aria-label="Закрыть ставку">×</button>
+          </div>
+          <div class="bet-amount-display">
+            <strong><span id="betAmountValue">0</span>⭐</strong>
+            <small>To win <span id="betWinValue">0</span>⭐ · <span id="betPriceValue">0¢</span></small>
+          </div>
+          <div class="bet-side-toggle">
+            <button id="betSideYesBtn" class="active" type="button">Yes</button>
+            <button id="betSideNoBtn" type="button">No</button>
+          </div>
+          <div class="bet-add-grid">
+            <button data-bet-add="50" type="button">+50</button>
+            <button data-bet-add="100" type="button">+100</button>
+            <button data-bet-add="500" type="button">+500</button>
+            <button data-bet-add="1000" type="button">+1000</button>
+          </div>
+          <button id="betConfirmBtn" class="trade-confirm" type="button">Trade</button>
         </div>
       </section>
 
@@ -80,7 +127,8 @@
         <div class="market-hero">
           <div class="coin-badge">₿</div>
           <div class="market-heading">
-            <h2>BTC Up or Down 5m <span id="marketStatus" class="status-pill">...</span></h2>
+            <h2 id="marketTitle">BTC Up or Down 5m</h2>
+            <span id="marketStatus" class="status-pill">...</span>
             <p id="marketWindow">--</p>
           </div>
           <div class="countdown">
@@ -126,8 +174,8 @@
             <span id="depthNoBar"></span>
           </div>
           <div class="depth-labels">
-            <span>UP <b id="yesVolume">0</b> FIRE</span>
-            <span>DOWN <b id="noVolume">0</b> FIRE</span>
+            <span>UP <b id="yesVolume">0</b>⭐</span>
+            <span>DOWN <b id="noVolume">0</b>⭐</span>
           </div>
         </div>
       </section>
@@ -182,6 +230,6 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
-    <script src="/app.js?v=20260616-1" type="module"></script>
+    <script src="/app.js?v=20260616-2" type="module"></script>
   </body>
 </html>

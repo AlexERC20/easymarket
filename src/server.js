@@ -17,6 +17,7 @@ import {
   getMarketChart,
   getRecentMarkets,
   getUserSnapshot,
+  getWorldCupMarkets,
   resolveExpiredMarkets,
   sellOutcome,
   syncFireBalance,
@@ -262,6 +263,18 @@ app.get("/api/market/:marketId/activity", async (req, res) => {
     res.status(200).json({
       ok: true,
       activity,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/world-cup/markets", async (_req, res) => {
+  try {
+    const result = await getWorldCupMarkets();
+    res.status(200).json({
+      ok: true,
+      ...result,
     });
   } catch (error) {
     sendApiError(res, error);

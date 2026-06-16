@@ -281,23 +281,46 @@ h2 {
   line-height: 1;
 }
 
+.coin-badge.team,
+.team-flag {
+  overflow: hidden;
+  background: #111722;
+}
+
+.coin-badge.team img,
+.team-flag img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.team-flag {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  font-size: 24px;
+}
+
 .market-heading {
   min-width: 0;
   flex: 1;
 }
 
 .market-heading h2 {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-wrap: nowrap;
+  display: block;
   font-size: clamp(18px, 5vw, 28px);
   line-height: 1.02;
   white-space: nowrap;
 }
 
 .market-heading .status-pill {
-  flex: 0 0 auto;
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 6px;
   padding: 4px 7px;
   font-size: 9px;
   line-height: 1;
@@ -797,6 +820,205 @@ code {
 
 .task-limit {
   margin-top: 12px;
+}
+
+.world-cup-panel {
+  max-height: min(82dvh, 740px);
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.world-cup-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.world-cup-row {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 12px;
+}
+
+.world-cup-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.world-cup-main {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: 50px 1fr auto;
+  align-items: center;
+  gap: 11px;
+  padding: 0;
+  text-align: left;
+}
+
+.world-cup-main strong,
+.world-cup-main small {
+  display: block;
+}
+
+.world-cup-main strong {
+  font-size: 19px;
+  font-weight: 950;
+}
+
+.world-cup-main small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.world-cup-main b {
+  font-size: 27px;
+  font-weight: 950;
+}
+
+.world-cup-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.world-cup-actions button {
+  min-height: 48px;
+  border: 0;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.world-cup-actions .wc-yes {
+  background: rgba(25, 195, 125, 0.16);
+  color: var(--yes);
+}
+
+.world-cup-actions .wc-no {
+  background: rgba(239, 70, 111, 0.16);
+  color: var(--no);
+}
+
+.bet-panel {
+  width: min(100%, 430px);
+  margin: 0 auto max(10px, env(safe-area-inset-bottom));
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: #11161f;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.68);
+  padding: 14px;
+}
+
+.sheet-grabber {
+  width: 62px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  margin: 0 auto 18px;
+}
+
+.bet-sheet-head {
+  display: grid;
+  grid-template-columns: 48px 1fr 42px;
+  align-items: center;
+  gap: 12px;
+}
+
+.bet-sheet-head h2 {
+  margin-top: 4px;
+  font-size: 20px;
+}
+
+.bet-amount-display {
+  display: grid;
+  place-items: center;
+  min-height: 205px;
+  text-align: center;
+}
+
+.bet-amount-display strong {
+  display: block;
+  color: #dfe6f5;
+  font-size: clamp(54px, 18vw, 82px);
+  font-weight: 950;
+  line-height: 1;
+}
+
+.bet-amount-display small {
+  display: block;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 850;
+}
+
+.bet-amount-display small span:first-child {
+  color: var(--yes);
+}
+
+.bet-side-toggle {
+  display: flex;
+  width: fit-content;
+  margin: 0 auto 24px;
+  border-radius: 18px;
+  background: rgba(10, 14, 22, 0.62);
+  padding: 5px;
+}
+
+.bet-side-toggle button {
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--muted);
+  padding: 10px 20px;
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.bet-side-toggle button.active {
+  background: #222b38;
+  color: var(--text);
+}
+
+.bet-add-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.bet-add-grid button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: #202833;
+  color: #aeb8ca;
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.trade-confirm {
+  width: 100%;
+  min-height: 62px;
+  border: 0;
+  border-radius: 13px;
+  background: #1299f3;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 950;
+  box-shadow: inset 0 -5px 0 rgba(0, 0, 0, 0.2);
+}
+
+.trade-confirm:disabled {
+  opacity: 0.55;
 }
 
 @media (min-width: 700px) {

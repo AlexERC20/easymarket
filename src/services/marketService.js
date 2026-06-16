@@ -3,9 +3,27 @@ import { query, toNumber, withTransaction } from "../db.js";
 import { getBtcPrice, PriceUnavailableError } from "./priceService.js";
 
 const MARKET_SYMBOL = "BTCUSDT";
+const WORLD_CUP_EVENT_SLUG = "world-cup-winner";
+const WORLD_CUP_SYMBOL_PREFIX = "WCUP:";
 const MIN_PRICE = 0.001;
 const MAX_PRICE = 0.999;
 const DEFAULT_FEE_BPS = 200;
+const DEFAULT_PROFIT_FEE_BPS = 500;
+
+const WORLD_CUP_FALLBACK_MARKETS = [
+  { polymarketId: "fallback-france", team: "France", icon: "🇫🇷", yesPrice: 0.171, volume: 54_606_121 },
+  { polymarketId: "fallback-spain", team: "Spain", icon: "🇪🇸", yesPrice: 0.146, volume: 48_880_678 },
+  { polymarketId: "fallback-portugal", team: "Portugal", icon: "🇵🇹", yesPrice: 0.108, volume: 48_252_376 },
+  { polymarketId: "fallback-england", team: "England", icon: "🏴", yesPrice: 0.105, volume: 45_020_000 },
+  { polymarketId: "fallback-brazil", team: "Brazil", icon: "🇧🇷", yesPrice: 0.093, volume: 44_500_000 },
+  { polymarketId: "fallback-argentina", team: "Argentina", icon: "🇦🇷", yesPrice: 0.084, volume: 43_700_000 },
+  { polymarketId: "fallback-germany", team: "Germany", icon: "🇩🇪", yesPrice: 0.061, volume: 38_200_000 },
+  { polymarketId: "fallback-netherlands", team: "Netherlands", icon: "🇳🇱", yesPrice: 0.049, volume: 31_900_000 },
+  { polymarketId: "fallback-italy", team: "Italy", icon: "🇮🇹", yesPrice: 0.035, volume: 24_700_000 },
+  { polymarketId: "fallback-usa", team: "USA", icon: "🇺🇸", yesPrice: 0.026, volume: 21_000_000 },
+  { polymarketId: "fallback-mexico", team: "Mexico", icon: "🇲🇽", yesPrice: 0.018, volume: 16_600_000 },
+  { polymarketId: "fallback-canada", team: "Canada", icon: "🇨🇦", yesPrice: 0.012, volume: 12_300_000 },
+];
 
 function mapMarket(row) {
   if (!row) {
@@ -101,6 +119,33 @@ function mapMarketActivity(row) {
     price: toNumber(row.price),
     shares: toNumber(row.shares),
     created_at: row.created_at,
+  };
+}
+
+function mapWorldCupMarket(row) {
+  const yesPrice = toNumber(row.yes_price);
+  return {
+    id: Number(row.id),
+    symbol: row.symbol,
+    market_type: "WORLD_CUP_WINNER",
+    title: "World Cup Winner",
+    team: row.team,
+    icon: row.icon || "🏆",
+    image: row.icon || null,
+    slug: row.slug,
+    polymarket_id: row.polymarket_id,
+    question: row.question,
+    open_price: toNumber(row.open_price),
+    current_price: yesPrice,
+    yes_price: yesPrice,
+    no_price: toNumber(row.no_price, 1 - yesPrice),
+    chance_pct: Math.round(yesPrice * 1000) / 10,
+    volume: toNumber(row.meta_volume ?? row.volume),
+    yes_volume: toNumber(row.yes_volume),
+    no_volume: toNumber(row.no_volume),
+    start_time: row.start_time,
+    status: row.status,
+    end_time: row.end_time,
   };
 }
 
@@ -202,6 +247,96 @@ function getFeeBps() {
 
 function calculateFee(amount) {
   return Math.round(Number(amount || 0) * (getFeeBps() / 10_000) * 100) / 100;
+}
+
+function getProfitFeeBps() {
+  return Number.isFinite(config.marketProfitFeeBps) ? config.marketProfitFeeBps : DEFAULT_PROFIT_FEE_BPS;
+}
+
+function calculateProfitFee(profit) {
+  return Math.round(Math.max(0, Number(profit || 0)) * (getProfitFeeBps() / 10_000) * 100) / 100;
+}
+
+function normalizeWorldCupTeam(question) {
+  return String(question || "")
+    .replace(/^Will\s+/i, "")
+    .replace(/\s+win the 2026 FIFA World Cup\??$/i, "")
+    .trim();
+}
+
+function parseJsonArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  try {
+    return JSON.parse(String(value || "[]"));
+  } catch {
+    return [];
+  }
+}
+
+function normalizeWorldCupFeedMarket(market) {
+  const outcomePrices = parseJsonArray(market.outcomePrices);
+  const rawYesPrice = Number(outcomePrices[0]);
+  const team = normalizeWorldCupTeam(market.question);
+  if (!team || !Number.isFinite(rawYesPrice)) {
+    return null;
+  }
+  const yesPrice = clamp(rawYesPrice, MIN_PRICE, MAX_PRICE);
+
+  return {
+    polymarketId: String(market.id || market.slug || team),
+    team,
+    icon: market.icon || market.image || "",
+    slug: market.slug || "",
+    yesPrice,
+    volume: toNumber(market.volumeNum ?? market.volume),
+  };
+}
+
+async function fetchWorldCupMarketsFromPolymarket() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4500);
+  try {
+    const response = await fetch(
+      `https://gamma-api.polymarket.com/events/slug/${WORLD_CUP_EVENT_SLUG}`,
+      { signal: controller.signal },
+    );
+    if (!response.ok) {
+      throw new Error(`polymarket_${response.status}`);
+    }
+    const event = await response.json();
+    return (event.markets || [])
+      .map(normalizeWorldCupFeedMarket)
+      .filter(Boolean)
+      .sort((a, b) => b.yesPrice - a.yesPrice)
+      .slice(0, 60);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function worldCupSymbol(input) {
+  return `${WORLD_CUP_SYMBOL_PREFIX}${String(input.polymarketId).replace(/[^a-z0-9_-]/gi, "_")}`;
+}
+
+async function getWorldCupFeedMarkets() {
+  try {
+    const markets = await fetchWorldCupMarketsFromPolymarket();
+    if (markets.length) {
+      return {
+        source: "polymarket",
+        markets,
+      };
+    }
+  } catch (error) {
+    console.warn("[EasyMarket] Polymarket World Cup fetch failed", error instanceof Error ? error.message : String(error));
+  }
+
+  return {
+    source: "fallback",
+    markets: WORLD_CUP_FALLBACK_MARKETS,
+  };
 }
 
 function getDayKey() {
@@ -684,13 +819,15 @@ export async function createBtc5mMarket() {
 
 export async function getOpenMarket() {
   const result = await query(
-    `
-      SELECT *
-      FROM markets
-      WHERE status = 'open'
-      ORDER BY end_time ASC
-      LIMIT 1
-    `,
+      `
+        SELECT *
+        FROM markets
+        WHERE status = 'open'
+          AND symbol = $1
+        ORDER BY end_time ASC
+        LIMIT 1
+      `,
+    [MARKET_SYMBOL],
   );
 
   return mapMarket(result.rows[0]);
@@ -722,7 +859,9 @@ export async function updateLiveBtcPrice() {
         SELECT *
         FROM markets
         WHERE status = 'open'
+          AND symbol = $1
       `,
+      [MARKET_SYMBOL],
     );
 
     for (const market of markets.rows) {
@@ -792,6 +931,138 @@ export async function getMarketChart(market, limit = 240) {
   );
 
   return result.rows.map(mapMarketChartPoint);
+}
+
+export async function syncWorldCupMarkets() {
+  const feed = await getWorldCupFeedMarkets();
+  const endTime = new Date("2026-07-20T00:00:00Z");
+  const now = new Date();
+
+  await withTransaction(async (client) => {
+    for (const feedMarket of feed.markets) {
+      const symbol = worldCupSymbol(feedMarket);
+      const yesPrice = clamp(feedMarket.yesPrice, MIN_PRICE, MAX_PRICE);
+      const noPrice = 1 - yesPrice;
+      const question = `Will ${feedMarket.team} win the 2026 FIFA World Cup?`;
+      const liquidity = Math.max(1_000, toNumber(feedMarket.volume) || config.marketLiquidity);
+      const existingResult = await client.query(
+        `
+          SELECT *
+          FROM markets
+          WHERE symbol = $1
+            AND status = 'open'
+          ORDER BY id DESC
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [symbol],
+      );
+      const existingMarket = existingResult.rows[0];
+      const marketResult = existingMarket
+        ? await client.query(
+          `
+            UPDATE markets
+            SET question = $2,
+                current_price = $3,
+                yes_price = (yes_price * 0.70 + $3::numeric * 0.30),
+                no_price = 1 - (yes_price * 0.70 + $3::numeric * 0.30),
+                liquidity = $4,
+                end_time = $5
+            WHERE id = $1
+            RETURNING *
+          `,
+          [existingMarket.id, question, yesPrice, liquidity, endTime],
+        )
+        : await client.query(
+          `
+            INSERT INTO markets (
+              symbol,
+              question,
+              open_price,
+              current_price,
+              yes_price,
+              no_price,
+              yes_volume,
+              no_volume,
+              liquidity,
+              start_time,
+              end_time,
+              status
+            )
+            VALUES ($1, $2, $3, $3, $3, $4, 0, 0, $5, $6, $7, 'open')
+            RETURNING *
+          `,
+          [symbol, question, yesPrice, noPrice, liquidity, now, endTime],
+        );
+
+      await client.query(
+        `
+          INSERT INTO world_cup_market_meta (
+            symbol,
+            polymarket_id,
+            team,
+            slug,
+            icon,
+            volume,
+            updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, now())
+          ON CONFLICT (symbol) DO UPDATE SET
+            polymarket_id = EXCLUDED.polymarket_id,
+            team = EXCLUDED.team,
+            slug = EXCLUDED.slug,
+            icon = EXCLUDED.icon,
+            volume = EXCLUDED.volume,
+            updated_at = now()
+        `,
+        [
+          symbol,
+          feedMarket.polymarketId,
+          feedMarket.team,
+          feedMarket.slug || "",
+          feedMarket.icon || "",
+          toNumber(feedMarket.volume),
+        ],
+      );
+
+      const market = marketResult.rows[0];
+      await client.query(
+        `
+          INSERT INTO price_ticks (symbol, price, source)
+          VALUES ($1, $2, $3)
+        `,
+        [symbol, toNumber(market.yes_price), feed.source],
+      );
+    }
+  });
+
+  return feed.source;
+}
+
+export async function getWorldCupMarkets() {
+  const source = await syncWorldCupMarkets();
+  const result = await query(
+    `
+      SELECT
+        markets.*,
+        meta.team,
+        meta.polymarket_id,
+        meta.slug,
+        meta.icon,
+        meta.volume AS meta_volume
+      FROM markets
+      JOIN world_cup_market_meta meta ON meta.symbol = markets.symbol
+      WHERE markets.status = 'open'
+        AND markets.symbol LIKE $1
+      ORDER BY markets.yes_price DESC, meta.volume DESC
+    `,
+    [`${WORLD_CUP_SYMBOL_PREFIX}%`],
+  );
+
+  return {
+    source,
+    markets: result.rows.map(mapWorldCupMarket),
+  };
 }
 
 async function awardReferralBetBonus(client, buyerUser, marketId) {
@@ -909,7 +1180,7 @@ export async function buyOutcome(input) {
       throw new Error("invalid_market_price");
     }
 
-    const fee = calculateFee(amount);
+    const fee = 0;
     const netAmount = Math.max(0, amount - fee);
     const shares = netAmount / price;
     const liquidity = toNumber(market.liquidity, config.marketLiquidity);
@@ -1160,10 +1431,10 @@ export async function sellOutcome(input) {
 
     const sharesToSell = Math.min(positionShares, requestedShares);
     const gross = Math.round(sharesToSell * price * 100) / 100;
-    const fee = calculateFee(gross);
-    const proceeds = Math.max(0, Math.round((gross - fee) * 100) / 100);
     const soldRatio = sharesToSell / positionShares;
     const spentSold = toNumber(position.spent) * soldRatio;
+    const fee = calculateProfitFee(gross - spentSold);
+    const proceeds = Math.max(0, Math.round((gross - fee) * 100) / 100);
     const realizedPnl = proceeds - spentSold;
     const remainingShares = Math.max(0, positionShares - sharesToSell);
     const remainingSpent = Math.max(0, toNumber(position.spent) - spentSold);
@@ -1199,11 +1470,11 @@ export async function sellOutcome(input) {
     const positionUpdateResult = await client.query(
       `
         UPDATE positions
-        SET shares = $2,
-            spent = $3,
-            avg_price = CASE WHEN $2 > 0 THEN $3 / $2 ELSE 0 END,
-            payout = payout + $4,
-            pnl = pnl + $5,
+        SET shares = $2::numeric,
+            spent = $3::numeric,
+            avg_price = CASE WHEN $2::numeric > 0 THEN $3::numeric / $2::numeric ELSE 0 END,
+            payout = payout + $4::numeric,
+            pnl = pnl + $5::numeric,
             status = $6,
             updated_at = now()
         WHERE id = $1
@@ -1344,10 +1615,12 @@ export async function resolveExpiredMarkets() {
       SELECT *
       FROM markets
       WHERE status = 'open'
+        AND symbol = $1
         AND end_time <= now()
       ORDER BY end_time ASC
       LIMIT 5
     `,
+    [MARKET_SYMBOL],
   );
 
   for (const market of expiredResult.rows) {
@@ -1417,7 +1690,9 @@ export async function resolveExpiredMarkets() {
       for (const position of positions.rows) {
         const shares = toNumber(position.shares);
         const spent = toNumber(position.spent);
-        const payout = position.side === winner ? shares : 0;
+        const grossPayout = position.side === winner ? shares : 0;
+        const fee = calculateProfitFee(grossPayout - spent);
+        const payout = Math.max(0, Math.round((grossPayout - fee) * 100) / 100);
         const pnl = payout - spent;
 
         await client.query(

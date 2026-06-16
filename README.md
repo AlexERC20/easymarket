@@ -1,6 +1,6 @@
 # EasyMarket
 
-Telegram Mini App / Web App MVP with a FIRE-based YES/NO prediction market.
+Telegram Mini App / Web App MVP with a ⭐-based YES/NO prediction market.
 
 The first market type is BTC 5M:
 
@@ -8,7 +8,7 @@ The first market type is BTC 5M:
 BTC будет выше цены открытия через 5 минут?
 ```
 
-This is not a real-money market and does not include payments, cashout, leverage, futures, or Telegram Stars.
+This is not a real-money market and does not include cashout, leverage, futures, or real-money trading.
 
 ## Run Locally
 
@@ -60,8 +60,9 @@ MARKET_INTERVAL_SECONDS=10
 MARKET_DURATION_MINUTES=5
 MARKET_LIQUIDITY=10000
 MARKET_FEE_BPS=200
+MARKET_PROFIT_FEE_BPS=500
 PRICE_POLL_MS=1000
-PUBLIC_AV_BOT_URL=https://t.me/voit_help_bot?start=buy_fire
+PUBLIC_AV_BOT_URL=https://t.me/voit_help_bot?start=buy_stars
 PUBLIC_MINI_APP_URL=https://t.me/voit_help_bot?startapp=easymarket
 REFERRAL_BET_BONUS_FIRE=500
 TASK_SHARE_FIRE=100
@@ -179,4 +180,4 @@ curl -X POST https://easymarket-rcuj.onrender.com/api/bridge/fire/sync \
   }'
 ```
 
-Use `/api/bridge/fire/ledger` when the local bot needs to pull EasyMarket-side FIRE changes such as prediction-market buys and payouts.
+Use `/api/bridge/fire/ledger` when the local bot needs to pull EasyMarket-side ⭐ balance changes such as prediction-market buys and payouts.
