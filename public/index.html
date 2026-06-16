@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260616-4" />
+    <link rel="stylesheet" href="/styles.css?v=20260616-5" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -16,16 +16,39 @@
         </div>
         <div class="top-actions">
           <button id="worldCupBtn" class="icon-button sport-action" type="button" aria-label="World Cup markets">
-            🏆
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 4h8v3.5a4 4 0 0 1-8 0V4Z" />
+              <path d="M8 6H5.5A2.5 2.5 0 0 0 8 8.5" />
+              <path d="M16 6h2.5A2.5 2.5 0 0 1 16 8.5" />
+              <path d="M12 12v4" />
+              <path d="M9 20h6" />
+              <path d="M10 16h4v4h-4z" />
+            </svg>
           </button>
           <button id="withdrawBtn" class="icon-button withdraw-action" type="button" aria-label="Вывести звезды">
-            💸
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h16v11H4z" />
+              <path d="M16 11h4v4h-4z" />
+              <path d="M8 4h8" />
+              <path d="M12 10v5" />
+              <path d="m9.5 12.5 2.5 2.5 2.5-2.5" />
+            </svg>
           </button>
           <button id="walletBtn" class="icon-button fire-action" type="button" aria-label="Пополнить звезды">
-            <span class="icon-emoji">💳</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h16v11H4z" />
+              <path d="M16 11h4v4h-4z" />
+              <path d="M8 4h8" />
+              <path d="M12 9v6" />
+              <path d="M9 12h6" />
+            </svg>
           </button>
           <button id="tasksBtn" class="icon-button accent plus-action" type="button" aria-label="Открыть задания">
-            +
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+              <path d="M4 4h16v16H4z" />
+            </svg>
           </button>
         </div>
       </header>
@@ -40,6 +63,12 @@
             <button id="tasksCloseBtn" class="icon-button" type="button" aria-label="Закрыть задания">×</button>
           </div>
           <div class="task-list">
+            <div class="task-row info">
+              <div>
+                <strong>Активность в чате</strong>
+                <small>За каждое сообщение и реакцию в чате начисляются звезды.</small>
+              </div>
+            </div>
             <div class="task-row">
               <div>
                 <strong>Подписаться на канал AV</strong>
@@ -240,7 +269,10 @@
       <section class="card">
         <div class="section-title">
           <h2>Моя позиция</h2>
-          <span class="subtle">потенциальная выплата</span>
+          <div class="section-actions">
+            <span class="subtle">потенциальная выплата</span>
+            <button id="positionToggle" class="section-toggle hidden" type="button">Все</button>
+          </div>
         </div>
         <div id="positionList" class="position-list">
           <p class="muted">Позиции пока нет.</p>
@@ -250,7 +282,10 @@
       <section class="card">
         <div class="section-title">
           <h2>Live сделки</h2>
-          <span class="subtle">последние ставки</span>
+          <div class="section-actions">
+            <span class="subtle">все рынки</span>
+            <button id="activityToggle" class="section-toggle hidden" type="button">Все</button>
+          </div>
         </div>
         <div id="activityTape" class="activity-tape">
           <p class="muted">Пока нет ставок.</p>
@@ -260,7 +295,10 @@
       <section class="card">
         <div class="section-title">
           <h2>Последние рынки</h2>
-          <span class="subtle">результаты</span>
+          <div class="section-actions">
+            <span class="subtle">результаты</span>
+            <button id="recentToggle" class="section-toggle hidden" type="button">Все</button>
+          </div>
         </div>
         <div id="recentMarkets" class="recent-list">
           <p class="muted">Пока нет закрытых рынков.</p>
@@ -270,6 +308,6 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
-    <script src="/app.js?v=20260616-4" type="module"></script>
+    <script src="/app.js?v=20260616-5" type="module"></script>
   </body>
 </html>

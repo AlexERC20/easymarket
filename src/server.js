@@ -16,6 +16,7 @@ import {
   getFireLedgerEvents,
   getMarketActivity,
   getMarketChart,
+  getRecentActivity,
   getRecentMarkets,
   getUserSnapshot,
   getWorldCupMarkets,
@@ -317,6 +318,18 @@ app.get("/api/market/active", async (_req, res) => {
 app.get("/api/market/:marketId/activity", async (req, res) => {
   try {
     const activity = await getMarketActivity(req.params.marketId, req.query.limit);
+    res.status(200).json({
+      ok: true,
+      activity,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/activity/recent", async (req, res) => {
+  try {
+    const activity = await getRecentActivity(req.query.limit);
     res.status(200).json({
       ok: true,
       activity,

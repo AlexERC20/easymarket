@@ -85,6 +85,8 @@ function mapPosition(row) {
     winner: row.winner,
     market_status: row.market_status,
     market_end_time: row.market_end_time,
+    market_symbol: row.market_symbol,
+    team: row.team,
     yes_price: row.yes_price === undefined ? undefined : toNumber(row.yes_price),
     no_price: row.no_price === undefined ? undefined : toNumber(row.no_price),
   };
@@ -109,6 +111,11 @@ function mapMarketActivity(row) {
   return {
     id: Number(row.id),
     market_id: Number(row.market_id),
+    market_symbol: row.market_symbol,
+    market_question: row.market_question,
+    market_status: row.market_status,
+    market_winner: row.market_winner,
+    team: row.team,
     telegram_id: row.telegram_id,
     username: row.username,
     first_name: row.first_name,
@@ -498,10 +505,13 @@ export async function getUserSnapshot(telegramId) {
           m.winner,
           m.status AS market_status,
           m.end_time AS market_end_time,
+          m.symbol AS market_symbol,
+          meta.team AS team,
           m.yes_price,
           m.no_price
         FROM positions p
         JOIN markets m ON m.id = p.market_id
+        LEFT JOIN world_cup_market_meta meta ON meta.symbol = m.symbol
         WHERE p.user_id = $1
         ORDER BY p.updated_at DESC
         LIMIT 20
@@ -908,6 +918,32 @@ export async function getMarketActivity(marketId, limit = 20) {
       LIMIT $2
     `,
     [Number(marketId), Math.max(1, Math.min(50, Number(limit) || 20))],
+  );
+
+  return result.rows.map(mapMarketActivity);
+}
+
+export async function getRecentActivity(limit = 30) {
+  const result = await query(
+    `
+      SELECT
+        trades.*,
+        users.telegram_id,
+        users.username,
+        users.first_name,
+        markets.symbol AS market_symbol,
+        markets.question AS market_question,
+        markets.status AS market_status,
+        markets.winner AS market_winner,
+        meta.team AS team
+      FROM trades
+      JOIN users ON users.id = trades.user_id
+      JOIN markets ON markets.id = trades.market_id
+      LEFT JOIN world_cup_market_meta meta ON meta.symbol = markets.symbol
+      ORDER BY trades.created_at DESC
+      LIMIT $1
+    `,
+    [Math.max(1, Math.min(80, Number(limit) || 30))],
   );
 
   return result.rows.map(mapMarketActivity);

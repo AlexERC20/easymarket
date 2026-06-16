@@ -3,6 +3,7 @@ const AMOUNTS = [50, 100, 500, 1000];
 const MIN_OUTCOME_PRICE = 0.001;
 const CHART_WINDOW_MS = 10_000;
 const CHART_RENDER_INTERVAL_MS = 66;
+const COLLAPSE_LIMIT = 3;
 
 const state = {
   user: null,
@@ -27,10 +28,17 @@ const state = {
     reason: "",
     pending: false,
   },
+  expanded: {
+    positions: false,
+    activity: false,
+    recent: false,
+  },
   selectedSide: "YES",
   selectedAmount: 50,
   activityLoaded: false,
+  settlementsLoaded: false,
   seenActivityIds: new Set(),
+  seenSettledPositionIds: new Set(),
   pendingBuy: false,
   pendingSellSide: null,
   pendingSellPositionId: null,
@@ -125,13 +133,30 @@ function setTeamIconElement(element, icon, alt = "team") {
 
 function triggerHaptic(type = "light") {
   const haptic = window.Telegram?.WebApp?.HapticFeedback;
-  try {
-    if (type === "selection") {
+  const telegramPulse = (pulseType) => {
+    if (pulseType === "selection") {
       haptic?.selectionChanged?.();
-    } else if (type === "success" || type === "error" || type === "warning") {
-      haptic?.notificationOccurred?.(type);
+    } else if (pulseType === "success" || pulseType === "error" || pulseType === "warning") {
+      haptic?.notificationOccurred?.(pulseType);
     } else {
-      haptic?.impactOccurred?.(type);
+      haptic?.impactOccurred?.(pulseType);
+    }
+  };
+
+  try {
+    if (haptic) {
+      const sequences = {
+        selection: ["selection", "light"],
+        light: ["light"],
+        medium: ["medium", "light"],
+        success: ["success", "light"],
+        win: ["success", "medium", "light", "medium", "success"],
+        warning: ["warning", "medium"],
+        error: ["error", "heavy", "medium"],
+      };
+      (sequences[type] || sequences.light).forEach((pulse, index) => {
+        window.setTimeout(() => telegramPulse(pulse), index * 48);
+      });
     }
   } catch {
     // Haptic feedback is best-effort and must never block trading UI.
@@ -139,12 +164,18 @@ function triggerHaptic(type = "light") {
 
   if (!haptic && "vibrate" in navigator) {
     const pattern = type === "success"
-      ? [12, 28, 18]
+      ? [18, 32, 24]
+      : type === "win"
+        ? [80, 50, 110, 60, 60, 45, 140, 70, 220]
       : type === "error"
-        ? [35, 30, 35]
+        ? [55, 35, 42]
+        : type === "warning"
+          ? [32, 28, 44]
+          : type === "medium"
+            ? [28, 24, 18]
         : type === "selection"
-          ? 8
-          : 16;
+          ? [14, 18, 10]
+          : 24;
     navigator.vibrate(pattern);
   }
 }
@@ -713,15 +744,36 @@ function handleActivity(activity) {
   state.activity = nextActivity;
 }
 
+function handleSettlements(positions) {
+  const settled = (positions || [])
+    .filter((position) => position.status !== "open")
+    .filter((position) => Number(position.payout || 0) > 0 || Number(position.pnl || 0) > 0);
+
+  if (state.settlementsLoaded) {
+    const newWins = settled.filter((position) => !state.seenSettledPositionIds.has(position.id));
+    if (newWins.length) {
+      triggerHaptic("win");
+      showToast(`Есть выигрыш: +${formatFireDecimal(newWins.reduce((sum, item) => sum + Number(item.pnl || item.payout || 0), 0))}`);
+    }
+  }
+
+  settled.forEach((position) => state.seenSettledPositionIds.add(position.id));
+  state.settlementsLoaded = true;
+}
+
 async function loadMarket() {
   const data = await api("/api/market/active");
   state.market = data.market;
   state.chartPoints = mergeChartPoints(data.chart, data.market);
-  handleActivity(data.activity || []);
   renderMarket();
   renderTradeTicket();
-  renderActivity();
   renderMarketChart();
+}
+
+async function loadActivity() {
+  const data = await api("/api/activity/recent?limit=40");
+  handleActivity(data.activity || []);
+  renderActivity();
 }
 
 async function loadMe() {
@@ -733,6 +785,7 @@ async function loadMe() {
   state.balance = data.balance || 0;
   state.positions = data.positions || [];
   state.recentTrades = data.recent_trades || [];
+  handleSettlements(state.positions);
   renderMe();
 }
 
@@ -912,10 +965,63 @@ function updateTimer() {
   if (secondLabel) secondLabel.textContent = "SECS";
 }
 
+function setSectionToggle(id, total, key) {
+  const button = $(id);
+  if (!button) {
+    return;
+  }
+
+  if (total <= COLLAPSE_LIMIT) {
+    button.classList.add("hidden");
+    return;
+  }
+
+  button.classList.remove("hidden");
+  button.textContent = state.expanded[key] ? "Скрыть" : `Все ${total}`;
+}
+
+function getPositionMarket(position) {
+  return state.worldCupMarkets.find((market) => market.id === position.market_id)
+    || (position.market_id === state.market?.id ? state.market : null);
+}
+
+function getPositionMarketLabel(position, market = getPositionMarket(position)) {
+  if (market?.team || position.team) {
+    return market?.team || position.team;
+  }
+  if ((market?.symbol || position.market_symbol) === "BTCUSDT") {
+    return "BTC 5m";
+  }
+  return `#${position.market_id}`;
+}
+
+function getActivityMarketLabel(trade) {
+  if (trade.team) {
+    return trade.team;
+  }
+  if (trade.market_symbol === "BTCUSDT") {
+    return "BTC 5m";
+  }
+  return trade.market_symbol || `#${trade.market_id}`;
+}
+
+function getActivitySideLabel(trade) {
+  return trade.team ? (trade.side === "YES" ? "Yes" : "No") : sideLabel(trade.side);
+}
+
+function getRecentMarketLabel(market) {
+  const winner = market.winner ? sideLabel(market.winner) : marketStatusLabel(market.status);
+  if (market.symbol === "BTCUSDT") {
+    return `#${market.id} · ${winner} BTC 5m`;
+  }
+  return `#${market.id} · ${winner} ${market.symbol}`;
+}
+
 function renderMe() {
   animateText($("fireBalance"), state.balance, formatFire);
 
   const positions = state.positions.filter((position) => position.status === "open");
+  setSectionToggle("positionToggle", positions.length, "positions");
 
   const container = $("positionList");
   if (!positions.length) {
@@ -923,11 +1029,12 @@ function renderMe() {
     return;
   }
 
-  container.innerHTML = positions.map((position) => {
+  const visiblePositions = state.expanded.positions ? positions : positions.slice(0, COLLAPSE_LIMIT);
+  container.innerHTML = visiblePositions.map((position) => {
     const payout = Number(position.shares || 0);
     const spent = Number(position.spent || 0);
     const displayMarket = getDisplayMarket();
-    const selectedWorldCupMarket = state.worldCupMarkets.find((market) => market.id === position.market_id);
+    const selectedWorldCupMarket = getPositionMarket(position);
     const activeMarket = selectedWorldCupMarket || (position.market_id === state.market?.id ? state.market : null);
     const isActiveMarket = Boolean(activeMarket) || position.market_id === displayMarket?.id;
     const positionMarketPrice = Number(position.side === "YES" ? position.yes_price : position.no_price);
@@ -952,12 +1059,13 @@ function renderMe() {
       : secondsLeft > 0
         ? ` · ${secondsLeft}с`
         : " · закрывается";
+    const marketLabel = getPositionMarketLabel(position, activeMarket);
     return `
       <div class="mini-row">
         <div>
-          <strong class="side-${position.side}">${marketSideLabel(activeMarket, position.side)} ${payout.toFixed(2)} shares</strong>
+          <strong class="side-${position.side}">${escapeHtml(marketLabel)} · ${marketSideLabel(activeMarket, position.side)}</strong>
           <br />
-          <small>Avg ${formatCents(position.avg_price)} · Sell ${formatCents(marketPrice)} · Spent ${formatFire(spent)}${marketBadge}</small>
+          <small>${payout.toFixed(2)} shares · Avg ${formatCents(position.avg_price)} · Sell ${formatCents(marketPrice)} · Spent ${formatFire(spent)}${marketBadge}</small>
         </div>
         <div class="position-actions">
           <strong class="${pnl >= 0 ? "positive" : "negative"}">${pnl >= 0 ? "+" : ""}${formatFireDecimal(pnl)}</strong>
@@ -1005,20 +1113,23 @@ function renderTradeTicket() {
 
 function renderActivity() {
   const container = $("activityTape");
+  setSectionToggle("activityToggle", state.activity.length, "activity");
   if (!state.activity.length) {
     container.innerHTML = '<p class="muted">Пока нет ставок.</p>';
     return;
   }
 
-  container.innerHTML = state.activity.slice(0, 8).map((trade) => {
+  const visibleActivity = state.expanded.activity ? state.activity.slice(0, 16) : state.activity.slice(0, COLLAPSE_LIMIT);
+  container.innerHTML = visibleActivity.map((trade) => {
     const name = trade.username || trade.first_name || `user ${trade.telegram_id}`;
     const action = trade.action || "BUY";
+    const marketLabel = getActivityMarketLabel(trade);
     return `
       <div class="activity-row">
         <div>
-          <strong class="side-${trade.side}">${name} ${actionLabel(action)} ${sideLabel(trade.side)}</strong>
+          <strong class="side-${trade.side}">${escapeHtml(name)} ${actionLabel(action)} ${getActivitySideLabel(trade)}</strong>
           <br />
-          <small>${formatCents(trade.price)} · ${trade.shares.toFixed(2)} shares</small>
+          <small>${escapeHtml(marketLabel)} · ${formatCents(trade.price)} · ${trade.shares.toFixed(2)} shares</small>
         </div>
         <strong>${formatFire(trade.amount)}</strong>
       </div>
@@ -1028,18 +1139,19 @@ function renderActivity() {
 
 function renderRecentMarkets() {
   const container = $("recentMarkets");
+  setSectionToggle("recentToggle", state.recentMarkets.length, "recent");
   if (!state.recentMarkets.length) {
     container.innerHTML = '<p class="muted">Пока нет закрытых рынков.</p>';
     return;
   }
 
-  container.innerHTML = state.recentMarkets.slice(0, 5).map((market) => {
-    const winner = market.winner ? sideLabel(market.winner) : market.status;
+  const visibleMarkets = state.expanded.recent ? state.recentMarkets.slice(0, 12) : state.recentMarkets.slice(0, COLLAPSE_LIMIT);
+  container.innerHTML = visibleMarkets.map((market) => {
     const move = Number(market.close_price || 0) - Number(market.open_price || 0);
     return `
       <div class="mini-row">
         <div>
-          <strong class="side-${market.winner || "YES"}">${winner}</strong>
+          <strong class="side-${market.winner || "YES"}">${escapeHtml(getRecentMarketLabel(market))}</strong>
           <br />
           <small>$${formatPrice(market.open_price)} -> $${formatPrice(market.close_price)}</small>
         </div>
@@ -1425,6 +1537,7 @@ async function sellPosition({ side, positionId, marketId, shares }) {
 async function refreshAll() {
   try {
     await loadMarket();
+    await loadActivity();
     await loadMe();
     await loadRecentMarkets();
     setConnection("LIVE", "online");
@@ -1500,6 +1613,18 @@ $("topupSheet")?.addEventListener("click", (event) => {
 $("topupBuyBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   void startStarsTopup();
+});
+
+[
+  ["positionToggle", "positions", renderMe],
+  ["activityToggle", "activity", renderActivity],
+  ["recentToggle", "recent", renderRecentMarkets],
+].forEach(([id, key, render]) => {
+  $(id)?.addEventListener("click", () => {
+    triggerHaptic("selection");
+    state.expanded[key] = !state.expanded[key];
+    render();
+  });
 });
 
 document.querySelectorAll("[data-topup-package]").forEach((button) => {
@@ -1831,6 +1956,7 @@ setInterval(updateTimer, 250);
 setInterval(renderMarketChart, CHART_RENDER_INTERVAL_MS);
 setInterval(() => void loadMarket().catch(() => setConnection("Ошибка", "error")), 1_000);
 setInterval(() => void loadWorldCupMarkets().catch(() => undefined), 15_000);
+setInterval(() => void loadActivity().catch(() => undefined), 3_000);
 setInterval(() => void loadMe().catch(() => undefined), 3_000);
 setInterval(() => void loadRecentMarkets().catch(() => undefined), 10_000);
 

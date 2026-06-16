@@ -73,7 +73,7 @@ p {
 .telegram-shell .app-shell {
   min-height: var(--tg-app-height, 100dvh);
   height: var(--tg-app-height, 100dvh);
-  padding-top: calc(max(22px, env(safe-area-inset-top)) + 34px);
+  padding-top: calc(max(26px, env(safe-area-inset-top)) + 38px);
   padding-bottom: calc(max(20px, env(safe-area-inset-bottom)) + 8px);
 }
 
@@ -86,6 +86,7 @@ p {
 .ticket-head,
 .ticket-preview,
 .section-title,
+.section-actions,
 .mini-row,
 .activity-row,
 .depth-labels {
@@ -96,7 +97,7 @@ p {
 }
 
 .topbar {
-  margin: 2px 0 8px;
+  margin: 5px 0 8px;
 }
 
 h1 {
@@ -129,6 +130,21 @@ h2 {
 .subtle {
   font-size: 12px;
   font-weight: 700;
+}
+
+.section-actions {
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.section-toggle {
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--muted);
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 950;
 }
 
 .card,
@@ -164,8 +180,8 @@ h2 {
 .icon-button,
 .ghost-button {
   border: 1px solid var(--line);
-  border-radius: 14px;
-  background: #111722;
+  border-radius: 10px;
+  background: rgba(17, 23, 34, 0.76);
   color: var(--text);
   font-weight: 900;
 }
@@ -187,6 +203,7 @@ h2 {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2.5;
+  opacity: 0.72;
 }
 
 .icon-button.accent {
@@ -195,24 +212,14 @@ h2 {
   color: var(--fire);
 }
 
-.plus-action {
-  font-size: 26px;
-  line-height: 1;
-}
-
 .icon-button.fire-action {
   border-color: rgba(255, 184, 77, 0.42);
-  background: linear-gradient(180deg, rgba(255, 184, 77, 0.16), rgba(17, 23, 34, 0.96));
+  background: linear-gradient(180deg, rgba(255, 184, 77, 0.14), rgba(17, 23, 34, 0.78));
 }
 
 .icon-button.withdraw-action {
   border-color: rgba(94, 161, 255, 0.38);
-  background: linear-gradient(180deg, rgba(94, 161, 255, 0.16), rgba(17, 23, 34, 0.96));
-}
-
-.icon-emoji {
-  line-height: 1;
-  transform: translate(-2px, 1px);
+  background: linear-gradient(180deg, rgba(94, 161, 255, 0.14), rgba(17, 23, 34, 0.78));
 }
 
 .ghost-button {
@@ -662,21 +669,23 @@ h2 {
 .sell-button {
   min-height: 34px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.07);
   color: var(--text);
-  padding: 7px 10px;
+  padding: 8px 10px;
   font-size: 12px;
   font-weight: 950;
 }
 
 .sell-button.yes {
   border-color: rgba(25, 195, 125, 0.38);
+  background: rgba(25, 195, 125, 0.1);
   color: var(--yes);
 }
 
 .sell-button.no {
   border-color: rgba(239, 70, 111, 0.38);
+  background: rgba(239, 70, 111, 0.1);
   color: var(--no);
 }
 
@@ -752,6 +761,20 @@ code {
   display: none;
 }
 
+#worldCupSheet,
+#tasksSheet {
+  z-index: 34;
+}
+
+#betSheet {
+  z-index: 42;
+}
+
+#topupSheet,
+#withdrawSheet {
+  z-index: 54;
+}
+
 .task-panel {
   width: min(100%, 430px);
   margin: 0 auto max(10px, env(safe-area-inset-bottom));
@@ -786,6 +809,11 @@ code {
 .task-row.featured {
   border-color: rgba(255, 184, 77, 0.44);
   background: linear-gradient(135deg, rgba(255, 184, 77, 0.14), rgba(51, 178, 116, 0.08));
+}
+
+.task-row.info {
+  border-color: rgba(94, 161, 255, 0.28);
+  background: rgba(94, 161, 255, 0.08);
 }
 
 .task-row strong,
