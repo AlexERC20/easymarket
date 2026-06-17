@@ -74,7 +74,9 @@ p {
   padding: max(18px, env(safe-area-inset-top)) 12px max(20px, env(safe-area-inset-bottom));
   overflow-x: hidden;
   overflow-y: auto;
+  overflow-anchor: none;
   overscroll-behavior: contain;
+  scroll-behavior: auto;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -414,7 +416,10 @@ h2 {
   display: grid;
   grid-template-columns: 1fr 1.22fr;
   gap: 0;
+  min-height: 68px;
   margin: 14px 0 10px;
+  contain: layout paint;
+  overflow-anchor: none;
 }
 
 .price-board div {
@@ -430,8 +435,16 @@ h2 {
   padding: 0 0 0 14px;
 }
 
+.price-board .label {
+  min-height: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .price-board strong {
   display: block;
+  min-height: 38px;
   margin-top: 6px;
   overflow: hidden;
   color: #98a2b5;
@@ -451,9 +464,15 @@ h2 {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  min-height: 14px;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .current-label span {
+  flex: 0 0 auto;
+  min-width: 48px;
   color: var(--yes);
   font-size: clamp(11px, 3.2vw, 16px);
   font-weight: 950;
@@ -476,9 +495,11 @@ h2 {
 .chart-frame {
   position: relative;
   height: 204px;
+  min-height: 204px;
   width: calc(100% + 52px);
   margin: 10px -26px 13px;
   overflow: hidden;
+  overflow-anchor: none;
   border: 0;
   border-radius: 0;
   background: var(--bg);
@@ -540,11 +561,15 @@ h2 {
 .outcome-grid {
   align-items: stretch;
   gap: 10px;
+  min-height: 59px;
   margin-top: 11px;
+  contain: layout paint;
+  overflow-anchor: none;
 }
 
 .outcome-button {
   flex: 1;
+  height: 59px;
   min-height: 59px;
   border: 0;
   border-radius: 11px;
@@ -618,6 +643,7 @@ h2 {
   position: relative;
   bottom: auto;
   z-index: 5;
+  contain: layout paint;
   overflow-anchor: none;
   border-color: rgba(255, 255, 255, 0.12);
 }
@@ -638,6 +664,9 @@ h2 {
 .amount-button {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  height: 49px;
   min-height: 49px;
   border: 1px solid var(--line);
   border-radius: 10px;

@@ -1924,6 +1924,7 @@ async function refreshAll() {
 
 document.querySelectorAll(".outcome-button").forEach((button) => {
   button.addEventListener("click", () => {
+    button.blur();
     triggerHaptic("selection");
     state.selectedSide = button.dataset.side;
     renderTradeTicket();
@@ -1932,6 +1933,7 @@ document.querySelectorAll(".outcome-button").forEach((button) => {
 
 document.querySelectorAll(".amount-button").forEach((button) => {
   button.addEventListener("click", () => {
+    button.blur();
     state.selectedAmount = Number(button.dataset.amount);
     renderTradeTicket();
     void buy(state.selectedAmount);
@@ -2390,6 +2392,7 @@ $("betSideNoBtn")?.addEventListener("click", () => {
 
 document.querySelectorAll("[data-bet-add]").forEach((button) => {
   button.addEventListener("click", () => {
+    button.blur();
     triggerHaptic("selection");
     const addAmount = Number(button.dataset.betAdd || 0);
     const nextAmount = state.betSheet.amount + addAmount;
@@ -2405,6 +2408,7 @@ document.querySelectorAll("[data-bet-add]").forEach((button) => {
 });
 
 $("betConfirmBtn")?.addEventListener("click", async () => {
+  $("betConfirmBtn")?.blur();
   const { market, side, amount } = state.betSheet;
   if (!market || !amount) {
     triggerHaptic("warning");
