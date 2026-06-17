@@ -913,7 +913,8 @@ export async function syncFireBalanceByUsername(input) {
 
 export async function resetUserMarketStateByUsername(input) {
   const username = String(input.username || "").trim().replace(/^@/, "");
-  if (!username) {
+  const telegramId = String(input.telegram_id || input.telegramId || "").trim();
+  if (!username && !telegramId) {
     throw new Error("username_required");
   }
   const balance = ensureNonNegativeAmount(input.amount ?? input.balance);
@@ -921,16 +922,40 @@ export async function resetUserMarketStateByUsername(input) {
   const source = input.source || "bridge_user_reset";
 
   return withTransaction(async (client) => {
-    const userResult = await client.query(
-      `
+    const userLookupParams = telegramId && username
+      ? [telegramId, username]
+      : [telegramId || username];
+    const userLookupSql = telegramId && username
+      ? `
         SELECT *
         FROM users
-        WHERE lower(username) = lower($1)
-        ORDER BY updated_at DESC
+        WHERE telegram_id = $1::text
+           OR lower(username) = lower($2::text)
+        ORDER BY CASE WHEN telegram_id = $1::text THEN 0 ELSE 1 END,
+                 updated_at DESC
         LIMIT 1
         FOR UPDATE
-      `,
-      [username],
+      `
+      : telegramId
+        ? `
+          SELECT *
+          FROM users
+          WHERE telegram_id = $1::text
+          ORDER BY updated_at DESC
+          LIMIT 1
+          FOR UPDATE
+        `
+        : `
+          SELECT *
+          FROM users
+          WHERE lower(username) = lower($1::text)
+          ORDER BY updated_at DESC
+          LIMIT 1
+          FOR UPDATE
+        `;
+    const userResult = await client.query(
+      userLookupSql,
+      userLookupParams,
     );
     const user = userResult.rows[0];
     if (!user) {

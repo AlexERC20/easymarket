@@ -610,6 +610,7 @@ app.post("/api/bridge/fire/sync-username", requireBridgeSecret, async (req, res)
 app.post("/api/bridge/users/reset-market-state", requireBridgeSecret, async (req, res) => {
   try {
     const result = await resetUserMarketStateByUsername({
+      telegram_id: req.body?.telegram_id,
       username: req.body?.username,
       amount: req.body?.amount ?? req.body?.balance,
       reason: req.body?.reason || "bug_bounty_reset",
