@@ -50,6 +50,7 @@ const state = {
   seenActivityIds: new Set(),
   seenSettledPositionIds: new Set(),
   pendingBuy: false,
+  pendingBuyKey: null,
   pendingSellSide: null,
   pendingSellPositionId: null,
   publicConfig: {
@@ -1095,6 +1096,10 @@ function getPreview(amount = state.selectedAmount, side = state.selectedSide) {
   };
 }
 
+function getBuyIntentKey(marketId, side, amount) {
+  return `${marketId}:${side}:${Math.round(Number(amount || 0) * 100) / 100}`;
+}
+
 function renderMarket() {
   const market = getDisplayMarket();
   const hasMarket = Boolean(market);
@@ -1370,8 +1375,10 @@ function renderTradeTicket() {
   document.querySelectorAll(".amount-button").forEach((button) => {
     const amount = Number(button.dataset.amount);
     const amountPreview = getPreview(amount, side);
+    const pendingKey = market ? getBuyIntentKey(market.id, side, amount) : null;
     button.classList.toggle("active", amount === state.selectedAmount);
-    button.disabled = !market || !state.user || state.pendingBuy;
+    button.classList.toggle("loading", Boolean(state.pendingBuyKey && state.pendingBuyKey === pendingKey));
+    button.disabled = !market || !state.user;
     button.innerHTML = `
       <strong>${formatFire(amount)}</strong>
       <small>win <b>${formatFire(amountPreview.shares)}</b></small>
@@ -1767,6 +1774,13 @@ async function buy(amount = state.selectedAmount) {
   const side = state.selectedSide;
   const buyAmount = Number(amount || state.selectedAmount);
   state.selectedAmount = buyAmount;
+  const intentKey = getBuyIntentKey(marketId, side, buyAmount);
+  if (state.pendingBuy) {
+    triggerHaptic(state.pendingBuyKey === intentKey ? "light" : "selection");
+    state.pendingBuyKey = state.pendingBuyKey || intentKey;
+    renderTradeTicket();
+    return;
+  }
   if (buyAmount > Number(state.balance || 0)) {
     const missing = Math.max(1, Math.ceil(buyAmount - Number(state.balance || 0)));
     triggerHaptic("warning");
@@ -1775,6 +1789,7 @@ async function buy(amount = state.selectedAmount) {
   }
   triggerHaptic("medium");
   state.pendingBuy = true;
+  state.pendingBuyKey = intentKey;
   renderTradeTicket();
   try {
     const result = await api(`/api/market/${marketId}/buy`, {
@@ -1797,13 +1812,15 @@ async function buy(amount = state.selectedAmount) {
     renderMe();
     renderActivity();
     renderTradeTicket();
-    void Promise.all([
-      loadMarket().catch(() => undefined),
-      loadBtcMarkets().catch(() => undefined),
-      loadWorldCupMarkets().catch(() => undefined),
-      loadMe().catch(() => undefined),
-      loadComments().catch(() => undefined),
-    ]);
+    window.setTimeout(() => {
+      void Promise.all([
+        loadMarket().catch(() => undefined),
+        loadBtcMarkets().catch(() => undefined),
+        loadWorldCupMarkets().catch(() => undefined),
+        loadMe().catch(() => undefined),
+        loadComments().catch(() => undefined),
+      ]);
+    }, 160);
   } catch (error) {
     triggerHaptic("error");
     if (error.message === "insufficient_fire") {
@@ -1814,6 +1831,7 @@ async function buy(amount = state.selectedAmount) {
     }
   } finally {
     state.pendingBuy = false;
+    state.pendingBuyKey = null;
     renderMarket();
     renderTradeTicket();
   }
