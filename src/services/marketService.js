@@ -911,6 +911,145 @@ export async function syncFireBalanceByUsername(input) {
   });
 }
 
+export async function resetUserMarketStateByUsername(input) {
+  const username = String(input.username || "").trim().replace(/^@/, "");
+  if (!username) {
+    throw new Error("username_required");
+  }
+  const balance = ensureNonNegativeAmount(input.amount ?? input.balance);
+  const reason = input.reason || "bug_bounty_reset";
+  const source = input.source || "bridge_user_reset";
+
+  return withTransaction(async (client) => {
+    const userResult = await client.query(
+      `
+        SELECT *
+        FROM users
+        WHERE lower(username) = lower($1)
+        ORDER BY updated_at DESC
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [username],
+    );
+    const user = userResult.rows[0];
+    if (!user) {
+      throw new Error("user_not_found");
+    }
+
+    const balanceResult = await client.query(
+      `
+        SELECT balance
+        FROM fire_balances
+        WHERE user_id = $1::bigint
+        FOR UPDATE
+      `,
+      [user.id],
+    );
+    const previousBalance = toNumber(balanceResult.rows[0]?.balance);
+    const delta = Math.round((balance - previousBalance) * 100) / 100;
+
+    const touchedMarketResult = await client.query(
+      `
+        SELECT DISTINCT market_id
+        FROM (
+          SELECT market_id FROM positions WHERE user_id = $1::bigint
+          UNION
+          SELECT market_id FROM trades WHERE user_id = $1::bigint
+        ) touched
+      `,
+      [user.id],
+    );
+    const touchedMarketIds = touchedMarketResult.rows
+      .map((row) => Number(row.market_id))
+      .filter(Number.isSafeInteger);
+
+    const deletedTrades = await client.query(
+      `
+        DELETE FROM trades
+        WHERE user_id = $1::bigint
+      `,
+      [user.id],
+    );
+    const deletedPositions = await client.query(
+      `
+        DELETE FROM positions
+        WHERE user_id = $1::bigint
+      `,
+      [user.id],
+    );
+
+    if (touchedMarketIds.length) {
+      await client.query(
+        `
+          WITH rebuilt AS (
+            SELECT
+              market_id,
+              SUM(CASE WHEN side = 'YES' AND status = 'open' THEN spent ELSE 0 END) AS yes_volume,
+              SUM(CASE WHEN side = 'NO' AND status = 'open' THEN spent ELSE 0 END) AS no_volume
+            FROM positions
+            WHERE market_id = ANY($1::bigint[])
+            GROUP BY market_id
+          )
+          UPDATE markets
+          SET yes_volume = COALESCE(rebuilt.yes_volume, 0),
+              no_volume = COALESCE(rebuilt.no_volume, 0)
+          FROM rebuilt
+          WHERE markets.id = rebuilt.market_id
+            AND markets.status = 'open'
+        `,
+        [touchedMarketIds],
+      );
+      await client.query(
+        `
+          UPDATE markets
+          SET yes_volume = 0,
+              no_volume = 0
+          WHERE id = ANY($1::bigint[])
+            AND status = 'open'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM positions
+              WHERE positions.market_id = markets.id
+                AND positions.status = 'open'
+            )
+        `,
+        [touchedMarketIds],
+      );
+    }
+
+    await client.query(
+      `
+        UPDATE fire_balances
+        SET balance = $2::numeric,
+            updated_at = now()
+        WHERE user_id = $1::bigint
+      `,
+      [user.id, balance],
+    );
+
+    if (Math.abs(delta) >= 0.01) {
+      await client.query(
+        `
+          INSERT INTO fire_ledger (user_id, amount, reason, source)
+          VALUES ($1::bigint, $2::numeric, $3::text, $4::text)
+        `,
+        [user.id, delta, reason, source],
+      );
+    }
+
+    return {
+      user: mapUser(user),
+      balance,
+      previous_balance: previousBalance,
+      delta,
+      deleted_positions: deletedPositions.rowCount ?? 0,
+      deleted_trades: deletedTrades.rowCount ?? 0,
+      touched_markets: touchedMarketIds.length,
+    };
+  });
+}
+
 export async function claimShareTask(input) {
   const user = await upsertUser({
     telegram_id: input.telegram_id,
@@ -1446,6 +1585,14 @@ export async function getMarketChart(market, limit = 240) {
   if (!market) {
     return [];
   }
+  const btcDefinition = getBtcMarketDef(market.symbol);
+  const chartSymbol = btcDefinition ? MARKET_SYMBOL : market.symbol;
+  const lookbackMs = btcDefinition
+    ? Math.min(getBtcMarketDurationMinutes(btcDefinition) * 60_000, 7 * 24 * 60 * 60 * 1_000)
+    : 0;
+  const since = btcDefinition
+    ? new Date(Date.now() - lookbackMs)
+    : market.start_time;
 
   const result = await query(
     `
@@ -1460,7 +1607,7 @@ export async function getMarketChart(market, limit = 240) {
       ) recent_ticks
       ORDER BY created_at ASC
     `,
-    [market.symbol, market.start_time, Math.max(30, Math.min(600, Number(limit) || 240))],
+    [chartSymbol, since, Math.max(30, Math.min(600, Number(limit) || 240))],
   );
 
   return result.rows.map(mapMarketChartPoint);

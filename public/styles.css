@@ -338,9 +338,9 @@ h2 {
 
 .market-heading h2 {
   display: block;
-  font-size: clamp(18px, 5vw, 28px);
-  line-height: 1.02;
-  white-space: nowrap;
+  font-size: clamp(16px, 4.35vw, 22px);
+  line-height: 1.08;
+  overflow-wrap: anywhere;
 }
 
 .market-heading .status-pill {
@@ -1100,6 +1100,10 @@ code {
   color: #fff;
   padding: 0 13px;
   font-weight: 950;
+}
+
+.market-chat-form button:disabled {
+  opacity: 0.62;
 }
 
 .bet-panel {

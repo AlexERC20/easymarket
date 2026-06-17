@@ -27,6 +27,7 @@ const state = {
   worldCupCharts: new Map(),
   comments: [],
   commentsMarketId: null,
+  commentPending: false,
   betSheet: {
     market: null,
     side: "YES",
@@ -327,7 +328,26 @@ function getDisplayChartPoints(market) {
   }
 
   if (!isWorldCupMarket(market)) {
-    return state.chartPoints;
+    const btcPoints = isBtcMarket(market) && market?.id !== state.market?.id
+      ? state.btcCharts.get(market.id) || []
+      : state.chartPoints;
+    if (btcPoints.length > 1) {
+      return btcPoints;
+    }
+    const now = Date.now();
+    const start = Number(market?.open_price || market?.current_price || 0);
+    const current = Number(market?.current_price || start || 0);
+    if (!start || !current) {
+      return btcPoints;
+    }
+    const wiggle = Math.max(1, current * 0.00005);
+    return Array.from({ length: 18 }, (_, index) => {
+      const progress = index / 17;
+      return {
+        price: start + (current - start) * progress + Math.sin(index / 2.2) * wiggle,
+        at: now - (17 - index) * 850,
+      };
+    });
   }
 
   const points = state.worldCupCharts.get(market.id) || [];
@@ -388,16 +408,19 @@ function drawMarketChartFrame() {
   const nowMs = Date.now();
   const historyStart = sourcePoints[0]?.at;
   const historyEnd = sourcePoints[sourcePoints.length - 1]?.at;
-  const windowEnd = worldCup ? Math.max(nowMs, historyEnd || nowMs) : Math.min(endTime, nowMs);
-  const startTime = worldCup && sourcePoints.length > 1
+  const btc = isBtcMarket(market);
+  const windowEnd = (worldCup || btc) && sourcePoints.length > 1
+    ? Math.max(nowMs, historyEnd || nowMs)
+    : Math.min(endTime, nowMs);
+  const startTime = (worldCup || btc) && sourcePoints.length > 1
     ? historyStart
     : (worldCup ? windowEnd - CHART_WINDOW_MS : new Date(market.start_time).getTime());
-  const windowStart = worldCup && sourcePoints.length > 1
+  const windowStart = (worldCup || btc) && sourcePoints.length > 1
     ? startTime
     : Math.max(startTime, windowEnd - CHART_WINDOW_MS);
   const duration = Math.max(1, windowEnd - windowStart);
   const rawPoints = sourcePoints
-    .filter((point) => worldCup || (point.at >= windowStart - 1_500 && point.at <= windowEnd + 1_500));
+    .filter((point) => worldCup || btc || (point.at >= windowStart - 1_500 && point.at <= windowEnd + 1_500));
 
   if (rawPoints.length === 0 && currentPrice > 0) {
     rawPoints.push({ price: currentPrice, at: Date.now() });
@@ -1165,6 +1188,15 @@ function updateTimer() {
     $("timeLeftSeconds").textContent = String(hours).padStart(2, "0");
     if (minuteLabel) minuteLabel.textContent = "DAYS";
     if (secondLabel) secondLabel.textContent = "HRS";
+    return;
+  }
+  if (isBtcMarket(market) && seconds >= 3_600) {
+    const hours = Math.floor(seconds / 3_600);
+    const minutes = Math.floor((seconds % 3_600) / 60);
+    $("timeLeftMinutes").textContent = String(hours).padStart(2, "0");
+    $("timeLeftSeconds").textContent = String(minutes).padStart(2, "0");
+    if (minuteLabel) minuteLabel.textContent = "HRS";
+    if (secondLabel) secondLabel.textContent = "MINS";
     return;
   }
   const minutesPart = String(Math.floor(seconds / 60)).padStart(2, "0");
@@ -2133,11 +2165,17 @@ async function submitMarketComment() {
   const market = getDisplayMarket();
   const input = $("marketChatInput");
   const message = String(input?.value || "").trim();
-  if (!state.user?.telegram_id || !market?.id || !message) {
+  if (!state.user?.telegram_id || !market?.id || !message || state.commentPending) {
     triggerHaptic("warning");
     return;
   }
 
+  state.commentPending = true;
+  const submitButton = $("marketChatForm")?.querySelector("button");
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "...";
+  }
   try {
     const result = await api(`/api/market/${market.id}/comments`, {
       method: "POST",
@@ -2154,6 +2192,12 @@ async function submitMarketComment() {
   } catch (error) {
     triggerHaptic("error");
     showToast(error.message === "comment_required" ? "Напиши текст." : "Комментарий не отправился.");
+  } finally {
+    state.commentPending = false;
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = "Send";
+    }
   }
 }
 

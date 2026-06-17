@@ -24,6 +24,7 @@ import {
   getRecentMarkets,
   getUserSnapshot,
   getWorldCupMarkets,
+  resetUserMarketStateByUsername,
   resolveExpiredMarkets,
   sellOutcome,
   syncFireBalanceByUsername,
@@ -596,6 +597,23 @@ app.post("/api/bridge/fire/sync-username", requireBridgeSecret, async (req, res)
       amount: req.body?.amount ?? req.body?.balance,
       reason: req.body?.reason || "admin_adjustment",
       source: "bridge_sync_username",
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/users/reset-market-state", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await resetUserMarketStateByUsername({
+      username: req.body?.username,
+      amount: req.body?.amount ?? req.body?.balance,
+      reason: req.body?.reason || "bug_bounty_reset",
+      source: "bridge_user_reset",
     });
     res.status(200).json({
       ok: true,
