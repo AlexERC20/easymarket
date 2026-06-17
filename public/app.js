@@ -1376,13 +1376,19 @@ function renderTradeTicket() {
     const amount = Number(button.dataset.amount);
     const amountPreview = getPreview(amount, side);
     const pendingKey = market ? getBuyIntentKey(market.id, side, amount) : null;
+    const nextLabel = formatFire(amount);
+    const nextWin = formatFire(amountPreview.shares);
     button.classList.toggle("active", amount === state.selectedAmount);
     button.classList.toggle("loading", Boolean(state.pendingBuyKey && state.pendingBuyKey === pendingKey));
     button.disabled = !market || !state.user;
-    button.innerHTML = `
-      <strong>${formatFire(amount)}</strong>
-      <small>win <b>${formatFire(amountPreview.shares)}</b></small>
-    `;
+    if (button.dataset.label !== nextLabel || button.dataset.win !== nextWin) {
+      button.dataset.label = nextLabel;
+      button.dataset.win = nextWin;
+      button.innerHTML = `
+        <strong>${nextLabel}</strong>
+        <small>win <b>${nextWin}</b></small>
+      `;
+    }
   });
 
   $("ticketTitle").textContent = `Нажми сумму для ${marketSideLabel(market, side)}`;

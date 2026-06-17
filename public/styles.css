@@ -275,6 +275,7 @@ h2 {
 
 .market-card {
   overflow: hidden;
+  overflow-anchor: none;
   background:
     linear-gradient(
       180deg,
@@ -289,7 +290,9 @@ h2 {
 .market-hero {
   align-items: flex-start;
   gap: 11px;
+  min-height: 54px;
   margin-bottom: 14px;
+  overflow-anchor: none;
 }
 
 .coin-badge {
@@ -297,6 +300,7 @@ h2 {
   flex: 0 0 45px;
   width: 45px;
   height: 45px;
+  contain: layout paint;
   place-items: center;
   border-radius: 11px;
   background: linear-gradient(180deg, #ffb23f, #ff9418);
@@ -334,10 +338,13 @@ h2 {
 .market-heading {
   min-width: 0;
   flex: 1;
+  align-self: stretch;
+  min-height: 54px;
 }
 
 .market-heading h2 {
   display: block;
+  min-height: 18px;
   font-size: clamp(16px, 4.35vw, 22px);
   line-height: 1.08;
   overflow-wrap: anywhere;
@@ -360,7 +367,12 @@ h2 {
   display: flex;
   flex: 0 0 auto;
   gap: 12px;
+  min-width: 92px;
   text-align: center;
+}
+
+.countdown div {
+  width: 40px;
 }
 
 .countdown strong,
@@ -544,9 +556,13 @@ h2 {
 }
 
 .outcome-button:active,
-.amount-button:active,
 .icon-button:active {
   transform: translateY(1px) scale(0.99);
+}
+
+.amount-button:active {
+  filter: brightness(1.08);
+  transform: translateZ(0);
 }
 
 .outcome-button strong {
@@ -602,6 +618,7 @@ h2 {
   position: relative;
   bottom: auto;
   z-index: 5;
+  overflow-anchor: none;
   border-color: rgba(255, 255, 255, 0.12);
 }
 
@@ -614,16 +631,22 @@ h2 {
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
   margin-top: 9px;
+  contain: layout paint;
+  overflow-anchor: none;
 }
 
 .amount-button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
   min-height: 49px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: #10151f;
   color: var(--text);
   padding: 7px 4px;
-  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+  transform: translateZ(0);
+  transition: border-color 120ms ease, background 120ms ease, filter 120ms ease;
+  will-change: filter;
 }
 
 .amount-button strong,
@@ -632,12 +655,14 @@ h2 {
 }
 
 .amount-button strong {
+  min-height: 20px;
   font-size: clamp(15px, 4.3vw, 20px);
   font-weight: 950;
   line-height: 1;
 }
 
 .amount-button small {
+  min-height: 15px;
   margin-top: 4px;
   color: var(--muted);
   font-size: clamp(9px, 2.7vw, 12px);
