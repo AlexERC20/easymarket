@@ -1295,7 +1295,11 @@ function estimateSellQuote({ position, market, outcomePrice }) {
 }
 
 function renderMe() {
-  animateText($("fireBalance"), state.balance, formatFire);
+  const balanceElement = $("fireBalance");
+  const balanceDigits = String(Math.floor(Number(state.balance || 0))).length;
+  balanceElement?.classList.toggle("compact", balanceDigits >= 6);
+  balanceElement?.classList.toggle("tiny", balanceDigits >= 8);
+  animateText(balanceElement, state.balance, formatFire);
 
   const positions = state.positions.filter((position) => position.status === "open");
   setSectionToggle("positionToggle", positions.length, "positions");

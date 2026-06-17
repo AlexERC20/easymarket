@@ -108,13 +108,47 @@ p {
 
 .topbar {
   margin: 5px 0 8px;
+  min-height: 50px;
+  overflow-anchor: none;
 }
 
-h1 {
+.topbar h1 {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 176px;
   color: var(--fire);
   font-size: 28px;
   font-weight: 900;
   letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.balance-star {
+  flex: 0 0 auto;
+  font-size: 0.82em;
+}
+
+#fireBalance {
+  display: inline-block;
+  min-width: 78px;
+  max-width: 138px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transform-origin: left center;
+}
+
+#fireBalance.compact {
+  font-size: 0.82em;
+  max-width: 128px;
+}
+
+#fireBalance.tiny {
+  font-size: 0.68em;
+  max-width: 116px;
 }
 
 h2 {
@@ -184,6 +218,7 @@ h2 {
 .top-actions {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 6px;
 }
 
