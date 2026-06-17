@@ -7,14 +7,18 @@ import { config } from "./config.js";
 import { getPool, getSafeDatabaseErrorMessage, query, runMigrations } from "./db.js";
 import {
   addFireToUser,
+  addMarketComment,
   buyOutcome,
+  claimDailyTask,
   claimShareTask,
   completeVerifiedTask,
   createBtc5mMarket,
   ensureActiveMarket,
   getActiveMarket,
+  getBtcMarkets,
   getFireLedgerEvents,
   getMarketActivity,
+  getMarketComments,
   getMarketChart,
   getRecentActivity,
   getRecentMarkets,
@@ -22,6 +26,7 @@ import {
   getWorldCupMarkets,
   resolveExpiredMarkets,
   sellOutcome,
+  syncFireBalanceByUsername,
   syncFireBalance,
   updateLiveBtcPrice,
   upsertUser,
@@ -53,6 +58,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
   const publicErrors = new Set([
     "telegram_id_required",
     "telegram_id_missing",
+    "username_required",
     "amount_must_be_positive",
     "amount_must_be_non_negative",
     "invalid_market_id",
@@ -65,6 +71,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "invalid_position_id",
     "invalid_sell_shares",
     "invalid_task",
+    "comment_required",
     "insufficient_shares",
     "invalid_market_price",
     "invoice_failed",
@@ -182,6 +189,8 @@ app.get("/api/public/config", (_req, res) => {
     task_share_fire: config.taskShareFire,
     task_subscribe_fire: config.taskSubscribeFire,
     task_private_chat_fire: config.taskPrivateChatFire,
+    task_daily_presence_fire: config.taskDailyPresenceFire,
+    task_daily_bet_fire: config.taskDailyBetFire,
     task_daily_cap_fire: config.taskDailyCapFire,
     av_channel_url: config.publicAvChannelUrl,
     av_chat_url: config.publicAvChatUrl,
@@ -351,6 +360,46 @@ app.get("/api/world-cup/markets", async (_req, res) => {
   }
 });
 
+app.get("/api/btc/markets", async (_req, res) => {
+  try {
+    const markets = await getBtcMarkets();
+    res.status(200).json({
+      ok: true,
+      markets,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/market/:marketId/comments", async (req, res) => {
+  try {
+    const comments = await getMarketComments(req.params.marketId, req.query.limit);
+    res.status(200).json({
+      ok: true,
+      comments,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/market/:marketId/comments", async (req, res) => {
+  try {
+    const comment = await addMarketComment({
+      marketId: req.params.marketId,
+      telegram_id: req.body?.telegram_id,
+      message: req.body?.message,
+    });
+    res.status(200).json({
+      ok: true,
+      comment,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
 app.post("/api/market/:marketId/buy", async (req, res) => {
   try {
     const result = await buyOutcome({
@@ -441,6 +490,20 @@ app.post("/api/tasks/share", async (req, res) => {
   }
 });
 
+app.post("/api/tasks/daily", async (req, res) => {
+  try {
+    const result = await claimDailyTask({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      task_key: req.body?.task_key ?? req.body?.taskKey,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
 app.post("/api/dev/fire/add", requireDevTools, async (req, res) => {
   try {
     const result = await addFireToUser({
@@ -516,6 +579,23 @@ app.post("/api/bridge/fire/sync", requireBridgeSecret, async (req, res) => {
       amount: req.body?.amount ?? req.body?.balance,
       reason: req.body?.reason || "admin_adjustment",
       source: "bridge_sync",
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/fire/sync-username", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await syncFireBalanceByUsername({
+      username: req.body?.username,
+      amount: req.body?.amount ?? req.body?.balance,
+      reason: req.body?.reason || "admin_adjustment",
+      source: "bridge_sync_username",
     });
     res.status(200).json({
       ok: true,

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260616-7" />
+    <link rel="stylesheet" href="/styles.css?v=20260617-1" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -15,14 +15,26 @@
           <h1><span class="balance-star">⭐</span> <span id="fireBalance">0</span></h1>
         </div>
         <div class="top-actions">
+          <button id="btcMarketsBtn" class="icon-button btc-action" type="button" aria-label="BTC markets">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="8.5" />
+              <path d="M10 7v10" />
+              <path d="M8.5 9h4.3a2 2 0 0 1 0 4H8.5" />
+              <path d="M8.5 13h5a2 2 0 0 1 0 4h-5" />
+              <path d="M10 5.5v2" />
+              <path d="M13 5.5v2" />
+              <path d="M10 16.5v2" />
+              <path d="M13 16.5v2" />
+            </svg>
+          </button>
           <button id="worldCupBtn" class="icon-button sport-action" type="button" aria-label="World Cup markets">
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M8 4h8v3.5a4 4 0 0 1-8 0V4Z" />
-              <path d="M8 6H5.5A2.5 2.5 0 0 0 8 8.5" />
-              <path d="M16 6h2.5A2.5 2.5 0 0 1 16 8.5" />
-              <path d="M12 12v4" />
-              <path d="M9 20h6" />
-              <path d="M10 16h4v4h-4z" />
+              <path d="M7 5h10l-1.2 9H8.2L7 5Z" />
+              <path d="M8.5 7H5.8c.2 3 1.4 4.7 3.1 5" />
+              <path d="M15.5 7h2.7c-.2 3-1.4 4.7-3.1 5" />
+              <path d="M12 14v3.5" />
+              <path d="M8.8 20h6.4" />
+              <path d="M10 17.5h4" />
             </svg>
           </button>
           <button id="withdrawBtn" class="icon-button withdraw-action" type="button" aria-label="Вывести звезды">
@@ -97,6 +109,20 @@
               </div>
               <button id="taskShareBtn" class="task-button gold" type="button">Share</button>
             </div>
+            <div class="task-row">
+              <div>
+                <strong>Ежедневный вход</strong>
+                <small>Проведи 5 минут в EasyMarket и получи +<span id="dailyPresenceTaskReward">50</span></small>
+              </div>
+              <button id="taskDailyPresenceBtn" class="task-button" type="button">Таймер</button>
+            </div>
+            <div class="task-row">
+              <div>
+                <strong>Первая ставка дня</strong>
+                <small>Поставь 1 ставку и получи +<span id="dailyBetTaskReward">50</span> автоматически</small>
+              </div>
+              <button class="task-button" type="button" disabled>Auto</button>
+            </div>
           </div>
         </div>
       </section>
@@ -135,6 +161,21 @@
           <div class="topup-body">
             <strong>Скоро</strong>
             <p>Вывод звезд пока готовится. При выводе будет удержано 10% на комиссионные расходы.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="btcMarketsSheet" class="task-sheet hidden" aria-label="BTC markets">
+        <div class="task-panel world-cup-panel">
+          <div class="task-head">
+            <div>
+              <p class="eyebrow">BTC markets</p>
+              <h2>Bitcoin Up / Down</h2>
+            </div>
+            <button id="btcMarketsCloseBtn" class="icon-button" type="button" aria-label="Закрыть BTC markets">×</button>
+          </div>
+          <div id="btcMarketsList" class="world-cup-list">
+            <p class="muted">Загружаю BTC markets...</p>
           </div>
         </div>
       </section>
@@ -184,11 +225,11 @@
       </section>
 
       <section id="authCard" class="card hidden">
-        <h2>Нужен пользователь</h2>
+        <h2>Открой EasyMarket в Telegram</h2>
         <p>
-          Открой через Telegram Mini App или добавь dev query:
-          <code>?telegram_id=123&amp;username=alex&amp;first_name=Alex</code>
+          Это Mini App. В браузере снаружи Telegram ставки и баланс не откроются.
         </p>
+        <button id="openTelegramAppBtn" class="trade-confirm" type="button">Открыть в Telegram</button>
         <p id="authDebug" class="debug-text"></p>
       </section>
 
@@ -266,6 +307,20 @@
         </div>
       </section>
 
+      <section class="card market-chat-card">
+        <div class="section-title">
+          <h2>Чат рынка</h2>
+          <span class="subtle">ники и последняя ставка</span>
+        </div>
+        <div id="marketChatList" class="market-chat-list">
+          <p class="muted">Комментариев пока нет.</p>
+        </div>
+        <form id="marketChatForm" class="market-chat-form">
+          <input id="marketChatInput" type="text" maxlength="240" placeholder="Написать в чат рынка..." autocomplete="off" />
+          <button type="submit">Send</button>
+        </form>
+      </section>
+
       <section class="card">
         <div class="section-title">
           <h2>Моя позиция</h2>
@@ -308,6 +363,6 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
-    <script src="/app.js?v=20260616-7" type="module"></script>
+    <script src="/app.js?v=20260617-1" type="module"></script>
   </body>
 </html>

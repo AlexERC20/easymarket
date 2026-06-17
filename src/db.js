@@ -126,6 +126,24 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_markets_symbol_status
       ON markets(symbol, status);
 
+    WITH ranked_open_markets AS (
+      SELECT
+        id,
+        ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY end_time ASC, id ASC) AS rn
+      FROM markets
+      WHERE status = 'open'
+    )
+    UPDATE markets
+    SET status = 'superseded',
+        resolved_at = now()
+    FROM ranked_open_markets
+    WHERE markets.id = ranked_open_markets.id
+      AND ranked_open_markets.rn > 1;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_markets_one_open_per_symbol
+      ON markets(symbol)
+      WHERE status = 'open';
+
     CREATE TABLE IF NOT EXISTS world_cup_market_meta (
       symbol TEXT PRIMARY KEY,
       polymarket_id TEXT,
@@ -196,6 +214,17 @@ export async function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_trades_user_created
       ON trades(user_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS market_comments (
+      id BIGSERIAL PRIMARY KEY,
+      market_id BIGINT NOT NULL REFERENCES markets(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_market_comments_market_created
+      ON market_comments(market_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS price_ticks (
       id BIGSERIAL PRIMARY KEY,

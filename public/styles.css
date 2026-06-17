@@ -41,6 +41,14 @@ body {
   touch-action: pan-x pan-y;
 }
 
+body.auth-only .app-shell > :not(#authCard) {
+  display: none !important;
+}
+
+body.auth-only #authCard {
+  display: block;
+}
+
 button,
 input {
   font: inherit;
@@ -215,6 +223,12 @@ h2 {
 .icon-button.fire-action {
   border-color: rgba(255, 184, 77, 0.42);
   background: linear-gradient(180deg, rgba(255, 184, 77, 0.14), rgba(17, 23, 34, 0.78));
+}
+
+.icon-button.btc-action {
+  border-color: rgba(255, 184, 77, 0.48);
+  background: rgba(255, 184, 77, 0.11);
+  color: var(--fire);
 }
 
 .icon-button.withdraw-action {
@@ -986,6 +1000,106 @@ code {
 .world-cup-actions .wc-no {
   background: rgba(239, 70, 111, 0.16);
   color: var(--no);
+}
+
+.btc-mini-icon {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(180deg, #ffb84d, #f7931a);
+  color: #11161f;
+  font-size: 24px;
+  font-weight: 950;
+}
+
+.market-chat-card {
+  display: grid;
+  gap: 12px;
+}
+
+.market-chat-list {
+  display: grid;
+  gap: 9px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.chat-row {
+  border: 1px solid var(--line-soft);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 10px;
+}
+
+.chat-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-bottom: 5px;
+}
+
+.chat-meta strong {
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.chat-meta span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.chat-bet {
+  border-radius: 999px;
+  padding: 3px 6px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.chat-bet.side-YES {
+  color: var(--yes);
+  background: var(--yes-soft);
+}
+
+.chat-bet.side-NO {
+  color: var(--no);
+  background: var(--no-soft);
+}
+
+.chat-row p {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.market-chat-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.market-chat-form input {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #0d131d;
+  color: var(--text);
+  padding: 11px 12px;
+  outline: none;
+}
+
+.market-chat-form input:focus {
+  border-color: rgba(18, 153, 243, 0.5);
+}
+
+.market-chat-form button {
+  border: 0;
+  border-radius: 12px;
+  background: var(--blue);
+  color: #fff;
+  padding: 0 13px;
+  font-weight: 950;
 }
 
 .bet-panel {

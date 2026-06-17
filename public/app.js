@@ -3,6 +3,7 @@ const MARKET_MAKER_SPREAD_RATE = 0.03;
 const SELL_IMPACT_MULTIPLIER = 1.1;
 const AMOUNTS = [50, 100, 500, 1000];
 const MIN_OUTCOME_PRICE = 0.001;
+const BTC_MIN_OUTCOME_PRICE = 0.04;
 const CHART_WINDOW_MS = 10_000;
 const CHART_RENDER_INTERVAL_MS = 66;
 const COLLAPSE_LIMIT = 3;
@@ -16,10 +17,16 @@ const state = {
   recentMarkets: [],
   activity: [],
   chartPoints: [],
+  btcMarkets: [],
+  selectedBtcMarketId: null,
+  btcCharts: new Map(),
+  btcMarketsListRenderedOrder: "",
   worldCupMarkets: [],
   worldCupListRenderedOrder: "",
   selectedWorldCupMarketId: null,
   worldCupCharts: new Map(),
+  comments: [],
+  commentsMarketId: null,
   betSheet: {
     market: null,
     side: "YES",
@@ -51,11 +58,18 @@ const state = {
     task_share_fire: 100,
     task_subscribe_fire: 500,
     task_private_chat_fire: 15000,
+    task_daily_presence_fire: 50,
+    task_daily_bet_fire: 50,
     task_daily_cap_fire: 10000,
     av_channel_url: "https://t.me/erc20coin",
     av_chat_url: "https://t.me/thedaomaker",
     private_chat_url: "https://t.me/tribute/app?startapp=stKL",
     stars_invoice_enabled: false,
+  },
+  presence: {
+    startedAt: null,
+    claimed: false,
+    pending: false,
   },
   chartRaf: null,
   smoothedPrice: null,
@@ -248,18 +262,70 @@ function roundedRectPath(ctx, x, y, width, height, radius) {
 }
 
 function getDisplayMarket() {
-  if (!state.selectedWorldCupMarketId) {
-    return state.market;
+  if (state.selectedBtcMarketId) {
+    return state.btcMarkets.find((market) => market.id === state.selectedBtcMarketId) || state.market;
   }
 
-  return state.worldCupMarkets.find((market) => market.id === state.selectedWorldCupMarketId) || state.market;
+  if (state.selectedWorldCupMarketId) {
+    return state.worldCupMarkets.find((market) => market.id === state.selectedWorldCupMarketId) || state.market;
+  }
+
+  return state.market;
 }
 
 function isWorldCupMarket(market = getDisplayMarket()) {
   return market?.market_type === "WORLD_CUP_WINNER";
 }
 
+function isBtcMarket(market = getDisplayMarket()) {
+  return market?.market_type === "BTC_UPDOWN" || String(market?.symbol || "").startsWith("BTCUSDT");
+}
+
+function getMarketMinOutcomePrice(market = getDisplayMarket()) {
+  return isBtcMarket(market) ? BTC_MIN_OUTCOME_PRICE : MIN_OUTCOME_PRICE;
+}
+
+function upsertMarketListItem(listName, market) {
+  if (!market?.id) {
+    return;
+  }
+  const index = state[listName].findIndex((item) => item.id === market.id);
+  if (index >= 0) {
+    state[listName][index] = {
+      ...state[listName][index],
+      ...market,
+    };
+    return;
+  }
+  state[listName].push(market);
+}
+
+function upsertLocalMarket(market) {
+  if (!market?.id) {
+    return;
+  }
+  if (market.id === state.market?.id) {
+    state.market = {
+      ...state.market,
+      ...market,
+    };
+  }
+  if (market.market_type === "BTC_UPDOWN") {
+    upsertMarketListItem("btcMarkets", market);
+  }
+  if (market.market_type === "WORLD_CUP_WINNER") {
+    upsertMarketListItem("worldCupMarkets", market);
+  }
+}
+
 function getDisplayChartPoints(market) {
+  if (isBtcMarket(market) && market?.id !== state.market?.id) {
+    const points = state.btcCharts.get(market.id) || [];
+    if (points.length) {
+      return points;
+    }
+  }
+
   if (!isWorldCupMarket(market)) {
     return state.chartPoints;
   }
@@ -676,11 +742,15 @@ function renderTaskRewards() {
   const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 500));
   const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 15000));
   const ref = Math.round(Number(state.publicConfig.referral_bonus_fire || 500));
+  const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 50));
+  const dailyBet = Math.round(Number(state.publicConfig.task_daily_bet_fire || 50));
   if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
   if ($("channelTaskReward")) $("channelTaskReward").textContent = formatFire(sub);
   if ($("chatTaskReward")) $("chatTaskReward").textContent = formatFire(sub);
   if ($("privateChatTaskReward")) $("privateChatTaskReward").textContent = formatFire(privateChat);
   if ($("refTaskReward")) $("refTaskReward").textContent = formatFire(ref);
+  if ($("dailyPresenceTaskReward")) $("dailyPresenceTaskReward").textContent = formatFire(dailyPresence);
+  if ($("dailyBetTaskReward")) $("dailyBetTaskReward").textContent = formatFire(dailyBet);
 }
 
 async function api(path, options = {}) {
@@ -703,10 +773,18 @@ async function api(path, options = {}) {
 async function upsertMe() {
   const user = getTelegramUser();
   if (!user) {
+    document.body.classList.add("auth-only");
     $("authCard").classList.remove("hidden");
     $("authDebug").textContent = getTelegramDebugInfo();
     setConnection("Нет пользователя", "error");
-    return;
+    if (!/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)) {
+      window.setTimeout(() => {
+        if (!state.user && state.publicConfig.mini_app_url) {
+          window.location.href = state.publicConfig.mini_app_url;
+        }
+      }, 900);
+    }
+    return false;
   }
 
   const data = await api("/api/me/upsert", {
@@ -716,8 +794,11 @@ async function upsertMe() {
   state.user = data.user;
   state.balance = data.balance || 0;
   state.positions = data.positions || [];
+  state.presence.startedAt = Date.now();
+  document.body.classList.remove("auth-only");
   $("authCard").classList.add("hidden");
   setConnection("LIVE", "online");
+  return true;
 }
 
 function mergeChartPoints(points, market) {
@@ -786,6 +867,9 @@ async function loadMarket() {
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
+  if (!state.commentsMarketId || state.commentsMarketId === getDisplayMarket()?.id) {
+    void loadComments().catch(() => undefined);
+  }
 }
 
 async function loadActivity() {
@@ -813,6 +897,67 @@ async function loadRecentMarkets() {
   renderRecentMarkets();
 }
 
+function formatRelativeTime(value) {
+  const ms = Date.now() - new Date(value).getTime();
+  if (!Number.isFinite(ms) || ms < 60_000) return "now";
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+async function loadComments() {
+  const market = getDisplayMarket();
+  if (!market?.id) {
+    state.comments = [];
+    state.commentsMarketId = null;
+    renderComments();
+    return;
+  }
+
+  const data = await api(`/api/market/${market.id}/comments?limit=30`);
+  state.comments = data.comments || [];
+  state.commentsMarketId = market.id;
+  renderComments();
+}
+
+function renderComments() {
+  const container = $("marketChatList");
+  if (!container) {
+    return;
+  }
+
+  const market = getDisplayMarket();
+  if (!market?.id) {
+    container.innerHTML = '<p class="muted">Сначала выбери рынок.</p>';
+    return;
+  }
+
+  if (state.commentsMarketId !== market.id || !state.comments.length) {
+    container.innerHTML = '<p class="muted">Комментариев пока нет.</p>';
+    return;
+  }
+
+  container.innerHTML = state.comments.slice(0, 8).map((comment) => {
+    const name = comment.username || comment.first_name || `user ${comment.telegram_id}`;
+    const latestBet = comment.latest_bet;
+    const betBadge = latestBet
+      ? `<span class="chat-bet side-${latestBet.side}">${actionLabel(latestBet.action)} ${marketSideLabel(market, latestBet.side)} ${formatFire(latestBet.amount)}</span>`
+      : '<span class="chat-bet muted">без ставки</span>';
+    return `
+      <div class="chat-row">
+        <div class="chat-meta">
+          <strong>${escapeHtml(name)}</strong>
+          <span>${formatRelativeTime(comment.created_at)}</span>
+          ${betBadge}
+        </div>
+        <p>${escapeHtml(comment.message)}</p>
+      </div>
+    `;
+  }).join("");
+}
+
 function mergeWorldCupChartPoint(market) {
   if (!market?.id) {
     return;
@@ -835,6 +980,51 @@ function mergeWorldCupChartPoint(market) {
     points.push(nextPoint);
   }
   state.worldCupCharts.set(market.id, points.slice(-260));
+}
+
+function mergeBtcChartPoint(market) {
+  if (!market?.id) {
+    return;
+  }
+
+  const existing = state.btcCharts.get(market.id) || [];
+  const history = (market.chart || [])
+    .map((point) => ({
+      price: normalizeChartPrice(point.price),
+      at: new Date(point.created_at).getTime(),
+    }))
+    .filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at));
+  const points = existing.length ? existing : history;
+  if (market.current_price) {
+    const nextPoint = {
+      price: Number(market.current_price),
+      at: Date.now(),
+    };
+    const lastPoint = points[points.length - 1];
+    if (!lastPoint || nextPoint.at - lastPoint.at > 700 || Math.abs(nextPoint.price - lastPoint.price) > 0.01) {
+      points.push(nextPoint);
+    }
+  }
+  state.btcCharts.set(market.id, points.slice(-260));
+}
+
+async function loadBtcMarkets() {
+  const data = await api("/api/btc/markets");
+  const incomingMarkets = data.markets || [];
+  state.btcMarkets = incomingMarkets;
+  state.btcMarkets.forEach(mergeBtcChartPoint);
+  if (
+    state.selectedBtcMarketId
+    && !state.btcMarkets.some((market) => market.id === state.selectedBtcMarketId)
+  ) {
+    state.selectedBtcMarketId = null;
+  }
+  renderBtcMarketsList();
+  if (state.selectedBtcMarketId) {
+    renderMarket();
+    renderTradeTicket();
+    renderMarketChart();
+  }
 }
 
 async function loadWorldCupMarkets() {
@@ -870,7 +1060,7 @@ function getPreview(amount = state.selectedAmount, side = state.selectedSide) {
   const price = market
     ? Number(side === "YES" ? market.yes_price : market.no_price)
     : 0.5;
-  const safePrice = Math.max(MIN_OUTCOME_PRICE, price || 0.5);
+  const safePrice = Math.max(getMarketMinOutcomePrice(market), price || 0.5);
   const net = Number(amount || 0);
   const shares = net / safePrice;
   const profit = shares - Number(amount || 0);
@@ -905,7 +1095,7 @@ function renderMarket() {
   marketStatus.classList.toggle("live", market?.status === "open");
   $("marketTitle").textContent = worldCup
     ? `${market.team} Winner`
-    : "BTC Up or Down 5m";
+    : (market?.title || "BTC Up or Down 5m");
   const coinBadge = document.querySelector(".coin-badge");
   if (coinBadge) {
     if (worldCup) {
@@ -968,11 +1158,13 @@ function updateTimer() {
 
   const remainingMs = new Date(market.end_time).getTime() - Date.now();
   const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
-  if (isWorldCupMarket(market) && seconds > 172_800) {
-    $("timeLeftMinutes").textContent = String(Math.ceil(seconds / 86_400));
-    $("timeLeftSeconds").textContent = "";
+  if (isWorldCupMarket(market) && seconds > 86_400) {
+    const days = Math.floor(seconds / 86_400);
+    const hours = Math.floor((seconds % 86_400) / 3_600);
+    $("timeLeftMinutes").textContent = String(days);
+    $("timeLeftSeconds").textContent = String(hours).padStart(2, "0");
     if (minuteLabel) minuteLabel.textContent = "DAYS";
-    if (secondLabel) secondLabel.textContent = "LEFT";
+    if (secondLabel) secondLabel.textContent = "HRS";
     return;
   }
   const minutesPart = String(Math.floor(seconds / 60)).padStart(2, "0");
@@ -1000,6 +1192,7 @@ function setSectionToggle(id, total, key) {
 
 function getPositionMarket(position) {
   return state.worldCupMarkets.find((market) => market.id === position.market_id)
+    || state.btcMarkets.find((market) => market.id === position.market_id)
     || (position.market_id === state.market?.id ? state.market : null);
 }
 
@@ -1007,8 +1200,13 @@ function getPositionMarketLabel(position, market = getPositionMarket(position)) 
   if (market?.team || position.team) {
     return market?.team || position.team;
   }
-  if ((market?.symbol || position.market_symbol) === "BTCUSDT") {
-    return "BTC 5m";
+  if (market?.market_type === "BTC_UPDOWN") {
+    return market.title || `BTC ${market.label || ""}`;
+  }
+  const symbol = market?.symbol || position.market_symbol;
+  if (String(symbol || "").startsWith("BTCUSDT")) {
+    const suffix = String(symbol).replace("BTCUSDT", "").replace(/^_/, "").toLowerCase();
+    return `BTC ${suffix || "5m"}`;
   }
   return `#${position.market_id}`;
 }
@@ -1017,8 +1215,9 @@ function getActivityMarketLabel(trade) {
   if (trade.team) {
     return trade.team;
   }
-  if (trade.market_symbol === "BTCUSDT") {
-    return "BTC 5m";
+  if (String(trade.market_symbol || "").startsWith("BTCUSDT")) {
+    const suffix = String(trade.market_symbol).replace("BTCUSDT", "").replace(/^_/, "").toLowerCase();
+    return `BTC ${suffix || "5m"}`;
   }
   return trade.market_symbol || `#${trade.market_id}`;
 }
@@ -1029,20 +1228,23 @@ function getActivitySideLabel(trade) {
 
 function getRecentMarketLabel(market) {
   const winner = market.winner ? sideLabel(market.winner) : marketStatusLabel(market.status);
-  if (market.symbol === "BTCUSDT") {
-    return `#${market.id} · ${winner} BTC 5m`;
+  if (String(market.symbol || "").startsWith("BTCUSDT")) {
+    const suffix = String(market.symbol).replace("BTCUSDT", "").replace(/^_/, "").toLowerCase();
+    return `#${market.id} · ${winner} BTC ${suffix || "5m"}`;
   }
   return `#${market.id} · ${winner} ${market.symbol}`;
 }
 
 function estimateSellQuote({ position, market, outcomePrice }) {
   const shares = Number(position.shares || 0);
-  const price = Math.max(MIN_OUTCOME_PRICE, Number(outcomePrice || 0));
+  const minPrice = getMarketMinOutcomePrice(market);
+  const price = Math.max(minPrice, Number(outcomePrice || 0));
   const liquidity = Math.max(100, Number(market?.liquidity || state.market?.liquidity || 10_000));
   const estimatedGross = shares * price;
   const impact = (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER;
-  const nextPrice = Math.max(MIN_OUTCOME_PRICE, price - impact);
-  const bidPrice = Math.max(MIN_OUTCOME_PRICE, ((price + nextPrice) / 2) * (1 - MARKET_MAKER_SPREAD_RATE));
+  const nextPrice = Math.max(minPrice, price - impact);
+  const extraExitPenalty = isWorldCupMarket(market) ? 0.02 : 0;
+  const bidPrice = Math.max(minPrice, Math.min(price, nextPrice) * (1 - MARKET_MAKER_SPREAD_RATE - extraExitPenalty));
   const grossExitValue = shares * bidPrice;
   const spent = Number(position.spent || 0);
   const exitProfit = grossExitValue - spent;
@@ -1258,6 +1460,78 @@ function renderWorldCupList() {
   `).join("");
 }
 
+function renderBtcMarketsList() {
+  const container = $("btcMarketsList");
+  if (!container) {
+    return;
+  }
+
+  if (!state.btcMarkets.length) {
+    container.innerHTML = '<p class="muted">BTC markets пока загружаются.</p>';
+    return;
+  }
+
+  const orderKey = state.btcMarkets.map((market) => market.id).join(",");
+  if (state.btcMarketsListRenderedOrder === orderKey) {
+    for (const market of state.btcMarkets) {
+      const row = container.querySelector(`[data-market-id="${market.id}"]`);
+      if (!row) continue;
+      const chance = row.querySelector("[data-btc-chance]");
+      const price = row.querySelector("[data-btc-price]");
+      const yesButton = row.querySelector("[data-side='YES']");
+      const noButton = row.querySelector("[data-side='NO']");
+      if (chance) chance.textContent = `${Math.round(Number(market.yes_price || 0.5) * 100)}%`;
+      if (price) price.textContent = `$${formatPrice(market.current_price || market.open_price)}`;
+      if (yesButton) yesButton.textContent = `Buy Up ${formatCents(market.yes_price)}`;
+      if (noButton) noButton.textContent = `Buy Down ${formatCents(market.no_price)}`;
+    }
+    return;
+  }
+
+  state.btcMarketsListRenderedOrder = orderKey;
+  container.innerHTML = state.btcMarkets.map((market) => `
+    <article class="world-cup-row btc-market-row" data-market-id="${market.id}">
+      <button class="world-cup-main" data-btc-open="${market.id}" type="button">
+        <span class="team-flag btc-mini-icon">₿</span>
+        <span>
+          <strong>${escapeHtml(market.title || `BTC ${market.label || ""}`)}</strong>
+          <small data-btc-price>$${formatPrice(market.current_price || market.open_price)}</small>
+        </span>
+        <b data-btc-chance>${Math.round(Number(market.yes_price || 0.5) * 100)}%</b>
+      </button>
+      <div class="world-cup-actions">
+        <button class="wc-yes" data-btc-buy="${market.id}" data-side="YES" type="button">Buy Up ${formatCents(market.yes_price)}</button>
+        <button class="wc-no" data-btc-buy="${market.id}" data-side="NO" type="button">Buy Down ${formatCents(market.no_price)}</button>
+      </div>
+    </article>
+  `).join("");
+}
+
+function setBtcMarketsSheetOpen(open) {
+  const sheet = $("btcMarketsSheet");
+  if (!sheet) return;
+  sheet.classList.toggle("hidden", !open);
+}
+
+function selectBtcMarket(marketId) {
+  const id = Number(marketId);
+  const market = state.btcMarkets.find((item) => item.id === id);
+  if (!market) {
+    return;
+  }
+  state.selectedBtcMarketId = id === state.market?.id ? null : id;
+  state.selectedWorldCupMarketId = null;
+  state.smoothedPrice = null;
+  state.chartYMin = null;
+  state.chartYMax = null;
+  state.commentsMarketId = null;
+  setBtcMarketsSheetOpen(false);
+  renderMarket();
+  renderTradeTicket();
+  renderMarketChart();
+  void loadComments().catch(() => undefined);
+}
+
 function setWorldCupSheetOpen(open) {
   const sheet = $("worldCupSheet");
   if (!sheet) return;
@@ -1271,13 +1545,16 @@ function selectWorldCupMarket(marketId) {
     return;
   }
   state.selectedWorldCupMarketId = id;
+  state.selectedBtcMarketId = null;
   state.smoothedPrice = null;
   state.chartYMin = null;
   state.chartYMax = null;
+  state.commentsMarketId = null;
   setWorldCupSheetOpen(false);
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
+  void loadComments().catch(() => undefined);
 }
 
 function renderBetSheet() {
@@ -1477,20 +1754,23 @@ async function buy(amount = state.selectedAmount) {
       }),
     });
     state.balance = result.balance ?? state.balance;
-    if (result.market?.id === state.market?.id) {
-      state.market = result.market;
-    }
+    upsertLocalMarket(result.market);
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
     triggerHaptic("success");
+    if (Number(result.daily_bet_bonus?.awarded || 0) > 0) {
+      showToast(`+${formatFire(result.daily_bet_bonus.awarded)} за первую ставку дня.`);
+    }
     renderMarket();
     renderMe();
     renderActivity();
     renderTradeTicket();
     void Promise.all([
       loadMarket().catch(() => undefined),
+      loadBtcMarkets().catch(() => undefined),
       loadWorldCupMarkets().catch(() => undefined),
       loadMe().catch(() => undefined),
+      loadComments().catch(() => undefined),
     ]);
   } catch (error) {
     triggerHaptic("error");
@@ -1529,9 +1809,7 @@ async function sellPosition({ side, positionId, marketId, shares }) {
       }),
     });
     state.balance = result.balance ?? state.balance;
-    if (result.market?.id === state.market?.id) {
-      state.market = result.market;
-    }
+    upsertLocalMarket(result.market);
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
     triggerHaptic("success");
@@ -1543,8 +1821,10 @@ async function sellPosition({ side, positionId, marketId, shares }) {
     renderTradeTicket();
     void Promise.all([
       loadMarket().catch(() => undefined),
+      loadBtcMarkets().catch(() => undefined),
       loadWorldCupMarkets().catch(() => undefined),
       loadMe().catch(() => undefined),
+      loadComments().catch(() => undefined),
     ]);
   } catch (error) {
     triggerHaptic("error");
@@ -1574,9 +1854,11 @@ async function sellPosition({ side, positionId, marketId, shares }) {
 async function refreshAll() {
   try {
     await loadMarket();
+    await loadBtcMarkets().catch(() => undefined);
     await loadActivity();
     await loadMe();
     await loadRecentMarkets();
+    await loadComments().catch(() => undefined);
     setConnection("LIVE", "online");
   } catch (error) {
     setConnection("Ошибка", "error");
@@ -1748,6 +2030,60 @@ async function claimShareTask() {
   }
 }
 
+async function claimDailyPresenceTask() {
+  if (!state.user?.telegram_id || state.presence.pending) {
+    return;
+  }
+  const elapsed = Date.now() - Number(state.presence.startedAt || Date.now());
+  if (elapsed < 5 * 60_000) {
+    const left = Math.ceil((5 * 60_000 - elapsed) / 1000);
+    showToast(`Осталось ${Math.ceil(left / 60)} мин.`);
+    return;
+  }
+
+  state.presence.pending = true;
+  try {
+    const result = await api("/api/tasks/daily", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        username: state.user.username,
+        first_name: state.user.first_name,
+        task_key: "daily_presence",
+      }),
+    });
+    state.balance = result.balance ?? state.balance;
+    state.presence.claimed = true;
+    renderMe();
+    if (result.already_claimed) {
+      showToast("Ежедневный вход уже забран.");
+    } else if (Number(result.awarded || 0) > 0) {
+      showToast(`+${formatFire(result.awarded)} за 5 минут в EasyMarket.`);
+    } else {
+      showToast("Дневной лимит бонусов уже достигнут.");
+    }
+  } catch {
+    showToast("Не получилось забрать daily.");
+  } finally {
+    state.presence.pending = false;
+  }
+}
+
+function updatePresenceTaskButton() {
+  const button = $("taskDailyPresenceBtn");
+  if (!button || !state.presence.startedAt || state.presence.claimed) {
+    return;
+  }
+  const elapsed = Date.now() - state.presence.startedAt;
+  const remainingMs = Math.max(0, 5 * 60_000 - elapsed);
+  if (remainingMs <= 0) {
+    button.textContent = "Забрать";
+    return;
+  }
+  const seconds = Math.ceil(remainingMs / 1000);
+  button.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 async function shareInvite({ awardShareTask = false } = {}) {
   triggerHaptic("selection");
   if (!state.user?.telegram_id) {
@@ -1790,6 +2126,34 @@ async function shareInvite({ awardShareTask = false } = {}) {
     await claimShareTask();
   } else {
     showToast(`+${formatFire(bonus)} после первой ставки друга.`);
+  }
+}
+
+async function submitMarketComment() {
+  const market = getDisplayMarket();
+  const input = $("marketChatInput");
+  const message = String(input?.value || "").trim();
+  if (!state.user?.telegram_id || !market?.id || !message) {
+    triggerHaptic("warning");
+    return;
+  }
+
+  try {
+    const result = await api(`/api/market/${market.id}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        message,
+      }),
+    });
+    input.value = "";
+    state.comments = [result.comment, ...state.comments].slice(0, 30);
+    state.commentsMarketId = market.id;
+    triggerHaptic("success");
+    renderComments();
+  } catch (error) {
+    triggerHaptic("error");
+    showToast(error.message === "comment_required" ? "Напиши текст." : "Комментарий не отправился.");
   }
 }
 
@@ -1836,6 +2200,64 @@ $("taskPrivateChatBtn").addEventListener("click", () => {
 
 $("taskShareBtn").addEventListener("click", () => {
   void shareInvite({ awardShareTask: true });
+});
+
+$("taskDailyPresenceBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  void claimDailyPresenceTask();
+});
+
+$("openTelegramAppBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  window.location.href = state.publicConfig.mini_app_url || "https://t.me/voit_help_bot?startapp=easymarket";
+});
+
+$("marketChatForm")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitMarketComment();
+});
+
+$("btcMarketsBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  setBtcMarketsSheetOpen(true);
+  void loadBtcMarkets().catch(() => showToast("BTC markets пока не загрузились."));
+});
+
+$("btcMarketsCloseBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  setBtcMarketsSheetOpen(false);
+});
+
+$("btcMarketsSheet")?.addEventListener("click", (event) => {
+  if (event.target === $("btcMarketsSheet")) {
+    setBtcMarketsSheetOpen(false);
+  }
+});
+
+$("btcMarketsList")?.addEventListener("click", (event) => {
+  const buyButton = event.target.closest("[data-btc-buy]");
+  if (buyButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    const market = state.btcMarkets.find((item) => item.id === Number(buyButton.dataset.btcBuy));
+    if (market) {
+      triggerHaptic("selection");
+      state.selectedBtcMarketId = market.id === state.market?.id ? null : market.id;
+      state.selectedWorldCupMarketId = null;
+      state.selectedSide = buyButton.dataset.side || "YES";
+      renderMarket();
+      renderTradeTicket();
+      setBtcMarketsSheetOpen(false);
+      void loadComments().catch(() => undefined);
+    }
+    return;
+  }
+
+  const openButton = event.target.closest("[data-btc-open]");
+  if (openButton) {
+    triggerHaptic("selection");
+    selectBtcMarket(openButton.dataset.btcOpen);
+  }
 });
 
 $("worldCupBtn")?.addEventListener("click", () => {
@@ -1937,7 +2359,7 @@ document.querySelector(".market-card")?.addEventListener("touchstart", (event) =
 }, { passive: true });
 
 document.querySelector(".market-card")?.addEventListener("touchend", (event) => {
-  if (touchStartX === null || touchStartY === null || !state.worldCupMarkets.length) {
+  if (touchStartX === null || touchStartY === null || (!state.worldCupMarkets.length && !state.btcMarkets.length)) {
     return;
   }
   const touch = event.changedTouches[0];
@@ -1949,19 +2371,34 @@ document.querySelector(".market-card")?.addEventListener("touchend", (event) => 
     return;
   }
 
-  const markets = [null, ...state.worldCupMarkets.map((market) => market.id)];
-  const currentIndex = markets.indexOf(state.selectedWorldCupMarketId);
+  const markets = [
+    { type: "home", id: null },
+    ...state.btcMarkets
+      .filter((market) => market.id !== state.market?.id)
+      .map((market) => ({ type: "btc", id: market.id })),
+    ...state.worldCupMarkets.map((market) => ({ type: "world", id: market.id })),
+  ];
+  const currentKey = state.selectedWorldCupMarketId
+    ? `world:${state.selectedWorldCupMarketId}`
+    : state.selectedBtcMarketId
+      ? `btc:${state.selectedBtcMarketId}`
+      : "home:null";
+  const currentIndex = Math.max(0, markets.findIndex((market) => `${market.type}:${market.id}` === currentKey));
   const nextIndex = dx < 0
     ? Math.min(markets.length - 1, currentIndex + 1)
     : Math.max(0, currentIndex - 1);
-  state.selectedWorldCupMarketId = markets[nextIndex];
+  const nextMarket = markets[nextIndex];
+  state.selectedWorldCupMarketId = nextMarket.type === "world" ? nextMarket.id : null;
+  state.selectedBtcMarketId = nextMarket.type === "btc" ? nextMarket.id : null;
   state.smoothedPrice = null;
   state.chartYMin = null;
   state.chartYMax = null;
+  state.commentsMarketId = null;
   triggerHaptic("selection");
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
+  void loadComments().catch(() => undefined);
 }, { passive: true });
 
 document.addEventListener("click", (event) => {
@@ -1990,9 +2427,12 @@ document.addEventListener("click", (event) => {
 });
 
 setInterval(updateTimer, 250);
+setInterval(updatePresenceTaskButton, 1_000);
 setInterval(renderMarketChart, CHART_RENDER_INTERVAL_MS);
 setInterval(() => void loadMarket().catch(() => setConnection("Ошибка", "error")), 1_000);
+setInterval(() => void loadBtcMarkets().catch(() => undefined), 15_000);
 setInterval(() => void loadWorldCupMarkets().catch(() => undefined), 15_000);
+setInterval(() => void loadComments().catch(() => undefined), 8_000);
 setInterval(() => void loadActivity().catch(() => undefined), 3_000);
 setInterval(() => void loadMe().catch(() => undefined), 3_000);
 setInterval(() => void loadRecentMarkets().catch(() => undefined), 10_000);
@@ -2012,8 +2452,15 @@ AMOUNTS.forEach((amount, index) => {
 
 loadPublicConfig()
   .then(upsertMe)
-  .then(() => loadWorldCupMarkets().catch(() => undefined))
-  .then(refreshAll)
+  .then((authorized) => {
+    if (!authorized) {
+      return null;
+    }
+    return loadBtcMarkets()
+      .catch(() => undefined)
+      .then(() => loadWorldCupMarkets().catch(() => undefined))
+      .then(refreshAll);
+  })
   .catch((error) => {
     setConnection("Ошибка входа", "error");
     $("authCard").classList.remove("hidden");

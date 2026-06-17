@@ -7,11 +7,24 @@ const WORLD_CUP_EVENT_SLUG = "world-cup-winner";
 const WORLD_CUP_SYMBOL_PREFIX = "WCUP:";
 const MIN_PRICE = 0.001;
 const MAX_PRICE = 0.999;
+const BTC_MIN_PRICE = 0.04;
 const DEFAULT_FEE_BPS = 200;
 const DEFAULT_PROFIT_FEE_BPS = 500;
 const DEFAULT_MARKET_MAKER_SPREAD_BPS = 300;
 const BUY_IMPACT_MULTIPLIER = 0.85;
 const SELL_IMPACT_MULTIPLIER = 1.1;
+const REFERRAL_SIGNUP_BONUS = 100;
+
+const BTC_MARKET_DEFS = [
+  { key: "5M", symbol: MARKET_SYMBOL, label: "5m", title: "BTC Up or Down 5m", durationMinutes: null },
+  { key: "15M", symbol: "BTCUSDT_15M", label: "15m", title: "BTC Up or Down 15m", durationMinutes: 15 },
+  { key: "1H", symbol: "BTCUSDT_1H", label: "1h", title: "BTC Up or Down 1h", durationMinutes: 60 },
+  { key: "12H", symbol: "BTCUSDT_12H", label: "12h", title: "BTC Up or Down 12h", durationMinutes: 720 },
+  { key: "24H", symbol: "BTCUSDT_24H", label: "24h", title: "BTC Up or Down 24h", durationMinutes: 1440 },
+  { key: "7D", symbol: "BTCUSDT_7D", label: "7d", title: "BTC Up or Down 7d", durationMinutes: 10080 },
+];
+
+const BTC_MARKET_SYMBOLS = BTC_MARKET_DEFS.map((definition) => definition.symbol);
 
 const WORLD_CUP_FALLBACK_MARKETS = [
   { polymarketId: "fallback-france", team: "France", icon: "🇫🇷", yesPrice: 0.171, volume: 54_606_121 },
@@ -28,20 +41,39 @@ const WORLD_CUP_FALLBACK_MARKETS = [
   { polymarketId: "fallback-canada", team: "Canada", icon: "🇨🇦", yesPrice: 0.012, volume: 12_300_000 },
 ];
 
+function getBtcMarketDef(symbol) {
+  return BTC_MARKET_DEFS.find((definition) => definition.symbol === symbol) || null;
+}
+
+function isBtcMarketSymbol(symbol) {
+  return Boolean(getBtcMarketDef(symbol));
+}
+
+function getBtcMarketDurationMinutes(definition) {
+  return definition?.durationMinutes ?? config.marketDurationMinutes;
+}
+
 function mapMarket(row) {
   if (!row) {
     return null;
   }
+  const btcDefinition = getBtcMarketDef(row.symbol);
+  const minPrice = btcDefinition ? BTC_MIN_PRICE : MIN_PRICE;
+  const yesPrice = roundOutcomePrice(toNumber(row.yes_price), minPrice);
+  const noPrice = roundOutcomePrice(1 - yesPrice, minPrice);
 
   return {
     id: Number(row.id),
     symbol: row.symbol,
+    market_type: btcDefinition ? "BTC_UPDOWN" : undefined,
+    title: btcDefinition?.title,
+    label: btcDefinition?.label,
     question: row.question,
     open_price: toNumber(row.open_price),
     close_price: row.close_price === null ? null : toNumber(row.close_price),
     current_price: row.current_price === null ? null : toNumber(row.current_price),
-    yes_price: toNumber(row.yes_price),
-    no_price: toNumber(row.no_price),
+    yes_price: yesPrice,
+    no_price: noPrice,
     yes_volume: toNumber(row.yes_volume),
     no_volume: toNumber(row.no_volume),
     liquidity: toNumber(row.liquidity),
@@ -132,6 +164,31 @@ function mapMarketActivity(row) {
   };
 }
 
+function mapMarketComment(row) {
+  const latestBetAmount = row.latest_bet_amount === null || row.latest_bet_amount === undefined
+    ? null
+    : toNumber(row.latest_bet_amount);
+  return {
+    id: Number(row.id),
+    market_id: Number(row.market_id),
+    message: row.message,
+    created_at: row.created_at,
+    telegram_id: row.telegram_id,
+    username: row.username,
+    first_name: row.first_name,
+    latest_bet: latestBetAmount === null
+      ? null
+      : {
+        action: row.latest_bet_action || "BUY",
+        side: row.latest_bet_side,
+        amount: latestBetAmount,
+        price: toNumber(row.latest_bet_price),
+        shares: toNumber(row.latest_bet_shares),
+        created_at: row.latest_bet_created_at,
+      },
+  };
+}
+
 function mapWorldCupMarket(row) {
   const yesPrice = toNumber(row.yes_price);
   const localVolume = toNumber(row.yes_volume) + toNumber(row.no_volume);
@@ -184,8 +241,8 @@ function mapFireLedgerEvent(row) {
   };
 }
 
-function questionForPrice(price) {
-  return `BTC будет выше ${Math.round(price).toLocaleString("ru-RU")} через 5 минут?`;
+function questionForPrice(price, definition = getBtcMarketDef(MARKET_SYMBOL)) {
+  return `BTC будет выше ${Math.round(price).toLocaleString("ru-RU")} через ${definition?.label || "5m"}?`;
 }
 
 function getMarketProgress(market) {
@@ -195,9 +252,19 @@ function getMarketProgress(market) {
   return clamp((Date.now() - start) / duration, 0, 1);
 }
 
+function getMarketMinOutcomePrice(market) {
+  return isBtcMarketSymbol(market?.symbol) ? BTC_MIN_PRICE : MIN_PRICE;
+}
+
+function isSportsMarket(market) {
+  return String(market?.symbol || "").startsWith(WORLD_CUP_SYMBOL_PREFIX);
+}
+
 function getMarketMakerYesPrice(market, currentPrice, options = {}) {
   const openPrice = toNumber(market.open_price);
-  const previousYesPrice = clamp(toNumber(market.yes_price, 0.5), MIN_PRICE, MAX_PRICE);
+  const minPrice = getMarketMinOutcomePrice(market);
+  const maxPrice = 1 - minPrice;
+  const previousYesPrice = clamp(toNumber(market.yes_price, 0.5), minPrice, maxPrice);
   if (!openPrice || !currentPrice) {
     return previousYesPrice;
   }
@@ -227,14 +294,14 @@ function getMarketMakerYesPrice(market, currentPrice, options = {}) {
     : 0;
   const orderProbability = 0.5 + clamp(imbalance, -1, 1) * 0.42;
 
-  const target = clamp(priceProbability * 0.86 + orderProbability * 0.14, MIN_PRICE, MAX_PRICE);
+  const target = clamp(priceProbability * 0.86 + orderProbability * 0.14, minPrice, maxPrice);
   const adaptiveInertia = options.fast
     ? 0.24
     : Math.max(0.08, 0.48 - progress * 0.4);
   const panicInertia = Math.abs(target - previousYesPrice) > 0.18 ? 0.08 : adaptiveInertia;
   const tradeShift = Number(options.tradeShift || 0);
 
-  return clamp(previousYesPrice * panicInertia + target * (1 - panicInertia) + tradeShift, MIN_PRICE, MAX_PRICE);
+  return clamp(previousYesPrice * panicInertia + target * (1 - panicInertia) + tradeShift, minPrice, maxPrice);
 }
 
 function ensurePositiveAmount(amount) {
@@ -281,19 +348,20 @@ function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
-function roundOutcomePrice(value) {
-  return Math.round(clamp(Number(value || 0), MIN_PRICE, MAX_PRICE) * 100_000_000) / 100_000_000;
+function roundOutcomePrice(value, minPrice = MIN_PRICE) {
+  return Math.round(clamp(Number(value || 0), minPrice, 1 - minPrice) * 100_000_000) / 100_000_000;
 }
 
-function getOutcomePriceFromYes(yesPrice, side) {
-  const normalizedYesPrice = roundOutcomePrice(yesPrice);
-  return side === "YES" ? normalizedYesPrice : roundOutcomePrice(1 - normalizedYesPrice);
+function getOutcomePriceFromYes(yesPrice, side, minPrice = MIN_PRICE) {
+  const normalizedYesPrice = roundOutcomePrice(yesPrice, minPrice);
+  return side === "YES" ? normalizedYesPrice : roundOutcomePrice(1 - normalizedYesPrice, minPrice);
 }
 
 function getMarketOutcomePrice(market, side) {
+  const minPrice = getMarketMinOutcomePrice(market);
   return side === "YES"
-    ? roundOutcomePrice(toNumber(market.yes_price))
-    : roundOutcomePrice(toNumber(market.no_price));
+    ? roundOutcomePrice(toNumber(market.yes_price), minPrice)
+    : roundOutcomePrice(toNumber(market.no_price), minPrice);
 }
 
 function getCurrentPriceForMarket(market) {
@@ -301,6 +369,7 @@ function getCurrentPriceForMarket(market) {
 }
 
 function getBuyExecutionQuote(market, side, amount) {
+  const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
   const liquidity = toNumber(market.liquidity, config.marketLiquidity);
   const tradeShift = (side === "YES" ? 1 : -1) * (amount / liquidity) * BUY_IMPACT_MULTIPLIER;
@@ -313,20 +382,21 @@ function getBuyExecutionQuote(market, side, amount) {
     repricedMarket,
     getCurrentPriceForMarket(market),
     { fast: true, tradeShift },
-  ));
-  const nextOutcomePrice = getOutcomePriceFromYes(nextYesPrice, side);
+  ), minPrice);
+  const nextOutcomePrice = getOutcomePriceFromYes(nextYesPrice, side, minPrice);
   const spread = getMarketMakerSpreadBps() / 10_000;
-  const executionPrice = roundOutcomePrice(((oldOutcomePrice + nextOutcomePrice) / 2) * (1 + spread));
+  const executionPrice = roundOutcomePrice(Math.max(oldOutcomePrice, nextOutcomePrice) * (1 + spread), minPrice);
 
   return {
     oldOutcomePrice,
     executionPrice,
     nextYesPrice,
-    nextNoPrice: roundOutcomePrice(1 - nextYesPrice),
+    nextNoPrice: roundOutcomePrice(1 - nextYesPrice, minPrice),
   };
 }
 
 function getSellExecutionQuote(market, side, sharesToSell) {
+  const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
   const liquidity = toNumber(market.liquidity, config.marketLiquidity);
   const estimatedGross = Math.max(0, sharesToSell * oldOutcomePrice);
@@ -344,10 +414,11 @@ function getSellExecutionQuote(market, side, sharesToSell) {
     repricedMarket,
     getCurrentPriceForMarket(market),
     { fast: true, tradeShift },
-  ));
-  const nextOutcomePrice = getOutcomePriceFromYes(nextYesPrice, side);
+  ), minPrice);
+  const nextOutcomePrice = getOutcomePriceFromYes(nextYesPrice, side, minPrice);
   const spread = getMarketMakerSpreadBps() / 10_000;
-  const executionPrice = roundOutcomePrice(((oldOutcomePrice + nextOutcomePrice) / 2) * (1 - spread));
+  const exitPenalty = isSportsMarket(market) ? 0.02 : 0;
+  const executionPrice = roundOutcomePrice(Math.min(oldOutcomePrice, nextOutcomePrice) * (1 - spread - exitPenalty), minPrice);
   const gross = roundMoney(sharesToSell * executionPrice);
 
   return {
@@ -355,7 +426,7 @@ function getSellExecutionQuote(market, side, sharesToSell) {
     executionPrice,
     gross,
     nextYesPrice,
-    nextNoPrice: roundOutcomePrice(1 - nextYesPrice),
+    nextNoPrice: roundOutcomePrice(1 - nextYesPrice, minPrice),
     nextYesVolume: repricedMarket.yes_volume,
     nextNoVolume: repricedMarket.no_volume,
   };
@@ -462,6 +533,8 @@ async function getDailyBonusRemaining(client, userId) {
           'task_share_friend',
           'task_av_channel',
           'task_av_chat',
+          'task_daily_presence',
+          'task_daily_bet',
           'referral_bet_bonus'
         )
         AND created_at >= date_trunc('day', now())
@@ -550,6 +623,27 @@ export async function upsertUser(input) {
       [user.id],
     );
 
+    if (safeReferredBy) {
+      const referralSignupResult = await client.query(
+        `
+          INSERT INTO fire_task_claims (user_id, task_key, amount, day_key, source)
+          VALUES ($1, 'referral_signup', $2, 'once', $3)
+          ON CONFLICT DO NOTHING
+          RETURNING *
+        `,
+        [user.id, REFERRAL_SIGNUP_BONUS, `referral:${safeReferredBy}`],
+      );
+      if (referralSignupResult.rows[0]) {
+        await adjustBalance(
+          client,
+          user.id,
+          REFERRAL_SIGNUP_BONUS,
+          "referral_signup_bonus",
+          `referral:${safeReferredBy}`,
+        );
+      }
+    }
+
     return mapUser(user);
   });
 }
@@ -580,6 +674,30 @@ async function getBalanceByUserId(userId) {
   );
 
   return toNumber(result.rows[0]?.balance);
+}
+
+async function adjustBalance(client, userId, amount, reason, source) {
+  const delta = Math.round(Number(amount || 0) * 100) / 100;
+  if (!Number.isFinite(delta) || Math.abs(delta) < 0.01) {
+    return;
+  }
+
+  await client.query(
+    `
+      UPDATE fire_balances
+      SET balance = balance + $2::numeric,
+          updated_at = now()
+      WHERE user_id = $1
+    `,
+    [userId, delta],
+  );
+  await client.query(
+    `
+      INSERT INTO fire_ledger (user_id, amount, reason, source)
+      VALUES ($1, $2::numeric, $3, $4)
+    `,
+    [userId, delta, reason, source],
+  );
 }
 
 export async function getUserSnapshot(telegramId) {
@@ -726,6 +844,73 @@ export async function syncFireBalance(input) {
   };
 }
 
+export async function syncFireBalanceByUsername(input) {
+  const username = String(input.username || "").trim().replace(/^@/, "");
+  if (!username) {
+    throw new Error("username_required");
+  }
+  const balance = ensureNonNegativeAmount(input.amount ?? input.balance);
+  const reason = input.reason || "admin_adjustment";
+  const source = input.source || "bridge_sync";
+
+  return withTransaction(async (client) => {
+    const userResult = await client.query(
+      `
+        SELECT *
+        FROM users
+        WHERE lower(username) = lower($1)
+        ORDER BY updated_at DESC
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [username],
+    );
+    const user = userResult.rows[0];
+    if (!user) {
+      throw new Error("user_not_found");
+    }
+
+    const balanceResult = await client.query(
+      `
+        SELECT balance
+        FROM fire_balances
+        WHERE user_id = $1
+        FOR UPDATE
+      `,
+      [user.id],
+    );
+    const previousBalance = toNumber(balanceResult.rows[0]?.balance);
+    const delta = Math.round((balance - previousBalance) * 100) / 100;
+
+    await client.query(
+      `
+        UPDATE fire_balances
+        SET balance = $2::numeric,
+            updated_at = now()
+        WHERE user_id = $1
+      `,
+      [user.id, balance],
+    );
+
+    if (Math.abs(delta) >= 0.01) {
+      await client.query(
+        `
+          INSERT INTO fire_ledger (user_id, amount, reason, source)
+          VALUES ($1, $2::numeric, $3, $4)
+        `,
+        [user.id, delta, reason, source],
+      );
+    }
+
+    return {
+      user: mapUser(user),
+      balance,
+      previous_balance: previousBalance,
+      delta,
+    };
+  });
+}
+
 export async function claimShareTask(input) {
   const user = await upsertUser({
     telegram_id: input.telegram_id,
@@ -853,6 +1038,68 @@ export async function completeVerifiedTask(input) {
   });
 }
 
+async function claimDailyTaskForUser(client, user, taskKey) {
+  const normalizedTaskKey = String(taskKey || "").trim();
+  const taskAmounts = {
+    daily_presence: Math.round(Number(config.taskDailyPresenceFire || 0)),
+    daily_bet: Math.round(Number(config.taskDailyBetFire || 0)),
+  };
+  const amount = taskAmounts[normalizedTaskKey];
+  if (!amount) {
+    throw new Error("invalid_task");
+  }
+
+  const dayKey = getDayKey();
+  const claimResult = await client.query(
+    `
+      INSERT INTO fire_task_claims (user_id, task_key, amount, day_key, source)
+      VALUES ($1, $2, $3, $4, 'mini_app')
+      ON CONFLICT DO NOTHING
+      RETURNING *
+    `,
+    [user.id, normalizedTaskKey, amount, dayKey],
+  );
+
+  let bonus = {
+    awarded: 0,
+    daily_remaining: await getDailyBonusRemaining(client, user.id),
+    cap_reached: false,
+  };
+  if (claimResult.rows[0] && amount > 0) {
+    bonus = await awardBonusWithDailyCap(
+      client,
+      user.id,
+      amount,
+      getTaskReason(normalizedTaskKey),
+      `task:${normalizedTaskKey}:${dayKey}`,
+    );
+  }
+
+  const balanceResult = await client.query(
+    "SELECT balance FROM fire_balances WHERE user_id = $1",
+    [user.id],
+  );
+
+  return {
+    ok: true,
+    user,
+    task_key: normalizedTaskKey,
+    already_claimed: !claimResult.rows[0],
+    ...bonus,
+    balance: toNumber(balanceResult.rows[0]?.balance),
+  };
+}
+
+export async function claimDailyTask(input) {
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+
+  return withTransaction(async (client) => claimDailyTaskForUser(client, user, input.task_key ?? input.taskKey));
+}
+
 export async function getFireLedgerEvents(input = {}) {
   const afterId = Math.max(0, Math.floor(Number(input.after_id ?? input.afterId ?? 0) || 0));
   const limit = Math.max(1, Math.min(250, Math.floor(Number(input.limit ?? 100) || 100)));
@@ -879,10 +1126,16 @@ export async function getFireLedgerEvents(input = {}) {
   return result.rows.map(mapFireLedgerEvent);
 }
 
-export async function createBtc5mMarket() {
-  const btc = await getBtcPrice();
+export async function createBtcMarket(definition = BTC_MARKET_DEFS[0], btcInput = null) {
+  const existing = await getOpenMarket(definition.symbol);
+  if (existing) {
+    return existing;
+  }
+
+  const btc = btcInput || await getBtcPrice();
   const startTime = new Date();
-  const endTime = new Date(startTime.getTime() + config.marketDurationMinutes * 60_000);
+  const durationMinutes = getBtcMarketDurationMinutes(definition);
+  const endTime = new Date(startTime.getTime() + durationMinutes * 60_000);
 
   const result = await query(
     `
@@ -904,8 +1157,8 @@ export async function createBtc5mMarket() {
       RETURNING *
     `,
     [
-      MARKET_SYMBOL,
-      questionForPrice(btc.price),
+      definition.symbol,
+      questionForPrice(btc.price, definition),
       btc.price,
       config.marketLiquidity,
       startTime,
@@ -918,13 +1171,17 @@ export async function createBtc5mMarket() {
       INSERT INTO price_ticks (symbol, price, source)
       VALUES ($1, $2, $3)
     `,
-    [btc.symbol, btc.price, btc.source],
+    [definition.symbol, btc.price, btc.source],
   );
 
   return mapMarket(result.rows[0]);
 }
 
-export async function getOpenMarket() {
+export async function createBtc5mMarket() {
+  return createBtcMarket(BTC_MARKET_DEFS[0]);
+}
+
+export async function getOpenMarket(symbol = MARKET_SYMBOL) {
   const result = await query(
       `
         SELECT *
@@ -934,20 +1191,43 @@ export async function getOpenMarket() {
         ORDER BY end_time ASC
         LIMIT 1
       `,
-    [MARKET_SYMBOL],
+    [symbol],
   );
 
   return mapMarket(result.rows[0]);
 }
 
-export async function ensureActiveMarket() {
+export async function ensureActiveBtcMarkets() {
   await resolveExpiredMarkets();
-  const existing = await getOpenMarket();
-  if (existing) {
-    return existing;
+  let btc = null;
+  const markets = [];
+  for (const definition of BTC_MARKET_DEFS) {
+    const existing = await getOpenMarket(definition.symbol);
+    if (existing) {
+      markets.push(existing);
+      continue;
+    }
+    try {
+      btc = btc || await getBtcPrice();
+      markets.push(await createBtcMarket(definition, btc));
+    } catch (error) {
+      if (error?.code === "23505") {
+        const duplicateWinner = await getOpenMarket(definition.symbol);
+        if (duplicateWinner) {
+          markets.push(duplicateWinner);
+          continue;
+        }
+      }
+      throw error;
+    }
   }
 
-  return createBtc5mMarket();
+  return markets;
+}
+
+export async function ensureActiveMarket() {
+  const markets = await ensureActiveBtcMarkets();
+  return markets.find((market) => market.symbol === MARKET_SYMBOL) || markets[0] || null;
 }
 
 export async function updateLiveBtcPrice() {
@@ -966,9 +1246,9 @@ export async function updateLiveBtcPrice() {
         SELECT *
         FROM markets
         WHERE status = 'open'
-          AND symbol = $1
+          AND symbol = ANY($1)
       `,
-      [MARKET_SYMBOL],
+      [BTC_MARKET_SYMBOLS],
     );
 
     for (const market of markets.rows) {
@@ -985,6 +1265,16 @@ export async function updateLiveBtcPrice() {
         `,
         [market.id, btc.price, yesPrice, noPrice],
       );
+
+      if (market.symbol !== btc.symbol) {
+        await client.query(
+          `
+            INSERT INTO price_ticks (symbol, price, source)
+            VALUES ($1, $2, $3)
+          `,
+          [market.symbol, btc.price, btc.source],
+        );
+      }
     }
   });
 
@@ -994,6 +1284,27 @@ export async function updateLiveBtcPrice() {
 export async function getActiveMarket() {
   const market = await ensureActiveMarket();
   return market;
+}
+
+export async function getBtcMarkets() {
+  await ensureActiveBtcMarkets();
+  const result = await query(
+    `
+      SELECT *
+      FROM markets
+      WHERE status = 'open'
+        AND symbol = ANY($1)
+      ORDER BY array_position($1::text[], symbol)
+    `,
+    [BTC_MARKET_SYMBOLS],
+  );
+
+  const markets = result.rows.map(mapMarket);
+  const charts = await Promise.all(markets.map((market) => getMarketChart(market, 260)));
+  return markets.map((market, index) => ({
+    ...market,
+    chart: charts[index],
+  }));
 }
 
 export async function getMarketActivity(marketId, limit = 20) {
@@ -1014,6 +1325,95 @@ export async function getMarketActivity(marketId, limit = 20) {
   );
 
   return result.rows.map(mapMarketActivity);
+}
+
+export async function getMarketComments(marketId, limit = 30) {
+  const id = Number(marketId);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new Error("invalid_market_id");
+  }
+
+  const result = await query(
+    `
+      SELECT
+        comments.*,
+        users.telegram_id,
+        users.username,
+        users.first_name,
+        latest_trade.action AS latest_bet_action,
+        latest_trade.side AS latest_bet_side,
+        latest_trade.amount AS latest_bet_amount,
+        latest_trade.price AS latest_bet_price,
+        latest_trade.shares AS latest_bet_shares,
+        latest_trade.created_at AS latest_bet_created_at
+      FROM market_comments comments
+      JOIN users ON users.id = comments.user_id
+      LEFT JOIN LATERAL (
+        SELECT action, side, amount, price, shares, created_at
+        FROM trades
+        WHERE trades.user_id = comments.user_id
+          AND trades.market_id = comments.market_id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) latest_trade ON true
+      WHERE comments.market_id = $1
+      ORDER BY comments.created_at DESC
+      LIMIT $2
+    `,
+    [id, Math.max(1, Math.min(80, Number(limit) || 30))],
+  );
+
+  return result.rows.map(mapMarketComment);
+}
+
+export async function addMarketComment(input) {
+  const marketId = Number(input.marketId);
+  const message = String(input.message || "").trim().slice(0, 240);
+  if (!Number.isSafeInteger(marketId) || marketId <= 0) {
+    throw new Error("invalid_market_id");
+  }
+  if (!message) {
+    throw new Error("comment_required");
+  }
+
+  const user = await getUserByTelegramId(input.telegram_id);
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+
+  const result = await query(
+    `
+      WITH inserted AS (
+        INSERT INTO market_comments (market_id, user_id, message)
+        VALUES ($1, $2, $3)
+        RETURNING *
+      )
+      SELECT
+        inserted.*,
+        users.telegram_id,
+        users.username,
+        users.first_name,
+        latest_trade.action AS latest_bet_action,
+        latest_trade.side AS latest_bet_side,
+        latest_trade.amount AS latest_bet_amount,
+        latest_trade.price AS latest_bet_price,
+        latest_trade.shares AS latest_bet_shares,
+        latest_trade.created_at AS latest_bet_created_at
+      FROM inserted
+      JOIN users ON users.id = inserted.user_id
+      LEFT JOIN LATERAL (
+        SELECT action, side, amount, price, shares, created_at
+        FROM trades
+        WHERE trades.user_id = inserted.user_id
+          AND trades.market_id = inserted.market_id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) latest_trade ON true
+    `,
+    [marketId, user.id, message],
+  );
+
+  return mapMarketComment(result.rows[0]);
 }
 
 export async function getRecentActivity(limit = 30) {
@@ -1341,8 +1741,9 @@ export async function buyOutcome(input) {
       throw new Error("insufficient_fire");
     }
 
+    const marketMinPrice = getMarketMinOutcomePrice(market);
     const quote = getBuyExecutionQuote(market, side, amount);
-    if (quote.executionPrice < MIN_PRICE || quote.executionPrice > MAX_PRICE) {
+    if (quote.executionPrice < marketMinPrice || quote.executionPrice > 1 - marketMinPrice) {
       throw new Error("invalid_market_price");
     }
 
@@ -1422,6 +1823,7 @@ export async function buyOutcome(input) {
     );
 
     const referralBonus = await awardReferralBetBonus(client, user, marketId);
+    const dailyBetBonus = await claimDailyTaskForUser(client, user, "daily_bet");
 
     const finalBalanceResult = await client.query(
       `
@@ -1438,6 +1840,7 @@ export async function buyOutcome(input) {
       position: mapPosition(positionResult.rows[0]),
       trade: mapTrade(tradeResult.rows[0]),
       referral_bonus: referralBonus,
+      daily_bet_bonus: dailyBetBonus,
       market: mapMarket({
         ...market,
         yes_price: nextYesPrice,
@@ -1480,8 +1883,8 @@ export async function sellOutcome(input) {
         `
           SELECT *
           FROM positions
-          WHERE id = $1
-            AND user_id = $2
+          WHERE id = $1::bigint
+            AND user_id = $2::bigint
             AND status = 'open'
           FOR UPDATE
         `,
@@ -1492,9 +1895,9 @@ export async function sellOutcome(input) {
         `
           SELECT *
           FROM positions
-          WHERE user_id = $1
-            AND market_id = $2
-            AND side = $3
+          WHERE user_id = $1::bigint
+            AND market_id = $2::bigint
+            AND side = $3::text
             AND status = 'open'
           FOR UPDATE
         `,
@@ -1507,8 +1910,8 @@ export async function sellOutcome(input) {
           SELECT p.*
           FROM positions p
           JOIN markets m ON m.id = p.market_id
-          WHERE p.user_id = $1
-            AND p.side = $2
+          WHERE p.user_id = $1::bigint
+            AND p.side = $2::text
             AND p.status = 'open'
             AND m.status = 'open'
             AND m.end_time > now()
@@ -1530,9 +1933,9 @@ export async function sellOutcome(input) {
         `
           SELECT *
           FROM positions
-          WHERE user_id = $1
-            AND market_id = $2
-            AND side = $3
+          WHERE user_id = $1::bigint
+            AND market_id = $2::bigint
+            AND side = $3::text
             AND status = 'open'
           FOR UPDATE
         `,
@@ -1550,7 +1953,7 @@ export async function sellOutcome(input) {
       `
         SELECT *
         FROM markets
-        WHERE id = $1
+        WHERE id = $1::bigint
         FOR UPDATE
       `,
       [marketId],
@@ -1580,8 +1983,9 @@ export async function sellOutcome(input) {
     }
 
     const sharesToSell = Math.min(positionShares, requestedShares);
+    const marketMinPrice = getMarketMinOutcomePrice(market);
     const quote = getSellExecutionQuote(market, side, sharesToSell);
-    if (quote.executionPrice < MIN_PRICE || quote.executionPrice > MAX_PRICE) {
+    if (quote.executionPrice < marketMinPrice || quote.executionPrice > 1 - marketMinPrice) {
       throw new Error("invalid_market_price");
     }
 
@@ -1600,7 +2004,7 @@ export async function sellOutcome(input) {
         UPDATE fire_balances
         SET balance = balance + $2::numeric,
             updated_at = now()
-        WHERE user_id = $1
+        WHERE user_id = $1::bigint
       `,
       [user.id, proceeds],
     );
@@ -1608,7 +2012,7 @@ export async function sellOutcome(input) {
     await client.query(
       `
         INSERT INTO fire_ledger (user_id, amount, reason, source)
-        VALUES ($1, $2::numeric, $3, $4)
+        VALUES ($1::bigint, $2::numeric, $3::text, $4::text)
       `,
       [user.id, proceeds, side === "YES" ? "sell_yes" : "sell_no", `market:${marketId}`],
     );
@@ -1616,7 +2020,7 @@ export async function sellOutcome(input) {
     const tradeResult = await client.query(
       `
         INSERT INTO trades (user_id, market_id, action, side, amount, fee, price, shares)
-        VALUES ($1, $2, 'SELL', $3, $4::numeric, $5::numeric, $6::numeric, $7::numeric)
+        VALUES ($1::bigint, $2::bigint, 'SELL', $3::text, $4::numeric, $5::numeric, $6::numeric, $7::numeric)
         RETURNING *
       `,
       [user.id, marketId, side, proceeds, fee, quote.executionPrice, sharesToSell],
@@ -1632,7 +2036,7 @@ export async function sellOutcome(input) {
             pnl = pnl + $5::numeric,
             status = $6::text,
             updated_at = now()
-        WHERE id = $1
+        WHERE id = $1::bigint
         RETURNING *
       `,
       [
@@ -1655,7 +2059,7 @@ export async function sellOutcome(input) {
             no_price = $3::numeric,
             yes_volume = $4::numeric,
             no_volume = $5::numeric
-        WHERE id = $1
+        WHERE id = $1::bigint
       `,
       [
         marketId,
@@ -1754,12 +2158,12 @@ export async function resolveExpiredMarkets() {
       SELECT *
       FROM markets
       WHERE status = 'open'
-        AND symbol = $1
+        AND symbol = ANY($1)
         AND end_time <= now()
       ORDER BY end_time ASC
-      LIMIT 5
+      LIMIT 30
     `,
-    [MARKET_SYMBOL],
+    [BTC_MARKET_SYMBOLS],
   );
 
   for (const market of expiredResult.rows) {
@@ -1868,12 +2272,17 @@ export async function resolveExpiredMarkets() {
     });
   }
 
-  const currentOpen = await getOpenMarket();
-  if (!currentOpen) {
+  let btcForCreation = null;
+  for (const definition of BTC_MARKET_DEFS) {
+    const currentOpen = await getOpenMarket(definition.symbol);
+    if (currentOpen) {
+      continue;
+    }
     try {
-      await createBtc5mMarket();
+      btcForCreation = btcForCreation || await getBtcPrice();
+      await createBtcMarket(definition, btcForCreation);
     } catch (error) {
-      if (!(error instanceof PriceUnavailableError)) {
+      if (!(error instanceof PriceUnavailableError) && error?.code !== "23505") {
         throw error;
       }
     }

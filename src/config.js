@@ -47,6 +47,8 @@ export const config = {
   taskShareFire: parseNumber(process.env.TASK_SHARE_FIRE, 100, 0),
   taskSubscribeFire: parseNumber(process.env.TASK_SUBSCRIBE_FIRE, 500, 0),
   taskPrivateChatFire: parseNumber(process.env.TASK_PRIVATE_CHAT_FIRE, 15_000, 0),
+  taskDailyPresenceFire: parseNumber(process.env.TASK_DAILY_PRESENCE_FIRE, 50, 0),
+  taskDailyBetFire: parseNumber(process.env.TASK_DAILY_BET_FIRE, 50, 0),
   taskDailyCapFire: parseNumber(process.env.TASK_DAILY_CAP_FIRE, 10_000, 0),
   publicAvChannelUrl: (
     process.env.PUBLIC_AV_CHANNEL_URL
