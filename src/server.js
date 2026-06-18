@@ -738,10 +738,9 @@ async function startMarketEngine() {
     console.warn("[easymarket] startup market check failed:", error instanceof Error ? error.message : "unknown error");
   }
 
-  const marketTickMs = Math.max(1_000, Math.min(config.marketIntervalSeconds * 1_000, 2_000));
   setInterval(() => {
     void marketTick();
-  }, marketTickMs);
+  }, config.marketIntervalSeconds * 1_000);
 
   setInterval(() => {
     void priceTick();

@@ -7,9 +7,6 @@ const BTC_MIN_OUTCOME_PRICE = 0.04;
 const CHART_WINDOW_MS = 10_000;
 const CHART_RENDER_INTERVAL_MS = 66;
 const COLLAPSE_LIMIT = 3;
-const MAX_PARALLEL_BUYS = 10;
-const MAX_BUY_QUEUE = 80;
-const MARKET_BUY_CLOSE_BUFFER_MS = 250;
 
 const state = {
   user: null,
@@ -56,13 +53,7 @@ const state = {
   seenSettledPositionIds: new Set(),
   pendingBuy: false,
   pendingBuyKey: null,
-  pendingBuyCount: 0,
-  pendingBuyKeys: new Map(),
   buyQueue: [],
-  reservedBuyAmount: 0,
-  buyRefreshTimer: null,
-  expiryRefreshMarketId: null,
-  lastClosedMarketToastAt: 0,
   pendingSellSide: null,
   pendingSellPositionId: null,
   publicConfig: {
@@ -124,9 +115,6 @@ const marketStatusLabel = (status) => {
   }
   if (status === "resolved") {
     return "CLOSED";
-  }
-  if (status === "closed") {
-    return "ENDED";
   }
   return status || "нет рынка";
 };
@@ -290,36 +278,12 @@ function getDisplayMarket() {
   return state.market;
 }
 
-function findLocalMarketById(marketId) {
-  const id = Number(marketId);
-  return (
-    (state.market?.id === id ? state.market : null)
-    || state.btcMarkets.find((market) => market.id === id)
-    || state.worldCupMarkets.find((market) => market.id === id)
-    || null
-  );
-}
-
 function isWorldCupMarket(market = getDisplayMarket()) {
   return market?.market_type === "WORLD_CUP_WINNER";
 }
 
 function isBtcMarket(market = getDisplayMarket()) {
   return market?.market_type === "BTC_UPDOWN" || String(market?.symbol || "").startsWith("BTCUSDT");
-}
-
-function isMarketOpenForBuy(market, bufferMs = MARKET_BUY_CLOSE_BUFFER_MS) {
-  if (!market || market.status !== "open" || !market.end_time) {
-    return false;
-  }
-  return new Date(market.end_time).getTime() > Date.now() + bufferMs;
-}
-
-function getEffectiveMarketStatus(market) {
-  if (!market) {
-    return null;
-  }
-  return isMarketOpenForBuy(market, 0) ? market.status : "closed";
 }
 
 function getMarketMinOutcomePrice(market = getDisplayMarket()) {
@@ -345,40 +309,18 @@ function upsertLocalMarket(market) {
   if (!market?.id) {
     return;
   }
-  const existing = findLocalMarketById(market.id);
-  const mergedMarket = {
-    ...(existing || {}),
-    ...market,
-    market_type: market.market_type || existing?.market_type,
-    team: market.team || existing?.team,
-    icon: market.icon || existing?.icon,
-    title: market.title || existing?.title,
-    label: market.label || existing?.label,
-  };
   if (market.id === state.market?.id) {
     state.market = {
       ...state.market,
-      ...mergedMarket,
+      ...market,
     };
   }
-  if (mergedMarket.market_type === "BTC_UPDOWN" || isBtcMarket(mergedMarket)) {
-    upsertMarketListItem("btcMarkets", mergedMarket);
+  if (market.market_type === "BTC_UPDOWN") {
+    upsertMarketListItem("btcMarkets", market);
   }
-  if (mergedMarket.market_type === "WORLD_CUP_WINNER") {
-    upsertMarketListItem("worldCupMarkets", mergedMarket);
+  if (market.market_type === "WORLD_CUP_WINNER") {
+    upsertMarketListItem("worldCupMarkets", market);
   }
-}
-
-function markLocalMarketClosed(marketId) {
-  const market = findLocalMarketById(marketId);
-  if (!market) {
-    return;
-  }
-  upsertLocalMarket({
-    ...market,
-    status: "closed",
-    end_time: new Date().toISOString(),
-  });
 }
 
 function getDisplayChartPoints(market) {
@@ -1013,23 +955,6 @@ async function loadComments() {
   renderComments();
 }
 
-function scheduleFastDataRefresh(delayMs = 120) {
-  if (state.buyRefreshTimer) {
-    clearTimeout(state.buyRefreshTimer);
-  }
-  state.buyRefreshTimer = window.setTimeout(() => {
-    state.buyRefreshTimer = null;
-    void Promise.all([
-      loadMarket().catch(() => undefined),
-      loadBtcMarkets().catch(() => undefined),
-      loadWorldCupMarkets().catch(() => undefined),
-      loadMe().catch(() => undefined),
-      loadActivity().catch(() => undefined),
-      loadComments().catch(() => undefined),
-    ]);
-  }, Math.max(0, delayMs));
-}
-
 function renderComments() {
   const container = $("marketChatList");
   if (!container) {
@@ -1184,40 +1109,6 @@ function getBuyIntentKey(marketId, side, amount) {
   return `${marketId}:${side}:${Math.round(Number(amount || 0) * 100) / 100}`;
 }
 
-function getPendingBuyKeyCount(key) {
-  return Number(state.pendingBuyKeys.get(key) || 0);
-}
-
-function setPendingBuyKeyCount(key, delta) {
-  const next = Math.max(0, getPendingBuyKeyCount(key) + delta);
-  if (next) {
-    state.pendingBuyKeys.set(key, next);
-  } else {
-    state.pendingBuyKeys.delete(key);
-  }
-  state.pendingBuyCount = Math.max(0, state.pendingBuyCount + delta);
-  state.pendingBuy = state.pendingBuyCount > 0;
-  state.pendingBuyKey = state.pendingBuyKeys.keys().next().value || null;
-}
-
-function releaseReservedBuy(amount) {
-  state.reservedBuyAmount = Math.max(0, Number(state.reservedBuyAmount || 0) - Number(amount || 0));
-}
-
-function clearQueuedBuys(marketId = null) {
-  const kept = [];
-  let released = 0;
-  for (const intent of state.buyQueue) {
-    if (marketId === null || Number(intent.marketId) === Number(marketId)) {
-      released += Number(intent.amount || 0);
-    } else {
-      kept.push(intent);
-    }
-  }
-  state.buyQueue = kept;
-  releaseReservedBuy(released);
-}
-
 function applyBuyIntentSelection(intent) {
   const marketId = Number(intent.marketId);
   const btcMarket = state.btcMarkets.find((market) => market.id === marketId);
@@ -1250,12 +1141,10 @@ function renderMarket() {
   const noVolume = Number(market?.no_volume || 0);
   const volumeTotal = Math.max(1, yesVolume + noVolume);
   const yesDepth = Math.max(6, Math.min(94, (yesVolume / volumeTotal) * 100));
-  const effectiveStatus = getEffectiveMarketStatus(market);
-  const canBuyMarket = isMarketOpenForBuy(market);
 
   const marketStatus = $("marketStatus");
-  marketStatus.textContent = marketStatusLabel(effectiveStatus);
-  marketStatus.classList.toggle("live", effectiveStatus === "open");
+  marketStatus.textContent = marketStatusLabel(market?.status);
+  marketStatus.classList.toggle("live", market?.status === "open");
   $("marketTitle").textContent = worldCup
     ? `${market.team} Winner`
     : (market?.title || "BTC Up or Down 5m");
@@ -1303,7 +1192,7 @@ function renderMarket() {
 
   updateTimer();
   document.querySelectorAll(".outcome-button, .amount-button").forEach((button) => {
-    button.disabled = !hasMarket || !state.user || !canBuyMarket;
+    button.disabled = !hasMarket || !state.user;
   });
 }
 
@@ -1321,13 +1210,6 @@ function updateTimer() {
 
   const remainingMs = new Date(market.end_time).getTime() - Date.now();
   const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
-  if (remainingMs <= 0 && market.status === "open" && state.expiryRefreshMarketId !== market.id) {
-    state.expiryRefreshMarketId = market.id;
-    markLocalMarketClosed(market.id);
-    renderMarket();
-    renderTradeTicket();
-    scheduleFastDataRefresh(0);
-  }
   if ((isWorldCupMarket(market) || isBtcMarket(market)) && seconds >= 86_400) {
     const days = Math.floor(seconds / 86_400);
     const hours = Math.floor((seconds % 86_400) / 3_600);
@@ -1514,7 +1396,6 @@ function renderTradeTicket() {
   const side = state.selectedSide;
   const price = getSelectedPrice();
   const market = getDisplayMarket();
-  const canBuyMarket = isMarketOpenForBuy(market);
 
   document.querySelectorAll(".outcome-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.side === side);
@@ -1526,8 +1407,8 @@ function renderTradeTicket() {
     const nextLabel = formatFire(amount);
     const nextWin = formatFire(amountPreview.shares);
     button.classList.toggle("active", amount === state.selectedAmount);
-    button.classList.toggle("loading", Boolean(pendingKey && getPendingBuyKeyCount(pendingKey)));
-    button.disabled = !market || !state.user || !canBuyMarket;
+    button.classList.toggle("loading", Boolean(state.pendingBuyKey && state.pendingBuyKey === pendingKey));
+    button.disabled = !market || !state.user;
     if (button.dataset.label !== nextLabel || button.dataset.win !== nextWin) {
       button.dataset.label = nextLabel;
       button.dataset.win = nextWin;
@@ -1538,9 +1419,7 @@ function renderTradeTicket() {
     }
   });
 
-  $("ticketTitle").textContent = canBuyMarket
-    ? `Нажми сумму для ${marketSideLabel(market, side)}`
-    : "Рынок завершён, обновляю...";
+  $("ticketTitle").textContent = `Нажми сумму для ${marketSideLabel(market, side)}`;
   $("ticketPrice").textContent = `${marketSideLabel(market, side)} ${formatCents(price)}`;
 }
 
@@ -1954,83 +1833,7 @@ function addLocalActivity(trade) {
   showTradeBubble(enriched);
 }
 
-function handleClosedMarketBuy(marketId) {
-  clearQueuedBuys(marketId);
-  markLocalMarketClosed(marketId);
-  const now = Date.now();
-  if (now - state.lastClosedMarketToastAt > 1_500) {
-    state.lastClosedMarketToastAt = now;
-    showToast("Этот рынок уже завершился. Обновляю...");
-  }
-  triggerHaptic("warning");
-  renderMarket();
-  renderTradeTicket();
-  scheduleFastDataRefresh(0);
-}
-
-function drainBuyQueue() {
-  while (state.pendingBuyCount < MAX_PARALLEL_BUYS && state.buyQueue.length) {
-    const intent = state.buyQueue.shift();
-    const market = findLocalMarketById(intent.marketId);
-    if (!isMarketOpenForBuy(market)) {
-      releaseReservedBuy(intent.amount);
-      handleClosedMarketBuy(intent.marketId);
-      continue;
-    }
-    void executeBuyIntent(intent);
-  }
-}
-
-async function executeBuyIntent(intent) {
-  setPendingBuyKeyCount(intent.intentKey, 1);
-  renderTradeTicket();
-  try {
-    const result = await api(`/api/market/${intent.marketId}/buy`, {
-      method: "POST",
-      body: JSON.stringify({
-        telegram_id: state.user.telegram_id,
-        side: intent.side,
-        amount: intent.amount,
-      }),
-    });
-    const serverBalance = Number(result.balance);
-    if (Number.isFinite(serverBalance)) {
-      state.balance = Math.min(Number(state.balance || 0), serverBalance);
-    }
-    upsertLocalMarket(result.market);
-    upsertLocalPosition(result.position);
-    addLocalActivity(result.trade);
-    triggerHaptic("success");
-    if (Number(result.daily_bet_bonus?.awarded || 0) > 0) {
-      showToast(`+${formatFire(result.daily_bet_bonus.awarded)} за первую ставку дня.`);
-    }
-    renderMarket();
-    renderMe();
-    renderActivity();
-    scheduleFastDataRefresh(90);
-  } catch (error) {
-    triggerHaptic("error");
-    if (error.message === "insufficient_fire") {
-      clearQueuedBuys();
-      const available = Math.max(0, Number(state.balance || 0) - Number(state.reservedBuyAmount || 0));
-      const missing = Math.max(1, Math.ceil(Number(intent.amount || 0) - available));
-      openTopupSheet(missing, `Для ставки ${formatFire(intent.amount)} не хватает ${formatFire(missing)}.`);
-    } else if (error.message === "market_closed" || error.message === "market_not_open") {
-      handleClosedMarketBuy(intent.marketId);
-    } else {
-      showToast("Покупка не прошла.");
-      scheduleFastDataRefresh(150);
-    }
-  } finally {
-    releaseReservedBuy(intent.amount);
-    setPendingBuyKeyCount(intent.intentKey, -1);
-    renderMarket();
-    renderTradeTicket();
-    drainBuyQueue();
-  }
-}
-
-function buy(amount = state.selectedAmount) {
+async function buy(amount = state.selectedAmount) {
   const market = getDisplayMarket();
   if (!state.user || !market) {
     triggerHaptic("warning");
@@ -2042,40 +1845,79 @@ function buy(amount = state.selectedAmount) {
   const side = state.selectedSide;
   const buyAmount = Number(amount || state.selectedAmount);
   state.selectedAmount = buyAmount;
-  if (!Number.isFinite(buyAmount) || buyAmount <= 0) {
-    triggerHaptic("warning");
-    return;
-  }
-  if (!isMarketOpenForBuy(market)) {
-    handleClosedMarketBuy(marketId);
-    return;
-  }
   const intentKey = getBuyIntentKey(marketId, side, buyAmount);
-  const available = Math.max(0, Number(state.balance || 0) - Number(state.reservedBuyAmount || 0));
-  if (buyAmount > available) {
-    clearQueuedBuys();
-    const missing = Math.max(1, Math.ceil(buyAmount - available));
+  if (state.pendingBuy) {
+    triggerHaptic(state.pendingBuyKey === intentKey ? "light" : "selection");
+    state.pendingBuyKey = state.pendingBuyKey || intentKey;
+    if (state.buyQueue.length < 12) {
+      state.buyQueue.push({ marketId, side, amount: buyAmount });
+    }
+    renderTradeTicket();
+    return;
+  }
+  if (buyAmount > Number(state.balance || 0)) {
+    state.buyQueue = [];
+    const missing = Math.max(1, Math.ceil(buyAmount - Number(state.balance || 0)));
     triggerHaptic("warning");
     openTopupSheet(missing, `Для ставки ${formatFire(buyAmount)} не хватает ${formatFire(missing)}.`);
     return;
   }
-  if (state.buyQueue.length >= MAX_BUY_QUEUE) {
-    triggerHaptic("warning");
-    showToast("Слишком много ставок в очереди. Секунду.");
-    return;
-  }
-
   triggerHaptic("medium");
-  state.reservedBuyAmount += buyAmount;
-  state.buyQueue.push({
-    marketId,
-    side,
-    amount: buyAmount,
-    intentKey,
-    queuedAt: Date.now(),
-  });
+  state.pendingBuy = true;
+  state.pendingBuyKey = intentKey;
   renderTradeTicket();
-  drainBuyQueue();
+  try {
+    const result = await api(`/api/market/${marketId}/buy`, {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        side,
+        amount: buyAmount,
+      }),
+    });
+    state.balance = result.balance ?? state.balance;
+    upsertLocalMarket(result.market);
+    upsertLocalPosition(result.position);
+    addLocalActivity(result.trade);
+    triggerHaptic("success");
+    if (Number(result.daily_bet_bonus?.awarded || 0) > 0) {
+      showToast(`+${formatFire(result.daily_bet_bonus.awarded)} за первую ставку дня.`);
+    }
+    renderMarket();
+    renderMe();
+    renderActivity();
+    renderTradeTicket();
+    window.setTimeout(() => {
+      void Promise.all([
+        loadMarket().catch(() => undefined),
+        loadBtcMarkets().catch(() => undefined),
+        loadWorldCupMarkets().catch(() => undefined),
+        loadMe().catch(() => undefined),
+        loadComments().catch(() => undefined),
+      ]);
+    }, 160);
+  } catch (error) {
+    triggerHaptic("error");
+    if (error.message === "insufficient_fire") {
+      state.buyQueue = [];
+      const missing = Math.max(1, Math.ceil(buyAmount - Number(state.balance || 0)));
+      openTopupSheet(missing, `Для ставки ${formatFire(buyAmount)} не хватает ${formatFire(missing)}.`);
+    } else {
+      showToast("Покупка не прошла.");
+    }
+  } finally {
+    state.pendingBuy = false;
+    state.pendingBuyKey = null;
+    renderMarket();
+    renderTradeTicket();
+    const nextIntent = state.buyQueue.shift();
+    if (nextIntent) {
+      applyBuyIntentSelection(nextIntent);
+      window.setTimeout(() => {
+        void buy(nextIntent.amount);
+      }, 70);
+    }
+  }
 }
 
 async function sellPosition({ side, positionId, marketId, shares }) {
@@ -2757,12 +2599,12 @@ document.addEventListener("click", (event) => {
 setInterval(updateTimer, 250);
 setInterval(updatePresenceTaskButton, 1_000);
 setInterval(renderMarketChart, CHART_RENDER_INTERVAL_MS);
-setInterval(() => void loadMarket().catch(() => setConnection("Ошибка", "error")), 750);
-setInterval(() => void loadBtcMarkets().catch(() => undefined), 3_000);
-setInterval(() => void loadWorldCupMarkets().catch(() => undefined), 3_000);
-setInterval(() => void loadComments().catch(() => undefined), 5_000);
-setInterval(() => void loadActivity().catch(() => undefined), 2_000);
-setInterval(() => void loadMe().catch(() => undefined), 2_000);
+setInterval(() => void loadMarket().catch(() => setConnection("Ошибка", "error")), 1_000);
+setInterval(() => void loadBtcMarkets().catch(() => undefined), 15_000);
+setInterval(() => void loadWorldCupMarkets().catch(() => undefined), 15_000);
+setInterval(() => void loadComments().catch(() => undefined), 8_000);
+setInterval(() => void loadActivity().catch(() => undefined), 3_000);
+setInterval(() => void loadMe().catch(() => undefined), 3_000);
 setInterval(() => void loadRecentMarkets().catch(() => undefined), 10_000);
 
 window.addEventListener("resize", () => {
