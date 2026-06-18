@@ -439,6 +439,57 @@ function normalizeWorldCupTeam(question) {
     .trim();
 }
 
+function normalizeWorldCupTeamKey(team) {
+  return String(team || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function isImageIcon(icon) {
+  return /^https?:\/\//i.test(String(icon || ""));
+}
+
+function isFallbackWorldCupSymbol(symbol) {
+  return String(symbol || "").startsWith(`${WORLD_CUP_SYMBOL_PREFIX}fallback-`);
+}
+
+function rankWorldCupRow(row) {
+  const localVolume = toNumber(row.yes_volume) + toNumber(row.no_volume);
+  return (
+    localVolume * 1_000
+    + (isImageIcon(row.icon) ? 100 : 0)
+    + (isFallbackWorldCupSymbol(row.symbol) ? -50 : 0)
+    + toNumber(row.meta_volume ?? row.volume) / 1_000_000
+    + Number(row.id || 0) / 1_000_000_000
+  );
+}
+
+function dedupeWorldCupRows(rows) {
+  const byTeam = new Map();
+  for (const row of rows) {
+    const key = normalizeWorldCupTeamKey(row.team || normalizeWorldCupTeam(row.question));
+    if (!key) {
+      continue;
+    }
+
+    const current = byTeam.get(key);
+    if (!current || rankWorldCupRow(row) > rankWorldCupRow(current)) {
+      byTeam.set(key, row);
+    }
+  }
+
+  return Array.from(byTeam.values()).sort((a, b) => {
+    const priceDiff = toNumber(b.yes_price) - toNumber(a.yes_price);
+    if (Math.abs(priceDiff) > 0.000001) {
+      return priceDiff;
+    }
+    return toNumber(b.meta_volume ?? b.volume) - toNumber(a.meta_volume ?? a.volume);
+  });
+}
+
 function parseJsonArray(value) {
   if (Array.isArray(value)) {
     return value;
@@ -1652,15 +1703,22 @@ export async function syncWorldCupMarkets() {
       const liquidity = Math.max(1_000, toNumber(feedMarket.volume) || config.marketLiquidity);
       const existingResult = await client.query(
         `
-          SELECT *
-          FROM markets
-          WHERE symbol = $1
-            AND status = 'open'
-          ORDER BY id DESC
+          SELECT m.*
+          FROM markets m
+          LEFT JOIN world_cup_market_meta meta ON meta.symbol = m.symbol
+          WHERE m.status = 'open'
+            AND (
+              m.symbol = $1
+              OR LOWER(meta.team) = LOWER($2)
+            )
+          ORDER BY
+            (COALESCE(m.yes_volume, 0) + COALESCE(m.no_volume, 0)) DESC,
+            CASE WHEN m.symbol = $1 THEN 1 ELSE 0 END DESC,
+            m.id DESC
           LIMIT 1
           FOR UPDATE
         `,
-        [symbol],
+        [symbol, feedMarket.team],
       );
       const existingMarket = existingResult.rows[0];
       const marketResult = existingMarket
@@ -1763,7 +1821,8 @@ export async function getWorldCupMarkets() {
     `,
     [`${WORLD_CUP_SYMBOL_PREFIX}%`],
   );
-  const symbols = result.rows.map((row) => row.symbol);
+  const rows = dedupeWorldCupRows(result.rows);
+  const symbols = rows.map((row) => row.symbol);
   let chartBySymbol = new Map();
   if (symbols.length) {
     const chartResult = await query(
@@ -1796,7 +1855,7 @@ export async function getWorldCupMarkets() {
 
   return {
     source,
-    markets: result.rows.map((row) => mapWorldCupMarket({
+    markets: rows.map((row) => mapWorldCupMarket({
       ...row,
       chart: chartBySymbol.get(row.symbol) || [],
     })),
