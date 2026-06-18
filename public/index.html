@@ -4,63 +4,68 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260617-1" />
+    <link rel="stylesheet" href="/styles.css?v=20260618-1" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
     <main class="app-shell">
       <header class="topbar">
-        <div class="app-title">EasyMarket</div>
+        <div class="app-title">EASYMARKET</div>
         <div class="topbar-row">
           <div>
-            <h1><span class="balance-star">⭐</span> <span id="fireBalance">0</span></h1>
+            <h1>
+              <svg class="balance-star-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m12 3.8 2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4-3.9-3.8 5.4-.8L12 3.8Z" />
+              </svg>
+              <span id="fireBalance">0</span>
+            </h1>
           </div>
           <div class="top-actions">
             <button id="btcMarketsBtn" class="icon-button btc-action" type="button" aria-label="BTC markets">
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="12" cy="12" r="8.5" />
+                <path d="M7.5 6.8h6.2c2 0 3.2 1.1 3.2 2.7 0 1.2-.7 2.1-1.8 2.4 1.5.3 2.4 1.3 2.4 2.8 0 1.8-1.4 2.9-3.6 2.9H7.5" />
                 <path d="M10 7v10" />
-                <path d="M8.5 9h4.3a2 2 0 0 1 0 4H8.5" />
-                <path d="M8.5 13h5a2 2 0 0 1 0 4h-5" />
-                <path d="M10 5.5v2" />
-                <path d="M13 5.5v2" />
-                <path d="M10 16.5v2" />
-                <path d="M13 16.5v2" />
+                <path d="M8 11.8h5.4" />
+                <path d="M8 17.6h5.8" />
+                <path d="M9.3 4.5v2.3" />
+                <path d="M13.2 4.5v2.3" />
+                <path d="M9.3 17.6v2.1" />
+                <path d="M13.2 17.6v2.1" />
               </svg>
             </button>
             <button id="worldCupBtn" class="icon-button sport-action" type="button" aria-label="World Cup markets">
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M7 5h10l-1.2 9H8.2L7 5Z" />
-                <path d="M8.5 7H5.8c.2 3 1.4 4.7 3.1 5" />
-                <path d="M15.5 7h2.7c-.2 3-1.4 4.7-3.1 5" />
-                <path d="M12 14v3.5" />
-                <path d="M8.8 20h6.4" />
-                <path d="M10 17.5h4" />
+                <circle cx="12" cy="12" r="7.5" />
+                <path d="m12 6.8 3.2 2.3-1.2 3.8h-4L8.8 9.1 12 6.8Z" />
+                <path d="M5.8 10.2 8.8 9" />
+                <path d="m15.2 9 3 1.2" />
+                <path d="m10 12.9-1.8 2.7" />
+                <path d="m14 12.9 1.8 2.7" />
               </svg>
             </button>
-            <button id="withdrawBtn" class="icon-button withdraw-action" type="button" aria-label="Вывести звезды">
+            <button id="leaderboardBtn" class="icon-button leaderboard-action" type="button" aria-label="Рейтинг">
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 7h16v11H4z" />
-                <path d="M16 11h4v4h-4z" />
-                <path d="M8 4h8" />
-                <path d="M12 10v5" />
-                <path d="m9.5 12.5 2.5 2.5 2.5-2.5" />
+                <path d="M6.5 19V11" />
+                <path d="M12 19V5" />
+                <path d="M17.5 19v-9.5" />
+                <path d="M4.5 19.2h15" />
+                <path d="m12 3.5.9 1.8 2 .3-1.4 1.4.3 2-1.8-.9-1.8.9.3-2-1.4-1.4 2-.3.9-1.8Z" />
               </svg>
             </button>
-            <button id="walletBtn" class="icon-button fire-action" type="button" aria-label="Пополнить звезды">
+            <button id="walletBtn" class="icon-button wallet-action" type="button" aria-label="Кошелек">
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 7h16v11H4z" />
-                <path d="M16 11h4v4h-4z" />
-                <path d="M8 4h8" />
-                <path d="M12 9v6" />
-                <path d="M9 12h6" />
+                <path d="M4.5 7.5h14.2a1.8 1.8 0 0 1 1.8 1.8v8a1.8 1.8 0 0 1-1.8 1.8H5.8a2.3 2.3 0 0 1-2.3-2.3V7.5Z" />
+                <path d="M4.8 7.5 15.6 4.6c1.2-.3 2.4.6 2.4 1.8v1.1" />
+                <path d="M16.4 13.3h4.1" />
+                <path d="M18.4 11.3v4" />
               </svg>
             </button>
             <button id="tasksBtn" class="icon-button accent plus-action" type="button" aria-label="Открыть задания">
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 5v14" />
-                <path d="M5 12h14" />
-                <path d="M4 4h16v16H4z" />
+                <path d="M7 6.5h10" />
+                <path d="M7 12h10" />
+                <path d="M7 17.5h6" />
+                <path d="M5 3.5h14a1.5 1.5 0 0 1 1.5 1.5v14a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V5A1.5 1.5 0 0 1 5 3.5Z" />
               </svg>
             </button>
           </div>
@@ -129,40 +134,49 @@
         </div>
       </section>
 
-      <section id="topupSheet" class="task-sheet hidden" aria-label="Пополнить звезды">
+      <section id="topupSheet" class="task-sheet hidden" aria-label="Кошелек">
         <div class="task-panel topup-panel">
           <div class="task-head">
             <div>
               <p class="eyebrow">Telegram Stars</p>
-              <h2>Пополнить звезды</h2>
+              <h2 id="walletSheetTitle">Пополнить звезды</h2>
             </div>
             <button id="topupCloseBtn" class="icon-button" type="button" aria-label="Закрыть пополнение">×</button>
           </div>
+          <div class="wallet-mode-toggle" role="tablist" aria-label="Кошелек">
+            <button id="walletModeTopupBtn" class="active" type="button">Пополнить</button>
+            <button id="walletModeWithdrawBtn" type="button">Вывести</button>
+          </div>
           <div class="topup-body">
-            <strong><span id="topupAmountValue">100</span></strong>
-            <div class="topup-packages" role="group" aria-label="Пакеты пополнения">
-              <button type="button" data-topup-package="100">100</button>
-              <button type="button" data-topup-package="1000">1 000</button>
-              <button type="button" data-topup-package="10000">10 000</button>
+            <div id="topupModePanel" class="wallet-mode-panel">
+              <strong><span id="topupAmountValue">100</span></strong>
+              <div class="topup-packages" role="group" aria-label="Пакеты пополнения">
+                <button type="button" data-topup-package="100">100</button>
+                <button type="button" data-topup-package="1000">1 000</button>
+                <button type="button" data-topup-package="10000">10 000</button>
+              </div>
+              <p id="topupReason">Зачислим в баланс после оплаты.</p>
+              <button id="topupBuyBtn" class="trade-confirm" type="button">Купить</button>
             </div>
-            <p id="topupReason">Зачислим в баланс после оплаты.</p>
-            <button id="topupBuyBtn" class="trade-confirm" type="button">Купить</button>
+            <div id="withdrawModePanel" class="wallet-mode-panel hidden">
+              <strong>Скоро</strong>
+              <p>Вывод звезд пока готовится. При выводе будет удержано 10% на комиссионные расходы.</p>
+            </div>
           </div>
         </div>
       </section>
 
-      <section id="withdrawSheet" class="task-sheet hidden" aria-label="Вывод звезд">
-        <div class="task-panel topup-panel">
+      <section id="leaderboardSheet" class="task-sheet hidden" aria-label="Рейтинг">
+        <div class="task-panel leaderboard-panel">
           <div class="task-head">
             <div>
-              <p class="eyebrow">Withdraw</p>
-              <h2>Вывод звезд</h2>
+              <p class="eyebrow">Top players</p>
+              <h2>Рейтинг</h2>
             </div>
-            <button id="withdrawCloseBtn" class="icon-button" type="button" aria-label="Закрыть вывод">×</button>
+            <button id="leaderboardCloseBtn" class="icon-button" type="button" aria-label="Закрыть рейтинг">×</button>
           </div>
-          <div class="topup-body">
-            <strong>Скоро</strong>
-            <p>Вывод звезд пока готовится. При выводе будет удержано 10% на комиссионные расходы.</p>
+          <div id="leaderboardList" class="leaderboard-list">
+            <p class="muted">Загружаю рейтинг...</p>
           </div>
         </div>
       </section>
@@ -310,16 +324,17 @@
       </section>
 
       <section class="card market-chat-card">
-        <div class="section-title">
-          <h2>Чат рынка</h2>
-          <span class="subtle">ники и последняя ставка</span>
-        </div>
         <div id="marketChatList" class="market-chat-list">
           <p class="muted">Комментариев пока нет.</p>
         </div>
         <form id="marketChatForm" class="market-chat-form">
-          <input id="marketChatInput" type="text" maxlength="240" placeholder="Написать в чат рынка..." autocomplete="off" />
-          <button type="submit">Send</button>
+          <input id="marketChatInput" type="text" maxlength="240" placeholder="Написать сообщение..." autocomplete="off" />
+          <button type="submit" aria-label="Отправить">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m4 12 15-7-4 14-3.5-5L4 12Z" />
+              <path d="m11.5 14 3.5-9" />
+            </svg>
+          </button>
         </form>
       </section>
 
@@ -365,6 +380,6 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
-    <script src="/app.js?v=20260617-1" type="module"></script>
+    <script src="/app.js?v=20260618-1" type="module"></script>
   </body>
 </html>

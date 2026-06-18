@@ -2200,16 +2200,30 @@ export async function sellOutcome(input) {
 
     const positionUpdateResult = await client.query(
       `
+        WITH sale_input AS (
+          SELECT
+            $1::bigint AS position_id,
+            $2::numeric AS remaining_shares,
+            $3::numeric AS remaining_spent,
+            $4::numeric AS proceeds,
+            $5::numeric AS realized_pnl,
+            $6::text AS next_status
+        )
         UPDATE positions
-        SET shares = $2::numeric,
-            spent = $3::numeric,
-            avg_price = CASE WHEN $2::numeric > 0 THEN $3::numeric / $2::numeric ELSE 0 END,
-            payout = payout + $4::numeric,
-            pnl = pnl + $5::numeric,
-            status = $6::text,
+        SET shares = sale_input.remaining_shares,
+            spent = sale_input.remaining_spent,
+            avg_price = CASE
+              WHEN sale_input.remaining_shares > 0
+                THEN sale_input.remaining_spent / sale_input.remaining_shares
+              ELSE 0::numeric
+            END,
+            payout = positions.payout + sale_input.proceeds,
+            pnl = positions.pnl + sale_input.realized_pnl,
+            status = sale_input.next_status,
             updated_at = now()
-        WHERE id = $1::bigint
-        RETURNING *
+        FROM sale_input
+        WHERE positions.id = sale_input.position_id
+        RETURNING positions.*
       `,
       [
         position.id,
@@ -2474,6 +2488,59 @@ export async function getRecentMarkets(limit = 10) {
   );
 
   return result.rows.map(mapMarket);
+}
+
+export async function getLeaderboard(limit = 30) {
+  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 30));
+  const result = await query(
+    `
+      WITH trade_stats AS (
+        SELECT
+          user_id,
+          COUNT(*) FILTER (WHERE action = 'BUY') AS bet_count
+        FROM trades
+        GROUP BY user_id
+      ),
+      position_stats AS (
+        SELECT
+          user_id,
+          COUNT(*) FILTER (WHERE status <> 'open') AS settled_count,
+          COUNT(*) FILTER (WHERE status <> 'open' AND pnl > 0) AS win_count
+        FROM positions
+        GROUP BY user_id
+      )
+      SELECT
+        users.telegram_id,
+        users.username,
+        users.first_name,
+        fire_balances.balance,
+        COALESCE(trade_stats.bet_count, 0) AS bet_count,
+        COALESCE(position_stats.settled_count, 0) AS settled_count,
+        COALESCE(position_stats.win_count, 0) AS win_count
+      FROM users
+      JOIN fire_balances ON fire_balances.user_id = users.id
+      LEFT JOIN trade_stats ON trade_stats.user_id = users.id
+      LEFT JOIN position_stats ON position_stats.user_id = users.id
+      ORDER BY fire_balances.balance DESC, COALESCE(trade_stats.bet_count, 0) DESC, users.updated_at DESC
+      LIMIT $1
+    `,
+    [safeLimit],
+  );
+
+  return result.rows.map((row) => {
+    const settledCount = Number(row.settled_count || 0);
+    const winCount = Number(row.win_count || 0);
+    return {
+      telegram_id: row.telegram_id,
+      username: row.username,
+      first_name: row.first_name,
+      balance: toNumber(row.balance),
+      bet_count: Number(row.bet_count || 0),
+      settled_count: settledCount,
+      win_count: winCount,
+      win_rate_pct: settledCount > 0 ? Math.round((winCount / settledCount) * 1000) / 10 : 0,
+    };
+  });
 }
 
 export async function getUserPositions(telegramId) {

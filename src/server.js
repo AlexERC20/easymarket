@@ -17,6 +17,7 @@ import {
   getActiveMarket,
   getBtcMarkets,
   getFireLedgerEvents,
+  getLeaderboard,
   getMarketActivity,
   getMarketComments,
   getMarketChart,
@@ -472,6 +473,18 @@ app.get("/api/markets/recent", async (req, res) => {
     res.status(200).json({
       ok: true,
       markets,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/leaderboard", async (req, res) => {
+  try {
+    const players = await getLeaderboard(req.query.limit);
+    res.status(200).json({
+      ok: true,
+      players,
     });
   } catch (error) {
     sendApiError(res, error);

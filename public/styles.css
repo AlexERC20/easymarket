@@ -108,27 +108,28 @@ p {
 
 .topbar {
   display: block;
-  margin: -7px 0 8px;
+  margin: -13px 0 8px;
   min-height: 74px;
   overflow-anchor: none;
 }
 
 .app-title {
   width: 100%;
-  margin: 0 auto 8px;
+  margin: 0 auto 5px;
   color: rgba(243, 246, 251, 0.96);
-  font-size: clamp(22px, 6vw, 29px);
+  font-size: clamp(24px, 6.8vw, 32px);
   font-weight: 950;
   line-height: 1;
   text-align: center;
   letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .topbar-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 7px;
   min-height: 39px;
 }
 
@@ -145,9 +146,16 @@ p {
   white-space: nowrap;
 }
 
-.balance-star {
+.balance-star-icon {
   flex: 0 0 auto;
-  font-size: 0.82em;
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: rgba(255, 184, 77, 0.72);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.65;
+  opacity: 0.82;
 }
 
 #fireBalance {
@@ -239,7 +247,7 @@ h2 {
   display: flex;
   align-items: center;
   flex: 0 0 auto;
-  gap: 6px;
+  gap: 5px;
 }
 
 .icon-button,
@@ -253,22 +261,22 @@ h2 {
 
 .icon-button {
   position: relative;
-  width: 39px;
-  height: 39px;
+  width: 36px;
+  height: 36px;
   display: inline-grid;
   place-items: center;
   font-size: 19px;
 }
 
 .icon-button svg {
-  width: 21px;
-  height: 21px;
+  width: 20px;
+  height: 20px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 2.5;
-  opacity: 0.72;
+  stroke-width: 1.8;
+  opacity: 0.62;
 }
 
 .icon-button.accent {
@@ -277,20 +285,17 @@ h2 {
   color: var(--fire);
 }
 
-.icon-button.fire-action {
-  border-color: rgba(255, 184, 77, 0.42);
-  background: linear-gradient(180deg, rgba(255, 184, 77, 0.14), rgba(17, 23, 34, 0.78));
+.icon-button.wallet-action,
+.icon-button.leaderboard-action {
+  border-color: rgba(255, 255, 255, 0.09);
+  background: rgba(17, 23, 34, 0.72);
+  color: rgba(243, 246, 251, 0.8);
 }
 
 .icon-button.btc-action {
-  border-color: rgba(255, 184, 77, 0.48);
-  background: rgba(255, 184, 77, 0.11);
+  border-color: rgba(255, 184, 77, 0.28);
+  background: rgba(255, 184, 77, 0.08);
   color: var(--fire);
-}
-
-.icon-button.withdraw-action {
-  border-color: rgba(94, 161, 255, 0.38);
-  background: linear-gradient(180deg, rgba(94, 161, 255, 0.14), rgba(17, 23, 34, 0.78));
 }
 
 .ghost-button {
@@ -891,7 +896,8 @@ code {
 }
 
 #worldCupSheet,
-#tasksSheet {
+#tasksSheet,
+#leaderboardSheet {
   z-index: 34;
 }
 
@@ -899,8 +905,7 @@ code {
   z-index: 42;
 }
 
-#topupSheet,
-#withdrawSheet {
+#topupSheet {
   z-index: 54;
 }
 
@@ -994,6 +999,40 @@ code {
   margin-top: 18px;
 }
 
+.wallet-mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 14px;
+  border-radius: 14px;
+  background: rgba(7, 10, 16, 0.52);
+  padding: 5px;
+}
+
+.wallet-mode-toggle button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.wallet-mode-toggle button.active {
+  background: #202833;
+  color: var(--text);
+}
+
+.wallet-mode-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.wallet-mode-panel.hidden {
+  display: none;
+}
+
 .topup-body strong {
   color: var(--fire);
   font-size: clamp(34px, 12vw, 58px);
@@ -1030,6 +1069,76 @@ code {
 .topup-packages button.active {
   border-color: rgba(18, 153, 243, 0.58);
   background: rgba(18, 153, 243, 0.18);
+}
+
+.leaderboard-panel {
+  max-height: min(82dvh, 720px);
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+}
+
+.leaderboard-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.leaderboard-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 10px;
+}
+
+.leaderboard-rank {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.leaderboard-player {
+  min-width: 0;
+}
+
+.leaderboard-player strong,
+.leaderboard-player small {
+  display: block;
+}
+
+.leaderboard-player strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-player small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.leaderboard-balance {
+  color: var(--fire);
+  font-size: 14px;
+  font-weight: 950;
+  font-variant-numeric: tabular-nums;
 }
 
 .world-cup-panel {
@@ -1209,12 +1318,26 @@ code {
 }
 
 .market-chat-form button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  min-width: 44px;
   border: 0;
   border-radius: 12px;
   background: var(--blue);
   color: #fff;
-  padding: 0 13px;
+  padding: 0;
   font-weight: 950;
+}
+
+.market-chat-form button svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 
 .market-chat-form button:disabled {

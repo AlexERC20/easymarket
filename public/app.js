@@ -15,6 +15,7 @@ const state = {
   positions: [],
   recentTrades: [],
   recentMarkets: [],
+  leaderboard: [],
   activity: [],
   chartPoints: [],
   btcMarkets: [],
@@ -37,6 +38,7 @@ const state = {
     amount: 0,
     reason: "",
     pending: false,
+    mode: "topup",
   },
   expanded: {
     positions: false,
@@ -51,6 +53,7 @@ const state = {
   seenSettledPositionIds: new Set(),
   pendingBuy: false,
   pendingBuyKey: null,
+  buyQueue: [],
   pendingSellSide: null,
   pendingSellPositionId: null,
   publicConfig: {
@@ -921,6 +924,12 @@ async function loadRecentMarkets() {
   renderRecentMarkets();
 }
 
+async function loadLeaderboard() {
+  const data = await api("/api/leaderboard?limit=30");
+  state.leaderboard = data.players || [];
+  renderLeaderboard();
+}
+
 function formatRelativeTime(value) {
   const ms = Date.now() - new Date(value).getTime();
   if (!Number.isFinite(ms) || ms < 60_000) return "now";
@@ -1100,6 +1109,21 @@ function getBuyIntentKey(marketId, side, amount) {
   return `${marketId}:${side}:${Math.round(Number(amount || 0) * 100) / 100}`;
 }
 
+function applyBuyIntentSelection(intent) {
+  const marketId = Number(intent.marketId);
+  const btcMarket = state.btcMarkets.find((market) => market.id === marketId);
+  const worldMarket = state.worldCupMarkets.find((market) => market.id === marketId);
+  if (btcMarket) {
+    state.selectedBtcMarketId = btcMarket.id === state.market?.id ? null : btcMarket.id;
+    state.selectedWorldCupMarketId = null;
+  } else if (worldMarket) {
+    state.selectedWorldCupMarketId = worldMarket.id;
+    state.selectedBtcMarketId = null;
+  }
+  state.selectedSide = intent.side;
+  state.selectedAmount = intent.amount;
+}
+
 function renderMarket() {
   const market = getDisplayMarket();
   const hasMarket = Boolean(market);
@@ -1186,7 +1210,7 @@ function updateTimer() {
 
   const remainingMs = new Date(market.end_time).getTime() - Date.now();
   const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
-  if (isWorldCupMarket(market) && seconds > 86_400) {
+  if ((isWorldCupMarket(market) || isBtcMarket(market)) && seconds >= 86_400) {
     const days = Math.floor(seconds / 86_400);
     const hours = Math.floor((seconds % 86_400) / 3_600);
     $("timeLeftMinutes").textContent = String(days);
@@ -1449,6 +1473,35 @@ function renderRecentMarkets() {
   }).join("");
 }
 
+function renderLeaderboard() {
+  const container = $("leaderboardList");
+  if (!container) {
+    return;
+  }
+
+  if (!state.leaderboard.length) {
+    container.innerHTML = '<p class="muted">Пока нет игроков в рейтинге.</p>';
+    return;
+  }
+
+  container.innerHTML = state.leaderboard.map((player, index) => {
+    const name = player.username
+      ? `@${player.username}`
+      : player.first_name || `user ${player.telegram_id}`;
+    const winRate = Number(player.win_rate_pct || 0);
+    return `
+      <div class="leaderboard-row">
+        <span class="leaderboard-rank">${index + 1}</span>
+        <div class="leaderboard-player">
+          <strong>${escapeHtml(name)}</strong>
+          <small>${formatFire(player.bet_count)} ставок · WR ${winRate.toFixed(0)}%</small>
+        </div>
+        <strong class="leaderboard-balance">${formatFire(player.balance)}</strong>
+      </div>
+    `;
+  }).join("");
+}
+
 function formatVolume(value) {
   const num = Number(value || 0);
   if (num >= 1_000_000) {
@@ -1612,13 +1665,14 @@ function renderBetSheet() {
     return;
   }
 
-  const price = Math.max(MIN_OUTCOME_PRICE, Number(side === "YES" ? market.yes_price : market.no_price) || 0.5);
+  const isBtc = isBtcMarket(market);
+  const price = Math.max(getMarketMinOutcomePrice(market), Number(side === "YES" ? market.yes_price : market.no_price) || 0.5);
   const shares = Number(amount || 0) / price;
-  setTeamIconElement($("betTeamIcon"), market.icon, market.team);
-  if ($("betMarketTitle")) $("betMarketTitle").textContent = market.title || "World Cup Winner";
-  if ($("betTeamName")) $("betTeamName").textContent = market.team || "Team";
+  setTeamIconElement($("betTeamIcon"), isBtc ? "₿" : market.icon, isBtc ? "BTC" : market.team);
+  if ($("betMarketTitle")) $("betMarketTitle").textContent = market.title || (isBtc ? "BTC Market" : "World Cup Winner");
+  if ($("betTeamName")) $("betTeamName").textContent = isBtc ? (market.title || "BTC Up or Down") : (market.team || "Team");
   if ($("betSideName")) {
-    $("betSideName").textContent = side === "YES" ? "Yes" : "No";
+    $("betSideName").textContent = marketSideLabel(market, side);
     $("betSideName").className = side === "YES" ? "positive" : "negative";
   }
   if ($("betAmountValue")) $("betAmountValue").textContent = formatFire(amount);
@@ -1626,6 +1680,8 @@ function renderBetSheet() {
   if ($("betPriceValue")) $("betPriceValue").textContent = formatCents(price);
   $("betSideYesBtn")?.classList.toggle("active", side === "YES");
   $("betSideNoBtn")?.classList.toggle("active", side === "NO");
+  if ($("betSideYesBtn")) $("betSideYesBtn").textContent = marketSideLabel(market, "YES");
+  if ($("betSideNoBtn")) $("betSideNoBtn").textContent = marketSideLabel(market, "NO");
   if ($("betConfirmBtn")) {
     $("betConfirmBtn").disabled = !amount || !state.user;
     $("betConfirmBtn").textContent = amount ? `Trade ${formatFire(amount)}` : "Trade";
@@ -1648,12 +1704,20 @@ function closeBetSheet() {
 
 function renderTopupSheet() {
   const amount = Math.max(1, Math.round(Number(state.topup.amount || 0)));
+  const isTopupMode = state.topup.mode !== "withdraw";
+  $("topupModePanel")?.classList.toggle("hidden", !isTopupMode);
+  $("withdrawModePanel")?.classList.toggle("hidden", isTopupMode);
+  $("walletModeTopupBtn")?.classList.toggle("active", isTopupMode);
+  $("walletModeWithdrawBtn")?.classList.toggle("active", !isTopupMode);
+  if ($("walletSheetTitle")) {
+    $("walletSheetTitle").textContent = isTopupMode ? "Пополнить звезды" : "Вывести звезды";
+  }
   if ($("topupAmountValue")) $("topupAmountValue").textContent = formatFire(amount);
   if ($("topupReason")) {
     $("topupReason").textContent = state.topup.reason || "Звезды зачислятся в баланс после оплаты.";
   }
   if ($("topupBuyBtn")) {
-    $("topupBuyBtn").disabled = state.topup.pending || !state.user;
+    $("topupBuyBtn").disabled = !isTopupMode || state.topup.pending || !state.user;
     $("topupBuyBtn").textContent = state.topup.pending ? "Открываю оплату..." : `Купить ${formatFire(amount)}`;
   }
   document.querySelectorAll("[data-topup-package]").forEach((button) => {
@@ -1661,19 +1725,16 @@ function renderTopupSheet() {
   });
 }
 
-function openTopupSheet(amount, reason = "") {
+function openTopupSheet(amount, reason = "", mode = "topup") {
   state.topup.amount = Math.max(1, Math.round(Number(amount || 0)));
   state.topup.reason = reason;
+  state.topup.mode = mode === "withdraw" ? "withdraw" : "topup";
   renderTopupSheet();
   $("topupSheet")?.classList.remove("hidden");
 }
 
 function closeTopupSheet() {
   $("topupSheet")?.classList.add("hidden");
-}
-
-function setWithdrawSheetOpen(open) {
-  $("withdrawSheet")?.classList.toggle("hidden", !open);
 }
 
 async function refreshBalanceAfterInvoice() {
@@ -1788,10 +1849,14 @@ async function buy(amount = state.selectedAmount) {
   if (state.pendingBuy) {
     triggerHaptic(state.pendingBuyKey === intentKey ? "light" : "selection");
     state.pendingBuyKey = state.pendingBuyKey || intentKey;
+    if (state.buyQueue.length < 12) {
+      state.buyQueue.push({ marketId, side, amount: buyAmount });
+    }
     renderTradeTicket();
     return;
   }
   if (buyAmount > Number(state.balance || 0)) {
+    state.buyQueue = [];
     const missing = Math.max(1, Math.ceil(buyAmount - Number(state.balance || 0)));
     triggerHaptic("warning");
     openTopupSheet(missing, `Для ставки ${formatFire(buyAmount)} не хватает ${formatFire(missing)}.`);
@@ -1834,6 +1899,7 @@ async function buy(amount = state.selectedAmount) {
   } catch (error) {
     triggerHaptic("error");
     if (error.message === "insufficient_fire") {
+      state.buyQueue = [];
       const missing = Math.max(1, Math.ceil(buyAmount - Number(state.balance || 0)));
       openTopupSheet(missing, `Для ставки ${formatFire(buyAmount)} не хватает ${formatFire(missing)}.`);
     } else {
@@ -1844,6 +1910,13 @@ async function buy(amount = state.selectedAmount) {
     state.pendingBuyKey = null;
     renderMarket();
     renderTradeTicket();
+    const nextIntent = state.buyQueue.shift();
+    if (nextIntent) {
+      applyBuyIntentSelection(nextIntent);
+      window.setTimeout(() => {
+        void buy(nextIntent.amount);
+      }, 70);
+    }
   }
 }
 
@@ -1961,22 +2034,23 @@ if (refreshButton) {
 
 $("walletBtn").addEventListener("click", () => {
   triggerHaptic("selection");
-  openTopupSheet(100);
+  openTopupSheet(100, "", "topup");
 });
 
-$("withdrawBtn")?.addEventListener("click", () => {
+$("leaderboardBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
-  setWithdrawSheetOpen(true);
+  setLeaderboardSheetOpen(true);
+  void loadLeaderboard().catch(() => showToast("Рейтинг пока не загрузился."));
 });
 
-$("withdrawCloseBtn")?.addEventListener("click", () => {
+$("leaderboardCloseBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
-  setWithdrawSheetOpen(false);
+  setLeaderboardSheetOpen(false);
 });
 
-$("withdrawSheet")?.addEventListener("click", (event) => {
-  if (event.target === $("withdrawSheet")) {
-    setWithdrawSheetOpen(false);
+$("leaderboardSheet")?.addEventListener("click", (event) => {
+  if (event.target === $("leaderboardSheet")) {
+    setLeaderboardSheetOpen(false);
   }
 });
 
@@ -1996,6 +2070,18 @@ $("topupBuyBtn")?.addEventListener("click", () => {
   void startStarsTopup();
 });
 
+$("walletModeTopupBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  state.topup.mode = "topup";
+  renderTopupSheet();
+});
+
+$("walletModeWithdrawBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  state.topup.mode = "withdraw";
+  renderTopupSheet();
+});
+
 [
   ["positionToggle", "positions", renderMe],
   ["activityToggle", "activity", renderActivity],
@@ -2011,6 +2097,7 @@ $("topupBuyBtn")?.addEventListener("click", () => {
 document.querySelectorAll("[data-topup-package]").forEach((button) => {
   button.addEventListener("click", () => {
     triggerHaptic("selection");
+    state.topup.mode = "topup";
     state.topup.amount = Number(button.dataset.topupPackage);
     state.topup.reason = "";
     renderTopupSheet();
@@ -2204,7 +2291,6 @@ async function submitMarketComment() {
   const submitButton = $("marketChatForm")?.querySelector("button");
   if (submitButton) {
     submitButton.disabled = true;
-    submitButton.textContent = "...";
   }
   try {
     const result = await api(`/api/market/${market.id}/comments`, {
@@ -2226,13 +2312,18 @@ async function submitMarketComment() {
     state.commentPending = false;
     if (submitButton) {
       submitButton.disabled = false;
-      submitButton.textContent = "Send";
     }
   }
 }
 
 function setTasksSheetOpen(open) {
   const sheet = $("tasksSheet");
+  if (!sheet) return;
+  sheet.classList.toggle("hidden", !open);
+}
+
+function setLeaderboardSheetOpen(open) {
+  const sheet = $("leaderboardSheet");
   if (!sheet) return;
   sheet.classList.toggle("hidden", !open);
 }
@@ -2316,13 +2407,7 @@ $("btcMarketsList")?.addEventListener("click", (event) => {
     const market = state.btcMarkets.find((item) => item.id === Number(buyButton.dataset.btcBuy));
     if (market) {
       triggerHaptic("selection");
-      state.selectedBtcMarketId = market.id === state.market?.id ? null : market.id;
-      state.selectedWorldCupMarketId = null;
-      state.selectedSide = buyButton.dataset.side || "YES";
-      renderMarket();
-      renderTradeTicket();
-      setBtcMarketsSheetOpen(false);
-      void loadComments().catch(() => undefined);
+      openBetSheet(market, buyButton.dataset.side || "YES");
     }
     return;
   }
@@ -2418,12 +2503,21 @@ $("betConfirmBtn")?.addEventListener("click", async () => {
     triggerHaptic("warning");
     return;
   }
-  state.selectedWorldCupMarketId = market.id;
+  if (isBtcMarket(market)) {
+    state.selectedBtcMarketId = market.id === state.market?.id ? null : market.id;
+    state.selectedWorldCupMarketId = null;
+  } else {
+    state.selectedWorldCupMarketId = market.id;
+    state.selectedBtcMarketId = null;
+  }
   state.selectedSide = side;
   state.selectedAmount = amount;
   closeBetSheet();
   await buy(amount);
-  await loadWorldCupMarkets().catch(() => undefined);
+  await Promise.all([
+    loadBtcMarkets().catch(() => undefined),
+    loadWorldCupMarkets().catch(() => undefined),
+  ]);
 });
 
 let touchStartX = null;
