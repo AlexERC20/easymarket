@@ -5,7 +5,10 @@ const AMOUNTS = [50, 100, 500, 1000];
 const MIN_OUTCOME_PRICE = 0.001;
 const BTC_MIN_OUTCOME_PRICE = 0.04;
 const CHART_WINDOW_MS = 10_000;
-const CHART_RENDER_INTERVAL_MS = 66;
+const CHART_RENDER_INTERVAL_MS = 100;
+const ACTIVE_MARKET_POLL_MS = 1_500;
+const MARKET_LIST_POLL_MS = 10_000;
+const COMMENTS_POLL_MS = 10_000;
 const COLLAPSE_LIMIT = 3;
 const MARKET_BUY_CLOSE_BUFFER_MS = 400;
 
@@ -55,6 +58,9 @@ const state = {
   pendingBuy: false,
   pendingBuyKey: null,
   buyQueue: [],
+  inFlight: new Set(),
+  refreshTimer: null,
+  lastCommentsLoadAt: 0,
   expiryRefreshMarketId: null,
   lastClosedMarketToastAt: 0,
   pendingSellSide: null,
@@ -85,6 +91,7 @@ const state = {
   chartYMax: null,
 };
 
+const textAnimations = new WeakMap();
 const $ = (id) => document.getElementById(id);
 
 const formatFire = (value) => Math.floor(Number(value || 0)).toLocaleString("ru-RU");
@@ -621,6 +628,10 @@ function formatMarketWindow(market) {
 }
 
 function animateText(element, nextValue, formatter, duration = 360) {
+  if (!element) {
+    return;
+  }
+
   const numericValue = Number(nextValue || 0);
   const previousValue = Number(element.dataset.value);
   if (!Number.isFinite(previousValue)) {
@@ -634,6 +645,12 @@ function animateText(element, nextValue, formatter, duration = 360) {
     return;
   }
 
+  const previousAnimation = textAnimations.get(element);
+  if (previousAnimation) {
+    cancelAnimationFrame(previousAnimation);
+    textAnimations.delete(element);
+  }
+
   const startedAt = performance.now();
   const delta = numericValue - previousValue;
 
@@ -641,17 +658,19 @@ function animateText(element, nextValue, formatter, duration = 360) {
     const progress = Math.min(1, (now - startedAt) / duration);
     const eased = 1 - Math.pow(1 - progress, 3);
     const current = previousValue + delta * eased;
+    element.dataset.value = String(current);
     element.textContent = formatter(current);
     if (progress < 1) {
-      requestAnimationFrame(step);
+      textAnimations.set(element, requestAnimationFrame(step));
       return;
     }
 
+    textAnimations.delete(element);
     element.dataset.value = String(numericValue);
     element.textContent = formatter(numericValue);
   }
 
-  requestAnimationFrame(step);
+  textAnimations.set(element, requestAnimationFrame(step));
 }
 
 function normalizeTelegramUser(user, authSource) {
@@ -810,6 +829,53 @@ async function api(path, options = {}) {
   return data;
 }
 
+async function runSingleFlight(key, task) {
+  if (state.inFlight.has(key)) {
+    return null;
+  }
+
+  state.inFlight.add(key);
+  try {
+    return await task();
+  } finally {
+    state.inFlight.delete(key);
+  }
+}
+
+function maybeLoadComments(force = false) {
+  const now = Date.now();
+  if (!force && now - state.lastCommentsLoadAt < COMMENTS_POLL_MS) {
+    return;
+  }
+
+  state.lastCommentsLoadAt = now;
+  void runSingleFlight("comments", loadComments).catch(() => undefined);
+}
+
+function scheduleCoreRefresh({ delay = 120, includeLists = true, includeComments = false } = {}) {
+  if (state.refreshTimer) {
+    clearTimeout(state.refreshTimer);
+  }
+
+  state.refreshTimer = window.setTimeout(() => {
+    state.refreshTimer = null;
+    const jobs = [
+      runSingleFlight("market", loadMarket).catch(() => undefined),
+      runSingleFlight("me", loadMe).catch(() => undefined),
+    ];
+
+    if (includeLists) {
+      jobs.push(runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => undefined));
+      jobs.push(runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined));
+    }
+
+    void Promise.all(jobs);
+    if (includeComments) {
+      maybeLoadComments(true);
+    }
+  }, delay);
+}
+
 async function upsertMe() {
   const user = getTelegramUser();
   if (!user) {
@@ -908,7 +974,7 @@ async function loadMarket() {
   renderTradeTicket();
   renderMarketChart();
   if (!state.commentsMarketId || state.commentsMarketId === getDisplayMarket()?.id) {
-    void loadComments().catch(() => undefined);
+    maybeLoadComments();
   }
 }
 
@@ -1235,14 +1301,7 @@ function updateTimer() {
       button.disabled = true;
     });
     renderTradeTicket();
-    window.setTimeout(() => {
-      void Promise.all([
-        loadMarket().catch(() => undefined),
-        loadBtcMarkets().catch(() => undefined),
-        loadWorldCupMarkets().catch(() => undefined),
-        loadMe().catch(() => undefined),
-      ]);
-    }, 80);
+    scheduleCoreRefresh({ delay: 80 });
   }
   if ((isWorldCupMarket(market) || isBtcMarket(market)) && seconds >= 86_400) {
     const days = Math.floor(seconds / 86_400);
@@ -1668,7 +1727,7 @@ function selectBtcMarket(marketId) {
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
-  void loadComments().catch(() => undefined);
+  maybeLoadComments(true);
 }
 
 function setWorldCupSheetOpen(open) {
@@ -1693,7 +1752,7 @@ function selectWorldCupMarket(marketId) {
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
-  void loadComments().catch(() => undefined);
+  maybeLoadComments(true);
 }
 
 function renderBetSheet() {
@@ -1891,12 +1950,7 @@ async function buy(amount = state.selectedAmount) {
     }
     triggerHaptic("warning");
     renderTradeTicket();
-    void Promise.all([
-      loadMarket().catch(() => undefined),
-      loadBtcMarkets().catch(() => undefined),
-      loadWorldCupMarkets().catch(() => undefined),
-      loadMe().catch(() => undefined),
-    ]);
+    scheduleCoreRefresh({ delay: 80 });
     return;
   }
   const intentKey = getBuyIntentKey(marketId, side, buyAmount);
@@ -1941,15 +1995,7 @@ async function buy(amount = state.selectedAmount) {
     renderMe();
     renderActivity();
     renderTradeTicket();
-    window.setTimeout(() => {
-      void Promise.all([
-        loadMarket().catch(() => undefined),
-        loadBtcMarkets().catch(() => undefined),
-        loadWorldCupMarkets().catch(() => undefined),
-        loadMe().catch(() => undefined),
-        loadComments().catch(() => undefined),
-      ]);
-    }, 160);
+    scheduleCoreRefresh({ delay: 160, includeComments: true });
   } catch (error) {
     triggerHaptic("error");
     if (error.message === "insufficient_fire") {
@@ -1959,12 +2005,7 @@ async function buy(amount = state.selectedAmount) {
     } else if (error.message === "market_closed" || error.message === "market_not_open") {
       state.buyQueue = [];
       showToast("Этот рынок уже завершился. Обновляю...");
-      void Promise.all([
-        loadMarket().catch(() => undefined),
-        loadBtcMarkets().catch(() => undefined),
-        loadWorldCupMarkets().catch(() => undefined),
-        loadMe().catch(() => undefined),
-      ]);
+      scheduleCoreRefresh({ delay: 80 });
     } else {
       showToast("Покупка не прошла.");
     }
@@ -2015,13 +2056,7 @@ async function sellPosition({ side, positionId, marketId, shares }) {
     renderMe();
     renderActivity();
     renderTradeTicket();
-    void Promise.all([
-      loadMarket().catch(() => undefined),
-      loadBtcMarkets().catch(() => undefined),
-      loadWorldCupMarkets().catch(() => undefined),
-      loadMe().catch(() => undefined),
-      loadComments().catch(() => undefined),
-    ]);
+    scheduleCoreRefresh({ delay: 120, includeComments: true });
   } catch (error) {
     triggerHaptic("error");
     const messages = {
@@ -2035,10 +2070,7 @@ async function sellPosition({ side, positionId, marketId, shares }) {
     };
     const detail = error.detail ? ` (${error.detail})` : "";
     showToast(messages[error.message] ? `${messages[error.message]}${detail}` : `Продажа не прошла: ${error.message || "ошибка"}${detail}`);
-    await Promise.all([
-      loadMarket().catch(() => undefined),
-      loadMe().catch(() => undefined),
-    ]);
+    scheduleCoreRefresh({ delay: 80, includeLists: false });
   } finally {
     state.pendingSellSide = null;
     state.pendingSellPositionId = null;
@@ -2577,10 +2609,7 @@ $("betConfirmBtn")?.addEventListener("click", async () => {
   state.selectedAmount = amount;
   closeBetSheet();
   await buy(amount);
-  await Promise.all([
-    loadBtcMarkets().catch(() => undefined),
-    loadWorldCupMarkets().catch(() => undefined),
-  ]);
+  scheduleCoreRefresh({ delay: 120, includeComments: true });
 });
 
 let touchStartX = null;
@@ -2631,7 +2660,7 @@ document.querySelector(".market-card")?.addEventListener("touchend", (event) => 
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
-  void loadComments().catch(() => undefined);
+  maybeLoadComments(true);
 }, { passive: true });
 
 document.addEventListener("click", (event) => {
@@ -2644,10 +2673,7 @@ document.addEventListener("click", (event) => {
   if (button.dataset.sellLocked === "1") {
     triggerHaptic("warning");
     showToast(button.dataset.lockMessage || "Эта позиция уже не продаётся.");
-    void Promise.all([
-      loadMarket().catch(() => undefined),
-      loadMe().catch(() => undefined),
-    ]);
+    scheduleCoreRefresh({ delay: 80, includeLists: false });
     return;
   }
 
@@ -2662,13 +2688,25 @@ document.addEventListener("click", (event) => {
 setInterval(updateTimer, 250);
 setInterval(updatePresenceTaskButton, 1_000);
 setInterval(renderMarketChart, CHART_RENDER_INTERVAL_MS);
-setInterval(() => void loadMarket().catch(() => setConnection("Ошибка", "error")), 750);
-setInterval(() => void loadBtcMarkets().catch(() => undefined), 5_000);
-setInterval(() => void loadWorldCupMarkets().catch(() => undefined), 5_000);
-setInterval(() => void loadComments().catch(() => undefined), 8_000);
-setInterval(() => void loadActivity().catch(() => undefined), 3_000);
-setInterval(() => void loadMe().catch(() => undefined), 3_000);
-setInterval(() => void loadRecentMarkets().catch(() => undefined), 10_000);
+setInterval(() => {
+  void runSingleFlight("market", loadMarket).catch(() => setConnection("Ошибка", "error"));
+}, ACTIVE_MARKET_POLL_MS);
+setInterval(() => {
+  void runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => undefined);
+}, MARKET_LIST_POLL_MS);
+setInterval(() => {
+  void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined);
+}, MARKET_LIST_POLL_MS);
+setInterval(() => maybeLoadComments(true), COMMENTS_POLL_MS);
+setInterval(() => {
+  void runSingleFlight("activity", loadActivity).catch(() => undefined);
+}, 4_000);
+setInterval(() => {
+  void runSingleFlight("me", loadMe).catch(() => undefined);
+}, 3_500);
+setInterval(() => {
+  void runSingleFlight("recentMarkets", loadRecentMarkets).catch(() => undefined);
+}, 12_000);
 
 window.addEventListener("resize", () => {
   state.chartYMin = null;
