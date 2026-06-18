@@ -15,7 +15,9 @@ const MARKET_BUY_CLOSE_BUFFER_MS = 400;
 const state = {
   user: null,
   market: null,
+  currency: "STAR",
   balance: 0,
+  usdtBalance: 0,
   positions: [],
   recentTrades: [],
   recentMarkets: [],
@@ -43,7 +45,9 @@ const state = {
     reason: "",
     pending: false,
     mode: "topup",
+    currency: "STAR",
   },
+  leaderboardCurrency: "STAR",
   expanded: {
     positions: false,
     activity: false,
@@ -78,6 +82,8 @@ const state = {
     av_channel_url: "https://t.me/erc20coin",
     av_chat_url: "https://t.me/thedaomaker",
     private_chat_url: "https://t.me/tribute/app?startapp=stKL",
+    usdt_evm_address: "0x51592e92e48b94f3714c24c7597fb8a4ecfb36cd",
+    usdt_ton_address: "UQAFrUUrG0-cFLbZDkYA_RuGKSjuaULQPp7B7xxsmbzoaBdh",
     stars_invoice_enabled: false,
   },
   presence: {
@@ -98,6 +104,29 @@ const formatFire = (value) => Math.floor(Number(value || 0)).toLocaleString("ru-
 const formatFireDecimal = (value) => Number(value || 0).toLocaleString("ru-RU", {
   maximumFractionDigits: 1,
 });
+const normalizeCurrency = (value) => (String(value || "STAR").toUpperCase() === "USDT" ? "USDT" : "STAR");
+const currencySymbol = (currency = state.currency) => (normalizeCurrency(currency) === "USDT" ? "$" : "⭐");
+const formatCurrencyAmount = (value, currency = state.currency) => {
+  const safeCurrency = normalizeCurrency(currency);
+  const formatted = Number(value || 0).toLocaleString("ru-RU", {
+    minimumFractionDigits: safeCurrency === "USDT" ? 0 : 0,
+    maximumFractionDigits: safeCurrency === "USDT" ? 2 : 0,
+  });
+  return safeCurrency === "USDT" ? `$${formatted}` : formatted;
+};
+const getActiveBalance = () => (state.currency === "USDT" ? state.usdtBalance : state.balance);
+const formatSignedCurrencyAmount = (value, currency = state.currency) => {
+  const numeric = Number(value || 0);
+  return `${numeric > 0 ? "+" : ""}${formatCurrencyAmount(numeric, currency)}`;
+};
+function applyCurrencyBalance(currency, balance) {
+  const normalized = normalizeCurrency(currency);
+  if (normalized === "USDT") {
+    state.usdtBalance = Number(balance || 0);
+    return;
+  }
+  state.balance = Number(balance || 0);
+}
 const formatPrice = (value) => Number(value || 0).toLocaleString("ru-RU", {
   maximumFractionDigits: 2,
 });
@@ -899,6 +928,7 @@ async function upsertMe() {
   });
   state.user = data.user;
   state.balance = data.balance || 0;
+  state.usdtBalance = data.usdt_balance || 0;
   state.positions = data.positions || [];
   state.presence.startedAt = Date.now();
   document.body.classList.remove("auth-only");
@@ -958,7 +988,15 @@ function handleSettlements(positions) {
     const newWins = settled.filter((position) => !state.seenSettledPositionIds.has(position.id));
     if (newWins.length) {
       triggerHaptic("win");
-      showToast(`Есть выигрыш: +${formatFireDecimal(newWins.reduce((sum, item) => sum + Number(item.pnl || item.payout || 0), 0))}`);
+      const winsByCurrency = newWins.reduce((map, item) => {
+        const currency = normalizeCurrency(item.currency);
+        map.set(currency, (map.get(currency) || 0) + Number(item.pnl || item.payout || 0));
+        return map;
+      }, new Map());
+      const label = Array.from(winsByCurrency.entries())
+        .map(([currency, value]) => formatSignedCurrencyAmount(value, currency))
+        .join(" · ");
+      showToast(`Есть выигрыш: ${label}`);
     }
   }
 
@@ -991,6 +1029,7 @@ async function loadMe() {
 
   const data = await api(`/api/me?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
   state.balance = data.balance || 0;
+  state.usdtBalance = data.usdt_balance || 0;
   state.positions = data.positions || [];
   state.recentTrades = data.recent_trades || [];
   handleSettlements(state.positions);
@@ -1004,7 +1043,7 @@ async function loadRecentMarkets() {
 }
 
 async function loadLeaderboard() {
-  const data = await api("/api/leaderboard?limit=30");
+  const data = await api(`/api/leaderboard?limit=30&currency=${encodeURIComponent(state.leaderboardCurrency)}`);
   state.leaderboard = data.players || [];
   renderLeaderboard();
 }
@@ -1055,7 +1094,7 @@ function renderComments() {
     const name = comment.username || comment.first_name || `user ${comment.telegram_id}`;
     const latestBet = comment.latest_bet;
     const betBadge = latestBet
-      ? `<span class="chat-bet side-${latestBet.side}">${actionLabel(latestBet.action)} ${marketSideLabel(market, latestBet.side)} ${formatFire(latestBet.amount)}</span>`
+      ? `<span class="chat-bet side-${latestBet.side}">${actionLabel(latestBet.action)} ${marketSideLabel(market, latestBet.side)} ${formatCurrencyAmount(latestBet.amount, latestBet.currency)}</span>`
       : '<span class="chat-bet muted">без ставки</span>';
     return `
       <div class="chat-row">
@@ -1184,8 +1223,8 @@ function getPreview(amount = state.selectedAmount, side = state.selectedSide) {
   };
 }
 
-function getBuyIntentKey(marketId, side, amount) {
-  return `${marketId}:${side}:${Math.round(Number(amount || 0) * 100) / 100}`;
+function getBuyIntentKey(marketId, side, amount, currency = state.currency) {
+  return `${marketId}:${side}:${Math.round(Number(amount || 0) * 100) / 100}:${normalizeCurrency(currency)}`;
 }
 
 function applyBuyIntentSelection(intent) {
@@ -1201,6 +1240,7 @@ function applyBuyIntentSelection(intent) {
   }
   state.selectedSide = intent.side;
   state.selectedAmount = intent.amount;
+  state.currency = normalizeCurrency(intent.currency || state.currency);
 }
 
 function renderMarket() {
@@ -1413,12 +1453,20 @@ function estimateSellQuote({ position, market, outcomePrice }) {
 
 function renderMe() {
   const balanceElement = $("fireBalance");
-  const balanceDigits = String(Math.floor(Number(state.balance || 0))).length;
+  const activeBalance = getActiveBalance();
+  const balanceDigits = String(Math.floor(Number(activeBalance || 0))).length;
   balanceElement?.classList.toggle("compact", balanceDigits >= 6);
   balanceElement?.classList.toggle("tiny", balanceDigits >= 8);
-  animateText(balanceElement, state.balance, formatFire);
+  $("balanceStarIcon")?.classList.toggle("hidden", state.currency === "USDT");
+  $("balanceDollarIcon")?.classList.toggle("hidden", state.currency !== "USDT");
+  document.querySelectorAll("[data-currency-toggle]").forEach((button) => {
+    button.classList.toggle("active", normalizeCurrency(button.dataset.currencyToggle) === state.currency);
+  });
+  animateText(balanceElement, activeBalance, (value) => formatCurrencyAmount(value, state.currency));
 
-  const positions = state.positions.filter((position) => position.status === "open");
+  const positions = state.positions.filter((position) => (
+    position.status === "open" && normalizeCurrency(position.currency) === state.currency
+  ));
   setSectionToggle("positionToggle", positions.length, "positions");
 
   const container = $("positionList");
@@ -1431,6 +1479,7 @@ function renderMe() {
   container.innerHTML = visiblePositions.map((position) => {
     const payout = Number(position.shares || 0);
     const spent = Number(position.spent || 0);
+    const currency = normalizeCurrency(position.currency);
     const displayMarket = getDisplayMarket();
     const selectedWorldCupMarket = getPositionMarket(position);
     const activeMarket = selectedWorldCupMarket || (position.market_id === state.market?.id ? state.market : null);
@@ -1462,10 +1511,10 @@ function renderMe() {
         <div>
           <strong class="side-${position.side}">${escapeHtml(marketLabel)} · ${marketSideLabel(activeMarket, position.side)}</strong>
           <br />
-          <small>${payout.toFixed(2)} shares · Avg ${formatCents(position.avg_price)} · Sell ${formatCents(exitQuote.bidPrice)} · Spent ${formatFire(spent)}${marketBadge}</small>
+          <small>${payout.toFixed(2)} shares · Avg ${formatCents(position.avg_price)} · Sell ${formatCents(exitQuote.bidPrice)} · Spent ${formatCurrencyAmount(spent, currency)}${marketBadge}</small>
         </div>
         <div class="position-actions">
-          <strong class="${pnl >= 0 ? "positive" : "negative"}">${pnl >= 0 ? "+" : ""}${formatFireDecimal(pnl)}</strong>
+          <strong class="${pnl >= 0 ? "positive" : "negative"}">${formatSignedCurrencyAmount(pnl, currency)}</strong>
           <button
             class="sell-button ${sideClass(position.side)}"
             data-side="${position.side}"
@@ -1477,7 +1526,7 @@ function renderMe() {
             type="button"
             ${isSelling || !canSell ? "disabled" : ""}
           >
-            ${isSelling ? "Продаю..." : canSell ? `Продать ${formatFire(exitValue)}` : "Ждём итог"}
+            ${isSelling ? "Продаю..." : canSell ? `Продать ${formatCurrencyAmount(exitValue, currency)}` : "Ждём итог"}
           </button>
         </div>
       </div>
@@ -1497,9 +1546,9 @@ function renderTradeTicket() {
   document.querySelectorAll(".amount-button").forEach((button) => {
     const amount = Number(button.dataset.amount);
     const amountPreview = getPreview(amount, side);
-    const pendingKey = market ? getBuyIntentKey(market.id, side, amount) : null;
-    const nextLabel = formatFire(amount);
-    const nextWin = formatFire(amountPreview.shares);
+    const pendingKey = market ? getBuyIntentKey(market.id, side, amount, state.currency) : null;
+    const nextLabel = formatCurrencyAmount(amount, state.currency);
+    const nextWin = formatCurrencyAmount(amountPreview.shares, state.currency);
     button.classList.toggle("active", amount === state.selectedAmount);
     button.classList.toggle("loading", Boolean(state.pendingBuyKey && state.pendingBuyKey === pendingKey));
     button.disabled = !market || !state.user || !canBuyMarket;
@@ -1539,7 +1588,7 @@ function renderActivity() {
           <br />
           <small>${escapeHtml(marketLabel)} · ${formatCents(trade.price)} · ${trade.shares.toFixed(2)} shares</small>
         </div>
-        <strong>${formatFire(trade.amount)}</strong>
+        <strong>${formatCurrencyAmount(trade.amount, trade.currency)}</strong>
       </div>
     `;
   }).join("");
@@ -1574,6 +1623,9 @@ function renderLeaderboard() {
   if (!container) {
     return;
   }
+  document.querySelectorAll("[data-leaderboard-currency]").forEach((button) => {
+    button.classList.toggle("active", normalizeCurrency(button.dataset.leaderboardCurrency) === state.leaderboardCurrency);
+  });
 
   if (!state.leaderboard.length) {
     container.innerHTML = '<p class="muted">Пока нет игроков в рейтинге.</p>';
@@ -1592,7 +1644,7 @@ function renderLeaderboard() {
           <strong>${escapeHtml(name)}</strong>
           <small>${formatFire(player.bet_count)} ставок · WR ${winRate.toFixed(0)}%</small>
         </div>
-        <strong class="leaderboard-balance">${formatFire(player.balance)}</strong>
+        <strong class="leaderboard-balance">${formatCurrencyAmount(player.balance, player.currency || state.leaderboardCurrency)}</strong>
       </div>
     `;
   }).join("");
@@ -1771,8 +1823,8 @@ function renderBetSheet() {
     $("betSideName").textContent = marketSideLabel(market, side);
     $("betSideName").className = side === "YES" ? "positive" : "negative";
   }
-  if ($("betAmountValue")) $("betAmountValue").textContent = formatFire(amount);
-  if ($("betWinValue")) $("betWinValue").textContent = formatFire(shares);
+  if ($("betAmountValue")) $("betAmountValue").textContent = formatCurrencyAmount(amount, state.currency);
+  if ($("betWinValue")) $("betWinValue").textContent = formatCurrencyAmount(shares, state.currency);
   if ($("betPriceValue")) $("betPriceValue").textContent = formatCents(price);
   $("betSideYesBtn")?.classList.toggle("active", side === "YES");
   $("betSideNoBtn")?.classList.toggle("active", side === "NO");
@@ -1780,7 +1832,7 @@ function renderBetSheet() {
   if ($("betSideNoBtn")) $("betSideNoBtn").textContent = marketSideLabel(market, "NO");
   if ($("betConfirmBtn")) {
     $("betConfirmBtn").disabled = !amount || !state.user;
-    $("betConfirmBtn").textContent = amount ? `Trade ${formatFire(amount)}` : "Trade";
+    $("betConfirmBtn").textContent = amount ? `Trade ${formatCurrencyAmount(amount, state.currency)}` : "Trade";
   }
 }
 
@@ -1789,6 +1841,7 @@ function openBetSheet(market, side = "YES") {
     market,
     side,
     amount: 0,
+    currency: state.currency,
   };
   renderBetSheet();
   $("betSheet")?.classList.remove("hidden");
@@ -1801,20 +1854,36 @@ function closeBetSheet() {
 function renderTopupSheet() {
   const amount = Math.max(1, Math.round(Number(state.topup.amount || 0)));
   const isTopupMode = state.topup.mode !== "withdraw";
+  const currency = normalizeCurrency(state.topup.currency);
+  const isUsdt = currency === "USDT";
   $("topupModePanel")?.classList.toggle("hidden", !isTopupMode);
   $("withdrawModePanel")?.classList.toggle("hidden", isTopupMode);
   $("walletModeTopupBtn")?.classList.toggle("active", isTopupMode);
   $("walletModeWithdrawBtn")?.classList.toggle("active", !isTopupMode);
+  document.querySelectorAll("[data-wallet-currency]").forEach((button) => {
+    button.classList.toggle("active", normalizeCurrency(button.dataset.walletCurrency) === currency);
+  });
+  $("usdtDepositPanel")?.classList.toggle("hidden", !isUsdt || !isTopupMode);
+  if ($("usdtEvmAddress")) $("usdtEvmAddress").textContent = state.publicConfig.usdt_evm_address;
+  if ($("usdtTonAddress")) $("usdtTonAddress").textContent = state.publicConfig.usdt_ton_address;
   if ($("walletSheetTitle")) {
-    $("walletSheetTitle").textContent = isTopupMode ? "Пополнить звезды" : "Вывести звезды";
+    $("walletSheetTitle").textContent = isTopupMode
+      ? `Пополнить ${isUsdt ? "USDT" : "звезды"}`
+      : `Вывести ${isUsdt ? "USDT" : "звезды"}`;
   }
-  if ($("topupAmountValue")) $("topupAmountValue").textContent = formatFire(amount);
+  if ($("topupAmountValue")) $("topupAmountValue").textContent = formatCurrencyAmount(amount, currency);
   if ($("topupReason")) {
-    $("topupReason").textContent = state.topup.reason || "Звезды зачислятся в баланс после оплаты.";
+    $("topupReason").textContent = state.topup.reason || (
+      isUsdt
+        ? "После перевода напиши админу: зачислим виртуальные USDT на баланс."
+        : "Звезды зачислятся в баланс после оплаты."
+    );
   }
   if ($("topupBuyBtn")) {
     $("topupBuyBtn").disabled = !isTopupMode || state.topup.pending || !state.user;
-    $("topupBuyBtn").textContent = state.topup.pending ? "Открываю оплату..." : `Купить ${formatFire(amount)}`;
+    $("topupBuyBtn").textContent = isUsdt
+      ? "Скопировать ERC20/BEP20 адрес"
+      : (state.topup.pending ? "Открываю оплату..." : `Купить ${formatCurrencyAmount(amount, currency)}`);
   }
   document.querySelectorAll("[data-topup-package]").forEach((button) => {
     button.classList.toggle("active", Number(button.dataset.topupPackage) === amount);
@@ -1825,6 +1894,7 @@ function openTopupSheet(amount, reason = "", mode = "topup") {
   state.topup.amount = Math.max(1, Math.round(Number(amount || 0)));
   state.topup.reason = reason;
   state.topup.mode = mode === "withdraw" ? "withdraw" : "topup";
+  state.topup.currency = state.currency;
   renderTopupSheet();
   $("topupSheet")?.classList.remove("hidden");
 }
@@ -1840,6 +1910,28 @@ async function refreshBalanceAfterInvoice() {
   }
 }
 
+async function copyToClipboard(value) {
+  const text = String(value || "");
+  if (!text) {
+    return false;
+  }
+  try {
+    await navigator.clipboard?.writeText(text);
+    return true;
+  } catch {
+    const input = document.createElement("textarea");
+    input.value = text;
+    input.setAttribute("readonly", "readonly");
+    input.style.position = "fixed";
+    input.style.opacity = "0";
+    document.body.appendChild(input);
+    input.select();
+    const copied = document.execCommand("copy");
+    input.remove();
+    return copied;
+  }
+}
+
 async function startStarsTopup() {
   if (!state.user?.telegram_id) {
     triggerHaptic("warning");
@@ -1848,6 +1940,13 @@ async function startStarsTopup() {
   }
 
   const amount = Math.max(1, Math.round(Number(state.topup.amount || 0)));
+  if (state.topup.currency === "USDT") {
+    const copied = await copyToClipboard(state.publicConfig.usdt_evm_address);
+    triggerHaptic(copied ? "success" : "warning");
+    showToast(copied ? "ERC20/BEP20 адрес скопирован." : "Скопируй адрес вручную.");
+    return;
+  }
+
   state.topup.pending = true;
   renderTopupSheet();
   try {
@@ -1896,7 +1995,7 @@ function showTradeBubble(trade) {
   const name = trade.username || trade.first_name || "user";
   const action = trade.action || "BUY";
   bubble.className = `trade-bubble ${sideClass(trade.side)}`;
-  bubble.textContent = `${name} ${actionLabel(action)} ${sideLabel(trade.side)} ${formatFire(trade.amount)}`;
+  bubble.textContent = `${name} ${actionLabel(action)} ${sideLabel(trade.side)} ${formatCurrencyAmount(trade.amount, trade.currency)}`;
   bubble.style.left = `${24 + Math.random() * 52}%`;
   container.appendChild(bubble);
   setTimeout(() => bubble.remove(), 2600);
@@ -1940,6 +2039,7 @@ async function buy(amount = state.selectedAmount) {
   const marketId = market.id;
   const side = state.selectedSide;
   const buyAmount = Number(amount || state.selectedAmount);
+  const currency = state.currency;
   state.selectedAmount = buyAmount;
   if (!isMarketOpenForBuy(market)) {
     state.buyQueue = [];
@@ -1953,21 +2053,22 @@ async function buy(amount = state.selectedAmount) {
     scheduleCoreRefresh({ delay: 80 });
     return;
   }
-  const intentKey = getBuyIntentKey(marketId, side, buyAmount);
+  const intentKey = getBuyIntentKey(marketId, side, buyAmount, currency);
   if (state.pendingBuy) {
     triggerHaptic(state.pendingBuyKey === intentKey ? "light" : "selection");
     state.pendingBuyKey = state.pendingBuyKey || intentKey;
     if (state.buyQueue.length < 12) {
-      state.buyQueue.push({ marketId, side, amount: buyAmount });
+      state.buyQueue.push({ marketId, side, amount: buyAmount, currency });
     }
     renderTradeTicket();
     return;
   }
-  if (buyAmount > Number(state.balance || 0)) {
+  const activeBalance = getActiveBalance();
+  if (buyAmount > Number(activeBalance || 0)) {
     state.buyQueue = [];
-    const missing = Math.max(1, Math.ceil(buyAmount - Number(state.balance || 0)));
+    const missing = Math.max(1, Math.ceil(buyAmount - Number(activeBalance || 0)));
     triggerHaptic("warning");
-    openTopupSheet(missing, `Для ставки ${formatFire(buyAmount)} не хватает ${formatFire(missing)}.`);
+    openTopupSheet(missing, `Для ставки ${formatCurrencyAmount(buyAmount, currency)} не хватает ${formatCurrencyAmount(missing, currency)}.`);
     return;
   }
   triggerHaptic("medium");
@@ -1981,9 +2082,10 @@ async function buy(amount = state.selectedAmount) {
         telegram_id: state.user.telegram_id,
         side,
         amount: buyAmount,
+        currency,
       }),
     });
-    state.balance = result.balance ?? state.balance;
+    applyCurrencyBalance(result.currency || currency, result.currency_balance ?? result.balance);
     upsertLocalMarket(result.market);
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
@@ -1998,10 +2100,11 @@ async function buy(amount = state.selectedAmount) {
     scheduleCoreRefresh({ delay: 160, includeComments: true });
   } catch (error) {
     triggerHaptic("error");
-    if (error.message === "insufficient_fire") {
+    if (error.message === "insufficient_fire" || error.message === "insufficient_usdt") {
       state.buyQueue = [];
-      const missing = Math.max(1, Math.ceil(buyAmount - Number(state.balance || 0)));
-      openTopupSheet(missing, `Для ставки ${formatFire(buyAmount)} не хватает ${formatFire(missing)}.`);
+      const latestBalance = getActiveBalance();
+      const missing = Math.max(1, Math.ceil(buyAmount - Number(latestBalance || 0)));
+      openTopupSheet(missing, `Для ставки ${formatCurrencyAmount(buyAmount, currency)} не хватает ${formatCurrencyAmount(missing, currency)}.`);
     } else if (error.message === "market_closed" || error.message === "market_not_open") {
       state.buyQueue = [];
       showToast("Этот рынок уже завершился. Обновляю...");
@@ -2043,15 +2146,16 @@ async function sellPosition({ side, positionId, marketId, shares }) {
         position_id: positionId,
         side,
         shares,
+        currency: state.currency,
       }),
     });
-    state.balance = result.balance ?? state.balance;
+    applyCurrencyBalance(result.currency || state.currency, result.currency_balance ?? result.balance);
     upsertLocalMarket(result.market);
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
     triggerHaptic("success");
     const pnl = Number(result.sale?.pnl || 0);
-    showToast(`Продано ${sideLabel(side)}: ${pnl >= 0 ? "+" : ""}${formatFireDecimal(pnl)}`);
+    showToast(`Продано ${sideLabel(side)}: ${formatSignedCurrencyAmount(pnl, result.currency || state.currency)}`);
     renderMarket();
     renderMe();
     renderActivity();
@@ -2196,6 +2300,56 @@ document.querySelectorAll("[data-topup-package]").forEach((button) => {
     state.topup.amount = Number(button.dataset.topupPackage);
     state.topup.reason = "";
     renderTopupSheet();
+  });
+});
+
+document.querySelectorAll("[data-currency-toggle]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const nextCurrency = normalizeCurrency(button.dataset.currencyToggle);
+    if (state.currency === nextCurrency) {
+      return;
+    }
+    triggerHaptic("selection");
+    state.currency = nextCurrency;
+    state.topup.currency = nextCurrency;
+    state.buyQueue = [];
+    renderMe();
+    renderTradeTicket();
+    renderBetSheet();
+  });
+});
+
+document.querySelectorAll("[data-wallet-currency]").forEach((button) => {
+  button.addEventListener("click", () => {
+    triggerHaptic("selection");
+    state.topup.currency = normalizeCurrency(button.dataset.walletCurrency);
+    renderTopupSheet();
+  });
+});
+
+document.querySelectorAll("[data-leaderboard-currency]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const nextCurrency = normalizeCurrency(button.dataset.leaderboardCurrency);
+    if (state.leaderboardCurrency === nextCurrency) {
+      return;
+    }
+    triggerHaptic("selection");
+    state.leaderboardCurrency = nextCurrency;
+    state.leaderboard = [];
+    renderLeaderboard();
+    void loadLeaderboard().catch(() => showToast("Рейтинг пока не загрузился."));
+  });
+});
+
+document.querySelectorAll("[data-copy-address]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const type = button.dataset.copyAddress;
+    const address = type === "ton"
+      ? state.publicConfig.usdt_ton_address
+      : state.publicConfig.usdt_evm_address;
+    const copied = await copyToClipboard(address);
+    triggerHaptic(copied ? "success" : "warning");
+    showToast(copied ? "Адрес скопирован." : "Скопируй адрес вручную.");
   });
 });
 
@@ -2580,10 +2734,11 @@ document.querySelectorAll("[data-bet-add]").forEach((button) => {
     triggerHaptic("selection");
     const addAmount = Number(button.dataset.betAdd || 0);
     const nextAmount = state.betSheet.amount + addAmount;
-    if (nextAmount > Number(state.balance || 0)) {
-      const missing = Math.max(1, Math.ceil(nextAmount - Number(state.balance || 0)));
+    const activeBalance = getActiveBalance();
+    if (nextAmount > Number(activeBalance || 0)) {
+      const missing = Math.max(1, Math.ceil(nextAmount - Number(activeBalance || 0)));
       triggerHaptic("warning");
-      openTopupSheet(missing, `Для ставки ${formatFire(nextAmount)} не хватает ${formatFire(missing)}.`);
+      openTopupSheet(missing, `Для ставки ${formatCurrencyAmount(nextAmount, state.currency)} не хватает ${formatCurrencyAmount(missing, state.currency)}.`);
       return;
     }
     state.betSheet.amount = nextAmount;

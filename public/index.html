@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260618-4" />
+    <link rel="stylesheet" href="/styles.css?v=20260619-1" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -14,11 +14,16 @@
         <div class="topbar-row">
           <div>
             <h1>
-              <svg class="balance-star-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <svg id="balanceStarIcon" class="balance-star-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="m12 3.8 2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4-3.9-3.8 5.4-.8L12 3.8Z" />
               </svg>
+              <span id="balanceDollarIcon" class="balance-dollar-icon hidden">$</span>
               <span id="fireBalance">0</span>
             </h1>
+            <div class="currency-switch" aria-label="Валюта ставок">
+              <button class="active" type="button" data-currency-toggle="STAR">⭐</button>
+              <button type="button" data-currency-toggle="USDT">$</button>
+            </div>
           </div>
           <div class="top-actions">
             <button id="btcMarketsBtn" class="icon-button btc-action" type="button" aria-label="BTC markets">
@@ -147,6 +152,10 @@
             <button id="walletModeTopupBtn" class="active" type="button">Пополнить</button>
             <button id="walletModeWithdrawBtn" type="button">Вывести</button>
           </div>
+          <div class="wallet-currency-toggle" role="tablist" aria-label="Валюта пополнения">
+            <button class="active" type="button" data-wallet-currency="STAR">Звезды</button>
+            <button type="button" data-wallet-currency="USDT">USDT</button>
+          </div>
           <div class="topup-body">
             <div id="topupModePanel" class="wallet-mode-panel">
               <strong><span id="topupAmountValue">100</span></strong>
@@ -156,6 +165,18 @@
                 <button type="button" data-topup-package="10000">10 000</button>
               </div>
               <p id="topupReason">Зачислим в баланс после оплаты.</p>
+              <div id="usdtDepositPanel" class="usdt-deposit-panel hidden">
+                <div>
+                  <small>ERC20 / BEP20</small>
+                  <code id="usdtEvmAddress">0x51592e92e48b94f3714c24c7597fb8a4ecfb36cd</code>
+                  <button type="button" data-copy-address="evm">Скопировать</button>
+                </div>
+                <div>
+                  <small>TON</small>
+                  <code id="usdtTonAddress">UQAFrUUrG0-cFLbZDkYA_RuGKSjuaULQPp7B7xxsmbzoaBdh</code>
+                  <button type="button" data-copy-address="ton">Скопировать</button>
+                </div>
+              </div>
               <button id="topupBuyBtn" class="trade-confirm" type="button">Купить</button>
             </div>
             <div id="withdrawModePanel" class="wallet-mode-panel hidden">
@@ -174,6 +195,10 @@
               <h2>Рейтинг</h2>
             </div>
             <button id="leaderboardCloseBtn" class="icon-button" type="button" aria-label="Закрыть рейтинг">×</button>
+          </div>
+          <div class="leaderboard-currency-toggle" role="tablist" aria-label="Валюта рейтинга">
+            <button class="active" type="button" data-leaderboard-currency="STAR">Звезды</button>
+            <button type="button" data-leaderboard-currency="USDT">USDT</button>
           </div>
           <div id="leaderboardList" class="leaderboard-list">
             <p class="muted">Загружаю рейтинг...</p>
@@ -380,6 +405,6 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
-    <script src="/app.js?v=20260618-4" type="module"></script>
+    <script src="/app.js?v=20260619-1" type="module"></script>
   </body>
 </html>

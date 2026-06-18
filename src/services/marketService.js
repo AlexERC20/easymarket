@@ -14,6 +14,7 @@ const DEFAULT_MARKET_MAKER_SPREAD_BPS = 300;
 const BUY_IMPACT_MULTIPLIER = 0.85;
 const SELL_IMPACT_MULTIPLIER = 1.1;
 const REFERRAL_SIGNUP_BONUS = 100;
+const CURRENCIES = new Set(["STAR", "USDT"]);
 
 const BTC_MARKET_DEFS = [
   { key: "5M", symbol: MARKET_SYMBOL, label: "5m", title: "BTC Up or Down 5m", durationMinutes: null },
@@ -47,6 +48,27 @@ function getBtcMarketDef(symbol) {
 
 function isBtcMarketSymbol(symbol) {
   return Boolean(getBtcMarketDef(symbol));
+}
+
+function normalizeCurrency(value) {
+  const normalized = String(value || "STAR").trim().toUpperCase();
+  return CURRENCIES.has(normalized) ? normalized : "STAR";
+}
+
+function balanceTableForCurrency(currency) {
+  return normalizeCurrency(currency) === "USDT" ? "usdt_balances" : "fire_balances";
+}
+
+function ledgerTableForCurrency(currency) {
+  return normalizeCurrency(currency) === "USDT" ? "usdt_ledger" : "fire_ledger";
+}
+
+function balanceReasonSuffix(currency) {
+  return normalizeCurrency(currency) === "USDT" ? "_usdt" : "";
+}
+
+function insufficientBalanceError(currency) {
+  return normalizeCurrency(currency) === "USDT" ? "insufficient_usdt" : "insufficient_fire";
 }
 
 function getBtcMarketDurationMinutes(definition) {
@@ -113,6 +135,7 @@ function mapPosition(row) {
     avg_price: toNumber(row.avg_price),
     payout: toNumber(row.payout),
     pnl: toNumber(row.pnl),
+    currency: normalizeCurrency(row.currency),
     status: row.status,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -138,6 +161,7 @@ function mapTrade(row) {
     fee: toNumber(row.fee),
     price: toNumber(row.price),
     shares: toNumber(row.shares),
+    currency: normalizeCurrency(row.currency),
     created_at: row.created_at,
   };
 }
@@ -160,6 +184,7 @@ function mapMarketActivity(row) {
     fee: toNumber(row.fee),
     price: toNumber(row.price),
     shares: toNumber(row.shares),
+    currency: normalizeCurrency(row.currency),
     created_at: row.created_at,
   };
 }
@@ -184,6 +209,7 @@ function mapMarketComment(row) {
         amount: latestBetAmount,
         price: toNumber(row.latest_bet_price),
         shares: toNumber(row.latest_bet_shares),
+        currency: normalizeCurrency(row.latest_bet_currency),
         created_at: row.latest_bet_created_at,
       },
   };
@@ -673,6 +699,14 @@ export async function upsertUser(input) {
       `,
       [user.id],
     );
+    await client.query(
+      `
+        INSERT INTO usdt_balances (user_id, balance, updated_at)
+        VALUES ($1, 0, now())
+        ON CONFLICT (user_id) DO NOTHING
+      `,
+      [user.id],
+    );
 
     if (safeReferredBy) {
       const referralSignupResult = await client.query(
@@ -727,6 +761,35 @@ async function getBalanceByUserId(userId) {
   return toNumber(result.rows[0]?.balance);
 }
 
+async function getUsdtBalanceByUserId(userId) {
+  const result = await query(
+    `
+      SELECT balance
+      FROM usdt_balances
+      WHERE user_id = $1
+      LIMIT 1
+    `,
+    [userId],
+  );
+
+  return toNumber(result.rows[0]?.balance);
+}
+
+async function getBalanceByUserIdAndCurrency(userId, currency) {
+  const table = balanceTableForCurrency(currency);
+  const result = await query(
+    `
+      SELECT balance
+      FROM ${table}
+      WHERE user_id = $1
+      LIMIT 1
+    `,
+    [userId],
+  );
+
+  return toNumber(result.rows[0]?.balance);
+}
+
 async function adjustBalance(client, userId, amount, reason, source) {
   const delta = Math.round(Number(amount || 0) * 100) / 100;
   if (!Number.isFinite(delta) || Math.abs(delta) < 0.01) {
@@ -757,8 +820,9 @@ export async function getUserSnapshot(telegramId) {
     return null;
   }
 
-  const [balance, positionsResult, tradesResult] = await Promise.all([
+  const [balance, usdtBalance, positionsResult, tradesResult] = await Promise.all([
     getBalanceByUserId(user.id),
+    getUsdtBalanceByUserId(user.id),
     query(
       `
         SELECT
@@ -795,6 +859,7 @@ export async function getUserSnapshot(telegramId) {
   return {
     user,
     balance,
+    usdt_balance: usdtBalance,
     positions: positionsResult.rows.map(mapPosition),
     recent_trades: tradesResult.rows.map(mapTrade),
   };
@@ -836,6 +901,46 @@ export async function addFireToUser(input) {
   return {
     user,
     balance: result,
+  };
+}
+
+export async function addUsdtToUser(input) {
+  const amount = ensurePositiveAmount(input.amount);
+  const reason = input.reason || "admin_usdt_adjustment";
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+
+  const result = await withTransaction(async (client) => {
+    await client.query(
+      `
+        UPDATE usdt_balances
+        SET balance = balance + $2::numeric,
+            updated_at = now()
+        WHERE user_id = $1
+      `,
+      [user.id, amount],
+    );
+    await client.query(
+      `
+        INSERT INTO usdt_ledger (user_id, amount, reason, source)
+        VALUES ($1, $2::numeric, $3, $4)
+      `,
+      [user.id, amount, reason, input.source || "api"],
+    );
+    const balanceResult = await client.query(
+      "SELECT balance FROM usdt_balances WHERE user_id = $1",
+      [user.id],
+    );
+    return toNumber(balanceResult.rows[0]?.balance);
+  });
+
+  return {
+    user,
+    balance: result,
+    usdt_balance: result,
   };
 }
 
@@ -1560,11 +1665,12 @@ export async function getMarketComments(marketId, limit = 30) {
         latest_trade.amount AS latest_bet_amount,
         latest_trade.price AS latest_bet_price,
         latest_trade.shares AS latest_bet_shares,
+        latest_trade.currency AS latest_bet_currency,
         latest_trade.created_at AS latest_bet_created_at
       FROM market_comments comments
       JOIN users ON users.id = comments.user_id
       LEFT JOIN LATERAL (
-        SELECT action, side, amount, price, shares, created_at
+        SELECT action, side, amount, price, shares, currency, created_at
         FROM trades
         WHERE trades.user_id = comments.user_id
           AND trades.market_id = comments.market_id
@@ -1613,11 +1719,12 @@ export async function addMarketComment(input) {
         latest_trade.amount AS latest_bet_amount,
         latest_trade.price AS latest_bet_price,
         latest_trade.shares AS latest_bet_shares,
+        latest_trade.currency AS latest_bet_currency,
         latest_trade.created_at AS latest_bet_created_at
       FROM inserted
       JOIN users ON users.id = inserted.user_id
       LEFT JOIN LATERAL (
-        SELECT action, side, amount, price, shares, created_at
+        SELECT action, side, amount, price, shares, currency, created_at
         FROM trades
         WHERE trades.user_id = inserted.user_id
           AND trades.market_id = inserted.market_id
@@ -1924,6 +2031,10 @@ export async function buyOutcome(input) {
   const marketId = Number(input.marketId);
   const side = String(input.side || "").toUpperCase();
   const amount = ensurePositiveAmount(input.amount);
+  const currency = normalizeCurrency(input.currency);
+  const balanceTable = balanceTableForCurrency(currency);
+  const ledgerTable = ledgerTableForCurrency(currency);
+  const reasonSuffix = balanceReasonSuffix(currency);
 
   if (!Number.isSafeInteger(marketId) || marketId <= 0) {
     throw new Error("invalid_market_id");
@@ -1960,7 +2071,7 @@ export async function buyOutcome(input) {
     const balanceResult = await client.query(
       `
         SELECT balance
-        FROM fire_balances
+        FROM ${balanceTable}
         WHERE user_id = $1
         FOR UPDATE
       `,
@@ -1968,7 +2079,7 @@ export async function buyOutcome(input) {
     );
     const balance = toNumber(balanceResult.rows[0]?.balance);
     if (amount > balance) {
-      throw new Error("insufficient_fire");
+      throw new Error(insufficientBalanceError(currency));
     }
 
     const marketMinPrice = getMarketMinOutcomePrice(market);
@@ -1985,7 +2096,7 @@ export async function buyOutcome(input) {
 
     await client.query(
       `
-        UPDATE fire_balances
+        UPDATE ${balanceTable}
         SET balance = balance - $2::numeric,
             updated_at = now()
         WHERE user_id = $1
@@ -1995,10 +2106,10 @@ export async function buyOutcome(input) {
 
     await client.query(
       `
-        INSERT INTO fire_ledger (user_id, amount, reason, source)
+        INSERT INTO ${ledgerTable} (user_id, amount, reason, source)
         VALUES ($1, $2::numeric, $3, $4)
       `,
-      [user.id, -amount, side === "YES" ? "buy_yes" : "buy_no", `market:${marketId}`],
+      [user.id, -amount, `${side === "YES" ? "buy_yes" : "buy_no"}${reasonSuffix}`, `market:${marketId}`],
     );
 
     await client.query(
@@ -2028,11 +2139,12 @@ export async function buyOutcome(input) {
           shares,
           spent,
           avg_price,
+          currency,
           status,
           updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, 'open', now())
-        ON CONFLICT (user_id, market_id, side) DO UPDATE SET
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', now())
+        ON CONFLICT (user_id, market_id, side, currency) DO UPDATE SET
           shares = positions.shares + EXCLUDED.shares,
           spent = positions.spent + EXCLUDED.spent,
           avg_price = (positions.spent + EXCLUDED.spent) / NULLIF(positions.shares + EXCLUDED.shares, 0),
@@ -2040,16 +2152,16 @@ export async function buyOutcome(input) {
           updated_at = now()
         RETURNING *
       `,
-      [user.id, marketId, side, shares, amount, quote.executionPrice],
+      [user.id, marketId, side, shares, amount, quote.executionPrice, currency],
     );
 
     const tradeResult = await client.query(
       `
-        INSERT INTO trades (user_id, market_id, action, side, amount, fee, price, shares)
-        VALUES ($1, $2, 'BUY', $3, $4::numeric, $5::numeric, $6::numeric, $7::numeric)
+        INSERT INTO trades (user_id, market_id, action, side, amount, fee, price, shares, currency)
+        VALUES ($1, $2, 'BUY', $3, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8)
         RETURNING *
       `,
-      [user.id, marketId, side, amount, fee, quote.executionPrice, shares],
+      [user.id, marketId, side, amount, fee, quote.executionPrice, shares, currency],
     );
 
     const referralBonus = await awardReferralBetBonus(client, user, marketId);
@@ -2058,7 +2170,7 @@ export async function buyOutcome(input) {
     const finalBalanceResult = await client.query(
       `
         SELECT balance
-        FROM fire_balances
+        FROM ${balanceTable}
         WHERE user_id = $1
       `,
       [user.id],
@@ -2066,7 +2178,9 @@ export async function buyOutcome(input) {
 
     return {
       ok: true,
+      currency,
       balance: toNumber(finalBalanceResult.rows[0]?.balance),
+      currency_balance: toNumber(finalBalanceResult.rows[0]?.balance),
       position: mapPosition(positionResult.rows[0]),
       trade: mapTrade(tradeResult.rows[0]),
       referral_bonus: referralBonus,
@@ -2178,6 +2292,10 @@ export async function sellOutcome(input) {
     }
 
     const side = String(position.side || requestedSide).toUpperCase();
+    const currency = normalizeCurrency(position.currency);
+    const balanceTable = balanceTableForCurrency(currency);
+    const ledgerTable = ledgerTableForCurrency(currency);
+    const reasonSuffix = balanceReasonSuffix(currency);
     const marketId = Number(position.market_id);
     const marketResult = await client.query(
       `
@@ -2231,7 +2349,7 @@ export async function sellOutcome(input) {
 
     await client.query(
       `
-        UPDATE fire_balances
+        UPDATE ${balanceTable}
         SET balance = balance + $2::numeric,
             updated_at = now()
         WHERE user_id = $1::bigint
@@ -2241,19 +2359,19 @@ export async function sellOutcome(input) {
 
     await client.query(
       `
-        INSERT INTO fire_ledger (user_id, amount, reason, source)
+        INSERT INTO ${ledgerTable} (user_id, amount, reason, source)
         VALUES ($1::bigint, $2::numeric, $3::text, $4::text)
       `,
-      [user.id, proceeds, side === "YES" ? "sell_yes" : "sell_no", `market:${marketId}`],
+      [user.id, proceeds, `${side === "YES" ? "sell_yes" : "sell_no"}${reasonSuffix}`, `market:${marketId}`],
     );
 
     const tradeResult = await client.query(
       `
-        INSERT INTO trades (user_id, market_id, action, side, amount, fee, price, shares)
-        VALUES ($1::bigint, $2::bigint, 'SELL', $3::text, $4::numeric, $5::numeric, $6::numeric, $7::numeric)
+        INSERT INTO trades (user_id, market_id, action, side, amount, fee, price, shares, currency)
+        VALUES ($1::bigint, $2::bigint, 'SELL', $3::text, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8::text)
         RETURNING *
       `,
-      [user.id, marketId, side, proceeds, fee, quote.executionPrice, sharesToSell],
+      [user.id, marketId, side, proceeds, fee, quote.executionPrice, sharesToSell, currency],
     );
 
     const positionUpdateResult = await client.query(
@@ -2317,7 +2435,7 @@ export async function sellOutcome(input) {
     const finalBalanceResult = await client.query(
       `
         SELECT balance
-        FROM fire_balances
+        FROM ${balanceTable}
         WHERE user_id = $1
       `,
       [user.id],
@@ -2325,7 +2443,9 @@ export async function sellOutcome(input) {
 
     return {
       ok: true,
+      currency,
       balance: toNumber(finalBalanceResult.rows[0]?.balance),
+      currency_balance: toNumber(finalBalanceResult.rows[0]?.balance),
       position: mapPosition(positionUpdateResult.rows[0]),
       trade: mapTrade(tradeResult.rows[0]),
       market: mapMarket({
@@ -2361,11 +2481,15 @@ async function refundMarket(client, market, message) {
   );
 
   for (const position of positions.rows) {
+    const currency = normalizeCurrency(position.currency);
+    const balanceTable = balanceTableForCurrency(currency);
+    const ledgerTable = ledgerTableForCurrency(currency);
+    const reasonSuffix = balanceReasonSuffix(currency);
     const refund = toNumber(position.spent);
     if (refund > 0) {
       await client.query(
         `
-          UPDATE fire_balances
+          UPDATE ${balanceTable}
           SET balance = balance + $2,
               updated_at = now()
           WHERE user_id = $1
@@ -2374,10 +2498,10 @@ async function refundMarket(client, market, message) {
       );
       await client.query(
         `
-          INSERT INTO fire_ledger (user_id, amount, reason, source)
-          VALUES ($1, $2, 'market_refund', $3)
+          INSERT INTO ${ledgerTable} (user_id, amount, reason, source)
+          VALUES ($1, $2, $3, $4)
         `,
-        [position.user_id, refund, `market:${market.id}:${message}`],
+        [position.user_id, refund, `market_refund${reasonSuffix}`, `market:${market.id}:${message}`],
       );
     }
   }
@@ -2475,6 +2599,10 @@ export async function resolveExpiredMarkets() {
       );
 
       for (const position of positions.rows) {
+        const currency = normalizeCurrency(position.currency);
+        const balanceTable = balanceTableForCurrency(currency);
+        const ledgerTable = ledgerTableForCurrency(currency);
+        const reasonSuffix = balanceReasonSuffix(currency);
         const shares = toNumber(position.shares);
         const spent = toNumber(position.spent);
         const grossPayout = position.side === winner ? shares : 0;
@@ -2497,7 +2625,7 @@ export async function resolveExpiredMarkets() {
         if (payout > 0) {
           await client.query(
             `
-              UPDATE fire_balances
+              UPDATE ${balanceTable}
               SET balance = balance + $2,
                   updated_at = now()
               WHERE user_id = $1
@@ -2506,10 +2634,10 @@ export async function resolveExpiredMarkets() {
           );
           await client.query(
             `
-              INSERT INTO fire_ledger (user_id, amount, reason, source)
-              VALUES ($1, $2, 'market_payout', $3)
+              INSERT INTO ${ledgerTable} (user_id, amount, reason, source)
+              VALUES ($1, $2, $3, $4)
             `,
-            [position.user_id, payout, `market:${currentMarket.id}`],
+            [position.user_id, payout, `market_payout${reasonSuffix}`, `market:${currentMarket.id}`],
           );
         }
       }
@@ -2548,8 +2676,10 @@ export async function getRecentMarkets(limit = 10) {
   return result.rows.map(mapMarket);
 }
 
-export async function getLeaderboard(limit = 30) {
+export async function getLeaderboard(limit = 30, currencyInput = "STAR") {
   const safeLimit = Math.max(1, Math.min(100, Number(limit) || 30));
+  const currency = normalizeCurrency(currencyInput);
+  const balanceTable = balanceTableForCurrency(currency);
   const result = await query(
     `
       WITH trade_stats AS (
@@ -2557,6 +2687,7 @@ export async function getLeaderboard(limit = 30) {
           user_id,
           COUNT(*) FILTER (WHERE action = 'BUY') AS bet_count
         FROM trades
+        WHERE currency = $2
         GROUP BY user_id
       ),
       position_stats AS (
@@ -2565,24 +2696,25 @@ export async function getLeaderboard(limit = 30) {
           COUNT(*) FILTER (WHERE status <> 'open') AS settled_count,
           COUNT(*) FILTER (WHERE status <> 'open' AND pnl > 0) AS win_count
         FROM positions
+        WHERE currency = $2
         GROUP BY user_id
       )
       SELECT
         users.telegram_id,
         users.username,
         users.first_name,
-        fire_balances.balance,
+        balances.balance,
         COALESCE(trade_stats.bet_count, 0) AS bet_count,
         COALESCE(position_stats.settled_count, 0) AS settled_count,
         COALESCE(position_stats.win_count, 0) AS win_count
       FROM users
-      JOIN fire_balances ON fire_balances.user_id = users.id
+      JOIN ${balanceTable} balances ON balances.user_id = users.id
       LEFT JOIN trade_stats ON trade_stats.user_id = users.id
       LEFT JOIN position_stats ON position_stats.user_id = users.id
-      ORDER BY fire_balances.balance DESC, COALESCE(trade_stats.bet_count, 0) DESC, users.updated_at DESC
+      ORDER BY balances.balance DESC, COALESCE(trade_stats.bet_count, 0) DESC, users.updated_at DESC
       LIMIT $1
     `,
-    [safeLimit],
+    [safeLimit, currency],
   );
 
   return result.rows.map((row) => {
@@ -2592,6 +2724,7 @@ export async function getLeaderboard(limit = 30) {
       telegram_id: row.telegram_id,
       username: row.username,
       first_name: row.first_name,
+      currency,
       balance: toNumber(row.balance),
       bet_count: Number(row.bet_count || 0),
       settled_count: settledCount,

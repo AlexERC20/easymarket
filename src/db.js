@@ -100,6 +100,26 @@ export async function runMigrations() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS usdt_balances (
+      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      balance NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS usdt_ledger (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount NUMERIC(20, 8) NOT NULL,
+      reason TEXT NOT NULL,
+      source TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    INSERT INTO usdt_balances (user_id, balance, updated_at)
+    SELECT id, 0, now()
+    FROM users
+    ON CONFLICT (user_id) DO NOTHING;
+
     CREATE TABLE IF NOT EXISTS markets (
       id BIGSERIAL PRIMARY KEY,
       symbol TEXT NOT NULL,
@@ -242,6 +262,21 @@ export async function runMigrations() {
 
     ALTER TABLE users
       ADD COLUMN IF NOT EXISTS referred_by_telegram_id TEXT;
+
+    ALTER TABLE positions
+      ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'STAR';
+
+    ALTER TABLE trades
+      ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'STAR';
+
+    ALTER TABLE positions
+      DROP CONSTRAINT IF EXISTS positions_user_id_market_id_side_key;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_user_market_side_currency
+      ON positions(user_id, market_id, side, currency);
+
+    CREATE INDEX IF NOT EXISTS idx_trades_currency_created
+      ON trades(currency, created_at DESC);
   `);
 }
 

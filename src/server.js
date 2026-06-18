@@ -7,6 +7,7 @@ import { config } from "./config.js";
 import { getPool, getSafeDatabaseErrorMessage, query, runMigrations } from "./db.js";
 import {
   addFireToUser,
+  addUsdtToUser,
   addMarketComment,
   buyOutcome,
   claimDailyTask,
@@ -69,6 +70,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "market_not_open",
     "market_closed",
     "insufficient_fire",
+    "insufficient_usdt",
     "position_not_open",
     "invalid_position_id",
     "invalid_sell_shares",
@@ -197,6 +199,8 @@ app.get("/api/public/config", (_req, res) => {
     av_channel_url: config.publicAvChannelUrl,
     av_chat_url: config.publicAvChatUrl,
     private_chat_url: config.publicPrivateChatUrl,
+    usdt_evm_address: config.publicUsdtEvmAddress,
+    usdt_ton_address: config.publicUsdtTonAddress,
     stars_invoice_enabled: Boolean(config.telegramBotToken),
   });
 });
@@ -409,6 +413,7 @@ app.post("/api/market/:marketId/buy", async (req, res) => {
       telegram_id: req.body?.telegram_id,
       side: req.body?.side,
       amount: req.body?.amount,
+      currency: req.body?.currency,
     });
     res.status(200).json(result);
   } catch (error) {
@@ -424,6 +429,7 @@ app.post("/api/market/:marketId/sell", async (req, res) => {
       positionId: req.body?.position_id,
       side: req.body?.side,
       shares: req.body?.shares,
+      currency: req.body?.currency,
     });
     console.log("[EasyMarket] sell ok", {
       telegram_id: req.body?.telegram_id,
@@ -481,9 +487,10 @@ app.get("/api/markets/recent", async (req, res) => {
 
 app.get("/api/leaderboard", async (req, res) => {
   try {
-    const players = await getLeaderboard(req.query.limit);
+    const players = await getLeaderboard(req.query.limit, req.query.currency);
     res.status(200).json({
       ok: true,
+      currency: String(req.query.currency || "STAR").toUpperCase() === "USDT" ? "USDT" : "STAR",
       players,
     });
   } catch (error) {
@@ -537,6 +544,25 @@ app.post("/api/dev/fire/add", requireDevTools, async (req, res) => {
   }
 });
 
+app.post("/api/dev/usdt/add", requireDevTools, async (req, res) => {
+  try {
+    const result = await addUsdtToUser({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      amount: req.body?.amount,
+      reason: req.body?.reason || "dev_usdt_topup",
+      source: "dev",
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
 app.post("/api/dev/market/create", requireDevTools, async (_req, res) => {
   try {
     const market = await createBtc5mMarket();
@@ -573,6 +599,25 @@ app.post("/api/bridge/fire/add", requireBridgeSecret, async (req, res) => {
       first_name: req.body?.first_name,
       amount: req.body?.amount,
       reason: req.body?.reason || "admin_adjustment",
+      source: "bridge",
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/usdt/add", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await addUsdtToUser({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      amount: req.body?.amount,
+      reason: req.body?.reason || "admin_usdt_adjustment",
       source: "bridge",
     });
     res.status(200).json({

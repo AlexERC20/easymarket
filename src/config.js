@@ -62,6 +62,14 @@ export const config = {
     process.env.PUBLIC_PRIVATE_CHAT_URL
       || "https://t.me/tribute/app?startapp=stKL"
   ).trim(),
+  publicUsdtEvmAddress: (
+    process.env.PUBLIC_USDT_EVM_ADDRESS
+      || "0x51592e92e48b94f3714c24c7597fb8a4ecfb36cd"
+  ).trim(),
+  publicUsdtTonAddress: (
+    process.env.PUBLIC_USDT_TON_ADDRESS
+      || "UQAFrUUrG0-cFLbZDkYA_RuGKSjuaULQPp7B7xxsmbzoaBdh"
+  ).trim(),
 };
 
 export function clamp(value, min, max) {
