@@ -1716,7 +1716,6 @@ export async function syncWorldCupMarkets() {
             CASE WHEN m.symbol = $1 THEN 1 ELSE 0 END DESC,
             m.id DESC
           LIMIT 1
-          FOR UPDATE
         `,
         [symbol, feedMarket.team],
       );
