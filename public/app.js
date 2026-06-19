@@ -2195,6 +2195,14 @@ function closeTopupSheet() {
   $("topupSheet")?.classList.add("hidden");
 }
 
+function showButtonPressed(button) {
+  if (!button || button.disabled) return;
+  button.classList.remove("is-pressed");
+  void button.offsetWidth;
+  button.classList.add("is-pressed");
+  setTimeout(() => button.classList.remove("is-pressed"), 150);
+}
+
 function stopDepositPolling() {
   if (state.topup.pollTimer) {
     clearInterval(state.topup.pollTimer);
@@ -2681,6 +2689,7 @@ $("topupSheet")?.addEventListener("click", (event) => {
 });
 
 $("topupBuyBtn")?.addEventListener("click", () => {
+  showButtonPressed($("topupBuyBtn"));
   triggerHaptic("selection");
   void startStarsTopup();
 });
