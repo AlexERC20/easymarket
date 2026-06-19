@@ -56,7 +56,6 @@ const state = {
     pending: false,
     mode: "topup",
     currency: "USDT",
-    network: "BSC",
     intent: null,
     pollTimer: null,
   },
@@ -936,9 +935,6 @@ async function loadPublicConfig() {
       ...state.publicConfig,
       ...data,
     };
-    if (Array.isArray(state.publicConfig.usdt_deposit_networks) && state.publicConfig.usdt_deposit_networks.length > 0) {
-      state.topup.network = state.publicConfig.usdt_deposit_networks[0].key || state.topup.network;
-    }
     renderTaskRewards();
     renderTopupSheet();
   } catch {
