@@ -115,6 +115,61 @@ export async function runMigrations() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS usdt_deposit_intents (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      network TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      requested_amount NUMERIC(20, 8) NOT NULL,
+      deposit_amount NUMERIC(20, 8) NOT NULL,
+      credited_amount NUMERIC(20, 8),
+      to_address TEXT NOT NULL,
+      from_address TEXT,
+      tx_hash TEXT,
+      log_index INTEGER,
+      block_number BIGINT,
+      confirmations INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      credited_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_deposit_intents_user_created
+      ON usdt_deposit_intents(user_id, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_deposit_intents_status_network
+      ON usdt_deposit_intents(status, network, expires_at);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_usdt_deposit_intents_pending_amount
+      ON usdt_deposit_intents(network, deposit_amount)
+      WHERE status = 'pending';
+
+    CREATE TABLE IF NOT EXISTS usdt_deposit_events (
+      id BIGSERIAL PRIMARY KEY,
+      network TEXT NOT NULL,
+      tx_hash TEXT NOT NULL,
+      log_index INTEGER NOT NULL,
+      block_number BIGINT NOT NULL,
+      from_address TEXT NOT NULL,
+      to_address TEXT NOT NULL,
+      amount NUMERIC(20, 8) NOT NULL,
+      matched_intent_id BIGINT REFERENCES usdt_deposit_intents(id) ON DELETE SET NULL,
+      status TEXT NOT NULL DEFAULT 'unmatched',
+      chain_timestamp TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(network, tx_hash, log_index)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_deposit_events_status_created
+      ON usdt_deposit_events(status, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS usdt_deposit_scanner_state (
+      network TEXT PRIMARY KEY,
+      last_scanned_block BIGINT NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     INSERT INTO usdt_balances (user_id, balance, updated_at)
     SELECT id, 0, now()
     FROM users

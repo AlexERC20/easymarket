@@ -70,6 +70,30 @@ export const config = {
     process.env.PUBLIC_USDT_TON_ADDRESS
       || "UQAFrUUrG0-cFLbZDkYA_RuGKSjuaULQPp7B7xxsmbzoaBdh"
   ).trim(),
+  usdtDepositScanEnabled: parseBoolean(process.env.USDT_DEPOSIT_SCAN_ENABLED, true),
+  usdtDepositScanMs: parseNumber(process.env.USDT_DEPOSIT_SCAN_MS, 20_000, 5_000),
+  usdtDepositIntentMinutes: parseNumber(process.env.USDT_DEPOSIT_INTENT_MINUTES, 60, 5),
+  usdtDepositConfirmations: parseNumber(process.env.USDT_DEPOSIT_CONFIRMATIONS, 6, 1),
+  usdtBscRpcUrl: (
+    process.env.USDT_BSC_RPC_URL
+      || process.env.BSC_RPC_URL
+      || "https://bsc-dataseed.binance.org"
+  ).trim(),
+  usdtBscTokenAddress: (
+    process.env.USDT_BSC_TOKEN_ADDRESS
+      || "0x55d398326f99059fF775485246999027B3197955"
+  ).trim(),
+  usdtBscDecimals: parseNumber(process.env.USDT_BSC_DECIMALS, 18, 0),
+  usdtEthRpcUrl: (
+    process.env.USDT_ETH_RPC_URL
+      || process.env.ETH_RPC_URL
+      || "https://ethereum.publicnode.com"
+  ).trim(),
+  usdtEthTokenAddress: (
+    process.env.USDT_ETH_TOKEN_ADDRESS
+      || "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+  ).trim(),
+  usdtEthDecimals: parseNumber(process.env.USDT_ETH_DECIMALS, 6, 0),
 };
 
 export function clamp(value, min, max) {

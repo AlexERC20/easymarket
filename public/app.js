@@ -1,7 +1,8 @@
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
 const SELL_IMPACT_MULTIPLIER = 1.1;
-const AMOUNTS = [50, 100, 500, 1000];
+const STAR_AMOUNTS = [50, 100, 500, 1000];
+const USDT_AMOUNTS = [5, 10, 25, 100];
 const MIN_OUTCOME_PRICE = 0.001;
 const BTC_MIN_OUTCOME_PRICE = 0.04;
 const CHART_WINDOW_MS = 10_000;
@@ -46,6 +47,9 @@ const state = {
     pending: false,
     mode: "topup",
     currency: "STAR",
+    network: "BSC",
+    intent: null,
+    pollTimer: null,
   },
   leaderboardCurrency: "STAR",
   expanded: {
@@ -84,6 +88,8 @@ const state = {
     private_chat_url: "https://t.me/tribute/app?startapp=stKL",
     usdt_evm_address: "0x51592e92e48b94f3714c24c7597fb8a4ecfb36cd",
     usdt_ton_address: "UQAFrUUrG0-cFLbZDkYA_RuGKSjuaULQPp7B7xxsmbzoaBdh",
+    usdt_deposit_scan_enabled: false,
+    usdt_deposit_networks: [],
     stars_invoice_enabled: false,
   },
   presence: {
@@ -105,7 +111,7 @@ const formatFireDecimal = (value) => Number(value || 0).toLocaleString("ru-RU", 
   maximumFractionDigits: 1,
 });
 const normalizeCurrency = (value) => (String(value || "STAR").toUpperCase() === "USDT" ? "USDT" : "STAR");
-const currencySymbol = (currency = state.currency) => (normalizeCurrency(currency) === "USDT" ? "$" : "⭐");
+const getAmountsForCurrency = (currency = state.currency) => (normalizeCurrency(currency) === "USDT" ? USDT_AMOUNTS : STAR_AMOUNTS);
 const formatCurrencyAmount = (value, currency = state.currency) => {
   const safeCurrency = normalizeCurrency(currency);
   const formatted = Number(value || 0).toLocaleString("ru-RU", {
@@ -819,7 +825,11 @@ async function loadPublicConfig() {
       ...state.publicConfig,
       ...data,
     };
+    if (Array.isArray(state.publicConfig.usdt_deposit_networks) && state.publicConfig.usdt_deposit_networks.length > 0) {
+      state.topup.network = state.publicConfig.usdt_deposit_networks[0].key || state.topup.network;
+    }
     renderTaskRewards();
+    renderTopupSheet();
   } catch {
     // The UI can still work with local fallback config.
   }
@@ -1457,8 +1467,6 @@ function renderMe() {
   const balanceDigits = String(Math.floor(Number(activeBalance || 0))).length;
   balanceElement?.classList.toggle("compact", balanceDigits >= 6);
   balanceElement?.classList.toggle("tiny", balanceDigits >= 8);
-  $("balanceStarIcon")?.classList.toggle("hidden", state.currency === "USDT");
-  $("balanceDollarIcon")?.classList.toggle("hidden", state.currency !== "USDT");
   document.querySelectorAll("[data-currency-toggle]").forEach((button) => {
     button.classList.toggle("active", normalizeCurrency(button.dataset.currencyToggle) === state.currency);
   });
@@ -1539,12 +1547,17 @@ function renderTradeTicket() {
   const price = getSelectedPrice();
   const market = getDisplayMarket();
   const canBuyMarket = isMarketOpenForBuy(market);
+  const amounts = getAmountsForCurrency(state.currency);
+  if (!amounts.includes(Number(state.selectedAmount))) {
+    state.selectedAmount = amounts[0];
+  }
 
   document.querySelectorAll(".outcome-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.side === side);
   });
-  document.querySelectorAll(".amount-button").forEach((button) => {
-    const amount = Number(button.dataset.amount);
+  document.querySelectorAll(".amount-button").forEach((button, index) => {
+    const amount = amounts[index] || amounts[0];
+    button.dataset.amount = String(amount);
     const amountPreview = getPreview(amount, side);
     const pendingKey = market ? getBuyIntentKey(market.id, side, amount, state.currency) : null;
     const nextLabel = formatCurrencyAmount(amount, state.currency);
@@ -1830,6 +1843,12 @@ function renderBetSheet() {
   $("betSideNoBtn")?.classList.toggle("active", side === "NO");
   if ($("betSideYesBtn")) $("betSideYesBtn").textContent = marketSideLabel(market, "YES");
   if ($("betSideNoBtn")) $("betSideNoBtn").textContent = marketSideLabel(market, "NO");
+  const amounts = getAmountsForCurrency(state.currency);
+  document.querySelectorAll("[data-bet-add]").forEach((button, index) => {
+    const addAmount = amounts[index] || amounts[0];
+    button.dataset.betAdd = String(addAmount);
+    button.textContent = `+${formatCurrencyAmount(addAmount, state.currency)}`;
+  });
   if ($("betConfirmBtn")) {
     $("betConfirmBtn").disabled = !amount || !state.user;
     $("betConfirmBtn").textContent = amount ? `Trade ${formatCurrencyAmount(amount, state.currency)}` : "Trade";
@@ -1856,6 +1875,14 @@ function renderTopupSheet() {
   const isTopupMode = state.topup.mode !== "withdraw";
   const currency = normalizeCurrency(state.topup.currency);
   const isUsdt = currency === "USDT";
+  const intent = state.topup.intent;
+  const networks = Array.isArray(state.publicConfig.usdt_deposit_networks)
+    ? state.publicConfig.usdt_deposit_networks
+    : [];
+  const activeNetwork = networks.find((network) => network.key === state.topup.network) || networks[0];
+  if (activeNetwork && state.topup.network !== activeNetwork.key) {
+    state.topup.network = activeNetwork.key;
+  }
   $("topupModePanel")?.classList.toggle("hidden", !isTopupMode);
   $("withdrawModePanel")?.classList.toggle("hidden", isTopupMode);
   $("walletModeTopupBtn")?.classList.toggle("active", isTopupMode);
@@ -1864,6 +1891,27 @@ function renderTopupSheet() {
     button.classList.toggle("active", normalizeCurrency(button.dataset.walletCurrency) === currency);
   });
   $("usdtDepositPanel")?.classList.toggle("hidden", !isUsdt || !isTopupMode);
+  document.querySelectorAll("[data-usdt-network]").forEach((button) => {
+    const network = networks.find((item) => item.key === button.dataset.usdtNetwork);
+    button.disabled = !network || Boolean(intent);
+    button.classList.toggle("active", Boolean(network) && network.key === state.topup.network);
+  });
+  $("usdtDepositIntentBox")?.classList.toggle("hidden", !isUsdt || !intent);
+  if ($("usdtDepositExactAmount")) {
+    $("usdtDepositExactAmount").textContent = intent
+      ? `${Number(intent.deposit_amount || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`
+      : "";
+  }
+  if ($("usdtDepositStatus")) {
+    const statusText = intent?.status === "credited"
+      ? "Зачислено на баланс"
+      : intent?.status === "expired"
+        ? "Заявка истекла, создай новую"
+        : intent
+          ? "Ждем перевод и подтверждения сети"
+          : "";
+    $("usdtDepositStatus").textContent = statusText;
+  }
   if ($("usdtEvmAddress")) $("usdtEvmAddress").textContent = state.publicConfig.usdt_evm_address;
   if ($("usdtTonAddress")) $("usdtTonAddress").textContent = state.publicConfig.usdt_ton_address;
   if ($("walletSheetTitle")) {
@@ -1871,21 +1919,29 @@ function renderTopupSheet() {
       ? `Пополнить ${isUsdt ? "USDT" : "звезды"}`
       : `Вывести ${isUsdt ? "USDT" : "звезды"}`;
   }
+  if ($("walletSheetEyebrow")) {
+    $("walletSheetEyebrow").textContent = isUsdt ? "Virtual USDT" : "Telegram Stars";
+  }
   if ($("topupAmountValue")) $("topupAmountValue").textContent = formatCurrencyAmount(amount, currency);
   if ($("topupReason")) {
-    $("topupReason").textContent = state.topup.reason || (
-      isUsdt
-        ? "После перевода напиши админу: зачислим виртуальные USDT на баланс."
-        : "Звезды зачислятся в баланс после оплаты."
-    );
+    if (state.topup.reason) {
+      $("topupReason").textContent = state.topup.reason;
+    } else if (isUsdt && intent) {
+      $("topupReason").textContent = `Отправь ровно ${Number(intent.deposit_amount || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT на адрес ${intent.network_label || intent.network}. Баланс обновится автоматически.`;
+    } else if (isUsdt) {
+      $("topupReason").textContent = "Создай заявку, потом отправь точную сумму USDT на общий кошелек.";
+    } else {
+      $("topupReason").textContent = "Звезды зачислятся в баланс после оплаты.";
+    }
   }
   if ($("topupBuyBtn")) {
     $("topupBuyBtn").disabled = !isTopupMode || state.topup.pending || !state.user;
     $("topupBuyBtn").textContent = isUsdt
-      ? "Скопировать ERC20/BEP20 адрес"
+      ? (intent && intent.status === "pending" ? "Скопировать адрес" : "Создать заявку")
       : (state.topup.pending ? "Открываю оплату..." : `Купить ${formatCurrencyAmount(amount, currency)}`);
   }
   document.querySelectorAll("[data-topup-package]").forEach((button) => {
+    button.disabled = isUsdt && Boolean(intent);
     button.classList.toggle("active", Number(button.dataset.topupPackage) === amount);
   });
 }
@@ -1903,11 +1959,54 @@ function closeTopupSheet() {
   $("topupSheet")?.classList.add("hidden");
 }
 
+function stopDepositPolling() {
+  if (state.topup.pollTimer) {
+    clearInterval(state.topup.pollTimer);
+    state.topup.pollTimer = null;
+  }
+}
+
 async function refreshBalanceAfterInvoice() {
   for (let attempt = 0; attempt < 8; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, attempt < 2 ? 900 : 1500));
     await loadMe().catch(() => undefined);
   }
+}
+
+async function refreshDepositIntent() {
+  const intent = state.topup.intent;
+  if (!intent?.id || !state.user?.telegram_id) {
+    stopDepositPolling();
+    return;
+  }
+
+  try {
+    const data = await api(`/api/usdt/deposits/intents/${intent.id}?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
+    state.topup.intent = data.intent;
+    renderTopupSheet();
+    if (data.intent?.status === "credited") {
+      stopDepositPolling();
+      triggerHaptic("success");
+      showToast("USDT зачислены на баланс.");
+      await loadMe();
+      return;
+    }
+    if (data.intent?.status === "expired") {
+      stopDepositPolling();
+      triggerHaptic("warning");
+      showToast("Заявка истекла. Создай новую.");
+    }
+  } catch {
+    // Keep polling. Short RPC/API hiccups should not break the visible intent.
+  }
+}
+
+function startDepositPolling() {
+  stopDepositPolling();
+  state.topup.pollTimer = setInterval(() => {
+    void refreshDepositIntent();
+  }, 5000);
+  void refreshDepositIntent();
 }
 
 async function copyToClipboard(value) {
@@ -1932,6 +2031,43 @@ async function copyToClipboard(value) {
   }
 }
 
+async function createUsdtDepositIntent() {
+  if (!state.user?.telegram_id) {
+    triggerHaptic("warning");
+    showToast("Сначала нужен пользователь.");
+    return;
+  }
+
+  const amount = Math.max(1, Math.round(Number(state.topup.amount || 0)));
+  state.topup.pending = true;
+  renderTopupSheet();
+  try {
+    const result = await api("/api/usdt/deposits/intents", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        username: state.user.username,
+        first_name: state.user.first_name,
+        amount,
+        network: state.topup.network,
+      }),
+    });
+    state.topup.intent = result.intent;
+    triggerHaptic("success");
+    showToast("Заявка создана. Отправь точную сумму.");
+    startDepositPolling();
+  } catch (error) {
+    triggerHaptic("error");
+    const message = error.message === "invalid_deposit_network"
+      ? "Эта сеть сейчас недоступна."
+      : "Не получилось создать заявку.";
+    showToast(message);
+  } finally {
+    state.topup.pending = false;
+    renderTopupSheet();
+  }
+}
+
 async function startStarsTopup() {
   if (!state.user?.telegram_id) {
     triggerHaptic("warning");
@@ -1941,9 +2077,13 @@ async function startStarsTopup() {
 
   const amount = Math.max(1, Math.round(Number(state.topup.amount || 0)));
   if (state.topup.currency === "USDT") {
-    const copied = await copyToClipboard(state.publicConfig.usdt_evm_address);
+    if (!state.topup.intent || state.topup.intent.status === "expired" || state.topup.intent.status === "credited") {
+      await createUsdtDepositIntent();
+      return;
+    }
+    const copied = await copyToClipboard(state.topup.intent.to_address || state.publicConfig.usdt_evm_address);
     triggerHaptic(copied ? "success" : "warning");
-    showToast(copied ? "ERC20/BEP20 адрес скопирован." : "Скопируй адрес вручную.");
+    showToast(copied ? "Адрес скопирован." : "Скопируй адрес вручную.");
     return;
   }
 
@@ -2312,6 +2452,11 @@ document.querySelectorAll("[data-currency-toggle]").forEach((button) => {
     triggerHaptic("selection");
     state.currency = nextCurrency;
     state.topup.currency = nextCurrency;
+    state.selectedAmount = getAmountsForCurrency(nextCurrency)[0];
+    if (state.betSheet.market) {
+      state.betSheet.amount = 0;
+      state.betSheet.currency = nextCurrency;
+    }
     state.buyQueue = [];
     renderMe();
     renderTradeTicket();
@@ -2322,7 +2467,25 @@ document.querySelectorAll("[data-currency-toggle]").forEach((button) => {
 document.querySelectorAll("[data-wallet-currency]").forEach((button) => {
   button.addEventListener("click", () => {
     triggerHaptic("selection");
-    state.topup.currency = normalizeCurrency(button.dataset.walletCurrency);
+    const nextCurrency = normalizeCurrency(button.dataset.walletCurrency);
+    if (state.topup.currency !== nextCurrency) {
+      state.topup.intent = null;
+      stopDepositPolling();
+    }
+    state.topup.currency = nextCurrency;
+    renderTopupSheet();
+  });
+});
+
+document.querySelectorAll("[data-usdt-network]").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (button.disabled) {
+      return;
+    }
+    triggerHaptic("selection");
+    state.topup.network = button.dataset.usdtNetwork || "BSC";
+    state.topup.intent = null;
+    stopDepositPolling();
     renderTopupSheet();
   });
 });
@@ -2869,7 +3032,7 @@ window.addEventListener("resize", () => {
   renderMarketChart();
 });
 
-AMOUNTS.forEach((amount, index) => {
+getAmountsForCurrency().forEach((amount, index) => {
   const button = document.querySelector(`.amount-button[data-amount="${amount}"]`);
   if (button && index === 0) {
     button.classList.add("active");

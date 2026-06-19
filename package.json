@@ -8,6 +8,7 @@
     "dev": "node --watch src/server.js"
   },
   "dependencies": {
+    "ethers": "^6.17.0",
     "express": "^4.19.2",
     "pg": "^8.12.0"
   },

@@ -35,6 +35,13 @@ import {
   upsertUser,
 } from "./services/marketService.js";
 import { PriceUnavailableError } from "./services/priceService.js";
+import {
+  createUsdtDepositIntent,
+  getPublicUsdtDepositNetworks,
+  getUserDepositIntent,
+  getUserDepositIntents,
+  scanUsdtDeposits,
+} from "./services/usdtDepositService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -55,6 +62,7 @@ app.use(express.static(publicDir, {
 let marketEngineStarted = false;
 let marketEngineBusy = false;
 let priceEngineBusy = false;
+let usdtDepositScannerBusy = false;
 
 function sendApiError(res, error, fallbackStatus = 500) {
   const message = error instanceof Error ? error.message : String(error);
@@ -71,6 +79,10 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "market_closed",
     "insufficient_fire",
     "insufficient_usdt",
+    "invalid_deposit_amount",
+    "invalid_deposit_network",
+    "deposit_amount_collision",
+    "deposit_intent_not_found",
     "position_not_open",
     "invalid_position_id",
     "invalid_sell_shares",
@@ -201,6 +213,8 @@ app.get("/api/public/config", (_req, res) => {
     private_chat_url: config.publicPrivateChatUrl,
     usdt_evm_address: config.publicUsdtEvmAddress,
     usdt_ton_address: config.publicUsdtTonAddress,
+    usdt_deposit_scan_enabled: config.usdtDepositScanEnabled,
+    usdt_deposit_networks: getPublicUsdtDepositNetworks(),
     stars_invoice_enabled: Boolean(config.telegramBotToken),
   });
 });
@@ -252,6 +266,66 @@ app.post("/api/stars/invoice", async (req, res) => {
       ok: true,
       invoice_url: data.result,
       amount,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/usdt/deposits/intents", async (req, res) => {
+  try {
+    const result = await createUsdtDepositIntent({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      amount: req.body?.amount,
+      network: req.body?.network,
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/usdt/deposits/intents", async (req, res) => {
+  try {
+    const telegramId = getTelegramId(req);
+    if (!telegramId) {
+      throw new Error("telegram_id_missing");
+    }
+    const intents = await getUserDepositIntents(telegramId, req.query.limit);
+    res.status(200).json({
+      ok: true,
+      intents,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/usdt/deposits/intents/:intentId", async (req, res) => {
+  try {
+    const telegramId = getTelegramId(req);
+    if (!telegramId) {
+      throw new Error("telegram_id_missing");
+    }
+    const intent = await getUserDepositIntent({
+      intentId: req.params.intentId,
+      telegram_id: telegramId,
+    });
+    if (!intent) {
+      res.status(404).json({
+        ok: false,
+        message: "deposit_intent_not_found",
+      });
+      return;
+    }
+    res.status(200).json({
+      ok: true,
+      intent,
     });
   } catch (error) {
     sendApiError(res, error);
@@ -563,6 +637,15 @@ app.post("/api/dev/usdt/add", requireDevTools, async (req, res) => {
   }
 });
 
+app.post("/api/dev/usdt/deposits/scan", requireDevTools, async (_req, res) => {
+  try {
+    const result = await scanUsdtDeposits();
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
 app.post("/api/dev/market/create", requireDevTools, async (_req, res) => {
   try {
     const market = await createBtc5mMarket();
@@ -770,6 +853,21 @@ async function priceTick() {
   }
 }
 
+async function usdtDepositTick() {
+  if (usdtDepositScannerBusy || !config.usdtDepositScanEnabled) {
+    return;
+  }
+
+  usdtDepositScannerBusy = true;
+  try {
+    await scanUsdtDeposits();
+  } catch (error) {
+    console.warn("[easymarket] USDT deposit tick failed:", error instanceof Error ? error.message : "unknown error");
+  } finally {
+    usdtDepositScannerBusy = false;
+  }
+}
+
 async function startMarketEngine() {
   if (marketEngineStarted || !getPool()) {
     return;
@@ -791,6 +889,13 @@ async function startMarketEngine() {
   setInterval(() => {
     void priceTick();
   }, config.pricePollMs);
+
+  if (config.usdtDepositScanEnabled) {
+    void usdtDepositTick();
+    setInterval(() => {
+      void usdtDepositTick();
+    }, config.usdtDepositScanMs);
+  }
 }
 
 app.listen(config.port, "0.0.0.0", () => {
