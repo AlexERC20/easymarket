@@ -72,10 +72,31 @@ export const config = {
   usdtDepositScanMs: parseNumber(process.env.USDT_DEPOSIT_SCAN_MS, 20_000, 5_000),
   usdtDepositIntentMinutes: parseNumber(process.env.USDT_DEPOSIT_INTENT_MINUTES, 60, 5),
   usdtDepositConfirmations: parseNumber(process.env.USDT_DEPOSIT_CONFIRMATIONS, 6, 1),
+  usdtDepositMaxBlockRange: parseNumber(process.env.USDT_DEPOSIT_MAX_BLOCK_RANGE, 300, 10),
+  usdtDepositInitialLookbackBlocks: parseNumber(process.env.USDT_DEPOSIT_INITIAL_LOOKBACK_BLOCKS, 2_400, 300),
+  usdtDepositBackfillBlocks: parseNumber(process.env.USDT_DEPOSIT_BACKFILL_BLOCKS, 6_000, 300),
+  usdtDepositBackfillMs: parseNumber(process.env.USDT_DEPOSIT_BACKFILL_MS, 300_000, 60_000),
+  usdtDepositMatchGraceMinutes: parseNumber(process.env.USDT_DEPOSIT_MATCH_GRACE_MINUTES, 10, 0),
+  bscScanApiUrl: (
+    process.env.BSCSCAN_API_URL
+      || process.env.ETHERSCAN_API_URL
+      || "https://api.etherscan.io/v2/api"
+  ).trim(),
+  bscScanApiKey: (
+    process.env.BSCSCAN_API_KEY
+      || process.env.BSC_SCAN_API_KEY
+      || process.env.ETHERSCAN_API_KEY
+      || ""
+  ).trim(),
+  bscScanChainId: (
+    process.env.BSCSCAN_CHAIN_ID
+      || "56"
+  ).trim(),
+  bscScanPageSize: parseNumber(process.env.BSCSCAN_PAGE_SIZE, 50, 1),
   usdtBscRpcUrl: (
     process.env.USDT_BSC_RPC_URL
       || process.env.BSC_RPC_URL
-      || "https://bsc-dataseed.binance.org"
+      || "https://bsc.drpc.org"
   ).trim(),
   usdtBscTokenAddress: (
     process.env.USDT_BSC_TOKEN_ADDRESS

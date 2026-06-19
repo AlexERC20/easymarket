@@ -16,9 +16,10 @@ const TRANSFER_TOPIC = id("Transfer(address,address,uint256)");
 const TRANSFER_IFACE = new Interface([
   "event Transfer(address indexed from, address indexed to, uint256 value)",
 ]);
-const MAX_BLOCK_RANGE = 1800;
+const RECENT_UNMATCHED_LIMIT = 200;
 
 let providerCache = new Map();
+let backfillLastRunAt = new Map();
 
 function roundMoney(value, decimals = 2) {
   const multiplier = 10 ** decimals;
@@ -315,6 +316,176 @@ async function setScannerState(network, blockNumber) {
   );
 }
 
+async function getTransferLogs(provider, network, fromBlock, toBlock) {
+  if (fromBlock > toBlock) {
+    return [];
+  }
+
+  try {
+    return await provider.getLogs({
+      address: network.tokenAddress,
+      fromBlock,
+      toBlock,
+      topics: [
+        TRANSFER_TOPIC,
+        null,
+        zeroPadValue(network.treasuryAddress, 32),
+      ],
+    });
+  } catch (error) {
+    if (fromBlock >= toBlock) {
+      throw error;
+    }
+
+    const midpoint = Math.floor((fromBlock + toBlock) / 2);
+    const left = await getTransferLogs(provider, network, fromBlock, midpoint);
+    const right = await getTransferLogs(provider, network, midpoint + 1, toBlock);
+    return [...left, ...right];
+  }
+}
+
+async function matchDepositEvent(client, network, event) {
+  if (!event || event.status === "credited") {
+    return false;
+  }
+
+  const intentResult = await client.query(
+    `
+      SELECT *
+      FROM usdt_deposit_intents
+      WHERE network = ANY($1::text[])
+        AND status = ANY($5::text[])
+        AND deposit_amount = $2::numeric
+        AND created_at <= ($3::timestamptz + ($6::int * interval '1 minute'))
+        AND expires_at >= ($3::timestamptz - ($6::int * interval '1 minute'))
+      ORDER BY
+        CASE WHEN status = 'pending' THEN 0 ELSE 1 END,
+        CASE WHEN network = $4 THEN 0 ELSE 1 END,
+        created_at ASC
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [
+      [network.key, "ANY"],
+      event.amount,
+      event.chain_timestamp || new Date(),
+      network.key,
+      ["pending", "expired"],
+      Math.round(config.usdtDepositMatchGraceMinutes),
+    ],
+  );
+  const intent = intentResult.rows[0];
+  if (!intent) {
+    await client.query(
+      `
+        UPDATE usdt_deposit_events
+        SET status = 'unmatched'
+        WHERE network = $1
+          AND tx_hash = $2
+          AND log_index = $3
+          AND status <> 'credited'
+      `,
+      [network.key, event.tx_hash, event.log_index],
+    );
+    return false;
+  }
+
+  await client.query(
+    `
+      UPDATE usdt_balances
+      SET balance = balance + $2::numeric,
+          updated_at = now()
+      WHERE user_id = $1
+    `,
+    [intent.user_id, event.amount],
+  );
+  await client.query(
+    `
+      INSERT INTO usdt_ledger (user_id, amount, reason, source)
+      VALUES ($1, $2::numeric, 'usdt_onchain_deposit', $3)
+    `,
+    [intent.user_id, event.amount, `${network.key}:${event.tx_hash}:${event.log_index}`],
+  );
+  await client.query(
+    `
+      UPDATE usdt_deposit_intents
+      SET status = 'credited',
+          credited_amount = $2::numeric,
+          from_address = $3,
+          tx_hash = $4,
+          log_index = $5,
+          block_number = $6,
+          confirmations = $7,
+          credited_at = now(),
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [
+      intent.id,
+      event.amount,
+      event.from_address,
+      event.tx_hash,
+      event.log_index,
+      event.block_number,
+      event.confirmations || 0,
+    ],
+  );
+  await client.query(
+    `
+      UPDATE usdt_deposit_events
+      SET status = 'credited',
+          matched_intent_id = $4
+      WHERE network = $1
+        AND tx_hash = $2
+        AND log_index = $3
+    `,
+    [network.key, event.tx_hash, event.log_index, intent.id],
+  );
+  return true;
+}
+
+async function storeAndMatchDepositEvent(network, event) {
+  if (!event || event.amount < 0.01) {
+    return false;
+  }
+
+  await withTransaction(async (client) => {
+    const eventResult = await client.query(
+      `
+        INSERT INTO usdt_deposit_events (
+          network,
+          tx_hash,
+          log_index,
+          block_number,
+          from_address,
+          to_address,
+          amount,
+          chain_timestamp
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8)
+        ON CONFLICT (network, tx_hash, log_index) DO UPDATE SET
+          block_number = EXCLUDED.block_number
+        RETURNING *
+      `,
+      [
+        network.key,
+        event.txHash,
+        event.logIndex,
+        event.blockNumber,
+        event.fromAddress,
+        event.toAddress,
+        event.amount,
+        event.chainTimestamp,
+      ],
+    );
+
+    await matchDepositEvent(client, network, {
+      ...eventResult.rows[0],
+      confirmations: event.confirmations || 0,
+    });
+  });
+}
+
 async function processDepositLog(network, log, provider, blockCache) {
   const parsed = TRANSFER_IFACE.parseLog(log);
   const fromAddress = getAddress(parsed.args.from);
@@ -336,163 +507,238 @@ async function processDepositLog(network, log, provider, blockCache) {
   const txHash = String(log.transactionHash);
   const confirmations = Math.max(0, Number(blockCache.latestBlock || log.blockNumber) - Number(log.blockNumber) + 1);
 
-  await withTransaction(async (client) => {
-    const eventResult = await client.query(
-      `
-        INSERT INTO usdt_deposit_events (
-          network,
-          tx_hash,
-          log_index,
-          block_number,
-          from_address,
-          to_address,
-          amount,
-          chain_timestamp
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8)
-        ON CONFLICT (network, tx_hash, log_index) DO NOTHING
-        RETURNING *
-      `,
-      [
-        network.key,
-        txHash,
-        logIndex,
-        log.blockNumber,
-        fromAddress,
-        toAddress,
-        amount,
-        chainTimestamp,
-      ],
-    );
-
-    if (!eventResult.rows[0]) {
-      return;
-    }
-
-    const intentResult = await client.query(
-      `
-        SELECT *
-        FROM usdt_deposit_intents
-        WHERE network = ANY($1::text[])
-          AND status = 'pending'
-          AND deposit_amount = $2::numeric
-          AND created_at <= $3
-          AND expires_at >= $3
-        ORDER BY CASE WHEN network = $4 THEN 0 ELSE 1 END, created_at ASC
-        LIMIT 1
-        FOR UPDATE
-      `,
-      [[network.key, "ANY"], amount, chainTimestamp, network.key],
-    );
-    const intent = intentResult.rows[0];
-    if (!intent) {
-      await client.query(
-        `
-          UPDATE usdt_deposit_events
-          SET status = 'unmatched'
-          WHERE network = $1
-            AND tx_hash = $2
-            AND log_index = $3
-        `,
-        [network.key, txHash, logIndex],
-      );
-      return;
-    }
-
-    await client.query(
-      `
-        UPDATE usdt_balances
-        SET balance = balance + $2::numeric,
-            updated_at = now()
-        WHERE user_id = $1
-      `,
-      [intent.user_id, amount],
-    );
-    await client.query(
-      `
-        INSERT INTO usdt_ledger (user_id, amount, reason, source)
-        VALUES ($1, $2::numeric, 'usdt_onchain_deposit', $3)
-      `,
-      [intent.user_id, amount, `${network.key}:${txHash}:${logIndex}`],
-    );
-    await client.query(
-      `
-        UPDATE usdt_deposit_intents
-        SET status = 'credited',
-            credited_amount = $2::numeric,
-            from_address = $3,
-            tx_hash = $4,
-            log_index = $5,
-            block_number = $6,
-            confirmations = $7,
-            credited_at = now(),
-            updated_at = now()
-        WHERE id = $1
-      `,
-      [
-        intent.id,
-        amount,
-        fromAddress,
-        txHash,
-        logIndex,
-        log.blockNumber,
-        confirmations,
-      ],
-    );
-    await client.query(
-      `
-        UPDATE usdt_deposit_events
-        SET status = 'credited',
-            matched_intent_id = $4
-        WHERE network = $1
-          AND tx_hash = $2
-          AND log_index = $3
-      `,
-      [network.key, txHash, logIndex, intent.id],
-    );
+  await storeAndMatchDepositEvent(network, {
+    txHash,
+    logIndex,
+    blockNumber: log.blockNumber,
+    fromAddress,
+    toAddress,
+    amount,
+    chainTimestamp,
+    confirmations,
   });
 }
 
-async function scanNetwork(network) {
-  const provider = getProvider(network);
-  const latestBlock = await provider.getBlockNumber();
-  const safeToBlock = latestBlock - network.confirmations;
-  if (safeToBlock <= 0) {
-    return { network: network.key, scanned: 0 };
+async function reconcileUnmatchedDepositEvents(network, latestBlock) {
+  const eventsResult = await query(
+    `
+      SELECT *
+      FROM usdt_deposit_events
+      WHERE network = $1
+        AND status = 'unmatched'
+        AND created_at >= now() - interval '2 days'
+      ORDER BY created_at DESC
+      LIMIT $2
+    `,
+    [network.key, RECENT_UNMATCHED_LIMIT],
+  );
+
+  let matched = 0;
+  for (const event of eventsResult.rows) {
+    const confirmations = Math.max(0, Number(latestBlock || event.block_number) - Number(event.block_number) + 1);
+    const didMatch = await withTransaction(async (client) => matchDepositEvent(client, network, {
+      ...event,
+      confirmations,
+    }));
+    if (didMatch) {
+      matched += 1;
+    }
   }
 
-  const previousBlock = await getScannerState(network);
-  const effectivePreviousBlock = previousBlock || Math.max(0, safeToBlock - 300);
-  const fromBlock = effectivePreviousBlock + 1;
-  const toBlock = Math.min(safeToBlock, effectivePreviousBlock + MAX_BLOCK_RANGE);
-  if (fromBlock > toBlock) {
-    return { network: network.key, scanned: 0, latestBlock };
+  return {
+    checked: eventsResult.rows.length,
+    matched,
+  };
+}
+
+async function hasRecentUnresolvedDepositIntents() {
+  const result = await query(
+    `
+      SELECT 1
+      FROM usdt_deposit_intents
+      WHERE status = ANY($1::text[])
+        AND created_at >= now() - interval '2 days'
+      LIMIT 1
+    `,
+    [["pending", "expired"]],
+  );
+  return Boolean(result.rows[0]);
+}
+
+async function maybeBackfillRecentDeposits(network, provider, latestBlock) {
+  const now = Date.now();
+  const lastRunAt = Number(backfillLastRunAt.get(network.key) || 0);
+  if (now - lastRunAt < config.usdtDepositBackfillMs) {
+    return null;
+  }
+  if (!(await hasRecentUnresolvedDepositIntents())) {
+    backfillLastRunAt.set(network.key, now);
+    return null;
+  }
+
+  backfillLastRunAt.set(network.key, now);
+  const safeToBlock = latestBlock - network.confirmations;
+  const maxRange = Math.round(config.usdtDepositMaxBlockRange);
+  const fromBlock = Math.max(0, safeToBlock - Math.round(config.usdtDepositBackfillBlocks));
+  if (fromBlock > safeToBlock) {
+    return null;
   }
 
   const blockCache = new Map();
   blockCache.latestBlock = latestBlock;
-  const logs = await provider.getLogs({
-    address: network.tokenAddress,
+  let logsCount = 0;
+  for (let from = fromBlock; from <= safeToBlock; from += maxRange) {
+    const to = Math.min(safeToBlock, from + maxRange - 1);
+    const logs = await getTransferLogs(provider, network, from, to);
+    logsCount += logs.length;
+    for (const log of logs) {
+      await processDepositLog(network, log, provider, blockCache);
+    }
+  }
+
+  return {
     fromBlock,
-    toBlock,
-    topics: [
-      TRANSFER_TOPIC,
-      null,
-      zeroPadValue(network.treasuryAddress, 32),
-    ],
+    toBlock: safeToBlock,
+    logs: logsCount,
+  };
+}
+
+function canUseBscScan(network) {
+  return network.key === "BSC"
+    && Boolean(config.bscScanApiKey)
+    && Boolean(config.bscScanApiUrl);
+}
+
+function getBscScanTransferAmount(tx, fallbackDecimals) {
+  const decimals = Number(tx.tokenDecimal ?? fallbackDecimals);
+  const rawValue = BigInt(String(tx.value || "0"));
+  return roundMoney(formatUnits(rawValue, Number.isFinite(decimals) ? decimals : fallbackDecimals), 2);
+}
+
+async function scanBscScanNetwork(network) {
+  if (!canUseBscScan(network)) {
+    return {
+      enabled: false,
+      reason: "missing_api_key",
+    };
+  }
+
+  const params = new URLSearchParams({
+    chainid: config.bscScanChainId,
+    module: "account",
+    action: "tokentx",
+    contractaddress: network.tokenAddress,
+    address: network.treasuryAddress,
+    page: "1",
+    offset: String(Math.round(config.bscScanPageSize)),
+    sort: "desc",
+    apikey: config.bscScanApiKey,
   });
+
+  const response = await fetch(`${config.bscScanApiUrl}?${params.toString()}`, {
+    headers: {
+      accept: "application/json",
+    },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(`bscscan_http_${response.status}`);
+  }
+  if (!payload || (payload.status === "0" && payload.message !== "No transactions found")) {
+    throw new Error(payload?.result || payload?.message || "bscscan_error");
+  }
+
+  const rows = Array.isArray(payload.result) ? payload.result : [];
+  let checked = 0;
+  let incoming = 0;
+  for (const tx of rows) {
+    checked += 1;
+    const txTo = normalizeAddress(tx.to);
+    const contract = normalizeAddress(tx.contractAddress);
+    if (txTo !== network.treasuryAddress || contract !== network.tokenAddress) {
+      continue;
+    }
+
+    incoming += 1;
+    await storeAndMatchDepositEvent(network, {
+      txHash: String(tx.hash || ""),
+      logIndex: Number(tx.logIndex ?? tx.transactionIndex ?? 0),
+      blockNumber: Number(tx.blockNumber || 0),
+      fromAddress: normalizeAddress(tx.from),
+      toAddress: txTo,
+      amount: getBscScanTransferAmount(tx, network.decimals),
+      chainTimestamp: tx.timeStamp ? new Date(Number(tx.timeStamp) * 1000) : new Date(),
+      confirmations: Number(tx.confirmations || 0),
+    });
+  }
+
+  return {
+    enabled: true,
+    checked,
+    incoming,
+  };
+}
+
+async function scanNetwork(network) {
+  let explorer = null;
+  try {
+    explorer = await scanBscScanNetwork(network);
+  } catch (error) {
+    explorer = {
+      enabled: true,
+      error: "scan_failed",
+      message: error instanceof Error ? error.message : "unknown",
+    };
+  }
+
+  const provider = getProvider(network);
+  let latestBlock;
+  try {
+    latestBlock = await provider.getBlockNumber();
+  } catch (error) {
+    return {
+      network: network.key,
+      scanned: 0,
+      explorer,
+      rpc_error: "scan_failed",
+      message: error instanceof Error ? error.message : "unknown",
+    };
+  }
+  const safeToBlock = latestBlock - network.confirmations;
+  if (safeToBlock <= 0) {
+    return { network: network.key, scanned: 0, explorer };
+  }
+
+  const previousBlock = await getScannerState(network);
+  const effectivePreviousBlock = previousBlock || Math.max(0, safeToBlock - Math.round(config.usdtDepositInitialLookbackBlocks));
+  const fromBlock = effectivePreviousBlock + 1;
+  const toBlock = Math.min(safeToBlock, effectivePreviousBlock + Math.round(config.usdtDepositMaxBlockRange));
+  if (fromBlock > toBlock) {
+    const reconcile = await reconcileUnmatchedDepositEvents(network, latestBlock);
+    const backfill = await maybeBackfillRecentDeposits(network, provider, latestBlock);
+    return { network: network.key, scanned: 0, latestBlock, explorer, reconcile, backfill };
+  }
+
+  const blockCache = new Map();
+  blockCache.latestBlock = latestBlock;
+  const logs = await getTransferLogs(provider, network, fromBlock, toBlock);
 
   for (const log of logs) {
     await processDepositLog(network, log, provider, blockCache);
   }
 
   await setScannerState(network, toBlock);
+  const reconcile = await reconcileUnmatchedDepositEvents(network, latestBlock);
+  const backfill = await maybeBackfillRecentDeposits(network, provider, latestBlock);
   return {
     network: network.key,
     fromBlock,
     toBlock,
     logs: logs.length,
     latestBlock,
+    explorer,
+    reconcile,
+    backfill,
   };
 }
 
