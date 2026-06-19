@@ -2893,16 +2893,16 @@ async function shareInvite({ awardShareTask = false } = {}) {
     return;
   }
 
-  const bonus = Math.round(Number(state.publicConfig.referral_bonus_fire || 500));
+  const usdtBonus = Math.round(Number(state.publicConfig.referral_bet_bonus_usdt || 30));
   const inviteUrl = buildInviteUrl(state.user.telegram_id);
-  const text = `Залетай в EasyMarket. После первой ставки мне дадут ${formatFire(bonus)}.`;
+  const text = `Залетай в EasyMarket. После первой ставки мне дадут ${formatFire(usdtBonus)} USDT.`;
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
     if (awardShareTask) {
       await claimShareTask();
     } else {
-      showToast(`+${formatFire(bonus)} после первой ставки друга.`);
+      showToast(`+${formatFire(usdtBonus)} USDT после первой ставки друга.`);
     }
     return;
   }
