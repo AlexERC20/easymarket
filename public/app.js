@@ -16,7 +16,7 @@ const MARKET_BUY_CLOSE_BUFFER_MS = 400;
 const state = {
   user: null,
   market: null,
-  currency: "STAR",
+  currency: "USDT",
   balance: 0,
   usdtBalance: 0,
   usdtCashBalance: 0,
@@ -55,7 +55,7 @@ const state = {
     reason: "",
     pending: false,
     mode: "topup",
-    currency: "STAR",
+    currency: "USDT",
     network: "BSC",
     intent: null,
     pollTimer: null,
