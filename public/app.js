@@ -2080,13 +2080,6 @@ function closeBetSheet() {
   $("betSheet")?.classList.add("hidden");
 }
 
-function buildQrImageUrl(value) {
-  const data = String(value || "").trim();
-  return data
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=216x216&data=${encodeURIComponent(data)}`
-    : "";
-}
-
 function renderTopupSheet() {
   const isTopupMode = state.topup.mode !== "withdraw";
   const currency = normalizeCurrency(state.topup.currency);
@@ -2107,22 +2100,11 @@ function renderTopupSheet() {
     button.classList.toggle("active", normalizeCurrency(button.dataset.walletCurrency) === currency);
   });
   $("usdtDepositPanel")?.classList.toggle("hidden", !isUsdt || !isTopupMode);
-  document.querySelector(".topup-packages")?.classList.toggle("hidden", isUsdt);
   $("usdtDepositIntentBox")?.classList.toggle("hidden", !isUsdt || !intent);
   if ($("usdtDepositExactAmount")) {
     $("usdtDepositExactAmount").textContent = intent
       ? `${Number(intent.deposit_amount || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`
       : "";
-  }
-  if ($("usdtDepositStatus")) {
-    const statusText = intent?.status === "credited"
-      ? "Зачислено на баланс"
-      : intent?.status === "expired"
-        ? "Заявка истекла, создай новую"
-        : intent
-          ? "Ждем перевод и подтверждения сети"
-          : "";
-    $("usdtDepositStatus").textContent = statusText;
   }
   if ($("usdtDepositNetworkHint")) {
     $("usdtDepositNetworkHint").textContent = intent ? "Можно отправить в BEP20 или ERC20" : "";
@@ -2135,17 +2117,9 @@ function renderTopupSheet() {
     const cardType = card.dataset.usdtAddressCard;
     card.classList.toggle("hidden", !(hasPendingIntent && cardType === "evm" && intent?.to_address));
   });
-  if ($("usdtEvmAddressLabel")) {
-    $("usdtEvmAddressLabel").textContent = intent?.network_label
-      ? `${intent.network_label} USDT адрес`
-      : "BEP20 / ERC20 USDT адрес";
-  }
+  if ($("usdtEvmAddressLabel")) $("usdtEvmAddressLabel").textContent = "Кошелек для пополнения";
   const depositAddress = hasPendingIntent ? (intent?.to_address || "") : "";
   if ($("usdtEvmAddress")) $("usdtEvmAddress").textContent = depositAddress;
-  if ($("usdtDepositQr")) {
-    $("usdtDepositQr").classList.toggle("hidden", !depositAddress);
-    $("usdtDepositQr").src = depositAddress ? buildQrImageUrl(depositAddress) : "";
-  }
   if ($("walletSheetTitle")) {
     $("walletSheetTitle").textContent = isTopupMode
       ? `Пополнить ${isUsdt ? "USDT" : "звезды"}`
@@ -2165,7 +2139,6 @@ function renderTopupSheet() {
       ? `Бонус: ${formatCurrencyAmount(state.usdtBonusBalance, "USDT")}`
       : "";
   }
-  if ($("topupAmountValue")) $("topupAmountValue").textContent = formatCurrencyAmount(amount, currency);
   if ($("topupCustomAmount") && document.activeElement !== $("topupCustomAmount")) {
     $("topupCustomAmount").value = currency === "USDT"
       ? String(amount)
@@ -2177,17 +2150,16 @@ function renderTopupSheet() {
     $("topupCustomAmount").disabled = hasPendingIntent;
   }
   if ($("topupReason")) {
+    let topupReasonText = "";
     if (state.topup.reason) {
-      $("topupReason").textContent = isUsdt && !intent
-        ? `${state.topup.reason} После создания заявки покажем адрес и QR. Отправить можно в BEP20 или ERC20.`
-        : state.topup.reason;
+      topupReasonText = state.topup.reason;
     } else if (isUsdt && intent) {
-      $("topupReason").textContent = `Отправь ровно ${Number(intent.deposit_amount || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT в BEP20 или ERC20. Баланс обновится автоматически.`;
-    } else if (isUsdt) {
-      $("topupReason").textContent = "Укажи сумму от 15 USDT. После создания заявки покажем адрес и QR. Отправить можно в BEP20 или ERC20.";
-    } else {
-      $("topupReason").textContent = "Звезды зачислятся в баланс после оплаты.";
+      topupReasonText = `Отправь ровно ${Number(intent.deposit_amount || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT в BEP20 или ERC20. Баланс обновится автоматически.`;
+    } else if (!isUsdt) {
+      topupReasonText = "Звезды зачислятся в баланс после оплаты.";
     }
+    $("topupReason").textContent = topupReasonText;
+    $("topupReason").classList.toggle("hidden", !topupReasonText);
   }
   if ($("topupBuyBtn")) {
     $("topupBuyBtn").disabled = !isTopupMode || state.topup.pending || !state.user || (isUsdt && !hasUsdtNetworks);
@@ -2195,10 +2167,6 @@ function renderTopupSheet() {
       ? (hasPendingIntent ? "Скопировать адрес" : "Создать заявку")
       : (state.topup.pending ? "Открываю оплату..." : `Купить ${formatCurrencyAmount(amount, currency)}`);
   }
-  document.querySelectorAll("[data-topup-package]").forEach((button) => {
-    button.disabled = hasPendingIntent;
-    button.classList.toggle("active", Number(button.dataset.topupPackage) === amount);
-  });
 }
 
 function openTopupSheet(amount, reason = "", mode = "topup") {
@@ -2729,19 +2697,6 @@ $("walletModeWithdrawBtn")?.addEventListener("click", () => {
     triggerHaptic("selection");
     state.expanded[key] = !state.expanded[key];
     render();
-  });
-});
-
-document.querySelectorAll("[data-topup-package]").forEach((button) => {
-  button.addEventListener("click", () => {
-    if (button.disabled) {
-      return;
-    }
-    triggerHaptic("selection");
-    state.topup.mode = "topup";
-    state.topup.amount = normalizeTopupAmount(button.dataset.topupPackage, state.topup.currency);
-    state.topup.reason = "";
-    renderTopupSheet();
   });
 });
 

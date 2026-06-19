@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260619-12" />
+    <link rel="stylesheet" href="/styles.css?v=20260619-13" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -168,29 +168,20 @@
           </div>
           <div class="topup-body">
             <div id="topupModePanel" class="wallet-mode-panel">
-              <strong><span id="topupAmountValue">100</span></strong>
               <label class="topup-custom-amount">
-                <span>Своя сумма</span>
                 <input id="topupCustomAmount" type="number" min="1" max="100000" step="0.01" inputmode="decimal" value="100" />
               </label>
-              <div class="topup-packages" role="group" aria-label="Пакеты пополнения">
-                <button type="button" data-topup-package="100">100</button>
-                <button type="button" data-topup-package="1000">1 000</button>
-                <button type="button" data-topup-package="10000">10 000</button>
-              </div>
               <p id="topupReason">Зачислим в баланс после оплаты.</p>
               <div id="usdtDepositPanel" class="usdt-deposit-panel hidden">
                 <div id="usdtDepositIntentBox" class="usdt-deposit-intent hidden">
                   <small>Отправь ровно</small>
                   <strong id="usdtDepositExactAmount">100.00 USDT</strong>
-                  <span id="usdtDepositStatus">Ждем перевод</span>
                   <span id="usdtDepositNetworkHint">BEP20 или ERC20</span>
                   <button id="usdtCancelIntentBtn" class="usdt-cancel-intent" type="button">Отменить заявку</button>
                 </div>
                 <div class="usdt-address-card hidden" data-usdt-address-card="evm">
-                  <small id="usdtEvmAddressLabel">BEP20 / ERC20 USDT адрес</small>
+                  <small id="usdtEvmAddressLabel">Кошелек для пополнения</small>
                   <code id="usdtEvmAddress"></code>
-                  <img id="usdtDepositQr" class="usdt-deposit-qr hidden" alt="QR адреса USDT" />
                   <button type="button" data-copy-address="evm">Скопировать</button>
                 </div>
               </div>
@@ -421,6 +412,6 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
-    <script src="/app.js?v=20260619-12" type="module"></script>
+    <script src="/app.js?v=20260619-13" type="module"></script>
   </body>
 </html>

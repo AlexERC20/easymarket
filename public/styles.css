@@ -1243,13 +1243,6 @@ code {
   gap: 6px;
 }
 
-.topup-custom-amount span {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
 .topup-custom-amount input {
   width: 100%;
   border: 1px solid var(--line-soft);
@@ -1280,25 +1273,8 @@ code {
   text-align: center;
 }
 
-.topup-packages {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
-.topup-packages button {
-  min-height: 44px;
-  border: 1px solid var(--line);
-  border-radius: 13px;
-  background: #141b27;
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 950;
-}
-
-.topup-packages button.active {
-  border-color: rgba(18, 153, 243, 0.58);
-  background: rgba(18, 153, 243, 0.18);
+.topup-body p.hidden {
+  display: none;
 }
 
 .usdt-deposit-panel {
@@ -1371,20 +1347,6 @@ code {
   border-color: rgba(248, 113, 113, 0.32);
   background: rgba(248, 113, 113, 0.1);
   color: rgba(254, 202, 202, 0.95);
-}
-
-.usdt-deposit-qr {
-  width: 108px;
-  height: 108px;
-  justify-self: center;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 14px;
-  background: #fff;
-  padding: 6px;
-}
-
-.usdt-deposit-qr.hidden {
-  display: none;
 }
 
 .leaderboard-panel {
