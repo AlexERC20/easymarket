@@ -68,10 +68,6 @@ export const config = {
     process.env.PUBLIC_USDT_EVM_ADDRESS
       || "0x51592e92e48b94f3714c24c7597fb8a4ecfb36cd"
   ).trim(),
-  publicUsdtTonAddress: (
-    process.env.PUBLIC_USDT_TON_ADDRESS
-      || "UQAFrUUrG0-cFLbZDkYA_RuGKSjuaULQPp7B7xxsmbzoaBdh"
-  ).trim(),
   usdtDepositScanEnabled: parseBoolean(process.env.USDT_DEPOSIT_SCAN_ENABLED, true),
   usdtDepositScanMs: parseNumber(process.env.USDT_DEPOSIT_SCAN_MS, 20_000, 5_000),
   usdtDepositIntentMinutes: parseNumber(process.env.USDT_DEPOSIT_INTENT_MINUTES, 60, 5),

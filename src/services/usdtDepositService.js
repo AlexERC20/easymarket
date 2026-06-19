@@ -93,8 +93,6 @@ export function getPublicUsdtDepositNetworks() {
   return getConfiguredUsdtDepositNetworks().map((network) => ({
     key: network.key,
     label: network.label,
-    address: network.treasuryAddress,
-    token_address: network.tokenAddress,
     confirmations: network.confirmations,
   }));
 }

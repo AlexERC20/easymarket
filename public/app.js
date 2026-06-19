@@ -98,8 +98,7 @@ const state = {
     av_channel_url: "https://t.me/erc20coin",
     av_chat_url: "https://t.me/thedaomaker",
     private_chat_url: "https://t.me/tribute/app?startapp=stKL",
-    usdt_evm_address: "0x51592e92e48b94f3714c24c7597fb8a4ecfb36cd",
-    usdt_ton_address: "UQAFrUUrG0-cFLbZDkYA_RuGKSjuaULQPp7B7xxsmbzoaBdh",
+    usdt_evm_address: "",
     usdt_deposit_scan_enabled: false,
     usdt_deposit_networks: [],
     stars_invoice_enabled: false,
@@ -2135,15 +2134,15 @@ function renderTopupSheet() {
     $("usdtCancelIntentBtn").disabled = state.topup.pending;
   }
   document.querySelectorAll("[data-usdt-address-card]").forEach((card) => {
-    card.classList.toggle("hidden", !hasPendingIntent);
+    const cardType = card.dataset.usdtAddressCard;
+    card.classList.toggle("hidden", !(hasPendingIntent && cardType === "evm" && intent?.to_address));
   });
   if ($("usdtEvmAddressLabel")) {
     $("usdtEvmAddressLabel").textContent = intent?.network_label
       ? `${intent.network_label} USDT адрес`
       : "ERC20 / BEP20";
   }
-  if ($("usdtEvmAddress")) $("usdtEvmAddress").textContent = state.publicConfig.usdt_evm_address;
-  if ($("usdtTonAddress")) $("usdtTonAddress").textContent = state.publicConfig.usdt_ton_address;
+  if ($("usdtEvmAddress")) $("usdtEvmAddress").textContent = hasPendingIntent ? (intent?.to_address || "") : "";
   if ($("walletSheetTitle")) {
     $("walletSheetTitle").textContent = isTopupMode
       ? `Пополнить ${isUsdt ? "USDT" : "звезды"}`
@@ -2363,7 +2362,7 @@ async function startStarsTopup() {
       await createUsdtDepositIntent();
       return;
     }
-    const copied = await copyToClipboard(state.topup.intent.to_address || state.publicConfig.usdt_evm_address);
+    const copied = await copyToClipboard(state.topup.intent.to_address || "");
     triggerHaptic(copied ? "success" : "warning");
     showToast(copied ? "Адрес скопирован." : "Скопируй адрес вручную.");
     return;
@@ -2812,10 +2811,7 @@ document.querySelectorAll("[data-leaderboard-currency]").forEach((button) => {
 
 document.querySelectorAll("[data-copy-address]").forEach((button) => {
   button.addEventListener("click", async () => {
-    const type = button.dataset.copyAddress;
-    const address = type === "ton"
-      ? state.publicConfig.usdt_ton_address
-      : state.publicConfig.usdt_evm_address;
+    const address = state.topup.intent?.to_address || "";
     const copied = await copyToClipboard(address);
     triggerHaptic(copied ? "success" : "warning");
     showToast(copied ? "Адрес скопирован." : "Скопируй адрес вручную.");

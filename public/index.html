@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260619-9" />
+    <link rel="stylesheet" href="/styles.css?v=20260619-10" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -156,8 +156,8 @@
             <button id="walletModeWithdrawBtn" type="button">Вывести</button>
           </div>
           <div class="wallet-currency-toggle" role="tablist" aria-label="Валюта пополнения">
-            <button class="active" type="button" data-wallet-currency="STAR">Звезды</button>
-            <button type="button" data-wallet-currency="USDT">USDT</button>
+            <button type="button" data-wallet-currency="STAR">Звезды</button>
+            <button class="active" type="button" data-wallet-currency="USDT">USDT</button>
           </div>
           <div class="wallet-balance-line">
             <span>Баланс</span>
@@ -192,13 +192,8 @@
                 </div>
                 <div class="usdt-address-card hidden" data-usdt-address-card="evm">
                   <small id="usdtEvmAddressLabel">ERC20 / BEP20</small>
-                  <code id="usdtEvmAddress">0x51592e92e48b94f3714c24c7597fb8a4ecfb36cd</code>
+                  <code id="usdtEvmAddress"></code>
                   <button type="button" data-copy-address="evm">Скопировать</button>
-                </div>
-                <div class="usdt-address-card hidden" data-usdt-address-card="ton">
-                  <small>TON</small>
-                  <code id="usdtTonAddress">UQAFrUUrG0-cFLbZDkYA_RuGKSjuaULQPp7B7xxsmbzoaBdh</code>
-                  <button type="button" data-copy-address="ton">Скопировать</button>
                 </div>
               </div>
               <button id="topupBuyBtn" class="trade-confirm" type="button">Купить</button>
@@ -428,6 +423,6 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
-    <script src="/app.js?v=20260619-9" type="module"></script>
+    <script src="/app.js?v=20260619-10" type="module"></script>
   </body>
 </html>

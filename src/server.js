@@ -216,8 +216,6 @@ app.get("/api/public/config", (_req, res) => {
     av_channel_url: config.publicAvChannelUrl,
     av_chat_url: config.publicAvChatUrl,
     private_chat_url: config.publicPrivateChatUrl,
-    usdt_evm_address: config.publicUsdtEvmAddress,
-    usdt_ton_address: config.publicUsdtTonAddress,
     usdt_deposit_scan_enabled: config.usdtDepositScanEnabled,
     usdt_deposit_networks: getPublicUsdtDepositNetworks(),
     stars_invoice_enabled: Boolean(config.telegramBotToken),
