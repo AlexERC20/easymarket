@@ -2116,7 +2116,7 @@ function renderTopupSheet() {
       : "";
   }
   if ($("usdtDepositNetworkHint")) {
-    $("usdtDepositNetworkHint").textContent = hasPendingIntent ? "Можно отправить в BEP20 или ERC20" : "";
+    $("usdtDepositNetworkHint").textContent = hasPendingIntent ? "в BEP20 или ERC20. Баланс после зачисления обновится автоматически." : "";
   }
   if ($("usdtCancelIntentBtn")) {
     $("usdtCancelIntentBtn").classList.toggle("hidden", !hasPendingIntent);
@@ -2160,10 +2160,10 @@ function renderTopupSheet() {
   }
   if ($("topupReason")) {
     let topupReasonText = "";
-    if (state.topup.reason) {
+    if (isUsdt && hasPendingIntent) {
+      topupReasonText = "";
+    } else if (state.topup.reason) {
       topupReasonText = state.topup.reason;
-    } else if (isUsdt && hasPendingIntent) {
-      topupReasonText = `Отправь ровно ${Number(intent.deposit_amount || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT в BEP20 или ERC20. Баланс обновится автоматически.`;
     } else if (!isUsdt) {
       topupReasonText = "Звезды зачислятся в баланс после оплаты.";
     }
