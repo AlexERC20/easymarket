@@ -2108,15 +2108,15 @@ function renderTopupSheet() {
   document.querySelectorAll("[data-wallet-currency]").forEach((button) => {
     button.classList.toggle("active", normalizeCurrency(button.dataset.walletCurrency) === currency);
   });
-  $("usdtDepositPanel")?.classList.toggle("hidden", !isUsdt || !isTopupMode);
-  $("usdtDepositIntentBox")?.classList.toggle("hidden", !isUsdt || !intent);
+  $("usdtDepositPanel")?.classList.toggle("hidden", !isUsdt || !isTopupMode || !hasPendingIntent);
+  $("usdtDepositIntentBox")?.classList.toggle("hidden", !hasPendingIntent);
   if ($("usdtDepositExactAmount")) {
-    $("usdtDepositExactAmount").textContent = intent
+    $("usdtDepositExactAmount").textContent = hasPendingIntent
       ? `${Number(intent.deposit_amount || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`
       : "";
   }
   if ($("usdtDepositNetworkHint")) {
-    $("usdtDepositNetworkHint").textContent = intent ? "Можно отправить в BEP20 или ERC20" : "";
+    $("usdtDepositNetworkHint").textContent = hasPendingIntent ? "Можно отправить в BEP20 или ERC20" : "";
   }
   if ($("usdtCancelIntentBtn")) {
     $("usdtCancelIntentBtn").classList.toggle("hidden", !hasPendingIntent);
@@ -2162,7 +2162,7 @@ function renderTopupSheet() {
     let topupReasonText = "";
     if (state.topup.reason) {
       topupReasonText = state.topup.reason;
-    } else if (isUsdt && intent) {
+    } else if (isUsdt && hasPendingIntent) {
       topupReasonText = `Отправь ровно ${Number(intent.deposit_amount || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT в BEP20 или ERC20. Баланс обновится автоматически.`;
     } else if (!isUsdt) {
       topupReasonText = "Звезды зачислятся в баланс после оплаты.";
