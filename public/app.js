@@ -148,6 +148,14 @@ const normalizeTopupAmount = (value, currency = state.topup.currency) => {
     ? Math.round(capped * 100) / 100
     : Math.round(capped);
 };
+const hasTopupAmountValue = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return false;
+  }
+  const numeric = Number(raw.replace(",", "."));
+  return Number.isFinite(numeric) && numeric > 0;
+};
 const getActiveBalance = () => (state.currency === "USDT" ? state.usdtBalance : state.balance);
 const formatSignedCurrencyAmount = (value, currency = state.currency) => {
   const numeric = Number(value || 0);
@@ -2086,7 +2094,8 @@ function renderTopupSheet() {
   const isUsdt = currency === "USDT";
   const intent = state.topup.intent;
   const hasPendingIntent = isUsdt && intent?.status === "pending";
-  const amount = normalizeTopupAmount(state.topup.amount || 1, currency);
+  const hasAmount = hasTopupAmountValue(state.topup.amount);
+  const amount = hasAmount ? normalizeTopupAmount(state.topup.amount, currency) : "";
   state.topup.amount = amount;
   const networks = Array.isArray(state.publicConfig.usdt_deposit_networks)
     ? state.publicConfig.usdt_deposit_networks
@@ -2140,9 +2149,9 @@ function renderTopupSheet() {
       : "";
   }
   if ($("topupCustomAmount") && document.activeElement !== $("topupCustomAmount")) {
-    $("topupCustomAmount").value = currency === "USDT"
-      ? String(amount)
-      : String(Math.round(amount));
+    $("topupCustomAmount").value = hasAmount
+      ? (currency === "USDT" ? String(amount) : String(Math.round(amount)))
+      : "";
   }
   if ($("topupCustomAmount")) {
     $("topupCustomAmount").step = currency === "USDT" ? "0.01" : "1";
@@ -2165,12 +2174,16 @@ function renderTopupSheet() {
     $("topupBuyBtn").disabled = !isTopupMode || state.topup.pending || !state.user || (isUsdt && !hasUsdtNetworks);
     $("topupBuyBtn").textContent = isUsdt
       ? (hasPendingIntent ? "Скопировать адрес" : "Создать заявку")
-      : (state.topup.pending ? "Открываю оплату..." : `Купить ${formatCurrencyAmount(amount, currency)}`);
+      : (state.topup.pending
+        ? "Открываю оплату..."
+        : hasAmount
+          ? `Купить ${formatCurrencyAmount(amount, currency)}`
+          : "Купить");
   }
 }
 
 function openTopupSheet(amount, reason = "", mode = "topup") {
-  state.topup.amount = normalizeTopupAmount(amount || 1, state.currency);
+  state.topup.amount = hasTopupAmountValue(amount) ? normalizeTopupAmount(amount, state.currency) : "";
   state.topup.reason = reason;
   state.topup.mode = mode === "withdraw" ? "withdraw" : "topup";
   state.topup.currency = state.currency;
@@ -2260,8 +2273,13 @@ async function createUsdtDepositIntent() {
     showToast("Сначала нужен пользователь.");
     return;
   }
+  if (!hasTopupAmountValue(state.topup.amount)) {
+    triggerHaptic("warning");
+    showToast("Введи сумму пополнения.");
+    return;
+  }
 
-  const amount = normalizeTopupAmount(state.topup.amount || 1, "USDT");
+  const amount = normalizeTopupAmount(state.topup.amount, "USDT");
   state.topup.pending = true;
   renderTopupSheet();
   try {
@@ -2327,8 +2345,13 @@ async function startStarsTopup() {
     showToast("Сначала нужен пользователь.");
     return;
   }
+  if (!hasTopupAmountValue(state.topup.amount)) {
+    triggerHaptic("warning");
+    showToast("Введи сумму пополнения.");
+    return;
+  }
 
-  const amount = normalizeTopupAmount(state.topup.amount || 1, state.topup.currency);
+  const amount = normalizeTopupAmount(state.topup.amount, state.topup.currency);
   if (state.topup.currency === "USDT") {
     if (!state.topup.intent || state.topup.intent.status === "expired" || state.topup.intent.status === "credited") {
       await createUsdtDepositIntent();
@@ -2626,7 +2649,7 @@ if (refreshButton) {
 
 $("walletBtn").addEventListener("click", () => {
   triggerHaptic("selection");
-  openTopupSheet(100, "", "topup");
+  openTopupSheet("", "", "topup");
 });
 
 $("leaderboardBtn")?.addEventListener("click", () => {
@@ -2666,7 +2689,10 @@ $("topupCustomAmount")?.addEventListener("input", () => {
   if (state.topup.intent?.status === "pending") {
     return;
   }
-  state.topup.amount = normalizeTopupAmount($("topupCustomAmount").value, state.topup.currency);
+  const rawAmount = $("topupCustomAmount").value;
+  state.topup.amount = hasTopupAmountValue(rawAmount)
+    ? normalizeTopupAmount(rawAmount, state.topup.currency)
+    : "";
   state.topup.reason = "";
   renderTopupSheet();
 });
