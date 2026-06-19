@@ -979,6 +979,33 @@ code {
   margin-top: 13px;
 }
 
+.task-list.hidden {
+  display: none;
+}
+
+.task-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.task-tabs button {
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--muted);
+  padding: 10px;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.task-tabs button.active {
+  border-color: rgba(94, 161, 255, 0.46);
+  background: rgba(94, 161, 255, 0.16);
+  color: var(--text);
+}
+
 .task-row {
   border: 1px solid var(--line-soft);
   border-radius: 14px;
@@ -1029,6 +1056,82 @@ code {
   border-color: rgba(255, 184, 77, 0.5);
   background: rgba(255, 184, 77, 0.16);
   color: var(--fire);
+}
+
+.task-stats-panel {
+  margin-top: 13px;
+}
+
+.task-stats-panel.hidden {
+  display: none;
+}
+
+.task-stats-list {
+  display: grid;
+  gap: 8px;
+  max-height: 390px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.task-stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+  padding: 11px;
+}
+
+.task-stat-main,
+.task-stat-numbers {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.task-stat-main strong,
+.task-stat-numbers strong {
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.task-stat-main small,
+.task-stat-numbers small,
+.task-stat-empty {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.task-stat-main strong,
+.task-stat-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-stat-numbers {
+  text-align: right;
+  flex: 0 0 auto;
+}
+
+.task-stat-numbers .profit {
+  color: var(--yes);
+}
+
+.task-stat-numbers .loss {
+  color: var(--no);
+}
+
+.task-stat-empty {
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+  padding: 13px;
+  line-height: 1.35;
 }
 
 .task-limit {
@@ -1098,6 +1201,23 @@ code {
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wallet-balance-values {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: right;
+}
+
+.wallet-balance-values small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.wallet-balance-values small.hidden {
+  display: none;
 }
 
 .wallet-mode-panel {

@@ -132,6 +132,7 @@ function mapPosition(row) {
     side: row.side,
     shares: toNumber(row.shares),
     spent: toNumber(row.spent),
+    bonus_spent: toNumber(row.bonus_spent),
     avg_price: toNumber(row.avg_price),
     payout: toNumber(row.payout),
     pnl: toNumber(row.pnl),
@@ -264,6 +265,43 @@ function mapFireLedgerEvent(row) {
     reason: row.reason,
     source: row.source,
     created_at: row.created_at,
+  };
+}
+
+function mapUsdtLedgerEvent(row) {
+  return {
+    id: Number(row.id),
+    event_id: row.event_id,
+    ledger_type: row.ledger_type,
+    telegram_id: row.telegram_id,
+    username: row.username,
+    first_name: row.first_name,
+    amount: toNumber(row.amount),
+    reason: row.reason,
+    source: row.source,
+    created_at: row.created_at,
+  };
+}
+
+function mapUserMarketStat(row) {
+  return {
+    market_id: Number(row.market_id),
+    symbol: row.symbol,
+    market_type: row.market_type,
+    label: row.label,
+    title: row.title,
+    question: row.question,
+    team: row.team,
+    icon: row.icon,
+    status: row.market_status,
+    winner: row.winner,
+    currency: normalizeCurrency(row.currency),
+    positions_count: Number(row.positions_count || 0),
+    open_positions_count: Number(row.open_positions_count || 0),
+    spent: toNumber(row.spent),
+    payout: toNumber(row.payout),
+    pnl: toNumber(row.pnl),
+    updated_at: row.updated_at,
   };
 }
 
@@ -707,6 +745,14 @@ export async function upsertUser(input) {
       `,
       [user.id],
     );
+    await client.query(
+      `
+        INSERT INTO usdt_bonus_balances (user_id, balance, updated_at)
+        VALUES ($1, 0, now())
+        ON CONFLICT (user_id) DO NOTHING
+      `,
+      [user.id],
+    );
 
     if (safeReferredBy) {
       const referralSignupResult = await client.query(
@@ -726,6 +772,27 @@ export async function upsertUser(input) {
           "referral_signup_bonus",
           `referral:${safeReferredBy}`,
         );
+      }
+      const signupBonusUsdt = Math.round(Number(config.referralSignupBonusUsdt || 0) * 100) / 100;
+      if (signupBonusUsdt > 0) {
+        const usdtSignupResult = await client.query(
+          `
+            INSERT INTO usdt_bonus_claims (user_id, task_key, amount, source)
+            VALUES ($1, 'referral_signup_usdt', $2::numeric, $3)
+            ON CONFLICT DO NOTHING
+            RETURNING *
+          `,
+          [user.id, signupBonusUsdt, `referral:${safeReferredBy}`],
+        );
+        if (usdtSignupResult.rows[0]) {
+          await adjustUsdtBonusBalance(
+            client,
+            user.id,
+            signupBonusUsdt,
+            "referral_signup_bonus_usdt",
+            `referral:${safeReferredBy}`,
+          );
+        }
       }
     }
 
@@ -775,7 +842,33 @@ async function getUsdtBalanceByUserId(userId) {
   return toNumber(result.rows[0]?.balance);
 }
 
+async function getUsdtBonusBalanceByUserId(userId) {
+  const result = await query(
+    `
+      SELECT balance
+      FROM usdt_bonus_balances
+      WHERE user_id = $1
+      LIMIT 1
+    `,
+    [userId],
+  );
+
+  return toNumber(result.rows[0]?.balance);
+}
+
+async function getUsdtTotalBalanceByUserId(userId) {
+  const [cashBalance, bonusBalance] = await Promise.all([
+    getUsdtBalanceByUserId(userId),
+    getUsdtBonusBalanceByUserId(userId),
+  ]);
+  return Math.round((cashBalance + bonusBalance) * 100) / 100;
+}
+
 async function getBalanceByUserIdAndCurrency(userId, currency) {
+  if (normalizeCurrency(currency) === "USDT") {
+    return getUsdtTotalBalanceByUserId(userId);
+  }
+
   const table = balanceTableForCurrency(currency);
   const result = await query(
     `
@@ -814,15 +907,312 @@ async function adjustBalance(client, userId, amount, reason, source) {
   );
 }
 
+async function adjustUsdtBonusBalance(client, userId, amount, reason, source) {
+  const delta = Math.round(Number(amount || 0) * 100) / 100;
+  if (!Number.isFinite(delta) || Math.abs(delta) < 0.01) {
+    return;
+  }
+
+  await client.query(
+    `
+      UPDATE usdt_bonus_balances
+      SET balance = balance + $2::numeric,
+          updated_at = now()
+      WHERE user_id = $1
+    `,
+    [userId, delta],
+  );
+  await client.query(
+    `
+      INSERT INTO usdt_bonus_ledger (user_id, amount, reason, source)
+      VALUES ($1, $2::numeric, $3, $4)
+    `,
+    [userId, delta, reason, source],
+  );
+}
+
+async function getLockedCurrencyBalance(client, userId, currency) {
+  if (normalizeCurrency(currency) !== "USDT") {
+    const result = await client.query(
+      `
+        SELECT balance
+        FROM fire_balances
+        WHERE user_id = $1
+        FOR UPDATE
+      `,
+      [userId],
+    );
+    return {
+      cash: toNumber(result.rows[0]?.balance),
+      bonus: 0,
+      total: toNumber(result.rows[0]?.balance),
+    };
+  }
+
+  const cashResult = await client.query(
+    `
+      SELECT balance
+      FROM usdt_balances
+      WHERE user_id = $1
+      FOR UPDATE
+    `,
+    [userId],
+  );
+  const bonusResult = await client.query(
+    `
+      SELECT balance
+      FROM usdt_bonus_balances
+      WHERE user_id = $1
+      FOR UPDATE
+    `,
+    [userId],
+  );
+  const cash = toNumber(cashResult.rows[0]?.balance);
+  const bonus = toNumber(bonusResult.rows[0]?.balance);
+  return {
+    cash,
+    bonus,
+    total: Math.round((cash + bonus) * 100) / 100,
+  };
+}
+
+function splitUsdtSpend(amount, balances) {
+  const total = Math.round(Number(amount || 0) * 100) / 100;
+  const bonus = Math.min(Math.max(0, balances.bonus), total);
+  return {
+    bonus: Math.round(bonus * 100) / 100,
+    cash: Math.round((total - bonus) * 100) / 100,
+  };
+}
+
+function splitUsdtCredit(amount, bonusRatio) {
+  const total = Math.max(0, Math.round(Number(amount || 0) * 100) / 100);
+  const safeRatio = clamp(Number(bonusRatio || 0), 0, 1);
+  const bonus = Math.round(total * safeRatio * 100) / 100;
+  return {
+    bonus,
+    cash: Math.max(0, Math.round((total - bonus) * 100) / 100),
+  };
+}
+
+async function debitCurrencyBalance(client, userId, currency, amount, reason, source) {
+  const normalized = normalizeCurrency(currency);
+  const balances = await getLockedCurrencyBalance(client, userId, normalized);
+  const total = Math.round(Number(amount || 0) * 100) / 100;
+  if (total > balances.total) {
+    throw new Error(insufficientBalanceError(normalized));
+  }
+
+  if (normalized !== "USDT") {
+    await client.query(
+      `
+        UPDATE fire_balances
+        SET balance = balance - $2::numeric,
+            updated_at = now()
+        WHERE user_id = $1
+      `,
+      [userId, total],
+    );
+    await client.query(
+      `
+        INSERT INTO fire_ledger (user_id, amount, reason, source)
+        VALUES ($1, $2::numeric, $3, $4)
+      `,
+      [userId, -total, reason, source],
+    );
+    return {
+      cash_spent: total,
+      bonus_spent: 0,
+      balance: Math.round((balances.total - total) * 100) / 100,
+    };
+  }
+
+  const split = splitUsdtSpend(total, balances);
+  if (split.cash > 0) {
+    await client.query(
+      `
+        UPDATE usdt_balances
+        SET balance = balance - $2::numeric,
+            updated_at = now()
+        WHERE user_id = $1
+      `,
+      [userId, split.cash],
+    );
+    await client.query(
+      `
+        INSERT INTO usdt_ledger (user_id, amount, reason, source)
+        VALUES ($1, $2::numeric, $3, $4)
+      `,
+      [userId, -split.cash, reason, source],
+    );
+  }
+  if (split.bonus > 0) {
+    await adjustUsdtBonusBalance(client, userId, -split.bonus, `${reason}_bonus`, source);
+  }
+
+  return {
+    cash_spent: split.cash,
+    bonus_spent: split.bonus,
+    balance: Math.round((balances.total - total) * 100) / 100,
+  };
+}
+
+async function creditCurrencyBalance(client, userId, currency, amount, reason, source, bonusRatio = 0) {
+  const normalized = normalizeCurrency(currency);
+  const total = Math.max(0, Math.round(Number(amount || 0) * 100) / 100);
+  if (total <= 0) {
+    return {
+      cash: 0,
+      bonus: 0,
+    };
+  }
+
+  if (normalized !== "USDT") {
+    await client.query(
+      `
+        UPDATE fire_balances
+        SET balance = balance + $2::numeric,
+            updated_at = now()
+        WHERE user_id = $1
+      `,
+      [userId, total],
+    );
+    await client.query(
+      `
+        INSERT INTO fire_ledger (user_id, amount, reason, source)
+        VALUES ($1, $2::numeric, $3, $4)
+      `,
+      [userId, total, reason, source],
+    );
+    return {
+      cash: total,
+      bonus: 0,
+    };
+  }
+
+  const split = splitUsdtCredit(total, bonusRatio);
+  if (split.cash > 0) {
+    await client.query(
+      `
+        UPDATE usdt_balances
+        SET balance = balance + $2::numeric,
+            updated_at = now()
+        WHERE user_id = $1
+      `,
+      [userId, split.cash],
+    );
+    await client.query(
+      `
+        INSERT INTO usdt_ledger (user_id, amount, reason, source)
+        VALUES ($1, $2::numeric, $3, $4)
+      `,
+      [userId, split.cash, reason, source],
+    );
+  }
+  if (split.bonus > 0) {
+    await adjustUsdtBonusBalance(client, userId, split.bonus, `${reason}_bonus`, source);
+  }
+
+  return split;
+}
+
+async function getCurrencyBalanceSnapshot(client, userId, currency) {
+  const normalized = normalizeCurrency(currency);
+  if (normalized !== "USDT") {
+    const result = await client.query(
+      "SELECT balance FROM fire_balances WHERE user_id = $1",
+      [userId],
+    );
+    return {
+      cash: toNumber(result.rows[0]?.balance),
+      bonus: 0,
+      total: toNumber(result.rows[0]?.balance),
+    };
+  }
+
+  const cashResult = await client.query("SELECT balance FROM usdt_balances WHERE user_id = $1", [userId]);
+  const bonusResult = await client.query("SELECT balance FROM usdt_bonus_balances WHERE user_id = $1", [userId]);
+  const cash = toNumber(cashResult.rows[0]?.balance);
+  const bonus = toNumber(bonusResult.rows[0]?.balance);
+  return {
+    cash,
+    bonus,
+    total: Math.round((cash + bonus) * 100) / 100,
+  };
+}
+
+function getBonusRatioForAmount(bonusAmount, totalAmount) {
+  const total = Number(totalAmount || 0);
+  if (!Number.isFinite(total) || total <= 0) {
+    return 0;
+  }
+
+  return clamp(Number(bonusAmount || 0) / total, 0, 1);
+}
+
+async function getUserMarketStats(userId, limit = 40) {
+  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 40));
+  const result = await query(
+    `
+      SELECT
+        p.market_id,
+        p.currency,
+        m.symbol,
+        CASE
+          WHEN m.symbol = ANY($2) THEN 'BTC_UPDOWN'
+          WHEN m.symbol LIKE '${WORLD_CUP_SYMBOL_PREFIX}%' THEN 'WORLD_CUP_WINNER'
+          ELSE NULL
+        END AS market_type,
+        meta.team,
+        meta.icon,
+        m.question,
+        m.status AS market_status,
+        m.winner,
+        COUNT(*) AS positions_count,
+        COUNT(*) FILTER (WHERE p.status = 'open') AS open_positions_count,
+        SUM(p.spent) AS spent,
+        SUM(p.payout) AS payout,
+        SUM(p.pnl) AS pnl,
+        MAX(p.updated_at) AS updated_at
+      FROM positions p
+      JOIN markets m ON m.id = p.market_id
+      LEFT JOIN world_cup_market_meta meta ON meta.symbol = m.symbol
+      WHERE p.user_id = $1
+      GROUP BY
+        p.market_id,
+        p.currency,
+        m.symbol,
+        meta.team,
+        meta.icon,
+        m.question,
+        m.status,
+        m.winner
+      ORDER BY MAX(p.updated_at) DESC
+      LIMIT $3
+    `,
+    [userId, BTC_MARKET_SYMBOLS, safeLimit],
+  );
+
+  return result.rows.map((row) => {
+    const btcDefinition = getBtcMarketDef(row.symbol);
+    return mapUserMarketStat({
+      ...row,
+      title: btcDefinition?.title,
+      label: btcDefinition?.label,
+    });
+  });
+}
+
 export async function getUserSnapshot(telegramId) {
   const user = await getUserByTelegramId(telegramId);
   if (!user) {
     return null;
   }
 
-  const [balance, usdtBalance, positionsResult, tradesResult] = await Promise.all([
+  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats] = await Promise.all([
     getBalanceByUserId(user.id),
     getUsdtBalanceByUserId(user.id),
+    getUsdtBonusBalanceByUserId(user.id),
     query(
       `
         SELECT
@@ -854,14 +1244,19 @@ export async function getUserSnapshot(telegramId) {
       `,
       [user.id],
     ),
+    getUserMarketStats(user.id),
   ]);
+  const usdtTotalBalance = Math.round((usdtCashBalance + usdtBonusBalance) * 100) / 100;
 
   return {
     user,
     balance,
-    usdt_balance: usdtBalance,
+    usdt_balance: usdtTotalBalance,
+    usdt_cash_balance: usdtCashBalance,
+    usdt_bonus_balance: usdtBonusBalance,
     positions: positionsResult.rows.map(mapPosition),
     recent_trades: tradesResult.rows.map(mapTrade),
+    market_stats: marketStats,
   };
 }
 
@@ -1446,6 +1841,58 @@ export async function getFireLedgerEvents(input = {}) {
   return result.rows.map(mapFireLedgerEvent);
 }
 
+export async function getUsdtLedgerEvents(input = {}) {
+  const limit = Math.max(1, Math.min(250, Math.floor(Number(input.limit ?? 100) || 100)));
+  const rawAfterTs = input.after_ts ?? input.afterTs;
+  const afterDate = rawAfterTs
+    ? new Date(Number.isFinite(Number(rawAfterTs)) ? Number(rawAfterTs) : rawAfterTs)
+    : new Date(0);
+  const safeAfterDate = Number.isFinite(afterDate.getTime()) ? afterDate : new Date(0);
+  const result = await query(
+    `
+      SELECT *
+      FROM (
+        SELECT
+          ledger.id,
+          'cash:' || ledger.id::text AS event_id,
+          'cash' AS ledger_type,
+          users.telegram_id,
+          users.username,
+          users.first_name,
+          ledger.amount,
+          ledger.reason,
+          ledger.source,
+          ledger.created_at
+        FROM usdt_ledger ledger
+        JOIN users ON users.id = ledger.user_id
+        WHERE ledger.created_at > $1
+
+        UNION ALL
+
+        SELECT
+          ledger.id,
+          'bonus:' || ledger.id::text AS event_id,
+          'bonus' AS ledger_type,
+          users.telegram_id,
+          users.username,
+          users.first_name,
+          ledger.amount,
+          ledger.reason,
+          ledger.source,
+          ledger.created_at
+        FROM usdt_bonus_ledger ledger
+        JOIN users ON users.id = ledger.user_id
+        WHERE ledger.created_at > $1
+      ) ledger_events
+      ORDER BY created_at ASC, event_id ASC
+      LIMIT $2
+    `,
+    [safeAfterDate, limit],
+  );
+
+  return result.rows.map(mapUsdtLedgerEvent);
+}
+
 export async function createBtcMarket(definition = BTC_MARKET_DEFS[0], btcInput = null) {
   const existing = await getOpenMarket(definition.symbol);
   if (existing) {
@@ -1970,8 +2417,9 @@ export async function getWorldCupMarkets() {
 
 async function awardReferralBetBonus(client, buyerUser, marketId) {
   const bonusAmount = Math.round(Number(config.referralBetBonusFire || 0));
+  const usdtBonusAmount = Math.round(Number(config.referralBetBonusUsdt || 0) * 100) / 100;
   const inviterTelegramId = String(buyerUser.referred_by_telegram_id || "").trim();
-  if (bonusAmount <= 0 || !inviterTelegramId || inviterTelegramId === String(buyerUser.telegram_id)) {
+  if ((bonusAmount <= 0 && usdtBonusAmount <= 0) || !inviterTelegramId || inviterTelegramId === String(buyerUser.telegram_id)) {
     return null;
   }
 
@@ -2009,18 +2457,55 @@ async function awardReferralBetBonus(client, buyerUser, marketId) {
     return null;
   }
 
-  const bonus = await awardBonusWithDailyCap(
-    client,
-    inviter.id,
-    bonusAmount,
-    "referral_bet_bonus",
-    `referral:${buyerUser.telegram_id}:market:${marketId}`,
-  );
+  const bonus = bonusAmount > 0
+    ? await awardBonusWithDailyCap(
+      client,
+      inviter.id,
+      bonusAmount,
+      "referral_bet_bonus",
+      `referral:${buyerUser.telegram_id}:market:${marketId}`,
+    )
+    : {
+      awarded: 0,
+      daily_remaining: await getDailyBonusRemaining(client, inviter.id),
+      cap_reached: false,
+    };
+
+  let usdtBonus = null;
+  if (usdtBonusAmount > 0) {
+    const usdtBonusResult = await client.query(
+      `
+        INSERT INTO usdt_referral_bonuses (
+          inviter_user_id,
+          referred_user_id,
+          market_id,
+          amount
+        )
+        VALUES ($1, $2, $3, $4::numeric)
+        ON CONFLICT DO NOTHING
+        RETURNING *
+      `,
+      [inviter.id, buyerUser.id, marketId, usdtBonusAmount],
+    );
+    if (usdtBonusResult.rows[0]) {
+      await adjustUsdtBonusBalance(
+        client,
+        inviter.id,
+        usdtBonusAmount,
+        "referral_bet_bonus_usdt",
+        `referral:${buyerUser.telegram_id}:market:${marketId}`,
+      );
+      usdtBonus = {
+        amount: usdtBonusAmount,
+      };
+    }
+  }
 
   return {
     inviter: mapUser(inviter),
     referred: mapUser(buyerUser),
     amount: bonus.awarded,
+    usdt_bonus: usdtBonus,
     daily_remaining: bonus.daily_remaining,
     cap_reached: bonus.cap_reached,
     day_key: dayKey,
@@ -2032,8 +2517,6 @@ export async function buyOutcome(input) {
   const side = String(input.side || "").toUpperCase();
   const amount = ensurePositiveAmount(input.amount);
   const currency = normalizeCurrency(input.currency);
-  const balanceTable = balanceTableForCurrency(currency);
-  const ledgerTable = ledgerTableForCurrency(currency);
   const reasonSuffix = balanceReasonSuffix(currency);
 
   if (!Number.isSafeInteger(marketId) || marketId <= 0) {
@@ -2068,20 +2551,6 @@ export async function buyOutcome(input) {
       throw new Error("market_closed");
     }
 
-    const balanceResult = await client.query(
-      `
-        SELECT balance
-        FROM ${balanceTable}
-        WHERE user_id = $1
-        FOR UPDATE
-      `,
-      [user.id],
-    );
-    const balance = toNumber(balanceResult.rows[0]?.balance);
-    if (amount > balance) {
-      throw new Error(insufficientBalanceError(currency));
-    }
-
     const marketMinPrice = getMarketMinOutcomePrice(market);
     const quote = getBuyExecutionQuote(market, side, amount);
     if (quote.executionPrice < marketMinPrice || quote.executionPrice > 1 - marketMinPrice) {
@@ -2093,23 +2562,13 @@ export async function buyOutcome(input) {
     const shares = netAmount / quote.executionPrice;
     const nextYesPrice = quote.nextYesPrice;
     const nextNoPrice = quote.nextNoPrice;
-
-    await client.query(
-      `
-        UPDATE ${balanceTable}
-        SET balance = balance - $2::numeric,
-            updated_at = now()
-        WHERE user_id = $1
-      `,
-      [user.id, amount],
-    );
-
-    await client.query(
-      `
-        INSERT INTO ${ledgerTable} (user_id, amount, reason, source)
-        VALUES ($1, $2::numeric, $3, $4)
-      `,
-      [user.id, -amount, `${side === "YES" ? "buy_yes" : "buy_no"}${reasonSuffix}`, `market:${marketId}`],
+    const debit = await debitCurrencyBalance(
+      client,
+      user.id,
+      currency,
+      amount,
+      `${side === "YES" ? "buy_yes" : "buy_no"}${reasonSuffix}`,
+      `market:${marketId}`,
     );
 
     await client.query(
@@ -2139,20 +2598,22 @@ export async function buyOutcome(input) {
           shares,
           spent,
           avg_price,
+          bonus_spent,
           currency,
           status,
           updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', now())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'open', now())
         ON CONFLICT (user_id, market_id, side, currency) DO UPDATE SET
           shares = positions.shares + EXCLUDED.shares,
           spent = positions.spent + EXCLUDED.spent,
+          bonus_spent = positions.bonus_spent + EXCLUDED.bonus_spent,
           avg_price = (positions.spent + EXCLUDED.spent) / NULLIF(positions.shares + EXCLUDED.shares, 0),
           status = 'open',
           updated_at = now()
         RETURNING *
       `,
-      [user.id, marketId, side, shares, amount, quote.executionPrice, currency],
+      [user.id, marketId, side, shares, amount, quote.executionPrice, debit.bonus_spent, currency],
     );
 
     const tradeResult = await client.query(
@@ -2167,20 +2628,15 @@ export async function buyOutcome(input) {
     const referralBonus = await awardReferralBetBonus(client, user, marketId);
     const dailyBetBonus = await claimDailyTaskForUser(client, user, "daily_bet");
 
-    const finalBalanceResult = await client.query(
-      `
-        SELECT balance
-        FROM ${balanceTable}
-        WHERE user_id = $1
-      `,
-      [user.id],
-    );
+    const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
     return {
       ok: true,
       currency,
-      balance: toNumber(finalBalanceResult.rows[0]?.balance),
-      currency_balance: toNumber(finalBalanceResult.rows[0]?.balance),
+      balance: finalBalance.total,
+      currency_balance: finalBalance.total,
+      currency_cash_balance: finalBalance.cash,
+      currency_bonus_balance: finalBalance.bonus,
       position: mapPosition(positionResult.rows[0]),
       trade: mapTrade(tradeResult.rows[0]),
       referral_bonus: referralBonus,
@@ -2293,8 +2749,6 @@ export async function sellOutcome(input) {
 
     const side = String(position.side || requestedSide).toUpperCase();
     const currency = normalizeCurrency(position.currency);
-    const balanceTable = balanceTableForCurrency(currency);
-    const ledgerTable = ledgerTableForCurrency(currency);
     const reasonSuffix = balanceReasonSuffix(currency);
     const marketId = Number(position.market_id);
     const marketResult = await client.query(
@@ -2340,29 +2794,23 @@ export async function sellOutcome(input) {
     const gross = quote.gross;
     const soldRatio = sharesToSell / positionShares;
     const spentSold = toNumber(position.spent) * soldRatio;
+    const bonusSpentSold = toNumber(position.bonus_spent) * soldRatio;
     const fee = calculateProfitFee(gross - spentSold);
     const proceeds = Math.max(0, Math.round((gross - fee) * 100) / 100);
     const realizedPnl = proceeds - spentSold;
     const remainingShares = Math.max(0, positionShares - sharesToSell);
     const remainingSpent = Math.max(0, toNumber(position.spent) - spentSold);
+    const remainingBonusSpent = Math.max(0, toNumber(position.bonus_spent) - bonusSpentSold);
     const isFullExit = remainingShares <= 0.00000001;
-
-    await client.query(
-      `
-        UPDATE ${balanceTable}
-        SET balance = balance + $2::numeric,
-            updated_at = now()
-        WHERE user_id = $1::bigint
-      `,
-      [user.id, proceeds],
-    );
-
-    await client.query(
-      `
-        INSERT INTO ${ledgerTable} (user_id, amount, reason, source)
-        VALUES ($1::bigint, $2::numeric, $3::text, $4::text)
-      `,
-      [user.id, proceeds, `${side === "YES" ? "sell_yes" : "sell_no"}${reasonSuffix}`, `market:${marketId}`],
+    const bonusRatio = getBonusRatioForAmount(bonusSpentSold, spentSold);
+    await creditCurrencyBalance(
+      client,
+      user.id,
+      currency,
+      proceeds,
+      `${side === "YES" ? "sell_yes" : "sell_no"}${reasonSuffix}`,
+      `market:${marketId}`,
+      bonusRatio,
     );
 
     const tradeResult = await client.query(
@@ -2381,13 +2829,15 @@ export async function sellOutcome(input) {
             $1::bigint AS position_id,
             $2::numeric AS remaining_shares,
             $3::numeric AS remaining_spent,
-            $4::numeric AS proceeds,
-            $5::numeric AS realized_pnl,
-            $6::text AS next_status
+            $4::numeric AS remaining_bonus_spent,
+            $5::numeric AS proceeds,
+            $6::numeric AS realized_pnl,
+            $7::text AS next_status
         )
         UPDATE positions
         SET shares = sale_input.remaining_shares,
             spent = sale_input.remaining_spent,
+            bonus_spent = sale_input.remaining_bonus_spent,
             avg_price = CASE
               WHEN sale_input.remaining_shares > 0
                 THEN sale_input.remaining_spent / sale_input.remaining_shares
@@ -2405,6 +2855,7 @@ export async function sellOutcome(input) {
         position.id,
         isFullExit ? 0 : remainingShares,
         isFullExit ? 0 : remainingSpent,
+        isFullExit ? 0 : remainingBonusSpent,
         proceeds,
         realizedPnl,
         isFullExit ? "sold" : "open",
@@ -2432,20 +2883,15 @@ export async function sellOutcome(input) {
       ],
     );
 
-    const finalBalanceResult = await client.query(
-      `
-        SELECT balance
-        FROM ${balanceTable}
-        WHERE user_id = $1
-      `,
-      [user.id],
-    );
+    const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
     return {
       ok: true,
       currency,
-      balance: toNumber(finalBalanceResult.rows[0]?.balance),
-      currency_balance: toNumber(finalBalanceResult.rows[0]?.balance),
+      balance: finalBalance.total,
+      currency_balance: finalBalance.total,
+      currency_cash_balance: finalBalance.cash,
+      currency_bonus_balance: finalBalance.bonus,
       position: mapPosition(positionUpdateResult.rows[0]),
       trade: mapTrade(tradeResult.rows[0]),
       market: mapMarket({
@@ -2482,26 +2928,17 @@ async function refundMarket(client, market, message) {
 
   for (const position of positions.rows) {
     const currency = normalizeCurrency(position.currency);
-    const balanceTable = balanceTableForCurrency(currency);
-    const ledgerTable = ledgerTableForCurrency(currency);
     const reasonSuffix = balanceReasonSuffix(currency);
     const refund = toNumber(position.spent);
     if (refund > 0) {
-      await client.query(
-        `
-          UPDATE ${balanceTable}
-          SET balance = balance + $2,
-              updated_at = now()
-          WHERE user_id = $1
-        `,
-        [position.user_id, refund],
-      );
-      await client.query(
-        `
-          INSERT INTO ${ledgerTable} (user_id, amount, reason, source)
-          VALUES ($1, $2, $3, $4)
-        `,
-        [position.user_id, refund, `market_refund${reasonSuffix}`, `market:${market.id}:${message}`],
+      await creditCurrencyBalance(
+        client,
+        position.user_id,
+        currency,
+        refund,
+        `market_refund${reasonSuffix}`,
+        `market:${market.id}:${message}`,
+        getBonusRatioForAmount(position.bonus_spent, position.spent),
       );
     }
   }
@@ -2600,8 +3037,6 @@ export async function resolveExpiredMarkets() {
 
       for (const position of positions.rows) {
         const currency = normalizeCurrency(position.currency);
-        const balanceTable = balanceTableForCurrency(currency);
-        const ledgerTable = ledgerTableForCurrency(currency);
         const reasonSuffix = balanceReasonSuffix(currency);
         const shares = toNumber(position.shares);
         const spent = toNumber(position.spent);
@@ -2623,21 +3058,14 @@ export async function resolveExpiredMarkets() {
         );
 
         if (payout > 0) {
-          await client.query(
-            `
-              UPDATE ${balanceTable}
-              SET balance = balance + $2,
-                  updated_at = now()
-              WHERE user_id = $1
-            `,
-            [position.user_id, payout],
-          );
-          await client.query(
-            `
-              INSERT INTO ${ledgerTable} (user_id, amount, reason, source)
-              VALUES ($1, $2, $3, $4)
-            `,
-            [position.user_id, payout, `market_payout${reasonSuffix}`, `market:${currentMarket.id}`],
+          await creditCurrencyBalance(
+            client,
+            position.user_id,
+            currency,
+            payout,
+            `market_payout${reasonSuffix}`,
+            `market:${currentMarket.id}`,
+            getBonusRatioForAmount(position.bonus_spent, position.spent),
           );
         }
       }
@@ -2679,6 +3107,64 @@ export async function getRecentMarkets(limit = 10) {
 export async function getLeaderboard(limit = 30, currencyInput = "STAR") {
   const safeLimit = Math.max(1, Math.min(100, Number(limit) || 30));
   const currency = normalizeCurrency(currencyInput);
+  if (currency === "USDT") {
+    const result = await query(
+      `
+        WITH trade_stats AS (
+          SELECT
+            user_id,
+            COUNT(*) FILTER (WHERE action = 'BUY') AS bet_count
+          FROM trades
+          WHERE currency = $2
+          GROUP BY user_id
+        ),
+        position_stats AS (
+          SELECT
+            user_id,
+            COUNT(*) FILTER (WHERE status <> 'open') AS settled_count,
+            COUNT(*) FILTER (WHERE status <> 'open' AND pnl > 0) AS win_count
+          FROM positions
+          WHERE currency = $2
+          GROUP BY user_id
+        )
+        SELECT
+          users.telegram_id,
+          users.username,
+          users.first_name,
+          COALESCE(cash.balance, 0) + COALESCE(bonus.balance, 0) AS balance,
+          COALESCE(trade_stats.bet_count, 0) AS bet_count,
+          COALESCE(position_stats.settled_count, 0) AS settled_count,
+          COALESCE(position_stats.win_count, 0) AS win_count
+        FROM users
+        LEFT JOIN usdt_balances cash ON cash.user_id = users.id
+        LEFT JOIN usdt_bonus_balances bonus ON bonus.user_id = users.id
+        LEFT JOIN trade_stats ON trade_stats.user_id = users.id
+        LEFT JOIN position_stats ON position_stats.user_id = users.id
+        ORDER BY (COALESCE(cash.balance, 0) + COALESCE(bonus.balance, 0)) DESC,
+          COALESCE(trade_stats.bet_count, 0) DESC,
+          users.updated_at DESC
+        LIMIT $1
+      `,
+      [safeLimit, currency],
+    );
+
+    return result.rows.map((row) => {
+      const settledCount = Number(row.settled_count || 0);
+      const winCount = Number(row.win_count || 0);
+      return {
+        telegram_id: row.telegram_id,
+        username: row.username,
+        first_name: row.first_name,
+        currency,
+        balance: toNumber(row.balance),
+        bet_count: Number(row.bet_count || 0),
+        settled_count: settledCount,
+        win_count: winCount,
+        win_rate_pct: settledCount > 0 ? Math.round((winCount / settledCount) * 1000) / 10 : 0,
+      };
+    });
+  }
+
   const balanceTable = balanceTableForCurrency(currency);
   const result = await query(
     `

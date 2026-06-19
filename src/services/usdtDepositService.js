@@ -27,7 +27,7 @@ function roundMoney(value, decimals = 2) {
 
 function ensurePositiveDepositAmount(value) {
   const amount = roundMoney(value, 2);
-  if (!Number.isFinite(amount) || amount < 1 || amount > 100_000) {
+  if (!Number.isFinite(amount) || amount < 15 || amount > 100_000) {
     throw new Error("invalid_deposit_amount");
   }
   return amount;

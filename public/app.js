@@ -19,8 +19,11 @@ const state = {
   currency: "STAR",
   balance: 0,
   usdtBalance: 0,
+  usdtCashBalance: 0,
+  usdtBonusBalance: 0,
   positions: [],
   recentTrades: [],
+  marketStats: [],
   recentMarkets: [],
   leaderboard: [],
   activity: [],
@@ -52,6 +55,7 @@ const state = {
     pollTimer: null,
   },
   leaderboardCurrency: "STAR",
+  taskTab: "tasks",
   expanded: {
     positions: false,
     activity: false,
@@ -77,6 +81,8 @@ const state = {
     av_bot_url: "https://t.me/voit_help_bot?start=buy_stars",
     mini_app_url: "https://t.me/voit_help_bot?startapp=easymarket",
     referral_bonus_fire: 500,
+    referral_signup_bonus_usdt: 5,
+    referral_bet_bonus_usdt: 30,
     task_share_fire: 100,
     task_subscribe_fire: 500,
     task_private_chat_fire: 15000,
@@ -131,9 +137,9 @@ const normalizeTopupAmount = (value, currency = state.topup.currency) => {
   const safeCurrency = normalizeCurrency(currency);
   const numeric = Number(String(value ?? "").replace(",", "."));
   if (!Number.isFinite(numeric)) {
-    return 1;
+    return safeCurrency === "USDT" ? 15 : 1;
   }
-  const capped = Math.min(100_000, Math.max(1, numeric));
+  const capped = Math.min(100_000, Math.max(safeCurrency === "USDT" ? 15 : 1, numeric));
   return safeCurrency === "USDT"
     ? Math.round(capped * 100) / 100
     : Math.round(capped);
@@ -150,6 +156,23 @@ function applyCurrencyBalance(currency, balance) {
     return;
   }
   state.balance = Number(balance || 0);
+}
+
+function applyCurrencyBalancePayload(currency, payload = {}) {
+  const normalized = normalizeCurrency(currency);
+  const total = payload.currency_balance ?? payload.balance;
+  if (normalized === "USDT") {
+    state.usdtBalance = Number(total || 0);
+    if (payload.currency_cash_balance !== undefined) {
+      state.usdtCashBalance = Number(payload.currency_cash_balance || 0);
+    }
+    if (payload.currency_bonus_balance !== undefined) {
+      state.usdtBonusBalance = Number(payload.currency_bonus_balance || 0);
+    }
+    return;
+  }
+
+  state.balance = Number(total || 0);
 }
 const formatPrice = (value) => Number(value || 0).toLocaleString("ru-RU", {
   maximumFractionDigits: 2,
@@ -858,6 +881,7 @@ function renderTaskRewards() {
   const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 500));
   const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 15000));
   const ref = Math.round(Number(state.publicConfig.referral_bonus_fire || 500));
+  const refUsdt = Math.round(Number(state.publicConfig.referral_bet_bonus_usdt || 30));
   const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 50));
   const dailyBet = Math.round(Number(state.publicConfig.task_daily_bet_fire || 50));
   if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
@@ -865,8 +889,64 @@ function renderTaskRewards() {
   if ($("chatTaskReward")) $("chatTaskReward").textContent = formatFire(sub);
   if ($("privateChatTaskReward")) $("privateChatTaskReward").textContent = formatFire(privateChat);
   if ($("refTaskReward")) $("refTaskReward").textContent = formatFire(ref);
+  if ($("refTaskUsdtReward")) $("refTaskUsdtReward").textContent = formatFire(refUsdt);
   if ($("dailyPresenceTaskReward")) $("dailyPresenceTaskReward").textContent = formatFire(dailyPresence);
   if ($("dailyBetTaskReward")) $("dailyBetTaskReward").textContent = formatFire(dailyBet);
+}
+
+function getMarketStatTitle(stat) {
+  if (stat?.team) {
+    return stat.team;
+  }
+  if (stat?.title) {
+    return stat.label ? `${stat.title}` : stat.title;
+  }
+  if (stat?.symbol?.startsWith("BTCUSDT")) {
+    const label = stat.label || stat.symbol.replace("BTCUSDT_", "").replace("BTCUSDT", "5m").toLowerCase();
+    return `BTC ${label}`;
+  }
+  return stat?.question || stat?.symbol || `Маркет #${stat?.market_id || ""}`;
+}
+
+function renderTaskTabs() {
+  const isStats = state.taskTab === "stats";
+  $("tasksTabTasks")?.classList.toggle("active", !isStats);
+  $("tasksTabStats")?.classList.toggle("active", isStats);
+  document.querySelector(".task-list")?.classList.toggle("hidden", isStats);
+  $("taskStatsPanel")?.classList.toggle("hidden", !isStats);
+}
+
+function renderTaskStats() {
+  const list = $("taskStatsList");
+  if (!list) return;
+
+  const stats = state.marketStats || [];
+  if (!stats.length) {
+    list.innerHTML = `
+      <div class="task-stat-empty">
+        Пока нет рассчитанных рынков. Сделай ставку и дождись закрытия маркета.
+      </div>
+    `;
+    return;
+  }
+
+  list.innerHTML = stats.slice(0, 30).map((stat) => {
+    const currency = normalizeCurrency(stat.currency);
+    const pnl = Number(stat.pnl || 0);
+    const status = stat.open_positions_count > 0 ? "LIVE" : (stat.status === "resolved" ? "CLOSED" : String(stat.status || "").toUpperCase());
+    return `
+      <div class="task-stat-row">
+        <div class="task-stat-main">
+          <strong>${escapeHtml(getMarketStatTitle(stat))}</strong>
+          <small>${escapeHtml(status)} · ${stat.positions_count || 0} поз. · ${escapeHtml(currency)}</small>
+        </div>
+        <div class="task-stat-numbers">
+          <strong class="${pnl >= 0 ? "profit" : "loss"}">${formatSignedCurrencyAmount(pnl, currency)}</strong>
+          <small>${formatCurrencyAmount(stat.spent || 0, currency)} → ${formatCurrencyAmount(stat.payout || 0, currency)}</small>
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 async function api(path, options = {}) {
@@ -957,7 +1037,10 @@ async function upsertMe() {
   state.user = data.user;
   state.balance = data.balance || 0;
   state.usdtBalance = data.usdt_balance || 0;
+  state.usdtCashBalance = data.usdt_cash_balance || 0;
+  state.usdtBonusBalance = data.usdt_bonus_balance || 0;
   state.positions = data.positions || [];
+  state.marketStats = data.market_stats || [];
   state.presence.startedAt = Date.now();
   document.body.classList.remove("auth-only");
   $("authCard").classList.add("hidden");
@@ -1058,10 +1141,14 @@ async function loadMe() {
   const data = await api(`/api/me?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
   state.balance = data.balance || 0;
   state.usdtBalance = data.usdt_balance || 0;
+  state.usdtCashBalance = data.usdt_cash_balance || 0;
+  state.usdtBonusBalance = data.usdt_bonus_balance || 0;
   state.positions = data.positions || [];
   state.recentTrades = data.recent_trades || [];
+  state.marketStats = data.market_stats || [];
   handleSettlements(state.positions);
   renderMe();
+  renderTaskStats();
 }
 
 async function loadRecentMarkets() {
@@ -1911,6 +1998,7 @@ function renderTopupSheet() {
     button.classList.toggle("active", normalizeCurrency(button.dataset.walletCurrency) === currency);
   });
   $("usdtDepositPanel")?.classList.toggle("hidden", !isUsdt || !isTopupMode);
+  document.querySelector(".topup-packages")?.classList.toggle("hidden", isUsdt);
   document.querySelectorAll("[data-usdt-network]").forEach((button) => {
     const network = networks.find((item) => item.key === button.dataset.usdtNetwork);
     button.disabled = !network || Boolean(intent);
@@ -1955,8 +2043,15 @@ function renderTopupSheet() {
     $("walletSheetEyebrow").textContent = isUsdt ? "Virtual USDT" : "Telegram Stars";
   }
   if ($("walletFullBalance")) {
-    const walletBalance = isUsdt ? state.usdtBalance : state.balance;
+    const walletBalance = isUsdt ? state.usdtCashBalance : state.balance;
     $("walletFullBalance").textContent = formatCurrencyAmount(walletBalance, currency);
+  }
+  if ($("walletBonusBalance")) {
+    const hasBonus = isUsdt && Number(state.usdtBonusBalance || 0) > 0;
+    $("walletBonusBalance").classList.toggle("hidden", !hasBonus);
+    $("walletBonusBalance").textContent = hasBonus
+      ? `Бонус: ${formatCurrencyAmount(state.usdtBonusBalance, "USDT")}`
+      : "";
   }
   if ($("topupAmountValue")) $("topupAmountValue").textContent = formatCurrencyAmount(amount, currency);
   if ($("topupCustomAmount") && document.activeElement !== $("topupCustomAmount")) {
@@ -1966,6 +2061,7 @@ function renderTopupSheet() {
   }
   if ($("topupCustomAmount")) {
     $("topupCustomAmount").step = currency === "USDT" ? "0.01" : "1";
+    $("topupCustomAmount").min = currency === "USDT" ? "15" : "1";
     $("topupCustomAmount").disabled = hasPendingIntent;
   }
   if ($("topupReason")) {
@@ -2301,7 +2397,7 @@ async function buy(amount = state.selectedAmount) {
         currency,
       }),
     });
-    applyCurrencyBalance(result.currency || currency, result.currency_balance ?? result.balance);
+    applyCurrencyBalancePayload(result.currency || currency, result);
     upsertLocalMarket(result.market);
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
@@ -2365,7 +2461,7 @@ async function sellPosition({ side, positionId, marketId, shares }) {
         currency: state.currency,
       }),
     });
-    applyCurrencyBalance(result.currency || state.currency, result.currency_balance ?? result.balance);
+    applyCurrencyBalancePayload(result.currency || state.currency, result);
     upsertLocalMarket(result.market);
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
@@ -2824,6 +2920,11 @@ async function submitMarketComment() {
 function setTasksSheetOpen(open) {
   const sheet = $("tasksSheet");
   if (!sheet) return;
+  if (open) {
+    renderTaskRewards();
+    renderTaskTabs();
+    renderTaskStats();
+  }
   sheet.classList.toggle("hidden", !open);
 }
 
@@ -2836,7 +2937,17 @@ function setLeaderboardSheetOpen(open) {
 $("tasksBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   renderTaskRewards();
+  renderTaskStats();
   setTasksSheetOpen(true);
+});
+
+document.querySelectorAll("[data-task-tab]").forEach((button) => {
+  button.addEventListener("click", () => {
+    triggerHaptic("selection");
+    state.taskTab = button.dataset.taskTab === "stats" ? "stats" : "tasks";
+    renderTaskTabs();
+    renderTaskStats();
+  });
 });
 
 $("tasksCloseBtn").addEventListener("click", () => {

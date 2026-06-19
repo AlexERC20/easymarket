@@ -25,6 +25,7 @@ import {
   getRecentActivity,
   getRecentMarkets,
   getUserSnapshot,
+  getUsdtLedgerEvents,
   getWorldCupMarkets,
   resetUserMarketStateByUsername,
   resolveExpiredMarkets,
@@ -210,6 +211,8 @@ app.get("/api/public/config", (_req, res) => {
     task_daily_presence_fire: config.taskDailyPresenceFire,
     task_daily_bet_fire: config.taskDailyBetFire,
     task_daily_cap_fire: config.taskDailyCapFire,
+    referral_signup_bonus_usdt: config.referralSignupBonusUsdt,
+    referral_bet_bonus_usdt: config.referralBetBonusUsdt,
     av_channel_url: config.publicAvChannelUrl,
     av_chat_url: config.publicAvChatUrl,
     private_chat_url: config.publicPrivateChatUrl,
@@ -822,6 +825,24 @@ app.get("/api/bridge/fire/ledger", requireBridgeSecret, async (req, res) => {
       ok: true,
       events,
       last_id: events.length > 0 ? events[events.length - 1].id : Number(req.query.after_id ?? req.query.afterId ?? 0) || 0,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/usdt/ledger", requireBridgeSecret, async (req, res) => {
+  try {
+    const events = await getUsdtLedgerEvents({
+      after_ts: req.query.after_ts ?? req.query.afterTs,
+      limit: req.query.limit,
+    });
+    res.status(200).json({
+      ok: true,
+      events,
+      last_ts: events.length > 0
+        ? events[events.length - 1].created_at
+        : (req.query.after_ts ?? req.query.afterTs ?? null),
     });
   } catch (error) {
     sendApiError(res, error);

@@ -115,6 +115,41 @@ export async function runMigrations() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS usdt_bonus_balances (
+      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      balance NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS usdt_bonus_ledger (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount NUMERIC(20, 8) NOT NULL,
+      reason TEXT NOT NULL,
+      source TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS usdt_bonus_claims (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      task_key TEXT NOT NULL,
+      amount NUMERIC(20, 8) NOT NULL,
+      source TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(user_id, task_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS usdt_referral_bonuses (
+      id BIGSERIAL PRIMARY KEY,
+      inviter_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      referred_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      market_id BIGINT,
+      amount NUMERIC(20, 8) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(referred_user_id)
+    );
+
     CREATE TABLE IF NOT EXISTS usdt_deposit_intents (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -171,6 +206,11 @@ export async function runMigrations() {
     );
 
     INSERT INTO usdt_balances (user_id, balance, updated_at)
+    SELECT id, 0, now()
+    FROM users
+    ON CONFLICT (user_id) DO NOTHING;
+
+    INSERT INTO usdt_bonus_balances (user_id, balance, updated_at)
     SELECT id, 0, now()
     FROM users
     ON CONFLICT (user_id) DO NOTHING;
@@ -271,6 +311,9 @@ export async function runMigrations() {
       UNIQUE(user_id, market_id, side)
     );
 
+    ALTER TABLE positions
+      DROP CONSTRAINT IF EXISTS positions_user_id_market_id_side_key;
+
     CREATE INDEX IF NOT EXISTS idx_positions_user_status
       ON positions(user_id, status);
 
@@ -320,6 +363,9 @@ export async function runMigrations() {
 
     ALTER TABLE positions
       ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'STAR';
+
+    ALTER TABLE positions
+      ADD COLUMN IF NOT EXISTS bonus_spent NUMERIC(20, 8) NOT NULL DEFAULT 0;
 
     ALTER TABLE trades
       ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'STAR';
