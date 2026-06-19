@@ -280,6 +280,33 @@ export async function getUserDepositIntent(input) {
   return mapDepositIntent(result.rows[0]);
 }
 
+export async function cancelUserDepositIntent(input) {
+  const telegramId = String(input.telegram_id || "").trim();
+  if (!telegramId) {
+    throw new Error("telegram_id_missing");
+  }
+  const intentId = Number(input.intentId);
+  if (!Number.isSafeInteger(intentId) || intentId <= 0) {
+    return null;
+  }
+
+  const result = await query(
+    `
+      UPDATE usdt_deposit_intents i
+      SET status = 'cancelled',
+          updated_at = now()
+      FROM users u
+      WHERE i.id = $1
+        AND i.user_id = u.id
+        AND u.telegram_id = $2
+        AND i.status = 'pending'
+      RETURNING i.*
+    `,
+    [intentId, telegramId],
+  );
+  return mapDepositIntent(result.rows[0]);
+}
+
 async function getScannerState(network) {
   const result = await query(
     `

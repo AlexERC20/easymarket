@@ -120,6 +120,24 @@ const formatCurrencyAmount = (value, currency = state.currency) => {
   });
   return safeCurrency === "USDT" ? `$${formatted}` : formatted;
 };
+const formatHeaderCurrencyAmount = (value, currency = state.currency) => {
+  const safeCurrency = normalizeCurrency(currency);
+  const formatted = Number(value || 0).toLocaleString("ru-RU", {
+    maximumFractionDigits: 0,
+  });
+  return safeCurrency === "USDT" ? `$${formatted}` : formatted;
+};
+const normalizeTopupAmount = (value, currency = state.topup.currency) => {
+  const safeCurrency = normalizeCurrency(currency);
+  const numeric = Number(String(value ?? "").replace(",", "."));
+  if (!Number.isFinite(numeric)) {
+    return 1;
+  }
+  const capped = Math.min(100_000, Math.max(1, numeric));
+  return safeCurrency === "USDT"
+    ? Math.round(capped * 100) / 100
+    : Math.round(capped);
+};
 const getActiveBalance = () => (state.currency === "USDT" ? state.usdtBalance : state.balance);
 const formatSignedCurrencyAmount = (value, currency = state.currency) => {
   const numeric = Number(value || 0);
@@ -1470,7 +1488,7 @@ function renderMe() {
   document.querySelectorAll("[data-currency-toggle]").forEach((button) => {
     button.classList.toggle("active", normalizeCurrency(button.dataset.currencyToggle) === state.currency);
   });
-  animateText(balanceElement, activeBalance, (value) => formatCurrencyAmount(value, state.currency));
+  animateText(balanceElement, activeBalance, (value) => formatHeaderCurrencyAmount(value, state.currency));
 
   const positions = state.positions.filter((position) => (
     position.status === "open" && normalizeCurrency(position.currency) === state.currency
@@ -1871,11 +1889,13 @@ function closeBetSheet() {
 }
 
 function renderTopupSheet() {
-  const amount = Math.max(1, Math.round(Number(state.topup.amount || 0)));
   const isTopupMode = state.topup.mode !== "withdraw";
   const currency = normalizeCurrency(state.topup.currency);
   const isUsdt = currency === "USDT";
   const intent = state.topup.intent;
+  const hasPendingIntent = isUsdt && intent?.status === "pending";
+  const amount = normalizeTopupAmount(state.topup.amount || 1, currency);
+  state.topup.amount = amount;
   const networks = Array.isArray(state.publicConfig.usdt_deposit_networks)
     ? state.publicConfig.usdt_deposit_networks
     : [];
@@ -1912,6 +1932,18 @@ function renderTopupSheet() {
           : "";
     $("usdtDepositStatus").textContent = statusText;
   }
+  if ($("usdtCancelIntentBtn")) {
+    $("usdtCancelIntentBtn").classList.toggle("hidden", !hasPendingIntent);
+    $("usdtCancelIntentBtn").disabled = state.topup.pending;
+  }
+  document.querySelectorAll("[data-usdt-address-card]").forEach((card) => {
+    card.classList.toggle("hidden", !hasPendingIntent);
+  });
+  if ($("usdtEvmAddressLabel")) {
+    $("usdtEvmAddressLabel").textContent = intent?.network_label
+      ? `${intent.network_label} USDT адрес`
+      : "ERC20 / BEP20";
+  }
   if ($("usdtEvmAddress")) $("usdtEvmAddress").textContent = state.publicConfig.usdt_evm_address;
   if ($("usdtTonAddress")) $("usdtTonAddress").textContent = state.publicConfig.usdt_ton_address;
   if ($("walletSheetTitle")) {
@@ -1922,7 +1954,20 @@ function renderTopupSheet() {
   if ($("walletSheetEyebrow")) {
     $("walletSheetEyebrow").textContent = isUsdt ? "Virtual USDT" : "Telegram Stars";
   }
+  if ($("walletFullBalance")) {
+    const walletBalance = isUsdt ? state.usdtBalance : state.balance;
+    $("walletFullBalance").textContent = formatCurrencyAmount(walletBalance, currency);
+  }
   if ($("topupAmountValue")) $("topupAmountValue").textContent = formatCurrencyAmount(amount, currency);
+  if ($("topupCustomAmount") && document.activeElement !== $("topupCustomAmount")) {
+    $("topupCustomAmount").value = currency === "USDT"
+      ? String(amount)
+      : String(Math.round(amount));
+  }
+  if ($("topupCustomAmount")) {
+    $("topupCustomAmount").step = currency === "USDT" ? "0.01" : "1";
+    $("topupCustomAmount").disabled = hasPendingIntent;
+  }
   if ($("topupReason")) {
     if (state.topup.reason) {
       $("topupReason").textContent = state.topup.reason;
@@ -1937,17 +1982,17 @@ function renderTopupSheet() {
   if ($("topupBuyBtn")) {
     $("topupBuyBtn").disabled = !isTopupMode || state.topup.pending || !state.user;
     $("topupBuyBtn").textContent = isUsdt
-      ? (intent && intent.status === "pending" ? "Скопировать адрес" : "Создать заявку")
+      ? (hasPendingIntent ? "Скопировать адрес" : "Создать заявку")
       : (state.topup.pending ? "Открываю оплату..." : `Купить ${formatCurrencyAmount(amount, currency)}`);
   }
   document.querySelectorAll("[data-topup-package]").forEach((button) => {
-    button.disabled = isUsdt && Boolean(intent);
+    button.disabled = hasPendingIntent;
     button.classList.toggle("active", Number(button.dataset.topupPackage) === amount);
   });
 }
 
 function openTopupSheet(amount, reason = "", mode = "topup") {
-  state.topup.amount = Math.max(1, Math.round(Number(amount || 0)));
+  state.topup.amount = normalizeTopupAmount(amount || 1, state.currency);
   state.topup.reason = reason;
   state.topup.mode = mode === "withdraw" ? "withdraw" : "topup";
   state.topup.currency = state.currency;
@@ -2038,7 +2083,7 @@ async function createUsdtDepositIntent() {
     return;
   }
 
-  const amount = Math.max(1, Math.round(Number(state.topup.amount || 0)));
+  const amount = normalizeTopupAmount(state.topup.amount || 1, "USDT");
   state.topup.pending = true;
   renderTopupSheet();
   try {
@@ -2068,6 +2113,37 @@ async function createUsdtDepositIntent() {
   }
 }
 
+async function cancelUsdtDepositIntent() {
+  const intent = state.topup.intent;
+  if (!intent?.id || !state.user?.telegram_id || intent.status !== "pending") {
+    state.topup.intent = null;
+    stopDepositPolling();
+    renderTopupSheet();
+    return;
+  }
+
+  state.topup.pending = true;
+  renderTopupSheet();
+  try {
+    await api(`/api/usdt/deposits/intents/${intent.id}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+      }),
+    });
+    state.topup.intent = null;
+    stopDepositPolling();
+    triggerHaptic("success");
+    showToast("Заявка отменена.");
+  } catch {
+    triggerHaptic("error");
+    showToast("Не получилось отменить заявку.");
+  } finally {
+    state.topup.pending = false;
+    renderTopupSheet();
+  }
+}
+
 async function startStarsTopup() {
   if (!state.user?.telegram_id) {
     triggerHaptic("warning");
@@ -2075,7 +2151,7 @@ async function startStarsTopup() {
     return;
   }
 
-  const amount = Math.max(1, Math.round(Number(state.topup.amount || 0)));
+  const amount = normalizeTopupAmount(state.topup.amount || 1, state.topup.currency);
   if (state.topup.currency === "USDT") {
     if (!state.topup.intent || state.topup.intent.status === "expired" || state.topup.intent.status === "credited") {
       await createUsdtDepositIntent();
@@ -2409,6 +2485,20 @@ $("topupBuyBtn")?.addEventListener("click", () => {
   void startStarsTopup();
 });
 
+$("topupCustomAmount")?.addEventListener("input", () => {
+  if (state.topup.intent?.status === "pending") {
+    return;
+  }
+  state.topup.amount = normalizeTopupAmount($("topupCustomAmount").value, state.topup.currency);
+  state.topup.reason = "";
+  renderTopupSheet();
+});
+
+$("usdtCancelIntentBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  void cancelUsdtDepositIntent();
+});
+
 $("walletModeTopupBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   state.topup.mode = "topup";
@@ -2435,9 +2525,12 @@ $("walletModeWithdrawBtn")?.addEventListener("click", () => {
 
 document.querySelectorAll("[data-topup-package]").forEach((button) => {
   button.addEventListener("click", () => {
+    if (button.disabled) {
+      return;
+    }
     triggerHaptic("selection");
     state.topup.mode = "topup";
-    state.topup.amount = Number(button.dataset.topupPackage);
+    state.topup.amount = normalizeTopupAmount(button.dataset.topupPackage, state.topup.currency);
     state.topup.reason = "";
     renderTopupSheet();
   });

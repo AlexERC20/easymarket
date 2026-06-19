@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260619-3" />
+    <link rel="stylesheet" href="/styles.css?v=20260619-4" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -152,9 +152,17 @@
             <button class="active" type="button" data-wallet-currency="STAR">Звезды</button>
             <button type="button" data-wallet-currency="USDT">USDT</button>
           </div>
+          <div class="wallet-balance-line">
+            <span>Баланс</span>
+            <strong id="walletFullBalance">0</strong>
+          </div>
           <div class="topup-body">
             <div id="topupModePanel" class="wallet-mode-panel">
               <strong><span id="topupAmountValue">100</span></strong>
+              <label class="topup-custom-amount">
+                <span>Своя сумма</span>
+                <input id="topupCustomAmount" type="number" min="1" max="100000" step="0.01" inputmode="decimal" value="100" />
+              </label>
               <div class="topup-packages" role="group" aria-label="Пакеты пополнения">
                 <button type="button" data-topup-package="100">100</button>
                 <button type="button" data-topup-package="1000">1 000</button>
@@ -170,13 +178,14 @@
                   <small>Отправь ровно</small>
                   <strong id="usdtDepositExactAmount">100.00 USDT</strong>
                   <span id="usdtDepositStatus">Ждем перевод</span>
+                  <button id="usdtCancelIntentBtn" class="usdt-cancel-intent" type="button">Отменить заявку</button>
                 </div>
-                <div>
-                  <small>ERC20 / BEP20</small>
+                <div class="usdt-address-card hidden" data-usdt-address-card="evm">
+                  <small id="usdtEvmAddressLabel">ERC20 / BEP20</small>
                   <code id="usdtEvmAddress">0x51592e92e48b94f3714c24c7597fb8a4ecfb36cd</code>
                   <button type="button" data-copy-address="evm">Скопировать</button>
                 </div>
-                <div>
+                <div class="usdt-address-card hidden" data-usdt-address-card="ton">
                   <small>TON</small>
                   <code id="usdtTonAddress">UQAFrUUrG0-cFLbZDkYA_RuGKSjuaULQPp7B7xxsmbzoaBdh</code>
                   <button type="button" data-copy-address="ton">Скопировать</button>
@@ -186,7 +195,6 @@
             </div>
             <div id="withdrawModePanel" class="wallet-mode-panel hidden">
               <strong>Скоро</strong>
-              <p>Вывод звезд пока готовится. При выводе будет удержано 10% на комиссионные расходы.</p>
             </div>
           </div>
         </div>
@@ -410,6 +418,6 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
-    <script src="/app.js?v=20260619-3" type="module"></script>
+    <script src="/app.js?v=20260619-4" type="module"></script>
   </body>
 </html>

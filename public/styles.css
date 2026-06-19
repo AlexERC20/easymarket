@@ -1070,6 +1070,36 @@ code {
   color: var(--text);
 }
 
+.wallet-balance-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 10px 12px;
+}
+
+.wallet-balance-line span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.wallet-balance-line strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 950;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wallet-mode-panel {
   display: grid;
   gap: 12px;
@@ -1086,6 +1116,40 @@ code {
   letter-spacing: 0;
   line-height: 1;
   text-align: center;
+}
+
+.topup-custom-amount {
+  display: grid;
+  gap: 6px;
+}
+
+.topup-custom-amount span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.topup-custom-amount input {
+  width: 100%;
+  border: 1px solid var(--line-soft);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text);
+  padding: 12px;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 950;
+  outline: none;
+}
+
+.topup-custom-amount input:disabled {
+  opacity: 0.48;
+}
+
+.topup-custom-amount input:focus {
+  border-color: rgba(18, 153, 243, 0.55);
+  box-shadow: 0 0 0 3px rgba(18, 153, 243, 0.12);
 }
 
 .topup-body p {
@@ -1206,6 +1270,13 @@ code {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
+}
+
+.usdt-deposit-panel .usdt-cancel-intent {
+  margin-top: 4px;
+  border-color: rgba(248, 113, 113, 0.32);
+  background: rgba(248, 113, 113, 0.1);
+  color: rgba(254, 202, 202, 0.95);
 }
 
 .leaderboard-panel {

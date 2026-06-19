@@ -36,6 +36,7 @@ import {
 } from "./services/marketService.js";
 import { PriceUnavailableError } from "./services/priceService.js";
 import {
+  cancelUserDepositIntent,
   createUsdtDepositIntent,
   getPublicUsdtDepositNetworks,
   getUserDepositIntent,
@@ -83,6 +84,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "invalid_deposit_network",
     "deposit_amount_collision",
     "deposit_intent_not_found",
+    "deposit_intent_not_pending",
     "position_not_open",
     "invalid_position_id",
     "invalid_sell_shares",
@@ -313,6 +315,32 @@ app.get("/api/usdt/deposits/intents/:intentId", async (req, res) => {
       throw new Error("telegram_id_missing");
     }
     const intent = await getUserDepositIntent({
+      intentId: req.params.intentId,
+      telegram_id: telegramId,
+    });
+    if (!intent) {
+      res.status(404).json({
+        ok: false,
+        message: "deposit_intent_not_found",
+      });
+      return;
+    }
+    res.status(200).json({
+      ok: true,
+      intent,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/usdt/deposits/intents/:intentId/cancel", async (req, res) => {
+  try {
+    const telegramId = getTelegramId(req);
+    if (!telegramId) {
+      throw new Error("telegram_id_missing");
+    }
+    const intent = await cancelUserDepositIntent({
       intentId: req.params.intentId,
       telegram_id: telegramId,
     });
