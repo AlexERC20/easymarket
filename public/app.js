@@ -26,6 +26,12 @@ const state = {
   marketStats: [],
   recentMarkets: [],
   leaderboard: [],
+  leaderboardCache: {
+    STAR: null,
+    USDT: null,
+  },
+  leaderboardLoading: false,
+  leaderboardRequestId: 0,
   activity: [],
   chartPoints: [],
   btcMarkets: [],
@@ -1157,10 +1163,41 @@ async function loadRecentMarkets() {
   renderRecentMarkets();
 }
 
-async function loadLeaderboard() {
-  const data = await api(`/api/leaderboard?limit=30&currency=${encodeURIComponent(state.leaderboardCurrency)}`);
-  state.leaderboard = data.players || [];
-  renderLeaderboard();
+async function loadLeaderboard(currency = state.leaderboardCurrency, options = {}) {
+  const normalizedCurrency = normalizeCurrency(currency);
+  const requestId = state.leaderboardRequestId + 1;
+  state.leaderboardRequestId = requestId;
+  state.leaderboardLoading = true;
+
+  if (!options.background) {
+    if (state.leaderboardCache[normalizedCurrency]) {
+      state.leaderboard = state.leaderboardCache[normalizedCurrency];
+    }
+    renderLeaderboard();
+  }
+
+  try {
+    const data = await api(`/api/leaderboard?limit=30&currency=${encodeURIComponent(normalizedCurrency)}`);
+    const players = data.players || [];
+    state.leaderboardCache[normalizedCurrency] = players;
+
+    if (state.leaderboardCurrency === normalizedCurrency && state.leaderboardRequestId === requestId) {
+      state.leaderboard = players;
+      state.leaderboardLoading = false;
+      renderLeaderboard();
+      return;
+    }
+
+    if (state.leaderboardRequestId === requestId) {
+      state.leaderboardLoading = false;
+    }
+  } catch (error) {
+    if (state.leaderboardRequestId === requestId) {
+      state.leaderboardLoading = false;
+      renderLeaderboard();
+    }
+    throw error;
+  }
 }
 
 function formatRelativeTime(value) {
@@ -1745,12 +1782,16 @@ function renderLeaderboard() {
     button.classList.toggle("active", normalizeCurrency(button.dataset.leaderboardCurrency) === state.leaderboardCurrency);
   });
 
+  container.classList.toggle("loading", Boolean(state.leaderboardLoading));
+
   if (!state.leaderboard.length) {
-    container.innerHTML = '<p class="muted">Пока нет игроков в рейтинге.</p>';
+    container.innerHTML = state.leaderboardLoading
+      ? '<p class="muted">Загружаю рейтинг...</p>'
+      : '<p class="muted">Пока нет игроков в рейтинге.</p>';
     return;
   }
 
-  container.innerHTML = state.leaderboard.map((player, index) => {
+  const rows = state.leaderboard.map((player, index) => {
     const name = player.username
       ? `@${player.username}`
       : player.first_name || `user ${player.telegram_id}`;
@@ -1766,6 +1807,10 @@ function renderLeaderboard() {
       </div>
     `;
   }).join("");
+  const loadingPill = state.leaderboardLoading
+    ? '<div class="leaderboard-refresh-pill">Обновляю...</div>'
+    : "";
+  container.innerHTML = `${loadingPill}${rows}`;
 }
 
 function formatVolume(value) {
@@ -2687,9 +2732,16 @@ document.querySelectorAll("[data-leaderboard-currency]").forEach((button) => {
     }
     triggerHaptic("selection");
     state.leaderboardCurrency = nextCurrency;
-    state.leaderboard = [];
+    if (state.leaderboardCache[nextCurrency]) {
+      state.leaderboard = state.leaderboardCache[nextCurrency];
+    }
+    state.leaderboardLoading = true;
     renderLeaderboard();
-    void loadLeaderboard().catch(() => showToast("Рейтинг пока не загрузился."));
+    void loadLeaderboard(nextCurrency).catch(() => {
+      state.leaderboardLoading = false;
+      renderLeaderboard();
+      showToast("Рейтинг пока не загрузился.");
+    });
   });
 });
 
