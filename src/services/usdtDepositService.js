@@ -45,7 +45,7 @@ function normalizeAddress(value) {
 function buildEvmNetwork(input) {
   const treasuryAddress = normalizeAddress(config.publicUsdtEvmAddress);
   const tokenAddress = normalizeAddress(input.tokenAddress);
-  if (!treasuryAddress || !tokenAddress || !input.rpcUrl) {
+  if (!treasuryAddress || !tokenAddress || (!input.rpcUrl && !input.explorerApiKey)) {
     return null;
   }
 
@@ -57,6 +57,10 @@ function buildEvmNetwork(input) {
     treasuryAddress,
     decimals: input.decimals,
     confirmations: config.usdtDepositConfirmations,
+    explorerApiUrl: input.explorerApiUrl,
+    explorerApiKey: input.explorerApiKey,
+    explorerChainId: input.explorerChainId,
+    explorerPageSize: input.explorerPageSize,
   };
 }
 
@@ -68,6 +72,10 @@ export function getConfiguredUsdtDepositNetworks() {
       rpcUrl: config.usdtBscRpcUrl,
       tokenAddress: config.usdtBscTokenAddress,
       decimals: config.usdtBscDecimals,
+      explorerApiUrl: config.evmScanApiUrl,
+      explorerApiKey: config.evmScanApiKey,
+      explorerChainId: config.usdtBscExplorerChainId,
+      explorerPageSize: config.evmScanPageSize,
     }),
     buildEvmNetwork({
       key: "ETH",
@@ -75,6 +83,10 @@ export function getConfiguredUsdtDepositNetworks() {
       rpcUrl: config.usdtEthRpcUrl,
       tokenAddress: config.usdtEthTokenAddress,
       decimals: config.usdtEthDecimals,
+      explorerApiUrl: config.evmScanApiUrl,
+      explorerApiKey: config.evmScanApiKey,
+      explorerChainId: config.usdtEthExplorerChainId,
+      explorerPageSize: config.evmScanPageSize,
     }),
   ].filter(Boolean);
 }
@@ -603,20 +615,20 @@ async function maybeBackfillRecentDeposits(network, provider, latestBlock) {
   };
 }
 
-function canUseBscScan(network) {
-  return network.key === "BSC"
-    && Boolean(config.bscScanApiKey)
-    && Boolean(config.bscScanApiUrl);
+function canUseExplorerScan(network) {
+  return Boolean(network.explorerApiKey)
+    && Boolean(network.explorerApiUrl)
+    && Boolean(network.explorerChainId);
 }
 
-function getBscScanTransferAmount(tx, fallbackDecimals) {
+function getExplorerTransferAmount(tx, fallbackDecimals) {
   const decimals = Number(tx.tokenDecimal ?? fallbackDecimals);
   const rawValue = BigInt(String(tx.value || "0"));
   return roundMoney(formatUnits(rawValue, Number.isFinite(decimals) ? decimals : fallbackDecimals), 2);
 }
 
-async function scanBscScanNetwork(network) {
-  if (!canUseBscScan(network)) {
+async function scanExplorerNetwork(network) {
+  if (!canUseExplorerScan(network)) {
     return {
       enabled: false,
       reason: "missing_api_key",
@@ -624,28 +636,28 @@ async function scanBscScanNetwork(network) {
   }
 
   const params = new URLSearchParams({
-    chainid: config.bscScanChainId,
+    chainid: network.explorerChainId,
     module: "account",
     action: "tokentx",
     contractaddress: network.tokenAddress,
     address: network.treasuryAddress,
     page: "1",
-    offset: String(Math.round(config.bscScanPageSize)),
+    offset: String(Math.round(network.explorerPageSize || 50)),
     sort: "desc",
-    apikey: config.bscScanApiKey,
+    apikey: network.explorerApiKey,
   });
 
-  const response = await fetch(`${config.bscScanApiUrl}?${params.toString()}`, {
+  const response = await fetch(`${network.explorerApiUrl}?${params.toString()}`, {
     headers: {
       accept: "application/json",
     },
   });
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(`bscscan_http_${response.status}`);
+    throw new Error(`explorer_http_${response.status}`);
   }
   if (!payload || (payload.status === "0" && payload.message !== "No transactions found")) {
-    throw new Error(payload?.result || payload?.message || "bscscan_error");
+    throw new Error(payload?.result || payload?.message || "explorer_error");
   }
 
   const rows = Array.isArray(payload.result) ? payload.result : [];
@@ -666,7 +678,7 @@ async function scanBscScanNetwork(network) {
       blockNumber: Number(tx.blockNumber || 0),
       fromAddress: normalizeAddress(tx.from),
       toAddress: txTo,
-      amount: getBscScanTransferAmount(tx, network.decimals),
+      amount: getExplorerTransferAmount(tx, network.decimals),
       chainTimestamp: tx.timeStamp ? new Date(Number(tx.timeStamp) * 1000) : new Date(),
       confirmations: Number(tx.confirmations || 0),
     });
@@ -682,12 +694,23 @@ async function scanBscScanNetwork(network) {
 async function scanNetwork(network) {
   let explorer = null;
   try {
-    explorer = await scanBscScanNetwork(network);
+    explorer = await scanExplorerNetwork(network);
   } catch (error) {
     explorer = {
       enabled: true,
       error: "scan_failed",
       message: error instanceof Error ? error.message : "unknown",
+    };
+  }
+
+  if (explorer?.enabled && !explorer.error) {
+    const reconcile = await reconcileUnmatchedDepositEvents(network, 0);
+    return {
+      network: network.key,
+      scanned: 0,
+      source: "explorer",
+      explorer,
+      reconcile,
     };
   }
 

@@ -77,22 +77,30 @@ export const config = {
   usdtDepositBackfillBlocks: parseNumber(process.env.USDT_DEPOSIT_BACKFILL_BLOCKS, 6_000, 300),
   usdtDepositBackfillMs: parseNumber(process.env.USDT_DEPOSIT_BACKFILL_MS, 300_000, 60_000),
   usdtDepositMatchGraceMinutes: parseNumber(process.env.USDT_DEPOSIT_MATCH_GRACE_MINUTES, 10, 0),
-  bscScanApiUrl: (
-    process.env.BSCSCAN_API_URL
+  evmScanApiUrl: (
+    process.env.EVM_SCAN_API_URL
       || process.env.ETHERSCAN_API_URL
+      || process.env.BSCSCAN_API_URL
       || "https://api.etherscan.io/v2/api"
   ).trim(),
-  bscScanApiKey: (
-    process.env.BSCSCAN_API_KEY
-      || process.env.BSC_SCAN_API_KEY
+  evmScanApiKey: (
+    process.env.EVM_SCAN_API_KEY
       || process.env.ETHERSCAN_API_KEY
+      || process.env.BSCSCAN_API_KEY
+      || process.env.BSC_SCAN_API_KEY
       || ""
   ).trim(),
-  bscScanChainId: (
-    process.env.BSCSCAN_CHAIN_ID
+  evmScanPageSize: parseNumber(process.env.EVM_SCAN_PAGE_SIZE || process.env.BSCSCAN_PAGE_SIZE, 50, 1),
+  usdtBscExplorerChainId: (
+    process.env.USDT_BSC_EXPLORER_CHAIN_ID
+      || process.env.BSCSCAN_CHAIN_ID
       || "56"
   ).trim(),
-  bscScanPageSize: parseNumber(process.env.BSCSCAN_PAGE_SIZE, 50, 1),
+  usdtEthExplorerChainId: (
+    process.env.USDT_ETH_EXPLORER_CHAIN_ID
+      || process.env.ETHERSCAN_CHAIN_ID
+      || "1"
+  ).trim(),
   usdtBscRpcUrl: (
     process.env.USDT_BSC_RPC_URL
       || process.env.BSC_RPC_URL
