@@ -123,6 +123,7 @@ p {
   text-align: center;
   letter-spacing: 0;
   text-transform: uppercase;
+  transform: translateX(4px);
 }
 
 .topbar-row {
@@ -137,16 +138,16 @@ p {
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 8px;
+  gap: 6px;
 }
 
 .topbar h1 {
   display: flex;
   align-items: center;
   gap: 5px;
-  max-width: 176px;
+  max-width: 108px;
   color: var(--fire);
-  font-size: 28px;
+  font-size: 23px;
   font-weight: 900;
   letter-spacing: 0;
   line-height: 1;
@@ -155,8 +156,8 @@ p {
 
 #fireBalance {
   display: inline-block;
-  min-width: 78px;
-  max-width: 138px;
+  min-width: 58px;
+  max-width: 104px;
   overflow: hidden;
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
@@ -165,13 +166,13 @@ p {
 }
 
 #fireBalance.compact {
-  font-size: 0.82em;
-  max-width: 128px;
+  font-size: 0.78em;
+  max-width: 94px;
 }
 
 #fireBalance.tiny {
-  font-size: 0.68em;
-  max-width: 116px;
+  font-size: 0.62em;
+  max-width: 86px;
 }
 
 .currency-switch,
@@ -188,8 +189,8 @@ p {
 
 .currency-switch {
   flex: 0 0 auto;
-  min-height: 36px;
-  padding: 4px;
+  min-height: 31px;
+  padding: 3px;
 }
 
 .currency-switch button,
@@ -206,9 +207,9 @@ p {
 }
 
 .currency-switch button {
-  min-width: 42px;
-  min-height: 32px;
-  font-size: 14px;
+  min-width: 32px;
+  min-height: 27px;
+  font-size: 13px;
 }
 
 .currency-switch button.active,
