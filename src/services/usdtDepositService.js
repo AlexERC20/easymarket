@@ -33,17 +33,6 @@ function ensurePositiveDepositAmount(value) {
   return amount;
 }
 
-function normalizeNetwork(value) {
-  const network = String(value || "BSC").trim().toUpperCase();
-  if (network === "BEP20") {
-    return "BSC";
-  }
-  if (network === "ERC20") {
-    return "ETH";
-  }
-  return network;
-}
-
 function normalizeAddress(value) {
   try {
     return getAddress(String(value || "").trim());
@@ -97,15 +86,6 @@ export function getPublicUsdtDepositNetworks() {
   }));
 }
 
-function getNetworkOrThrow(value) {
-  const networkKey = normalizeNetwork(value);
-  const network = getConfiguredUsdtDepositNetworks().find((item) => item.key === networkKey);
-  if (!network) {
-    throw new Error("invalid_deposit_network");
-  }
-  return network;
-}
-
 function getProvider(network) {
   const cached = providerCache.get(network.key);
   if (cached) {
@@ -121,10 +101,11 @@ function mapDepositIntent(row) {
     return null;
   }
   const network = getConfiguredUsdtDepositNetworks().find((item) => item.key === row.network);
+  const isAnyNetwork = row.network === "ANY";
   return {
     id: Number(row.id),
     network: row.network,
-    network_label: network?.label || row.network,
+    network_label: isAnyNetwork ? "BEP20 / ERC20" : network?.label || row.network,
     status: row.status,
     requested_amount: toNumber(row.requested_amount),
     deposit_amount: toNumber(row.deposit_amount),
@@ -154,7 +135,11 @@ export async function expirePendingDepositIntents() {
 }
 
 export async function createUsdtDepositIntent(input) {
-  const network = getNetworkOrThrow(input.network);
+  const networks = getConfiguredUsdtDepositNetworks();
+  const network = networks[0];
+  if (!network) {
+    throw new Error("invalid_deposit_network");
+  }
   const requestedAmount = ensurePositiveDepositAmount(input.amount);
   const user = await upsertUser({
     telegram_id: input.telegram_id,
@@ -182,12 +167,12 @@ export async function createUsdtDepositIntent(input) {
         `
           SELECT id
           FROM usdt_deposit_intents
-          WHERE network = $1
-            AND status = 'pending'
-            AND deposit_amount = $2::numeric
+          WHERE status = 'pending'
+            AND deposit_amount = $1::numeric
+            AND network = ANY($2::text[])
           LIMIT 1
         `,
-        [network.key, depositAmount],
+        [depositAmount, ["ANY", ...networks.map((item) => item.key)]],
       );
       if (existsResult.rows[0]) {
         continue;
@@ -205,17 +190,16 @@ export async function createUsdtDepositIntent(input) {
           )
           VALUES (
             $1,
-            $2,
+            'ANY',
+            $2::numeric,
             $3::numeric,
-            $4::numeric,
-            $5,
-            now() + ($6::int * interval '1 minute')
+            $4,
+            now() + ($5::int * interval '1 minute')
           )
           RETURNING *
         `,
         [
           user.id,
-          network.key,
           requestedAmount,
           depositAmount,
           network.treasuryAddress,
@@ -389,16 +373,16 @@ async function processDepositLog(network, log, provider, blockCache) {
       `
         SELECT *
         FROM usdt_deposit_intents
-        WHERE network = $1
+        WHERE network = ANY($1::text[])
           AND status = 'pending'
           AND deposit_amount = $2::numeric
           AND created_at <= $3
           AND expires_at >= $3
-        ORDER BY created_at ASC
+        ORDER BY CASE WHEN network = $4 THEN 0 ELSE 1 END, created_at ASC
         LIMIT 1
         FOR UPDATE
       `,
-      [network.key, amount, chainTimestamp],
+      [[network.key, "ANY"], amount, chainTimestamp, network.key],
     );
     const intent = intentResult.rows[0];
     if (!intent) {

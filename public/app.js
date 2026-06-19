@@ -2084,6 +2084,13 @@ function closeBetSheet() {
   $("betSheet")?.classList.add("hidden");
 }
 
+function buildQrImageUrl(value) {
+  const data = String(value || "").trim();
+  return data
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=216x216&data=${encodeURIComponent(data)}`
+    : "";
+}
+
 function renderTopupSheet() {
   const isTopupMode = state.topup.mode !== "withdraw";
   const currency = normalizeCurrency(state.topup.currency);
@@ -2095,10 +2102,7 @@ function renderTopupSheet() {
   const networks = Array.isArray(state.publicConfig.usdt_deposit_networks)
     ? state.publicConfig.usdt_deposit_networks
     : [];
-  const activeNetwork = networks.find((network) => network.key === state.topup.network) || networks[0];
-  if (activeNetwork && state.topup.network !== activeNetwork.key) {
-    state.topup.network = activeNetwork.key;
-  }
+  const hasUsdtNetworks = networks.length > 0;
   $("topupModePanel")?.classList.toggle("hidden", !isTopupMode);
   $("withdrawModePanel")?.classList.toggle("hidden", isTopupMode);
   $("walletModeTopupBtn")?.classList.toggle("active", isTopupMode);
@@ -2108,11 +2112,6 @@ function renderTopupSheet() {
   });
   $("usdtDepositPanel")?.classList.toggle("hidden", !isUsdt || !isTopupMode);
   document.querySelector(".topup-packages")?.classList.toggle("hidden", isUsdt);
-  document.querySelectorAll("[data-usdt-network]").forEach((button) => {
-    const network = networks.find((item) => item.key === button.dataset.usdtNetwork);
-    button.disabled = !network || Boolean(intent);
-    button.classList.toggle("active", Boolean(network) && network.key === state.topup.network);
-  });
   $("usdtDepositIntentBox")?.classList.toggle("hidden", !isUsdt || !intent);
   if ($("usdtDepositExactAmount")) {
     $("usdtDepositExactAmount").textContent = intent
@@ -2129,6 +2128,9 @@ function renderTopupSheet() {
           : "";
     $("usdtDepositStatus").textContent = statusText;
   }
+  if ($("usdtDepositNetworkHint")) {
+    $("usdtDepositNetworkHint").textContent = intent ? "Можно отправить в BEP20 или ERC20" : "";
+  }
   if ($("usdtCancelIntentBtn")) {
     $("usdtCancelIntentBtn").classList.toggle("hidden", !hasPendingIntent);
     $("usdtCancelIntentBtn").disabled = state.topup.pending;
@@ -2140,9 +2142,14 @@ function renderTopupSheet() {
   if ($("usdtEvmAddressLabel")) {
     $("usdtEvmAddressLabel").textContent = intent?.network_label
       ? `${intent.network_label} USDT адрес`
-      : "ERC20 / BEP20";
+      : "BEP20 / ERC20 USDT адрес";
   }
-  if ($("usdtEvmAddress")) $("usdtEvmAddress").textContent = hasPendingIntent ? (intent?.to_address || "") : "";
+  const depositAddress = hasPendingIntent ? (intent?.to_address || "") : "";
+  if ($("usdtEvmAddress")) $("usdtEvmAddress").textContent = depositAddress;
+  if ($("usdtDepositQr")) {
+    $("usdtDepositQr").classList.toggle("hidden", !depositAddress);
+    $("usdtDepositQr").src = depositAddress ? buildQrImageUrl(depositAddress) : "";
+  }
   if ($("walletSheetTitle")) {
     $("walletSheetTitle").textContent = isTopupMode
       ? `Пополнить ${isUsdt ? "USDT" : "звезды"}`
@@ -2175,17 +2182,19 @@ function renderTopupSheet() {
   }
   if ($("topupReason")) {
     if (state.topup.reason) {
-      $("topupReason").textContent = state.topup.reason;
+      $("topupReason").textContent = isUsdt && !intent
+        ? `${state.topup.reason} После создания заявки покажем адрес и QR. Отправить можно в BEP20 или ERC20.`
+        : state.topup.reason;
     } else if (isUsdt && intent) {
-      $("topupReason").textContent = `Отправь ровно ${Number(intent.deposit_amount || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT на адрес ${intent.network_label || intent.network}. Баланс обновится автоматически.`;
+      $("topupReason").textContent = `Отправь ровно ${Number(intent.deposit_amount || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT в BEP20 или ERC20. Баланс обновится автоматически.`;
     } else if (isUsdt) {
-      $("topupReason").textContent = "Создай заявку, потом отправь точную сумму USDT на общий кошелек.";
+      $("topupReason").textContent = "Укажи сумму от 15 USDT. После создания заявки покажем адрес и QR. Отправить можно в BEP20 или ERC20.";
     } else {
       $("topupReason").textContent = "Звезды зачислятся в баланс после оплаты.";
     }
   }
   if ($("topupBuyBtn")) {
-    $("topupBuyBtn").disabled = !isTopupMode || state.topup.pending || !state.user;
+    $("topupBuyBtn").disabled = !isTopupMode || state.topup.pending || !state.user || (isUsdt && !hasUsdtNetworks);
     $("topupBuyBtn").textContent = isUsdt
       ? (hasPendingIntent ? "Скопировать адрес" : "Создать заявку")
       : (state.topup.pending ? "Открываю оплату..." : `Купить ${formatCurrencyAmount(amount, currency)}`);
@@ -2299,7 +2308,6 @@ async function createUsdtDepositIntent() {
         username: state.user.username,
         first_name: state.user.first_name,
         amount,
-        network: state.topup.network,
       }),
     });
     state.topup.intent = result.intent;
@@ -2771,19 +2779,6 @@ document.querySelectorAll("[data-wallet-currency]").forEach((button) => {
       stopDepositPolling();
     }
     state.topup.currency = nextCurrency;
-    renderTopupSheet();
-  });
-});
-
-document.querySelectorAll("[data-usdt-network]").forEach((button) => {
-  button.addEventListener("click", () => {
-    if (button.disabled) {
-      return;
-    }
-    triggerHaptic("selection");
-    state.topup.network = button.dataset.usdtNetwork || "BSC";
-    state.topup.intent = null;
-    stopDepositPolling();
     renderTopupSheet();
   });
 });

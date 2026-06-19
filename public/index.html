@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260619-10" />
+    <link rel="stylesheet" href="/styles.css?v=20260619-11" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -180,19 +180,17 @@
               </div>
               <p id="topupReason">Зачислим в баланс после оплаты.</p>
               <div id="usdtDepositPanel" class="usdt-deposit-panel hidden">
-                <div class="usdt-network-toggle" role="tablist" aria-label="Сеть USDT">
-                  <button class="active" type="button" data-usdt-network="BSC">BEP20</button>
-                  <button type="button" data-usdt-network="ETH">ERC20</button>
-                </div>
                 <div id="usdtDepositIntentBox" class="usdt-deposit-intent hidden">
                   <small>Отправь ровно</small>
                   <strong id="usdtDepositExactAmount">100.00 USDT</strong>
                   <span id="usdtDepositStatus">Ждем перевод</span>
+                  <span id="usdtDepositNetworkHint">BEP20 или ERC20</span>
                   <button id="usdtCancelIntentBtn" class="usdt-cancel-intent" type="button">Отменить заявку</button>
                 </div>
                 <div class="usdt-address-card hidden" data-usdt-address-card="evm">
-                  <small id="usdtEvmAddressLabel">ERC20 / BEP20</small>
+                  <small id="usdtEvmAddressLabel">BEP20 / ERC20 USDT адрес</small>
                   <code id="usdtEvmAddress"></code>
+                  <img id="usdtDepositQr" class="usdt-deposit-qr hidden" alt="QR адреса USDT" />
                   <button type="button" data-copy-address="evm">Скопировать</button>
                 </div>
               </div>
@@ -423,6 +421,6 @@
       <div id="toast" class="toast hidden"></div>
     </main>
 
-    <script src="/app.js?v=20260619-10" type="module"></script>
+    <script src="/app.js?v=20260619-11" type="module"></script>
   </body>
 </html>
