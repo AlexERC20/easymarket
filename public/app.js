@@ -768,13 +768,48 @@ function normalizeTelegramUser(user, authSource) {
   };
 }
 
-function parseTelegramInitDataUser(initData) {
-  if (!initData) {
-    return null;
+function parseTelegramDataParams(initData) {
+  try {
+    return initData ? new URLSearchParams(initData) : new URLSearchParams();
+  } catch {
+    return new URLSearchParams();
+  }
+}
+
+function getUrlHashParams() {
+  try {
+    return new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  } catch {
+    return new URLSearchParams();
+  }
+}
+
+function getTelegramLaunchDataParams() {
+  const tg = window.Telegram?.WebApp;
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashParams = getUrlHashParams();
+  const candidates = [
+    tg?.initData,
+    searchParams.get("tgWebAppData"),
+    hashParams.get("tgWebAppData"),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const params = parseTelegramDataParams(candidate);
+    if (params.get("user") || params.get("auth_date") || params.get("start_param")) {
+      return params;
+    }
   }
 
+  if (hashParams.get("user") || hashParams.get("auth_date") || hashParams.get("start_param")) {
+    return hashParams;
+  }
+
+  return new URLSearchParams();
+}
+
+function parseTelegramUserFromParams(params) {
   try {
-    const params = new URLSearchParams(initData);
     const rawUser = params.get("user");
     return rawUser ? JSON.parse(rawUser) : null;
   } catch {
@@ -782,41 +817,58 @@ function parseTelegramInitDataUser(initData) {
   }
 }
 
-function parseTelegramStartParam(initData) {
-  if (!initData) {
-    return null;
-  }
+function parseTelegramInitDataUser(initData) {
+  return parseTelegramUserFromParams(parseTelegramDataParams(initData));
+}
 
-  try {
-    return new URLSearchParams(initData).get("start_param");
-  } catch {
-    return null;
-  }
+function parseTelegramStartParam(initData) {
+  return parseTelegramDataParams(initData).get("start_param");
+}
+
+function getLaunchRefValue() {
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashParams = getUrlHashParams();
+  const telegramDataParams = getTelegramLaunchDataParams();
+  return telegramDataParams.get("start_param")
+    || hashParams.get("tgWebAppStartParam")
+    || searchParams.get("tgWebAppStartParam")
+    || searchParams.get("ref")
+    || searchParams.get("startapp")
+    || searchParams.get("start_param")
+    || null;
 }
 
 function getTelegramDebugInfo() {
   const tg = window.Telegram?.WebApp;
+  const launchDataParams = getTelegramLaunchDataParams();
   if (!tg) {
-    return "Telegram.WebApp: нет · initData: нет · user: нет";
+    const launchUser = parseTelegramUserFromParams(launchDataParams);
+    return [
+      "Telegram.WebApp: нет",
+      `hash data: ${launchDataParams.toString() ? "да" : "нет"}`,
+      `hash user: ${launchUser?.id ? "да" : "нет"}`,
+      `start: ${getLaunchRefValue() ? "да" : "нет"}`,
+    ].join(" · ");
   }
 
   const unsafeUser = tg.initDataUnsafe?.user;
   const parsedUser = parseTelegramInitDataUser(tg.initData);
+  const launchUser = parseTelegramUserFromParams(launchDataParams);
   return [
     "Telegram.WebApp: да",
     `initData: ${tg.initData ? "да" : "нет"}`,
     `unsafe user: ${unsafeUser?.id ? "да" : "нет"}`,
     `parsed user: ${parsedUser?.id ? "да" : "нет"}`,
+    `hash user: ${launchUser?.id ? "да" : "нет"}`,
+    `start: ${getLaunchRefValue() ? "да" : "нет"}`,
   ].join(" · ");
 }
 
 function getTelegramUser() {
   const tg = window.Telegram?.WebApp;
   const params = new URLSearchParams(window.location.search);
-  const refParam = params.get("ref")
-    || params.get("startapp")
-    || params.get("start_param")
-    || params.get("tgWebAppStartParam");
+  const launchDataParams = getTelegramLaunchDataParams();
+  const refParam = getLaunchRefValue();
   const normalizeRef = (value) => {
     const normalized = String(value || "").trim().replace(/^ref_/, "");
     return /^\d+$/.test(normalized) ? normalized : null;
@@ -840,8 +892,12 @@ function getTelegramUser() {
     } catch {
       // Older Telegram clients may not support every Mini App display method.
     }
-    const user = tg.initDataUnsafe?.user || parseTelegramInitDataUser(tg.initData);
-    const telegramRef = tg.initDataUnsafe?.start_param || parseTelegramStartParam(tg.initData);
+    const user = tg.initDataUnsafe?.user
+      || parseTelegramInitDataUser(tg.initData)
+      || parseTelegramUserFromParams(launchDataParams);
+    const telegramRef = tg.initDataUnsafe?.start_param
+      || parseTelegramStartParam(tg.initData)
+      || launchDataParams.get("start_param");
     const normalizedUser = normalizeTelegramUser(user, "telegram");
     if (normalizedUser) {
       return {
@@ -849,6 +905,15 @@ function getTelegramUser() {
         referred_by_telegram_id: normalizeRef(telegramRef) || normalizeRef(refParam),
       };
     }
+  }
+
+  const launchUser = parseTelegramUserFromParams(launchDataParams);
+  const normalizedLaunchUser = normalizeTelegramUser(launchUser, "telegram_hash");
+  if (normalizedLaunchUser) {
+    return {
+      ...normalizedLaunchUser,
+      referred_by_telegram_id: normalizeRef(launchDataParams.get("start_param")) || normalizeRef(refParam),
+    };
   }
 
   const telegramId = params.get("telegram_id");
@@ -1028,10 +1093,10 @@ async function upsertMe() {
     setConnection("Нет пользователя", "error");
     if (!/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)) {
       window.setTimeout(() => {
-        if (!state.user && state.publicConfig.mini_app_url) {
-          window.location.href = state.publicConfig.mini_app_url;
+        if (!state.user) {
+          window.location.href = buildTelegramMiniAppLaunchUrl(getLaunchRefValue() || "easymarket");
         }
-      }, 900);
+      }, 1_800);
     }
     return false;
   }
@@ -2757,21 +2822,35 @@ document.querySelectorAll("[data-copy-address]").forEach((button) => {
   });
 });
 
-function buildInviteUrl(inviterTelegramId) {
-  const refValue = `ref_${inviterTelegramId}`;
+function buildTelegramMiniAppLaunchUrl(startParam = "easymarket") {
+  let safeStartParam = String(startParam || "easymarket").trim() || "easymarket";
+  if (/^\d+$/.test(safeStartParam)) {
+    safeStartParam = `ref_${safeStartParam}`;
+  }
   const baseUrl = state.publicConfig.mini_app_url || "https://t.me/voit_help_bot?startapp=easymarket";
   try {
     const url = new URL(baseUrl, window.location.origin);
     if (/^(www\.)?t\.me$/i.test(url.hostname) || /^(www\.)?telegram\.me$/i.test(url.hostname)) {
-      url.searchParams.set("startapp", refValue);
+      url.searchParams.set("startapp", safeStartParam);
       return url.toString();
     }
 
-    url.searchParams.set("ref", String(inviterTelegramId));
+    if (safeStartParam.startsWith("ref_")) {
+      url.searchParams.set("ref", safeStartParam.replace(/^ref_/, ""));
+    } else {
+      url.searchParams.set("startapp", safeStartParam);
+    }
     return url.toString();
   } catch {
-    return `${window.location.origin}/?ref=${encodeURIComponent(String(inviterTelegramId))}`;
+    if (safeStartParam.startsWith("ref_")) {
+      return `${window.location.origin}/?ref=${encodeURIComponent(safeStartParam.replace(/^ref_/, ""))}`;
+    }
+    return `${window.location.origin}/?startapp=${encodeURIComponent(safeStartParam)}`;
   }
+}
+
+function buildInviteUrl(inviterTelegramId) {
+  return buildTelegramMiniAppLaunchUrl(`ref_${inviterTelegramId}`);
 }
 
 function openTelegramUrl(url) {
@@ -3042,7 +3121,7 @@ $("taskDailyPresenceBtn")?.addEventListener("click", () => {
 
 $("openTelegramAppBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
-  window.location.href = state.publicConfig.mini_app_url || "https://t.me/voit_help_bot?startapp=easymarket";
+  window.location.href = buildTelegramMiniAppLaunchUrl(getLaunchRefValue() || "easymarket");
 });
 
 $("marketChatForm")?.addEventListener("submit", (event) => {
