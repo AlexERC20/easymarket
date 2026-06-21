@@ -2134,6 +2134,35 @@ export async function getMarketComments(marketId, limit = 30) {
   return result.rows.map(mapMarketComment);
 }
 
+export async function getMarketOnlineCount(marketId) {
+  const id = Number(marketId);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new Error("invalid_market_id");
+  }
+
+  const result = await query(
+    `
+      SELECT COUNT(DISTINCT user_id)::int AS online_count
+      FROM (
+        SELECT user_id
+        FROM market_comments
+        WHERE market_id = $1
+          AND created_at > now() - interval '15 minutes'
+
+        UNION
+
+        SELECT user_id
+        FROM trades
+        WHERE market_id = $1
+          AND created_at > now() - interval '15 minutes'
+      ) active_users
+    `,
+    [id],
+  );
+
+  return Number(result.rows[0]?.online_count || 0);
+}
+
 export async function addMarketComment(input) {
   const marketId = Number(input.marketId);
   const message = String(input.message || "").trim().slice(0, 240);

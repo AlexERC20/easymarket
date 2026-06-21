@@ -55,6 +55,7 @@ NODE_ENV=production
 PGSSLMODE=require
 BOT_BRIDGE_SECRET=
 TELEGRAM_BOT_TOKEN=
+TELEGRAM_ADMIN_USER_IDS=
 ALLOW_DEV_AUTH=false
 ALLOW_DEV_TOOLS=false
 MARKET_INTERVAL_SECONDS=10
@@ -64,6 +65,7 @@ MARKET_FEE_BPS=200
 MARKET_PROFIT_FEE_BPS=500
 MARKET_MAKER_SPREAD_BPS=300
 PRICE_POLL_MS=1000
+PUBLIC_WEB_URL=https://easymarket-rcuj.onrender.com
 PUBLIC_AV_BOT_URL=https://t.me/voit_help_bot?start=buy_stars
 PUBLIC_MINI_APP_URL=https://t.me/voit_help_bot?startapp=easymarket
 REFERRAL_BET_BONUS_FIRE=500
@@ -82,6 +84,8 @@ PUBLIC_PRIVATE_CHAT_URL=https://t.me/tribute/app?startapp=stKL
 
 `DATABASE_URL` must be set in the Render environment. Do not commit real database credentials.
 `BOT_BRIDGE_SECRET` protects future local Telegram bot bridge endpoints through the `x-bridge-secret` header.
+`TELEGRAM_ADMIN_USER_IDS` is a comma-separated list of admin Telegram IDs that receive USDT withdrawal requests.
+`PUBLIC_WEB_URL` is the public Render URL used in admin confirmation buttons.
 `PUBLIC_MINI_APP_URL` should point to the Telegram Mini App deep link, so referral shares open inside Telegram instead of the plain website.
 `TASK_PRIVATE_CHAT_FIRE` is a one-time private chat subscriber bonus completed through `/api/bridge/tasks/complete` with `task_key=private_chat`; it is not counted against the ordinary daily task cap.
 

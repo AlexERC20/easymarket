@@ -205,6 +205,28 @@ export async function runMigrations() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS usdt_withdrawal_requests (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      amount NUMERIC(20, 8) NOT NULL,
+      network TEXT NOT NULL,
+      to_address TEXT NOT NULL,
+      tx_hash TEXT,
+      admin_token TEXT UNIQUE NOT NULL,
+      admin_telegram_id TEXT,
+      admin_username TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      confirmed_at TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_withdrawal_requests_user_created
+      ON usdt_withdrawal_requests(user_id, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_withdrawal_requests_status_created
+      ON usdt_withdrawal_requests(status, created_at DESC);
+
     INSERT INTO usdt_balances (user_id, balance, updated_at)
     SELECT id, 0, now()
     FROM users

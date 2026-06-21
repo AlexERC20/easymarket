@@ -149,7 +149,16 @@
               <p id="walletSheetEyebrow" class="eyebrow">Telegram Stars</p>
               <h2 id="walletSheetTitle">Пополнить звезды</h2>
             </div>
-            <button id="topupCloseBtn" class="icon-button" type="button" aria-label="Закрыть пополнение">×</button>
+            <div class="wallet-head-actions">
+              <button id="walletHistoryBtn" class="icon-button" type="button" aria-label="История кошелька">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 12a9 9 0 1 0 3-6.7" />
+                  <path d="M3 4v5h5" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+              </button>
+              <button id="topupCloseBtn" class="icon-button" type="button" aria-label="Закрыть пополнение">×</button>
+            </div>
           </div>
           <div class="wallet-mode-toggle" role="tablist" aria-label="Кошелек">
             <button id="walletModeTopupBtn" class="active" type="button">Пополнить</button>
@@ -187,7 +196,23 @@
               <button id="topupBuyBtn" class="trade-confirm" type="button">Купить</button>
             </div>
             <div id="withdrawModePanel" class="wallet-mode-panel hidden">
-              <strong>Скоро</strong>
+              <label class="topup-custom-amount">
+                <input id="withdrawAmountInput" type="number" min="1" max="100000" step="0.01" inputmode="decimal" placeholder="Сумма вывода" />
+              </label>
+              <label class="topup-custom-amount">
+                <input id="withdrawAddressInput" type="text" inputmode="text" autocomplete="off" placeholder="Кошелек получателя" />
+              </label>
+              <div class="withdraw-network-toggle" role="tablist" aria-label="Сеть вывода">
+                <button class="active" data-withdraw-network="BSC" type="button">BEP20</button>
+                <button data-withdraw-network="ETH" type="button">ERC20</button>
+              </div>
+              <p id="withdrawReason"></p>
+              <button id="withdrawSubmitBtn" class="trade-confirm" type="button">Вывести</button>
+            </div>
+            <div id="walletHistoryPanel" class="wallet-mode-panel wallet-history-panel hidden">
+              <div id="walletHistoryList" class="wallet-history-list">
+                <p class="muted">История пока загружается.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -355,6 +380,9 @@
       </section>
 
       <section class="card market-chat-card">
+        <div class="market-chat-head">
+          <span>онлайн:<b id="marketChatOnline">0</b></span>
+        </div>
         <div id="marketChatList" class="market-chat-list">
           <p class="muted">Комментариев пока нет.</p>
         </div>

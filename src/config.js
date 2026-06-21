@@ -36,6 +36,20 @@ export const config = {
       || process.env.TELEGRAM_MINI_APP_URL
       || "https://t.me/voit_help_bot?startapp=easymarket"
   ).trim(),
+  publicWebUrl: (
+    process.env.PUBLIC_WEB_URL
+      || process.env.EASYMARKET_PUBLIC_URL
+      || process.env.RENDER_EXTERNAL_URL
+      || "https://easymarket-rcuj.onrender.com"
+  ).trim().replace(/\/+$/, ""),
+  telegramAdminUserIds: (
+    process.env.EASYMARKET_ADMIN_TELEGRAM_IDS
+      || process.env.TELEGRAM_ADMIN_USER_IDS
+      || ""
+  )
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean),
   marketIntervalSeconds: parseNumber(process.env.MARKET_INTERVAL_SECONDS, 2, 1),
   marketDurationMinutes: parseNumber(process.env.MARKET_DURATION_MINUTES, 5, 1),
   marketLiquidity: parseNumber(process.env.MARKET_LIQUIDITY, 10_000, 100),

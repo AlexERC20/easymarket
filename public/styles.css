@@ -56,6 +56,12 @@ input {
 
 button {
   -webkit-tap-highlight-color: transparent;
+  transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease, background 160ms ease;
+}
+
+button.is-pressed:not(:disabled) {
+  filter: brightness(1.08);
+  transform: translateY(1px) scale(0.985);
 }
 
 h1,
@@ -323,6 +329,12 @@ h2 {
   stroke-linejoin: round;
   stroke-width: 1.8;
   opacity: 0.62;
+}
+
+.icon-button.active,
+.icon-button.is-pressed {
+  border-color: rgba(94, 161, 255, 0.42);
+  background: rgba(94, 161, 255, 0.14);
 }
 
 .icon-button.accent {
@@ -1142,6 +1154,12 @@ code {
   padding-bottom: 18px;
 }
 
+.wallet-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .topup-body {
   display: grid;
   gap: 12px;
@@ -1156,6 +1174,11 @@ code {
   border-radius: 14px;
   background: rgba(7, 10, 16, 0.52);
   padding: 5px;
+}
+
+.wallet-mode-toggle.hidden,
+.wallet-currency-toggle.hidden {
+  display: none;
 }
 
 .wallet-mode-toggle button {
@@ -1227,6 +1250,86 @@ code {
 
 .wallet-mode-panel.hidden {
   display: none;
+}
+
+.withdraw-network-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.withdraw-network-toggle button {
+  min-height: 40px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.withdraw-network-toggle button.active {
+  border-color: rgba(94, 161, 255, 0.45);
+  background: rgba(94, 161, 255, 0.14);
+  color: var(--text);
+}
+
+.wallet-history-panel {
+  max-height: min(58dvh, 520px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.wallet-history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.wallet-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 10px;
+  animation: rowPop 180ms ease both;
+}
+
+.wallet-history-row > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.wallet-history-row > div:last-child {
+  text-align: right;
+}
+
+.wallet-history-row strong,
+.wallet-history-row b {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.wallet-history-row small,
+.wallet-history-row span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wallet-history-row.deposit b {
+  color: var(--yes);
+}
+
+.wallet-history-row.withdrawal b {
+  color: var(--no);
 }
 
 .topup-body strong {
@@ -1538,6 +1641,22 @@ code {
   gap: 12px;
 }
 
+.market-chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.market-chat-head b {
+  margin-left: 4px;
+  color: var(--text);
+  font-weight: 950;
+}
+
 .market-chat-list {
   display: grid;
   gap: 9px;
@@ -1551,6 +1670,7 @@ code {
   border-radius: 13px;
   background: rgba(255, 255, 255, 0.035);
   padding: 10px;
+  animation: rowPop 170ms ease both;
 }
 
 .chat-meta {
@@ -1640,6 +1760,17 @@ code {
 
 .market-chat-form button:disabled {
   opacity: 0.62;
+}
+
+@keyframes rowPop {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .bet-panel {

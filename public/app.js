@@ -44,6 +44,7 @@ const state = {
   worldCupCharts: new Map(),
   comments: [],
   commentsMarketId: null,
+  commentsOnlineCount: 0,
   commentPending: false,
   betSheet: {
     market: null,
@@ -58,6 +59,18 @@ const state = {
     currency: "USDT",
     intent: null,
     pollTimer: null,
+    historyOpen: false,
+  },
+  withdrawal: {
+    amount: "",
+    address: "",
+    network: "BSC",
+    pending: false,
+    reason: "",
+  },
+  walletHistory: {
+    loading: false,
+    items: [],
   },
   leaderboardCurrency: "STAR",
   taskTab: "tasks",
@@ -127,6 +140,13 @@ const formatCurrencyAmount = (value, currency = state.currency) => {
   const formatted = Number(value || 0).toLocaleString("ru-RU", {
     minimumFractionDigits: safeCurrency === "USDT" ? 0 : 0,
     maximumFractionDigits: safeCurrency === "USDT" ? 2 : 0,
+  });
+  return safeCurrency === "USDT" ? `$${formatted}` : formatted;
+};
+const formatWholeCurrencyAmount = (value, currency = state.currency) => {
+  const safeCurrency = normalizeCurrency(currency);
+  const formatted = Math.floor(Number(value || 0)).toLocaleString("ru-RU", {
+    maximumFractionDigits: 0,
   });
   return safeCurrency === "USDT" ? `$${formatted}` : formatted;
 };
@@ -1283,12 +1303,14 @@ async function loadComments() {
   if (!market?.id) {
     state.comments = [];
     state.commentsMarketId = null;
+    state.commentsOnlineCount = 0;
     renderComments();
     return;
   }
 
   const data = await api(`/api/market/${market.id}/comments?limit=30`);
   state.comments = data.comments || [];
+  state.commentsOnlineCount = Number(data.online_count || 0);
   state.commentsMarketId = market.id;
   renderComments();
 }
@@ -1300,6 +1322,9 @@ function renderComments() {
   }
 
   const market = getDisplayMarket();
+  if ($("marketChatOnline")) {
+    $("marketChatOnline").textContent = Math.max(0, Math.round(Number(state.commentsOnlineCount || 0))).toLocaleString("ru-RU");
+  }
   if (!market?.id) {
     container.innerHTML = '<p class="muted">Сначала выбери рынок.</p>';
     return;
@@ -1770,8 +1795,8 @@ function renderTradeTicket() {
     button.dataset.amount = String(amount);
     const amountPreview = getPreview(amount, side);
     const pendingKey = market ? getBuyIntentKey(market.id, side, amount, state.currency) : null;
-    const nextLabel = formatCurrencyAmount(amount, state.currency);
-    const nextWin = formatCurrencyAmount(amountPreview.shares, state.currency);
+    const nextLabel = formatWholeCurrencyAmount(amount, state.currency);
+    const nextWin = formatWholeCurrencyAmount(amountPreview.shares, state.currency);
     button.classList.toggle("active", amount === state.selectedAmount);
     button.classList.toggle("loading", Boolean(state.pendingBuyKey && state.pendingBuyKey === pendingKey));
     button.disabled = !market || !state.user || !canBuyMarket;
@@ -2088,10 +2113,79 @@ function closeBetSheet() {
   $("betSheet")?.classList.add("hidden");
 }
 
+function walletStatusLabel(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "credited") return "зачислено";
+  if (normalized === "completed") return "выведено";
+  if (normalized === "pending") return "в обработке";
+  if (normalized === "expired") return "истекло";
+  if (normalized === "cancelled" || normalized === "canceled") return "отменено";
+  return normalized || "статус";
+}
+
+function walletTypeLabel(type) {
+  return type === "withdrawal" ? "Вывод" : "Пополнение";
+}
+
+function renderWalletHistory() {
+  const container = $("walletHistoryList");
+  if (!container) {
+    return;
+  }
+
+  if (state.walletHistory.loading) {
+    container.innerHTML = '<p class="muted">Загружаю историю...</p>';
+    return;
+  }
+
+  if (!state.walletHistory.items.length) {
+    container.innerHTML = '<p class="muted">Истории пополнений и выводов пока нет.</p>';
+    return;
+  }
+
+  container.innerHTML = state.walletHistory.items.slice(0, 30).map((item) => {
+    const amount = formatCurrencyAmount(item.amount, "USDT");
+    const network = item.network_label || item.network || "";
+    const address = item.address
+      ? `${String(item.address).slice(0, 7)}...${String(item.address).slice(-5)}`
+      : "";
+    return `
+      <div class="wallet-history-row ${item.type === "withdrawal" ? "withdrawal" : "deposit"}">
+        <div>
+          <strong>${walletTypeLabel(item.type)}</strong>
+          <small>${escapeHtml(network)}${address ? ` · ${escapeHtml(address)}` : ""}</small>
+        </div>
+        <div>
+          <b>${item.type === "withdrawal" ? "-" : "+"}${amount}</b>
+          <span>${walletStatusLabel(item.status)} · ${formatRelativeTime(item.created_at)}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function loadWalletHistory() {
+  if (!state.user?.telegram_id) {
+    return;
+  }
+  state.walletHistory.loading = true;
+  renderWalletHistory();
+  try {
+    const data = await api(`/api/wallet/history?telegram_id=${encodeURIComponent(state.user.telegram_id)}&limit=40`);
+    state.walletHistory.items = data.history || [];
+  } catch {
+    showToast("История кошелька пока не загрузилась.");
+  } finally {
+    state.walletHistory.loading = false;
+    renderWalletHistory();
+  }
+}
+
 function renderTopupSheet() {
   const isTopupMode = state.topup.mode !== "withdraw";
   const currency = normalizeCurrency(state.topup.currency);
   const isUsdt = currency === "USDT";
+  const isHistoryOpen = Boolean(state.topup.historyOpen);
   const intent = state.topup.intent;
   const hasPendingIntent = isUsdt && intent?.status === "pending";
   const hasAmount = hasTopupAmountValue(state.topup.amount);
@@ -2101,10 +2195,14 @@ function renderTopupSheet() {
     ? state.publicConfig.usdt_deposit_networks
     : [];
   const hasUsdtNetworks = networks.length > 0;
-  $("topupModePanel")?.classList.toggle("hidden", !isTopupMode);
-  $("withdrawModePanel")?.classList.toggle("hidden", isTopupMode);
-  $("walletModeTopupBtn")?.classList.toggle("active", isTopupMode);
-  $("walletModeWithdrawBtn")?.classList.toggle("active", !isTopupMode);
+  $("topupModePanel")?.classList.toggle("hidden", isHistoryOpen || !isTopupMode);
+  $("withdrawModePanel")?.classList.toggle("hidden", isHistoryOpen || isTopupMode);
+  $("walletHistoryPanel")?.classList.toggle("hidden", !isHistoryOpen);
+  $("walletModeTopupBtn")?.classList.toggle("active", !isHistoryOpen && isTopupMode);
+  $("walletModeWithdrawBtn")?.classList.toggle("active", !isHistoryOpen && !isTopupMode);
+  $("walletHistoryBtn")?.classList.toggle("active", isHistoryOpen);
+  document.querySelector(".wallet-mode-toggle")?.classList.toggle("hidden", isHistoryOpen);
+  document.querySelector(".wallet-currency-toggle")?.classList.toggle("hidden", isHistoryOpen || !isTopupMode);
   document.querySelectorAll("[data-wallet-currency]").forEach((button) => {
     button.classList.toggle("active", normalizeCurrency(button.dataset.walletCurrency) === currency);
   });
@@ -2130,12 +2228,16 @@ function renderTopupSheet() {
   const depositAddress = hasPendingIntent ? (intent?.to_address || "") : "";
   if ($("usdtEvmAddress")) $("usdtEvmAddress").textContent = depositAddress;
   if ($("walletSheetTitle")) {
-    $("walletSheetTitle").textContent = isTopupMode
+    $("walletSheetTitle").textContent = isHistoryOpen
+      ? "История кошелька"
+      : isTopupMode
       ? `Пополнить ${isUsdt ? "USDT" : "звезды"}`
       : `Вывести ${isUsdt ? "USDT" : "звезды"}`;
   }
   if ($("walletSheetEyebrow")) {
-    $("walletSheetEyebrow").textContent = isUsdt ? "Virtual USDT" : "Telegram Stars";
+    $("walletSheetEyebrow").textContent = isHistoryOpen
+      ? "Transactions"
+      : isUsdt ? "Virtual USDT" : "Telegram Stars";
   }
   if ($("walletFullBalance")) {
     const walletBalance = isUsdt ? state.usdtCashBalance : state.balance;
@@ -2180,19 +2282,39 @@ function renderTopupSheet() {
           ? `Купить ${formatCurrencyAmount(amount, currency)}`
           : "Купить");
   }
+  if ($("withdrawAmountInput") && document.activeElement !== $("withdrawAmountInput")) {
+    $("withdrawAmountInput").value = state.withdrawal.amount || "";
+  }
+  if ($("withdrawAddressInput") && document.activeElement !== $("withdrawAddressInput")) {
+    $("withdrawAddressInput").value = state.withdrawal.address || "";
+  }
+  document.querySelectorAll("[data-withdraw-network]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.withdrawNetwork === state.withdrawal.network);
+  });
+  if ($("withdrawReason")) {
+    $("withdrawReason").textContent = state.withdrawal.reason || "";
+    $("withdrawReason").classList.toggle("hidden", !state.withdrawal.reason);
+  }
+  if ($("withdrawSubmitBtn")) {
+    $("withdrawSubmitBtn").disabled = isHistoryOpen || isTopupMode || state.withdrawal.pending || !state.user;
+    $("withdrawSubmitBtn").textContent = state.withdrawal.pending ? "Создаю заявку..." : "Вывести";
+  }
+  renderWalletHistory();
 }
 
 function openTopupSheet(amount, reason = "", mode = "topup") {
   state.topup.amount = hasTopupAmountValue(amount) ? normalizeTopupAmount(amount, state.currency) : "";
   state.topup.reason = reason;
   state.topup.mode = mode === "withdraw" ? "withdraw" : "topup";
-  state.topup.currency = state.currency;
+  state.topup.currency = state.topup.mode === "withdraw" ? "USDT" : state.currency;
+  state.topup.historyOpen = false;
   renderTopupSheet();
   $("topupSheet")?.classList.remove("hidden");
 }
 
 function closeTopupSheet() {
   $("topupSheet")?.classList.add("hidden");
+  state.topup.historyOpen = false;
 }
 
 function showButtonPressed(button) {
@@ -2343,6 +2465,71 @@ async function cancelUsdtDepositIntent() {
     showToast("Не получилось отменить заявку.");
   } finally {
     state.topup.pending = false;
+    renderTopupSheet();
+  }
+}
+
+async function createUsdtWithdrawalRequest() {
+  if (!state.user?.telegram_id) {
+    triggerHaptic("warning");
+    showToast("Сначала нужен пользователь.");
+    return;
+  }
+  const amount = Number(String(state.withdrawal.amount || "").replace(",", "."));
+  if (!Number.isFinite(amount) || amount <= 0) {
+    triggerHaptic("warning");
+    showToast("Введи сумму вывода.");
+    return;
+  }
+  if (amount > Number(state.usdtCashBalance || 0)) {
+    triggerHaptic("warning");
+    showToast("Для вывода доступен только основной USDT-баланс.");
+    return;
+  }
+  const address = String(state.withdrawal.address || "").trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    triggerHaptic("warning");
+    showToast("Введи ERC20/BEP20 кошелек.");
+    return;
+  }
+
+  state.withdrawal.pending = true;
+  state.withdrawal.reason = "";
+  renderTopupSheet();
+  try {
+    const result = await api("/api/usdt/withdrawals", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        username: state.user.username,
+        first_name: state.user.first_name,
+        amount,
+        network: state.withdrawal.network,
+        to_address: address,
+      }),
+    });
+    state.usdtCashBalance = Number(result.usdt_cash_balance || 0);
+    state.usdtBonusBalance = Number(result.usdt_bonus_balance ?? state.usdtBonusBalance ?? 0);
+    state.usdtBalance = Number(result.usdt_balance ?? (state.usdtCashBalance + state.usdtBonusBalance));
+    state.withdrawal.amount = "";
+    state.withdrawal.address = "";
+    state.withdrawal.reason = "Заявка создана и отправлена админу. Статус будет в истории.";
+    state.topup.historyOpen = true;
+    triggerHaptic("success");
+    showToast("Заявка на вывод создана.");
+    await loadWalletHistory();
+    await loadMe().catch(() => undefined);
+  } catch (error) {
+    triggerHaptic("error");
+    const messages = {
+      insufficient_usdt: "Недостаточно доступного USDT.",
+      invalid_withdrawal_address: "Проверь кошелек получателя.",
+      invalid_withdrawal_network: "Выбери сеть вывода.",
+      invalid_withdrawal_amount: "Проверь сумму вывода.",
+    };
+    showToast(messages[error.message] || "Не получилось создать вывод.");
+  } finally {
+    state.withdrawal.pending = false;
     renderTopupSheet();
   }
 }
@@ -2694,6 +2881,15 @@ $("topupBuyBtn")?.addEventListener("click", () => {
   void startStarsTopup();
 });
 
+$("walletHistoryBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  state.topup.historyOpen = !state.topup.historyOpen;
+  if (state.topup.historyOpen) {
+    void loadWalletHistory();
+  }
+  renderTopupSheet();
+});
+
 $("topupCustomAmount")?.addEventListener("input", () => {
   if (state.topup.intent?.status === "pending") {
     return;
@@ -2713,15 +2909,52 @@ $("usdtCancelIntentBtn")?.addEventListener("click", () => {
 
 $("walletModeTopupBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
+  state.topup.historyOpen = false;
   state.topup.mode = "topup";
   renderTopupSheet();
 });
 
 $("walletModeWithdrawBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
+  state.topup.historyOpen = false;
   state.topup.mode = "withdraw";
+  state.topup.currency = "USDT";
   renderTopupSheet();
 });
+
+$("withdrawAmountInput")?.addEventListener("input", () => {
+  state.withdrawal.amount = $("withdrawAmountInput").value;
+  state.withdrawal.reason = "";
+  renderTopupSheet();
+});
+
+$("withdrawAddressInput")?.addEventListener("input", () => {
+  state.withdrawal.address = $("withdrawAddressInput").value;
+  state.withdrawal.reason = "";
+});
+
+document.querySelectorAll("[data-withdraw-network]").forEach((button) => {
+  button.addEventListener("click", () => {
+    triggerHaptic("selection");
+    state.withdrawal.network = button.dataset.withdrawNetwork === "ETH" ? "ETH" : "BSC";
+    state.withdrawal.reason = "";
+    renderTopupSheet();
+  });
+});
+
+$("withdrawSubmitBtn")?.addEventListener("click", () => {
+  showButtonPressed($("withdrawSubmitBtn"));
+  triggerHaptic("selection");
+  void createUsdtWithdrawalRequest();
+});
+
+document.addEventListener("pointerdown", (event) => {
+  const button = event.target.closest("button");
+  if (!button || button.disabled) {
+    return;
+  }
+  showButtonPressed(button);
+}, { passive: true });
 
 [
   ["positionToggle", "positions", renderMe],
@@ -3012,6 +3245,7 @@ async function submitMarketComment() {
     input.value = "";
     state.comments = [result.comment, ...state.comments].slice(0, 30);
     state.commentsMarketId = market.id;
+    state.commentsOnlineCount = Math.max(1, Number(state.commentsOnlineCount || 0));
     triggerHaptic("success");
     renderComments();
   } catch (error) {
@@ -3109,7 +3343,8 @@ $("marketChatForm")?.addEventListener("submit", (event) => {
 $("btcMarketsBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   setBtcMarketsSheetOpen(true);
-  void loadBtcMarkets().catch(() => showToast("BTC markets пока не загрузились."));
+  renderBtcMarketsList();
+  void runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => showToast("BTC markets пока не загрузились."));
 });
 
 $("btcMarketsCloseBtn")?.addEventListener("click", () => {
@@ -3146,7 +3381,8 @@ $("btcMarketsList")?.addEventListener("click", (event) => {
 $("worldCupBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   setWorldCupSheetOpen(true);
-  void loadWorldCupMarkets().catch(() => showToast("World Cup markets пока не загрузились."));
+  renderWorldCupList();
+  void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => showToast("World Cup markets пока не загрузились."));
 });
 
 $("worldCupCloseBtn")?.addEventListener("click", () => {

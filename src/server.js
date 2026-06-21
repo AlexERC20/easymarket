@@ -21,6 +21,7 @@ import {
   getLeaderboard,
   getMarketActivity,
   getMarketComments,
+  getMarketOnlineCount,
   getMarketChart,
   getRecentActivity,
   getRecentMarkets,
@@ -44,6 +45,12 @@ import {
   getUserDepositIntents,
   scanUsdtDeposits,
 } from "./services/usdtDepositService.js";
+import {
+  confirmUsdtWithdrawalRequest,
+  createUsdtWithdrawalRequest,
+  getUserWithdrawals,
+  getWalletHistory,
+} from "./services/usdtWithdrawalService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -86,6 +93,11 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "deposit_amount_collision",
     "deposit_intent_not_found",
     "deposit_intent_not_pending",
+    "invalid_withdrawal_amount",
+    "invalid_withdrawal_network",
+    "invalid_withdrawal_address",
+    "withdrawal_not_found",
+    "withdrawal_not_pending",
     "position_not_open",
     "invalid_position_id",
     "invalid_sell_shares",
@@ -361,6 +373,102 @@ app.post("/api/usdt/deposits/intents/:intentId/cancel", async (req, res) => {
   }
 });
 
+app.post("/api/usdt/withdrawals", async (req, res) => {
+  try {
+    const result = await createUsdtWithdrawalRequest({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      amount: req.body?.amount,
+      network: req.body?.network,
+      to_address: req.body?.to_address ?? req.body?.toAddress,
+    });
+    res.status(200).json({
+      ok: true,
+      request: result.request,
+      usdt_cash_balance: result.cash_balance,
+      usdt_bonus_balance: result.bonus_balance,
+      usdt_balance: result.balance,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/usdt/withdrawals", async (req, res) => {
+  try {
+    const telegramId = getTelegramId(req);
+    if (!telegramId) {
+      throw new Error("telegram_id_missing");
+    }
+    const requests = await getUserWithdrawals(telegramId, req.query.limit);
+    res.status(200).json({
+      ok: true,
+      requests,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/wallet/history", async (req, res) => {
+  try {
+    const telegramId = getTelegramId(req);
+    if (!telegramId) {
+      throw new Error("telegram_id_missing");
+    }
+    const history = await getWalletHistory(telegramId, req.query.limit);
+    res.status(200).json({
+      ok: true,
+      history,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/admin/withdrawals/:requestId/confirm", async (req, res) => {
+  try {
+    const request = await confirmUsdtWithdrawalRequest({
+      requestId: req.params.requestId,
+      token: req.query.token,
+    });
+    res.type("html").send(`<!doctype html>
+      <html lang="ru">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>EasyMarket withdrawal</title>
+          <style>
+            body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #080d16; color: #f3f6fb; font-family: Inter, system-ui, sans-serif; }
+            main { width: min(420px, calc(100% - 32px)); border: 1px solid rgba(255,255,255,.1); border-radius: 18px; background: #111823; padding: 22px; box-shadow: 0 24px 70px rgba(0,0,0,.5); }
+            h1 { margin: 0 0 8px; font-size: 22px; }
+            p { margin: 8px 0; color: #9aa5b8; line-height: 1.45; }
+            strong { color: #19c37d; }
+          </style>
+        </head>
+        <body>
+          <main>
+            <h1>Вывод подтвержден</h1>
+            <p>Заявка #${request.id} отмечена как выполненная.</p>
+            <p><strong>${request.amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT</strong> · ${request.network_label}</p>
+          </main>
+        </body>
+      </html>`);
+  } catch (error) {
+    res.status(400).type("html").send(`<!doctype html>
+      <html lang="ru">
+        <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /></head>
+        <body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#080d16;color:#f3f6fb;font-family:system-ui,sans-serif;">
+          <main style="width:min(420px,calc(100% - 32px));border:1px solid rgba(255,255,255,.1);border-radius:18px;background:#111823;padding:22px;">
+            <h1 style="margin:0 0 8px;font-size:22px;">Не получилось подтвердить</h1>
+            <p style="margin:0;color:#9aa5b8;">Заявка не найдена или ссылка уже недействительна.</p>
+          </main>
+        </body>
+      </html>`);
+  }
+});
+
 app.post("/api/me/upsert", async (req, res) => {
   try {
     const authSource = String(req.body?.auth_source || "telegram");
@@ -483,10 +591,14 @@ app.get("/api/btc/markets", async (_req, res) => {
 
 app.get("/api/market/:marketId/comments", async (req, res) => {
   try {
-    const comments = await getMarketComments(req.params.marketId, req.query.limit);
+    const [comments, onlineCount] = await Promise.all([
+      getMarketComments(req.params.marketId, req.query.limit),
+      getMarketOnlineCount(req.params.marketId),
+    ]);
     res.status(200).json({
       ok: true,
       comments,
+      online_count: onlineCount,
     });
   } catch (error) {
     sendApiError(res, error);
