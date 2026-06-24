@@ -527,12 +527,18 @@ app.get("/api/market/active", async (_req, res) => {
   try {
     await priceTick();
     const market = await getActiveMarket();
-    const [activity, chart] = market
-      ? await Promise.all([
-        getMarketActivity(market.id, 24),
-        getMarketChart(market, 260),
-      ])
-      : [[], []];
+    let activity = [];
+    let chart = [];
+    if (market) {
+      try {
+        [activity, chart] = await Promise.all([
+          getMarketActivity(market.id, 24),
+          getMarketChart(market, 260),
+        ]);
+      } catch (error) {
+        console.warn("[easymarket] active market extras failed:", error instanceof Error ? error.message : "unknown error");
+      }
+    }
     res.status(200).json({
       ok: true,
       market,
