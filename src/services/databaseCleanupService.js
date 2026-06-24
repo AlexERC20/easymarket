@@ -40,6 +40,35 @@ async function deleteOldPriceTicks() {
   );
 }
 
+async function truncatePriceTicksIfTooLarge() {
+  const maxMb = Number(config.cleanupPriceTicksTruncateAboveMb || 0);
+  if (!Number.isFinite(maxMb) || maxMb <= 0) {
+    return {
+      truncated: false,
+      bytes_before: 0,
+      threshold_mb: maxMb,
+    };
+  }
+
+  const sizeResult = await query("SELECT pg_total_relation_size('price_ticks') AS bytes");
+  const bytesBefore = Number(sizeResult.rows?.[0]?.bytes || 0);
+  const thresholdBytes = maxMb * 1024 * 1024;
+  if (bytesBefore < thresholdBytes) {
+    return {
+      truncated: false,
+      bytes_before: bytesBefore,
+      threshold_mb: maxMb,
+    };
+  }
+
+  await query("TRUNCATE TABLE price_ticks RESTART IDENTITY");
+  return {
+    truncated: true,
+    bytes_before: bytesBefore,
+    threshold_mb: maxMb,
+  };
+}
+
 async function deleteOldMarketComments() {
   return deleteInBatches(
     `
@@ -160,8 +189,10 @@ async function vacuumTouchedTables(summary) {
 
 export async function runDatabaseCleanup() {
   const startedAt = Date.now();
+  const priceTickEmergency = await truncatePriceTicksIfTooLarge();
   const summary = {
-    price_ticks: await deleteOldPriceTicks(),
+    price_ticks: priceTickEmergency.truncated ? 0 : await deleteOldPriceTicks(),
+    price_ticks_emergency: priceTickEmergency,
     market_comments: await deleteOldMarketComments(),
     usdt_deposit_events: await deleteOldDepositEvents(),
     usdt_deposit_intents: await deleteOldExpiredDepositIntents(),

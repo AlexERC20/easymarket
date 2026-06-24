@@ -1110,11 +1110,9 @@ async function startMarketEngine() {
   }
 
   if (config.databaseCleanupEnabled) {
-    if (config.databaseCleanupRunOnStart) {
-      setTimeout(() => {
-        void databaseCleanupTick("startup");
-      }, 15_000);
-    }
+    setTimeout(() => {
+      void databaseCleanupTick(config.databaseCleanupRunOnStart ? "startup" : "startup-safety");
+    }, 15_000);
     setInterval(() => {
       void databaseCleanupTick("daily");
     }, config.databaseCleanupIntervalMs);

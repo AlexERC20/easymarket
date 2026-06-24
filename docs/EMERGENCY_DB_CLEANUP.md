@@ -49,4 +49,4 @@ VACUUM (ANALYZE);
 
 ## After recovery
 
-`PRICE_TICKS_ENABLED=true` is the default again for live charts. Old raw ticks are pruned by the scheduled cleanup job; keep `DATABASE_CLEANUP_ENABLED=true` and a short `CLEANUP_PRICE_TICKS_HOURS` value on small Render Postgres plans.
+`PRICE_TICKS_DISABLED=false` is the default for live charts. Old raw ticks are pruned by the scheduled cleanup job; keep `DATABASE_CLEANUP_ENABLED=true` and a short `CLEANUP_PRICE_TICKS_HOURS` value on small Render Postgres plans. The app also has a startup safety cleanup that truncates only `price_ticks` when it grows above `CLEANUP_PRICE_TICKS_TRUNCATE_ABOVE_MB`.
