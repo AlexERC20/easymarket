@@ -305,6 +305,20 @@ function mapUserMarketStat(row) {
   };
 }
 
+async function persistPriceTick(db, symbol, price, source) {
+  if (!config.priceTicksEnabled) {
+    return;
+  }
+
+  await db.query(
+    `
+      INSERT INTO price_ticks (symbol, price, source)
+      VALUES ($1, $2, $3)
+    `,
+    [symbol, price, source],
+  );
+}
+
 function questionForPrice(price, definition = getBtcMarketDef(MARKET_SYMBOL)) {
   return `BTC будет выше ${Math.round(price).toLocaleString("ru-RU")} через ${definition?.label || "5m"}?`;
 }
@@ -1933,13 +1947,7 @@ export async function createBtcMarket(definition = BTC_MARKET_DEFS[0], btcInput 
     ],
   );
 
-  await query(
-    `
-      INSERT INTO price_ticks (symbol, price, source)
-      VALUES ($1, $2, $3)
-    `,
-    [definition.symbol, btc.price, btc.source],
-  );
+  await persistPriceTick({ query }, definition.symbol, btc.price, btc.source);
 
   return mapMarket(result.rows[0]);
 }
@@ -2000,13 +2008,7 @@ export async function ensureActiveMarket() {
 export async function updateLiveBtcPrice() {
   const btc = await getBtcPrice();
   await withTransaction(async (client) => {
-    await client.query(
-      `
-        INSERT INTO price_ticks (symbol, price, source)
-        VALUES ($1, $2, $3)
-      `,
-      [btc.symbol, btc.price, btc.source],
-    );
+    await persistPriceTick(client, btc.symbol, btc.price, btc.source);
 
     const markets = await client.query(
       `
@@ -2034,13 +2036,7 @@ export async function updateLiveBtcPrice() {
       );
 
       if (market.symbol !== btc.symbol) {
-        await client.query(
-          `
-            INSERT INTO price_ticks (symbol, price, source)
-            VALUES ($1, $2, $3)
-          `,
-          [market.symbol, btc.price, btc.source],
-        );
+        await persistPriceTick(client, market.symbol, btc.price, btc.source);
       }
     }
   });
@@ -2371,13 +2367,7 @@ export async function syncWorldCupMarkets() {
       );
 
       const market = marketResult.rows[0];
-      await client.query(
-        `
-          INSERT INTO price_ticks (symbol, price, source)
-          VALUES ($1, $2, $3)
-        `,
-        [symbol, toNumber(market.yes_price), feed.source],
-      );
+      await persistPriceTick(client, symbol, toNumber(market.yes_price), feed.source);
     }
   });
 
