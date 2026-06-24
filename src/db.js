@@ -176,6 +176,9 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_usdt_deposit_intents_status_network
       ON usdt_deposit_intents(status, network, expires_at);
 
+    CREATE INDEX IF NOT EXISTS idx_usdt_deposit_intents_status_updated
+      ON usdt_deposit_intents(status, updated_at);
+
     CREATE UNIQUE INDEX IF NOT EXISTS idx_usdt_deposit_intents_pending_amount
       ON usdt_deposit_intents(network, deposit_amount)
       WHERE status = 'pending';
@@ -198,6 +201,9 @@ export async function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_usdt_deposit_events_status_created
       ON usdt_deposit_events(status, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_deposit_events_created
+      ON usdt_deposit_events(created_at DESC);
 
     CREATE TABLE IF NOT EXISTS usdt_deposit_scanner_state (
       network TEXT PRIMARY KEY,
@@ -263,6 +269,9 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_markets_symbol_status
       ON markets(symbol, status);
 
+    CREATE INDEX IF NOT EXISTS idx_markets_status_resolved
+      ON markets(status, resolved_at DESC);
+
     WITH ranked_open_markets AS (
       SELECT
         id,
@@ -317,6 +326,9 @@ export async function runMigrations() {
       UNIQUE(user_id, task_key, day_key)
     );
 
+    CREATE INDEX IF NOT EXISTS idx_fire_task_claims_created
+      ON fire_task_claims(created_at DESC);
+
     CREATE TABLE IF NOT EXISTS positions (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -366,6 +378,9 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_market_comments_market_created
       ON market_comments(market_id, created_at DESC);
 
+    CREATE INDEX IF NOT EXISTS idx_market_comments_created
+      ON market_comments(created_at DESC);
+
     CREATE TABLE IF NOT EXISTS price_ticks (
       id BIGSERIAL PRIMARY KEY,
       symbol TEXT NOT NULL,
@@ -376,6 +391,9 @@ export async function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_price_ticks_symbol_created
       ON price_ticks(symbol, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_price_ticks_created
+      ON price_ticks(created_at DESC);
 
     ALTER TABLE trades
       ADD COLUMN IF NOT EXISTS action TEXT NOT NULL DEFAULT 'BUY';

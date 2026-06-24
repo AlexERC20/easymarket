@@ -37,6 +37,7 @@ import {
   upsertUser,
 } from "./services/marketService.js";
 import { PriceUnavailableError } from "./services/priceService.js";
+import { runDatabaseCleanup } from "./services/databaseCleanupService.js";
 import {
   cancelUserDepositIntent,
   createUsdtDepositIntent,
@@ -72,6 +73,7 @@ let marketEngineStarted = false;
 let marketEngineBusy = false;
 let priceEngineBusy = false;
 let usdtDepositScannerBusy = false;
+let databaseCleanupBusy = false;
 
 function sendApiError(res, error, fallbackStatus = 500) {
   const message = error instanceof Error ? error.message : String(error);
@@ -799,6 +801,19 @@ app.post("/api/dev/market/create", requireDevTools, async (_req, res) => {
   }
 });
 
+app.post("/api/bridge/cleanup/run", requireBridgeSecret, async (_req, res) => {
+  try {
+    const summary = await databaseCleanupTick("bridge");
+    res.status(200).json({
+      ok: true,
+      skipped: !summary,
+      summary,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
 app.post("/api/bridge/users/upsert", requireBridgeSecret, async (req, res) => {
   try {
     const user = await upsertUser({
@@ -1027,6 +1042,27 @@ async function usdtDepositTick() {
   }
 }
 
+async function databaseCleanupTick(reason = "scheduled") {
+  if (databaseCleanupBusy || !config.databaseCleanupEnabled) {
+    return null;
+  }
+
+  databaseCleanupBusy = true;
+  try {
+    const summary = await runDatabaseCleanup();
+    console.log("[easymarket] database cleanup finished", {
+      reason,
+      ...summary,
+    });
+    return summary;
+  } catch (error) {
+    console.warn("[easymarket] database cleanup failed:", error instanceof Error ? error.message : "unknown error");
+    return null;
+  } finally {
+    databaseCleanupBusy = false;
+  }
+}
+
 async function startMarketEngine() {
   if (marketEngineStarted || !getPool()) {
     return;
@@ -1054,6 +1090,17 @@ async function startMarketEngine() {
     setInterval(() => {
       void usdtDepositTick();
     }, config.usdtDepositScanMs);
+  }
+
+  if (config.databaseCleanupEnabled) {
+    if (config.databaseCleanupRunOnStart) {
+      setTimeout(() => {
+        void databaseCleanupTick("startup");
+      }, 15_000);
+    }
+    setInterval(() => {
+      void databaseCleanupTick("daily");
+    }, config.databaseCleanupIntervalMs);
   }
 }
 
