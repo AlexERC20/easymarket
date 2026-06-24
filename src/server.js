@@ -525,6 +525,7 @@ app.get("/api/me", async (req, res) => {
 
 app.get("/api/market/active", async (_req, res) => {
   try {
+    await priceTick();
     const market = await getActiveMarket();
     const [activity, chart] = market
       ? await Promise.all([
@@ -994,6 +995,21 @@ app.get("*", (_req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
 });
 
+async function withTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function marketTick() {
   if (marketEngineBusy) {
     return;
@@ -1017,7 +1033,8 @@ async function priceTick() {
 
   priceEngineBusy = true;
   try {
-    await updateLiveBtcPrice();
+    const timeoutMs = Math.max(3_000, Math.min(10_000, config.pricePollMs * 4));
+    await withTimeout(updateLiveBtcPrice(), timeoutMs, "BTC price tick timed out.");
   } catch (error) {
     if (!(error instanceof PriceUnavailableError)) {
       console.warn("[easymarket] price tick failed:", error instanceof Error ? error.message : "unknown error");
