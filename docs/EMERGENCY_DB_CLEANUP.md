@@ -49,4 +49,4 @@ VACUUM (ANALYZE);
 
 ## After recovery
 
-`PRICE_TICKS_ENABLED=false` is the default in the app now, so the biggest table should not start growing again unless this env is explicitly enabled.
+`PRICE_TICKS_ENABLED=true` is the default again for live charts. Old raw ticks are pruned by the scheduled cleanup job; keep `DATABASE_CLEANUP_ENABLED=true` and a short `CLEANUP_PRICE_TICKS_HOURS` value on small Render Postgres plans.
