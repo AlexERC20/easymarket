@@ -66,9 +66,11 @@ MARKET_PROFIT_FEE_BPS=500
 MARKET_MAKER_SPREAD_BPS=300
 PRICE_POLL_MS=1000
 DATABASE_CLEANUP_ENABLED=true
-DATABASE_CLEANUP_RUN_ON_START=true
+DATABASE_CLEANUP_RUN_ON_START=false
 DATABASE_CLEANUP_INTERVAL_MS=86400000
-DATABASE_CLEANUP_VACUUM=true
+DATABASE_CLEANUP_VACUUM=false
+DATABASE_CLEANUP_BATCH_SIZE=25000
+DATABASE_CLEANUP_MAX_BATCHES=20
 CLEANUP_PRICE_TICKS_HOURS=48
 CLEANUP_MARKET_COMMENTS_DAYS=3
 CLEANUP_DEPOSIT_EVENTS_DAYS=30
@@ -98,7 +100,7 @@ PUBLIC_PRIVATE_CHAT_URL=https://t.me/tribute/app?startapp=stKL
 `PUBLIC_WEB_URL` is the public Render URL used in admin confirmation buttons.
 `PUBLIC_MINI_APP_URL` should point to the Telegram Mini App deep link, so referral shares open inside Telegram instead of the plain website.
 `TASK_PRIVATE_CHAT_FIRE` is a one-time private chat subscriber bonus completed through `/api/bridge/tasks/complete` with `task_key=private_chat`; it is not counted against the ordinary daily task cap.
-`DATABASE_CLEANUP_*` controls the daily Postgres cleanup job. The defaults keep balances, ledgers, deposits, withdrawals, positions, and trades, while pruning old chart ticks, comments, scanner events, expired deposit requests, old daily task claims, and empty technical markets.
+`DATABASE_CLEANUP_*` controls the daily Postgres cleanup job. The defaults keep balances, ledgers, deposits, withdrawals, positions, and trades, while pruning old chart ticks, comments, scanner events, expired deposit requests, old daily task claims, and empty technical markets. Cleanup deletes in batches to avoid long locks on a busy database.
 
 ## Render
 

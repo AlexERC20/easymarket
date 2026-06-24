@@ -5,75 +5,134 @@ function rowCount(result) {
   return Number(result?.rowCount || 0);
 }
 
+async function deleteInBatches(sql, params = []) {
+  const batchSize = Math.round(config.databaseCleanupBatchSize);
+  const maxBatches = Math.round(config.databaseCleanupMaxBatches);
+  let total = 0;
+
+  for (let batch = 0; batch < maxBatches; batch += 1) {
+    const result = await query(sql, [...params, batchSize]);
+    const deleted = rowCount(result);
+    total += deleted;
+    if (deleted < batchSize) {
+      break;
+    }
+  }
+
+  return total;
+}
+
 async function deleteOldPriceTicks() {
-  const result = await query(
+  return deleteInBatches(
     `
-      DELETE FROM price_ticks
-      WHERE created_at < now() - ($1::int * interval '1 hour')
+      WITH doomed AS (
+        SELECT id
+        FROM price_ticks
+        WHERE created_at < now() - ($1::int * interval '1 hour')
+        ORDER BY id ASC
+        LIMIT $2
+      )
+      DELETE FROM price_ticks ticks
+      USING doomed
+      WHERE ticks.id = doomed.id
     `,
     [Math.round(config.cleanupPriceTicksHours)],
   );
-  return rowCount(result);
 }
 
 async function deleteOldMarketComments() {
-  const result = await query(
+  return deleteInBatches(
     `
-      DELETE FROM market_comments
-      WHERE created_at < now() - ($1::int * interval '1 day')
+      WITH doomed AS (
+        SELECT id
+        FROM market_comments
+        WHERE created_at < now() - ($1::int * interval '1 day')
+        ORDER BY id ASC
+        LIMIT $2
+      )
+      DELETE FROM market_comments comments
+      USING doomed
+      WHERE comments.id = doomed.id
     `,
     [Math.round(config.cleanupMarketCommentsDays)],
   );
-  return rowCount(result);
 }
 
 async function deleteOldDepositEvents() {
-  const result = await query(
+  return deleteInBatches(
     `
-      DELETE FROM usdt_deposit_events
-      WHERE created_at < now() - ($1::int * interval '1 day')
+      WITH doomed AS (
+        SELECT id
+        FROM usdt_deposit_events
+        WHERE created_at < now() - ($1::int * interval '1 day')
+        ORDER BY id ASC
+        LIMIT $2
+      )
+      DELETE FROM usdt_deposit_events events
+      USING doomed
+      WHERE events.id = doomed.id
     `,
     [Math.round(config.cleanupDepositEventsDays)],
   );
-  return rowCount(result);
 }
 
 async function deleteOldExpiredDepositIntents() {
-  const result = await query(
+  return deleteInBatches(
     `
-      DELETE FROM usdt_deposit_intents
-      WHERE status IN ('expired', 'cancelled', 'canceled')
-        AND updated_at < now() - ($1::int * interval '1 day')
+      WITH doomed AS (
+        SELECT id
+        FROM usdt_deposit_intents
+        WHERE status IN ('expired', 'cancelled', 'canceled')
+          AND updated_at < now() - ($1::int * interval '1 day')
+        ORDER BY id ASC
+        LIMIT $2
+      )
+      DELETE FROM usdt_deposit_intents intents
+      USING doomed
+      WHERE intents.id = doomed.id
     `,
     [Math.round(config.cleanupExpiredDepositIntentsDays)],
   );
-  return rowCount(result);
 }
 
 async function deleteOldTaskClaims() {
-  const result = await query(
+  return deleteInBatches(
     `
-      DELETE FROM fire_task_claims
-      WHERE created_at < now() - ($1::int * interval '1 day')
+      WITH doomed AS (
+        SELECT id
+        FROM fire_task_claims
+        WHERE created_at < now() - ($1::int * interval '1 day')
+        ORDER BY id ASC
+        LIMIT $2
+      )
+      DELETE FROM fire_task_claims claims
+      USING doomed
+      WHERE claims.id = doomed.id
     `,
     [Math.round(config.cleanupTaskClaimsDays)],
   );
-  return rowCount(result);
 }
 
 async function deleteEmptyOldMarkets() {
-  const result = await query(
+  return deleteInBatches(
     `
-      DELETE FROM markets m
-      WHERE m.status IN ('resolved', 'price_error', 'superseded')
-        AND COALESCE(m.resolved_at, m.end_time, m.created_at) < now() - ($1::int * interval '1 day')
-        AND NOT EXISTS (SELECT 1 FROM positions p WHERE p.market_id = m.id)
-        AND NOT EXISTS (SELECT 1 FROM trades t WHERE t.market_id = m.id)
-        AND NOT EXISTS (SELECT 1 FROM market_comments c WHERE c.market_id = m.id)
+      WITH doomed AS (
+        SELECT m.id
+        FROM markets m
+        WHERE m.status IN ('resolved', 'price_error', 'superseded')
+          AND COALESCE(m.resolved_at, m.end_time, m.created_at) < now() - ($1::int * interval '1 day')
+          AND NOT EXISTS (SELECT 1 FROM positions p WHERE p.market_id = m.id)
+          AND NOT EXISTS (SELECT 1 FROM trades t WHERE t.market_id = m.id)
+          AND NOT EXISTS (SELECT 1 FROM market_comments c WHERE c.market_id = m.id)
+        ORDER BY m.id ASC
+        LIMIT $2
+      )
+      DELETE FROM markets markets_to_delete
+      USING doomed
+      WHERE markets_to_delete.id = doomed.id
     `,
     [Math.round(config.cleanupEmptyMarketsDays)],
   );
-  return rowCount(result);
 }
 
 async function vacuumTouchedTables(summary) {
