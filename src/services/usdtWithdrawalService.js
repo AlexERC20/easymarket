@@ -63,6 +63,10 @@ function adminConfirmUrl(requestId, token) {
   return `${config.publicWebUrl}/admin/withdrawals/${encodeURIComponent(requestId)}/confirm?token=${encodeURIComponent(token)}`;
 }
 
+function adminConfirmCallbackData(requestId) {
+  return `em_wd_confirm:${requestId}`;
+}
+
 async function sendAdminWithdrawalNotification(request, adminToken) {
   if (!config.telegramBotToken || !config.telegramAdminUserIds.length) {
     return;
@@ -83,6 +87,16 @@ async function sendAdminWithdrawalNotification(request, adminToken) {
     "Проверь перевод вручную и подтверди заявку в AV-боте.",
     `Bridge confirm: /confirm_withdrawal ${request.id} ${adminToken}`,
   ].join("\n");
+  const replyMarkup = {
+    inline_keyboard: [
+      [
+        {
+          text: "✅ Подтвердить вывод",
+          callback_data: adminConfirmCallbackData(request.id),
+        },
+      ],
+    ],
+  };
   await Promise.allSettled(config.telegramAdminUserIds.map(async (chatId) => {
     const response = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`, {
       method: "POST",
@@ -91,6 +105,7 @@ async function sendAdminWithdrawalNotification(request, adminToken) {
         chat_id: chatId,
         text,
         disable_web_page_preview: true,
+        reply_markup: replyMarkup,
       }),
     });
     if (!response.ok) {
@@ -311,6 +326,59 @@ export async function confirmUsdtWithdrawalRequest(input) {
         FOR UPDATE
       `,
       [requestId, token],
+    );
+    const row = requestResult.rows[0];
+    if (!row) {
+      throw new Error("withdrawal_not_found");
+    }
+    if (row.status !== "pending") {
+      return mapWithdrawal(row);
+    }
+
+    const updateResult = await client.query(
+      `
+        UPDATE usdt_withdrawal_requests
+        SET status = 'completed',
+            updated_at = now(),
+            confirmed_at = now()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [requestId],
+    );
+
+    return mapWithdrawal({
+      ...updateResult.rows[0],
+      telegram_id: row.telegram_id,
+      username: row.username,
+      first_name: row.first_name,
+    });
+  });
+
+  void sendUserWithdrawalConfirmed(request);
+  return request;
+}
+
+export async function confirmUsdtWithdrawalRequestByBridge(input) {
+  const requestId = Number(input.requestId);
+  if (!Number.isSafeInteger(requestId) || requestId <= 0) {
+    throw new Error("withdrawal_not_found");
+  }
+
+  const request = await withTransaction(async (client) => {
+    const requestResult = await client.query(
+      `
+        SELECT
+          requests.*,
+          users.telegram_id,
+          users.username,
+          users.first_name
+        FROM usdt_withdrawal_requests requests
+        JOIN users ON users.id = requests.user_id
+        WHERE requests.id = $1
+        FOR UPDATE
+      `,
+      [requestId],
     );
     const row = requestResult.rows[0];
     if (!row) {

@@ -49,6 +49,7 @@ import {
 } from "./services/usdtDepositService.js";
 import {
   confirmUsdtWithdrawalRequest,
+  confirmUsdtWithdrawalRequestByBridge,
   createUsdtWithdrawalRequest,
   getUserWithdrawals,
   getWalletHistory,
@@ -723,10 +724,15 @@ app.post("/api/market/:marketId/sell", async (req, res) => {
 
 app.post("/api/bridge/withdrawals/:requestId/confirm", requireBridgeSecret, async (req, res) => {
   try {
-    const request = await confirmUsdtWithdrawalRequest({
-      requestId: req.params.requestId,
-      token: req.body?.token,
-    });
+    const token = String(req.body?.token ?? "").trim();
+    const request = token
+      ? await confirmUsdtWithdrawalRequest({
+        requestId: req.params.requestId,
+        token,
+      })
+      : await confirmUsdtWithdrawalRequestByBridge({
+        requestId: req.params.requestId,
+      });
     res.status(200).json({
       ok: true,
       request,
