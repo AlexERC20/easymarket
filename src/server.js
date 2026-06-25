@@ -113,7 +113,6 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "sell_failed",
     "sell_frozen",
     "sell_min_hold",
-    "sell_tail_blocked",
   ]);
 
   if (message === "DATABASE_URL is not configured.") {
@@ -709,7 +708,6 @@ app.post("/api/market/:marketId/sell", async (req, res) => {
       "sell_failed",
       "sell_frozen",
       "sell_min_hold",
-      "sell_tail_blocked",
     ]);
     if (!(error instanceof PriceUnavailableError) && message !== "DATABASE_URL is not configured." && !sellPublicErrors.has(message)) {
       res.status(500).json({

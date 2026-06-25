@@ -13,6 +13,8 @@ const DEFAULT_PROFIT_FEE_BPS = 500;
 const DEFAULT_MARKET_MAKER_SPREAD_BPS = 300;
 const BUY_IMPACT_MULTIPLIER = 0.85;
 const SELL_IMPACT_MULTIPLIER = 1.1;
+const MAX_SINGLE_TRADE_SHIFT = 0.42;
+const MIN_TAIL_DEPTH_FACTOR = 0.055;
 const REFERRAL_SIGNUP_BONUS = 100;
 const CURRENCIES = new Set(["STAR", "USDT"]);
 
@@ -446,11 +448,27 @@ function getCurrentPriceForMarket(market) {
   return toNumber(market.current_price, toNumber(market.open_price));
 }
 
+function getTailDepthFactor(outcomePrice, minPrice = MIN_PRICE) {
+  const price = clamp(Number(outcomePrice || 0.5), minPrice, 1 - minPrice);
+  const distanceFromCenter = Math.min(1, Math.abs(price - 0.5) / 0.5);
+  const centerDepth = Math.pow(1 - distanceFromCenter, 2.35);
+  return MIN_TAIL_DEPTH_FACTOR + (1 - MIN_TAIL_DEPTH_FACTOR) * centerDepth;
+}
+
+function getEffectiveMarketMakerLiquidity(market, outcomePrice) {
+  const rawLiquidity = Math.max(1, toNumber(market.liquidity, config.marketLiquidity));
+  const baseLiquidity = isSportsMarket(market)
+    ? Math.max(1_500, Math.min(30_000, Math.sqrt(rawLiquidity) * 2.1))
+    : Math.max(1_200, Math.min(24_000, rawLiquidity));
+  return Math.max(150, baseLiquidity * getTailDepthFactor(outcomePrice, getMarketMinOutcomePrice(market)));
+}
+
 function getBuyExecutionQuote(market, side, amount) {
   const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
-  const liquidity = toNumber(market.liquidity, config.marketLiquidity);
-  const tradeShift = (side === "YES" ? 1 : -1) * (amount / liquidity) * BUY_IMPACT_MULTIPLIER;
+  const liquidity = getEffectiveMarketMakerLiquidity(market, oldOutcomePrice);
+  const rawTradeShift = (amount / liquidity) * BUY_IMPACT_MULTIPLIER;
+  const tradeShift = (side === "YES" ? 1 : -1) * Math.min(MAX_SINGLE_TRADE_SHIFT, rawTradeShift);
   const repricedMarket = {
     ...market,
     yes_volume: toNumber(market.yes_volume) + (side === "YES" ? amount : 0),
@@ -476,9 +494,10 @@ function getBuyExecutionQuote(market, side, amount) {
 function getSellExecutionQuote(market, side, sharesToSell) {
   const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
-  const liquidity = toNumber(market.liquidity, config.marketLiquidity);
   const estimatedGross = Math.max(0, sharesToSell * oldOutcomePrice);
-  const tradeShift = (side === "YES" ? -1 : 1) * (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER;
+  const liquidity = getEffectiveMarketMakerLiquidity(market, oldOutcomePrice);
+  const rawTradeShift = (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER;
+  const tradeShift = (side === "YES" ? -1 : 1) * Math.min(MAX_SINGLE_TRADE_SHIFT, rawTradeShift);
   const repricedMarket = {
     ...market,
     yes_volume: side === "YES"
@@ -2820,18 +2839,6 @@ export async function sellOutcome(input) {
 
     const sharesToSell = Math.min(positionShares, requestedShares);
     const marketMinPrice = getMarketMinOutcomePrice(market);
-    const currentOutcomePrice = getMarketOutcomePrice(market, side);
-    const tailExitBlockPrice = Math.max(marketMinPrice, Number(config.marketTailExitBlockPrice || 0));
-    const boughtOutcomePrice = toNumber(position.avg_price);
-    if (
-      tailExitBlockPrice > 0
-      && (
-        currentOutcomePrice <= tailExitBlockPrice
-        || (boughtOutcomePrice > 0 && boughtOutcomePrice <= tailExitBlockPrice)
-      )
-    ) {
-      throw new Error("sell_tail_blocked");
-    }
     const quote = getSellExecutionQuote(market, side, sharesToSell);
     if (quote.executionPrice < marketMinPrice || quote.executionPrice > 1 - marketMinPrice) {
       throw new Error("invalid_market_price");

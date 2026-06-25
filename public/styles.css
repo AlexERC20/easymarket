@@ -408,6 +408,21 @@ h2 {
     );
 }
 
+.market-card.market-switching {
+  animation: marketSwitch 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes marketSwitch {
+  0% {
+    opacity: 0.72;
+    transform: translateX(10px) scale(0.992);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
 .market-hero {
   align-items: flex-start;
   gap: 11px;
@@ -907,7 +922,14 @@ h2 {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.04);
   padding: 11px;
-  animation: rowPop 170ms ease both;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.activity-row.fresh,
+.chat-row.fresh {
+  animation: rowPop 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  border-color: rgba(55, 214, 127, 0.26);
+  background: rgba(55, 214, 127, 0.06);
 }
 
 .position-actions {
@@ -1353,7 +1375,7 @@ code {
   border-radius: 13px;
   background: rgba(255, 255, 255, 0.04);
   padding: 10px;
-  animation: rowPop 180ms ease both;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
 }
 
 .wallet-history-row > div {
@@ -1619,7 +1641,7 @@ code {
 .world-cup-row {
   border-top: 1px solid var(--line-soft);
   padding-top: 12px;
-  animation: rowPop 170ms ease both;
+  transition: background 160ms ease, transform 160ms ease;
 }
 
 .world-cup-row:first-child {
@@ -1730,7 +1752,7 @@ code {
   border-radius: 13px;
   background: rgba(255, 255, 255, 0.035);
   padding: 10px;
-  animation: rowPop 170ms ease both;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
 }
 
 .chat-meta {
@@ -1876,6 +1898,25 @@ code {
   font-size: clamp(54px, 18vw, 82px);
   font-weight: 950;
   line-height: 1;
+}
+
+.bet-amount-display strong.amount-pulse {
+  animation: amountPulse 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes amountPulse {
+  0% {
+    transform: scale(0.96);
+    filter: brightness(0.92);
+  }
+  65% {
+    transform: scale(1.035);
+    filter: brightness(1.15);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
 }
 
 .bet-amount-display small {

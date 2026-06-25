@@ -1,6 +1,13 @@
 import { config } from "../config.js";
 import { query } from "../db.js";
 
+const EMPTY_MARKET_CLEANUP_SYMBOLS = [
+  "BTCUSDT",
+  "BTCUSDT_15M",
+  "BTCUSDT_1H",
+  "BTCUSDT_12H",
+];
+
 function rowCount(result) {
   return Number(result?.rowCount || 0);
 }
@@ -236,17 +243,18 @@ async function deleteEmptyOldMarkets() {
         FROM markets m
         WHERE m.status IN ('resolved', 'price_error', 'superseded')
           AND COALESCE(m.resolved_at, m.end_time, m.created_at) < now() - ($1::int * interval '1 day')
+          AND m.symbol = ANY($2::text[])
           AND NOT EXISTS (SELECT 1 FROM positions p WHERE p.market_id = m.id)
           AND NOT EXISTS (SELECT 1 FROM trades t WHERE t.market_id = m.id)
           AND NOT EXISTS (SELECT 1 FROM market_comments c WHERE c.market_id = m.id)
         ORDER BY m.id ASC
-        LIMIT $2
+        LIMIT $3
       )
       DELETE FROM markets markets_to_delete
       USING doomed
       WHERE markets_to_delete.id = doomed.id
     `,
-    [Math.round(config.cleanupEmptyMarketsDays)],
+    [Math.round(config.cleanupEmptyMarketsDays), EMPTY_MARKET_CLEANUP_SYMBOLS],
   );
 }
 

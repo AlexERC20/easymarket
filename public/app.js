@@ -1,6 +1,7 @@
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
 const SELL_IMPACT_MULTIPLIER = 1.1;
+const MIN_TAIL_DEPTH_FACTOR = 0.055;
 const STAR_AMOUNTS = [50, 100, 500, 1000];
 const USDT_AMOUNTS = [5, 10, 25, 100];
 const MIN_OUTCOME_PRICE = 0.001;
@@ -14,7 +15,6 @@ const COLLAPSE_LIMIT = 3;
 const MARKET_BUY_CLOSE_BUFFER_MS = 400;
 const MARKET_SELL_FREEZE_SECONDS = 7;
 const MARKET_MIN_HOLD_SECONDS = 20;
-const MARKET_TAIL_EXIT_BLOCK_PRICE = 0.08;
 
 const state = {
   user: null,
@@ -48,6 +48,9 @@ const state = {
   comments: [],
   commentsMarketId: null,
   commentsOnlineCount: 0,
+  commentsLoaded: false,
+  seenCommentIds: new Set(),
+  freshCommentIds: new Set(),
   commentPending: false,
   betSheet: {
     market: null,
@@ -88,6 +91,7 @@ const state = {
   activityLoaded: false,
   settlementsLoaded: false,
   seenActivityIds: new Set(),
+  freshActivityIds: new Set(),
   seenSettledPositionIds: new Set(),
   pendingBuy: false,
   pendingBuyKey: null,
@@ -253,6 +257,14 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function setInnerHtmlIfChanged(element, html) {
+  if (!element || element.innerHTML === html) {
+    return;
+  }
+
+  element.innerHTML = html;
 }
 
 function isImageUrl(value) {
@@ -1205,10 +1217,13 @@ function mergeChartPoints(points, market) {
 
 function handleActivity(activity) {
   const nextActivity = activity || [];
+  state.freshActivityIds = new Set();
   if (state.activityLoaded) {
-    nextActivity
+    const freshTrades = nextActivity
       .filter((trade) => !state.seenActivityIds.has(trade.id))
-      .slice()
+      .slice();
+    state.freshActivityIds = new Set(freshTrades.map((trade) => trade.id));
+    freshTrades
       .reverse()
       .forEach(showTradeBubble);
   }
@@ -1339,14 +1354,28 @@ async function loadComments() {
     state.comments = [];
     state.commentsMarketId = null;
     state.commentsOnlineCount = 0;
+    state.freshCommentIds = new Set();
     renderComments();
     return;
   }
 
   const data = await api(`/api/market/${market.id}/comments?limit=30`);
-  state.comments = data.comments || [];
+  const nextComments = data.comments || [];
+  const sameMarket = state.commentsMarketId === market.id;
+  state.freshCommentIds = new Set();
+  if (sameMarket && state.commentsLoaded) {
+    state.freshCommentIds = new Set(
+      nextComments
+        .filter((comment) => !state.seenCommentIds.has(`${market.id}:${comment.id}`))
+        .map((comment) => `${market.id}:${comment.id}`),
+    );
+  }
+
+  nextComments.forEach((comment) => state.seenCommentIds.add(`${market.id}:${comment.id}`));
+  state.comments = nextComments;
   state.commentsOnlineCount = Number(data.online_count || 0);
   state.commentsMarketId = market.id;
+  state.commentsLoaded = true;
   renderComments();
 }
 
@@ -1361,23 +1390,24 @@ function renderComments() {
     $("marketChatOnline").textContent = Math.max(0, Math.round(Number(state.commentsOnlineCount || 0))).toLocaleString("ru-RU");
   }
   if (!market?.id) {
-    container.innerHTML = '<p class="muted">Сначала выбери рынок.</p>';
+    setInnerHtmlIfChanged(container, '<p class="muted">Сначала выбери рынок.</p>');
     return;
   }
 
   if (state.commentsMarketId !== market.id || !state.comments.length) {
-    container.innerHTML = '<p class="muted">Комментариев пока нет.</p>';
+    setInnerHtmlIfChanged(container, '<p class="muted">Комментариев пока нет.</p>');
     return;
   }
 
-  container.innerHTML = state.comments.slice(0, 8).map((comment) => {
+  const html = state.comments.slice(0, 8).map((comment) => {
     const name = comment.username || comment.first_name || `user ${comment.telegram_id}`;
     const latestBet = comment.latest_bet;
+    const isFresh = state.freshCommentIds.has(`${market.id}:${comment.id}`);
     const betBadge = latestBet
       ? `<span class="chat-bet side-${latestBet.side}">${actionLabel(latestBet.action)} ${marketSideLabel(market, latestBet.side)} ${formatCurrencyAmount(latestBet.amount, latestBet.currency)}</span>`
       : '<span class="chat-bet muted">без ставки</span>';
     return `
-      <div class="chat-row">
+      <div class="chat-row ${isFresh ? "fresh" : ""}">
         <div class="chat-meta">
           <strong>${escapeHtml(name)}</strong>
           <span>${formatRelativeTime(comment.created_at)}</span>
@@ -1387,6 +1417,7 @@ function renderComments() {
       </div>
     `;
   }).join("");
+  setInnerHtmlIfChanged(container, html);
 }
 
 function mergeWorldCupChartPoint(market) {
@@ -1729,9 +1760,15 @@ function estimateSellQuote({ position, market, outcomePrice }) {
   const shares = Number(position.shares || 0);
   const minPrice = getMarketMinOutcomePrice(market);
   const price = Math.max(minPrice, Number(outcomePrice || 0));
-  const liquidity = Math.max(100, Number(market?.liquidity || state.market?.liquidity || 10_000));
+  const rawLiquidity = Math.max(1, Number(market?.liquidity || state.market?.liquidity || 10_000));
+  const baseLiquidity = isWorldCupMarket(market)
+    ? Math.max(1_500, Math.min(30_000, Math.sqrt(rawLiquidity) * 2.1))
+    : Math.max(1_200, Math.min(24_000, rawLiquidity));
+  const distanceFromCenter = Math.min(1, Math.abs(price - 0.5) / 0.5);
+  const depthFactor = MIN_TAIL_DEPTH_FACTOR + (1 - MIN_TAIL_DEPTH_FACTOR) * Math.pow(1 - distanceFromCenter, 2.35);
+  const liquidity = Math.max(150, baseLiquidity * depthFactor);
   const estimatedGross = shares * price;
-  const impact = (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER;
+  const impact = Math.min(0.42, (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER);
   const nextPrice = Math.max(minPrice, price - impact);
   const extraExitPenalty = isWorldCupMarket(market) ? 0.02 : 0;
   const bidPrice = Math.max(minPrice, Math.min(price, nextPrice) * (1 - MARKET_MAKER_SPREAD_RATE - extraExitPenalty));
@@ -1790,11 +1827,9 @@ function renderMe() {
     const marketIsLive = position.market_status === "open";
     const lastChangedAt = new Date(position.updated_at || position.created_at || 0).getTime();
     const holdSeconds = Number.isFinite(lastChangedAt) ? Math.floor((Date.now() - lastChangedAt) / 1000) : MARKET_MIN_HOLD_SECONDS;
-    const boughtTail = Number(position.avg_price || 0) <= MARKET_TAIL_EXIT_BLOCK_PRICE;
-    const tailNow = Number(exitQuote.bidPrice || 0) <= MARKET_TAIL_EXIT_BLOCK_PRICE;
     const frozen = secondsLeft !== null && secondsLeft <= MARKET_SELL_FREEZE_SECONDS;
     const tooFresh = holdSeconds < MARKET_MIN_HOLD_SECONDS;
-    const canSell = marketIsLive && secondsLeft !== null && secondsLeft > MARKET_SELL_FREEZE_SECONDS && !tooFresh && !boughtTail && !tailNow;
+    const canSell = marketIsLive && secondsLeft !== null && secondsLeft > MARKET_SELL_FREEZE_SECONDS && !tooFresh;
     const sellLockMessage = !marketIsLive
       ? "Рынок уже рассчитан."
       : secondsLeft === 0
@@ -1803,9 +1838,7 @@ function renderMe() {
           ? "В последние секунды продажа закрыта."
           : tooFresh
             ? `Подожди ${Math.max(1, MARKET_MIN_HOLD_SECONDS - holdSeconds)}с перед продажей.`
-            : boughtTail || tailNow
-              ? "Хвостовые ставки не продаются обратно."
-              : "";
+            : "";
     const marketBadge = secondsLeft === null
       ? ""
       : secondsLeft > 0
@@ -1883,17 +1916,18 @@ function renderActivity() {
   const container = $("activityTape");
   setSectionToggle("activityToggle", state.activity.length, "activity");
   if (!state.activity.length) {
-    container.innerHTML = '<p class="muted">Пока нет ставок.</p>';
+    setInnerHtmlIfChanged(container, '<p class="muted">Пока нет ставок.</p>');
     return;
   }
 
   const visibleActivity = state.expanded.activity ? state.activity.slice(0, 16) : state.activity.slice(0, COLLAPSE_LIMIT);
-  container.innerHTML = visibleActivity.map((trade) => {
+  const html = visibleActivity.map((trade) => {
     const name = trade.username || trade.first_name || `user ${trade.telegram_id}`;
     const action = trade.action || "BUY";
     const marketLabel = getActivityMarketLabel(trade);
+    const isFresh = state.freshActivityIds.has(trade.id);
     return `
-      <div class="activity-row">
+      <div class="activity-row ${isFresh ? "fresh" : ""}">
         <div>
           <strong class="side-${trade.side}">${escapeHtml(name)} ${actionLabel(action)} ${getActivitySideLabel(trade)}</strong>
           <br />
@@ -1903,18 +1937,19 @@ function renderActivity() {
       </div>
     `;
   }).join("");
+  setInnerHtmlIfChanged(container, html);
 }
 
 function renderRecentMarkets() {
   const container = $("recentMarkets");
   setSectionToggle("recentToggle", state.recentMarkets.length, "recent");
   if (!state.recentMarkets.length) {
-    container.innerHTML = '<p class="muted">Пока нет закрытых рынков.</p>';
+    setInnerHtmlIfChanged(container, '<p class="muted">Пока нет закрытых рынков.</p>');
     return;
   }
 
   const visibleMarkets = state.expanded.recent ? state.recentMarkets.slice(0, 12) : state.recentMarkets.slice(0, COLLAPSE_LIMIT);
-  container.innerHTML = visibleMarkets.map((market) => {
+  const html = visibleMarkets.map((market) => {
     const move = Number(market.close_price || 0) - Number(market.open_price || 0);
     return `
       <div class="mini-row">
@@ -1927,6 +1962,7 @@ function renderRecentMarkets() {
       </div>
     `;
   }).join("");
+  setInnerHtmlIfChanged(container, html);
 }
 
 function renderLeaderboard() {
@@ -2082,6 +2118,14 @@ function setBtcMarketsSheetOpen(open) {
   sheet.classList.toggle("hidden", !open);
 }
 
+function animateMarketSwitch() {
+  const card = document.querySelector(".market-card");
+  if (!card) return;
+  card.classList.remove("market-switching");
+  void card.offsetWidth;
+  card.classList.add("market-switching");
+}
+
 function selectBtcMarket(marketId) {
   const id = Number(marketId);
   const market = state.btcMarkets.find((item) => item.id === id);
@@ -2096,6 +2140,7 @@ function selectBtcMarket(marketId) {
   state.commentsMarketId = null;
   state.sideSelectedMarketId = null;
   setBtcMarketsSheetOpen(false);
+  animateMarketSwitch();
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
@@ -2122,6 +2167,7 @@ function selectWorldCupMarket(marketId) {
   state.commentsMarketId = null;
   state.sideSelectedMarketId = null;
   setWorldCupSheetOpen(false);
+  animateMarketSwitch();
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
@@ -2890,7 +2936,6 @@ async function sellPosition({ side, positionId, marketId, shares }) {
       user_not_found: "Пользователь не найден.",
       sell_frozen: "В последние секунды продажа закрыта.",
       sell_min_hold: "Слишком рано продавать. Подожди немного.",
-      sell_tail_blocked: "Хвостовые ставки нельзя продавать обратно.",
       sell_failed: "Продажа не прошла. Попробуй ещё раз.",
     };
     const detail = error.detail ? ` (${error.detail})` : "";
@@ -3605,6 +3650,9 @@ document.querySelectorAll("[data-bet-add]").forEach((button) => {
     }
     state.betSheet.amount = nextAmount;
     renderBetSheet();
+    $("betAmountValue")?.classList.remove("amount-pulse");
+    void $("betAmountValue")?.offsetWidth;
+    $("betAmountValue")?.classList.add("amount-pulse");
   });
 });
 
@@ -3675,6 +3723,7 @@ document.querySelector(".market-card")?.addEventListener("touchend", (event) => 
   state.commentsMarketId = null;
   state.sideSelectedMarketId = null;
   triggerHaptic("selection");
+  animateMarketSwitch();
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
