@@ -37,7 +37,7 @@ import {
   upsertUser,
 } from "./services/marketService.js";
 import { PriceUnavailableError } from "./services/priceService.js";
-import { runDatabaseCleanup } from "./services/databaseCleanupService.js";
+import { runDatabaseCleanup, runStartupDatabaseRescue } from "./services/databaseCleanupService.js";
 import {
   cancelUserDepositIntent,
   createUsdtDepositIntent,
@@ -1093,6 +1093,10 @@ async function startMarketEngine() {
 
   marketEngineStarted = true;
   try {
+    if (config.startupDatabaseRescueEnabled) {
+      const rescueSummary = await runStartupDatabaseRescue();
+      console.log("[easymarket] startup database rescue finished", rescueSummary);
+    }
     await runMigrations();
     await ensureActiveMarket();
   } catch (error) {

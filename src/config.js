@@ -58,6 +58,8 @@ export const config = {
   marketMakerSpreadBps: parseNumber(process.env.MARKET_MAKER_SPREAD_BPS, 300, 0),
   pricePollMs: parseNumber(process.env.PRICE_POLL_MS, 1_000, 250),
   priceTicksEnabled: !parseBoolean(process.env.PRICE_TICKS_DISABLED, false),
+  startupDatabaseRescueEnabled: parseBoolean(process.env.STARTUP_DATABASE_RESCUE_ENABLED, true),
+  startupPriceTicksDropAboveMb: parseNumber(process.env.STARTUP_PRICE_TICKS_DROP_ABOVE_MB, 64, 0),
   databaseCleanupEnabled: parseBoolean(process.env.DATABASE_CLEANUP_ENABLED, true),
   databaseCleanupRunOnStart: parseBoolean(process.env.DATABASE_CLEANUP_RUN_ON_START, false),
   databaseCleanupIntervalMs: parseNumber(process.env.DATABASE_CLEANUP_INTERVAL_MS, 86_400_000, 60_000),

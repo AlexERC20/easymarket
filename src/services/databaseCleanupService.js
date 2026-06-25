@@ -69,6 +69,52 @@ async function truncatePriceTicksIfTooLarge() {
   };
 }
 
+async function getPriceTicksSizeBytes() {
+  const relationResult = await query("SELECT to_regclass('public.price_ticks') AS relation_name");
+  if (!relationResult.rows?.[0]?.relation_name) {
+    return {
+      exists: false,
+      bytes: 0,
+    };
+  }
+
+  const sizeResult = await query("SELECT pg_total_relation_size('public.price_ticks'::regclass) AS bytes");
+  return {
+    exists: true,
+    bytes: Number(sizeResult.rows?.[0]?.bytes || 0),
+  };
+}
+
+export async function runStartupDatabaseRescue() {
+  const startedAt = Date.now();
+  const maxMb = Number(config.startupPriceTicksDropAboveMb || 0);
+  const summary = {
+    enabled: Boolean(config.startupDatabaseRescueEnabled),
+    price_ticks_dropped: false,
+    price_ticks_exists: false,
+    price_ticks_bytes_before: 0,
+    threshold_mb: maxMb,
+    elapsed_ms: 0,
+  };
+
+  if (!summary.enabled || !Number.isFinite(maxMb) || maxMb <= 0) {
+    summary.elapsed_ms = Date.now() - startedAt;
+    return summary;
+  }
+
+  const size = await getPriceTicksSizeBytes();
+  summary.price_ticks_exists = size.exists;
+  summary.price_ticks_bytes_before = size.bytes;
+
+  if (size.exists && size.bytes >= maxMb * 1024 * 1024) {
+    await query("DROP TABLE IF EXISTS price_ticks CASCADE");
+    summary.price_ticks_dropped = true;
+  }
+
+  summary.elapsed_ms = Date.now() - startedAt;
+  return summary;
+}
+
 async function deleteOldMarketComments() {
   return deleteInBatches(
     `

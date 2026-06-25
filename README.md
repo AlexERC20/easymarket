@@ -66,6 +66,8 @@ MARKET_PROFIT_FEE_BPS=500
 MARKET_MAKER_SPREAD_BPS=300
 PRICE_POLL_MS=1000
 PRICE_TICKS_DISABLED=false
+STARTUP_DATABASE_RESCUE_ENABLED=true
+STARTUP_PRICE_TICKS_DROP_ABOVE_MB=64
 DATABASE_CLEANUP_ENABLED=true
 DATABASE_CLEANUP_RUN_ON_START=false
 DATABASE_CLEANUP_INTERVAL_MS=86400000
@@ -104,6 +106,7 @@ PUBLIC_PRIVATE_CHAT_URL=https://t.me/tribute/app?startapp=stKL
 `TASK_PRIVATE_CHAT_FIRE` is a one-time private chat subscriber bonus completed through `/api/bridge/tasks/complete` with `task_key=private_chat`; it is not counted against the ordinary daily task cap.
 `DATABASE_CLEANUP_*` controls the daily Postgres cleanup job. The defaults keep balances, ledgers, deposits, withdrawals, positions, and trades, while pruning old chart ticks, comments, scanner events, expired deposit requests, old daily task claims, and empty technical markets. Cleanup deletes in batches to avoid long locks on a busy database. A startup safety cleanup also runs after deploy when cleanup is enabled.
 `PRICE_TICKS_DISABLED=false` keeps chart tick persistence on. Old raw ticks are pruned automatically, with `CLEANUP_PRICE_TICKS_HOURS=24` keeping a short rolling chart history instead of unbounded raw data. If `price_ticks` grows above `CLEANUP_PRICE_TICKS_TRUNCATE_ABOVE_MB`, startup/daily cleanup truncates only that disposable table to protect the 1 GB Postgres plan.
+`STARTUP_DATABASE_RESCUE_ENABLED=true` runs before migrations and can drop only the disposable `price_ticks` table when it is above `STARTUP_PRICE_TICKS_DROP_ABOVE_MB`; this protects startup on a nearly full Postgres disk.
 
 ## Render
 
