@@ -109,6 +109,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "invalid_position_id",
     "invalid_sell_shares",
     "invalid_task",
+    "task_not_ready",
     "comment_required",
     "insufficient_shares",
     "invalid_market_price",
@@ -120,6 +121,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "clan_not_found",
     "clan_name_required",
     "invalid_clan_channel",
+    "clan_exists",
   ]);
 
   if (message === "DATABASE_URL is not configured.") {

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260625-02" />
+    <link rel="stylesheet" href="/styles.css?v=20260625-03" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -95,89 +95,98 @@
             <button id="tasksTabStats" type="button" data-task-tab="stats">Моя статистика</button>
           </div>
           <div class="task-list">
-            <div class="task-row info">
-              <div>
-                <strong>Активность в чате</strong>
-                <small>За каждое сообщение и реакцию в чате начисляются звезды.</small>
+            <details class="task-group" open>
+              <summary>Ежедневные прогнозы</summary>
+              <div class="task-row">
+                <div>
+                  <strong>Ежедневный вход</strong>
+                  <small>Проведи 5 минут в EasyMarket и забери +<span id="dailyPresenceTaskReward">50</span></small>
+                </div>
+                <button id="taskDailyPresenceBtn" class="task-button" type="button">Таймер</button>
               </div>
-            </div>
-            <div class="task-row">
-              <div>
-                <strong>Подписаться на канал AV</strong>
-                <small>+<span id="channelTaskReward">500</span> после проверки ботом</small>
+              <div class="task-row">
+                <div>
+                  <strong>Первая ставка дня</strong>
+                  <small>Поставь 1 ставку и забери +<span id="dailyBetTaskReward">50</span></small>
+                </div>
+                <button class="task-button" data-daily-task="daily_bet" type="button">Забрать</button>
               </div>
-              <button id="taskChannelBtn" class="task-button" type="button">Открыть</button>
-            </div>
-            <div class="task-row">
-              <div>
-                <strong>Вступить в наш чат</strong>
-                <small>+<span id="chatTaskReward">500</span> после проверки ботом</small>
+              <div class="task-row">
+                <div>
+                  <strong>1 прогноз по BTC</strong>
+                  <small>Сделай прогноз в BTC-маркете и забери +50</small>
+                </div>
+                <button class="task-button" data-daily-task="daily_btc_prediction" type="button">Забрать</button>
               </div>
-              <button id="taskChatBtn" class="task-button" type="button">Открыть</button>
-            </div>
-            <div class="task-row featured">
-              <div>
-                <strong>Подписаться на приватку</strong>
-                <small>+<span id="privateChatTaskReward">15 000</span> авансом после проверки подписки</small>
+              <div class="task-row">
+                <div>
+                  <strong>1 прогноз на футбол</strong>
+                  <small>Сделай прогноз в World Cup market и забери +50</small>
+                </div>
+                <button class="task-button" data-daily-task="daily_football_prediction" type="button">Забрать</button>
               </div>
-              <button id="taskPrivateChatBtn" class="task-button gold" type="button">Открыть</button>
-            </div>
-            <div class="task-row">
-              <div>
-                <strong>Рассказать друзьям</strong>
-                <small>+<span id="shareTaskReward">100</span> за share, +<span id="refTaskReward">500</span> и +$<span id="refTaskUsdtReward">30</span> после первой ставки друга</small>
+              <div class="task-row">
+                <div>
+                  <strong>5 прогнозов по BTC</strong>
+                  <small>Пять BTC-прогнозов за день дают +300</small>
+                </div>
+                <button class="task-button" data-daily-task="daily_btc_5_predictions" type="button">Забрать</button>
               </div>
-              <button id="taskShareBtn" class="task-button gold" type="button">Share</button>
-            </div>
-            <div class="task-row">
-              <div>
-                <strong>Ежедневный вход</strong>
-                <small>Проведи 5 минут в EasyMarket и получи +<span id="dailyPresenceTaskReward">50</span></small>
+              <div class="task-row">
+                <div>
+                  <strong>Выиграй прогноз</strong>
+                  <small>Первая победа дня даёт +50</small>
+                </div>
+                <button class="task-button" data-daily-task="daily_win_1" type="button">Забрать</button>
               </div>
-              <button id="taskDailyPresenceBtn" class="task-button" type="button">Таймер</button>
-            </div>
-            <div class="task-row">
-              <div>
-                <strong>Первая ставка дня</strong>
-                <small>Поставь 1 ставку и получи +<span id="dailyBetTaskReward">50</span> автоматически</small>
+              <div class="task-row">
+                <div>
+                  <strong>5 побед подряд</strong>
+                  <small>Серия из пяти побед даёт +300</small>
+                </div>
+                <button class="task-button" data-daily-task="daily_win_streak_5" type="button">Забрать</button>
               </div>
-              <button class="task-button" type="button" disabled>Auto</button>
-            </div>
-            <div class="task-row">
-              <div>
-                <strong>1 прогноз по BTC</strong>
-                <small>Сделай прогноз в любом BTC-маркете и получи +50</small>
+            </details>
+            <details class="task-group">
+              <summary>Социальные</summary>
+              <div class="task-row info">
+                <div>
+                  <strong>Активность в чате</strong>
+                  <small>За каждое сообщение и реакцию в чате начисляются звезды.</small>
+                </div>
               </div>
-              <button class="task-button" type="button" disabled>Auto</button>
-            </div>
-            <div class="task-row">
-              <div>
-                <strong>1 прогноз на футбол</strong>
-                <small>Сделай прогноз в World Cup market и получи +50</small>
+              <div class="task-row">
+                <div>
+                  <strong>Рассказать друзьям</strong>
+                  <small>+<span id="shareTaskReward">100</span> за share, +<span id="refTaskReward">500</span> и +$<span id="refTaskUsdtReward">30</span> после первой ставки друга</small>
+                </div>
+                <button id="taskShareBtn" class="task-button gold" type="button">Share</button>
               </div>
-              <button class="task-button" type="button" disabled>Auto</button>
-            </div>
-            <div class="task-row">
-              <div>
-                <strong>5 прогнозов по BTC</strong>
-                <small>Пять BTC-прогнозов за день дают +300</small>
+            </details>
+            <details class="task-group">
+              <summary>Подписки</summary>
+              <div class="task-row">
+                <div>
+                  <strong>Подписаться на канал AV</strong>
+                  <small>+<span id="channelTaskReward">500</span> после проверки ботом</small>
+                </div>
+                <button id="taskChannelBtn" class="task-button" type="button">Открыть</button>
               </div>
-              <button class="task-button" type="button" disabled>Auto</button>
-            </div>
-            <div class="task-row">
-              <div>
-                <strong>Выиграй прогноз</strong>
-                <small>Первая победа дня даёт +50</small>
+              <div class="task-row">
+                <div>
+                  <strong>Вступить в наш чат</strong>
+                  <small>+<span id="chatTaskReward">500</span> после проверки ботом</small>
+                </div>
+                <button id="taskChatBtn" class="task-button" type="button">Открыть</button>
               </div>
-              <button class="task-button" type="button" disabled>Auto</button>
-            </div>
-            <div class="task-row">
-              <div>
-                <strong>5 побед подряд</strong>
-                <small>Серия из пяти побед даёт +300</small>
+              <div class="task-row featured">
+                <div>
+                  <strong>Подписаться на приватку</strong>
+                  <small>+<span id="privateChatTaskReward">15 000</span> авансом после проверки подписки</small>
+                </div>
+                <button id="taskPrivateChatBtn" class="task-button gold" type="button">Открыть</button>
               </div>
-              <button class="task-button" type="button" disabled>Auto</button>
-            </div>
+            </details>
           </div>
           <div id="taskStatsPanel" class="task-stats-panel hidden">
             <div id="taskStatsList" class="task-stats-list"></div>
@@ -288,22 +297,32 @@
               <p class="eyebrow">Squad wars</p>
               <h2>Кланы</h2>
             </div>
-            <button id="clansCloseBtn" class="icon-button" type="button" aria-label="Закрыть кланы">×</button>
+            <div class="clan-head-actions">
+              <button id="clanInfoBtn" class="icon-button" type="button" aria-label="Правила очков">i</button>
+              <button id="clanCreateToggleBtn" class="icon-button" type="button" aria-label="Создать клан">+</button>
+              <button id="clansCloseBtn" class="icon-button" type="button" aria-label="Закрыть кланы">×</button>
+            </div>
           </div>
           <div class="clan-hero">
-            <strong>BTC Bulls vs BTC Bears</strong>
-            <small>USDT-прогнозы дают очки клану: победа +3, проигрыш -1, новый участник +5.</small>
+            <div class="clan-trophy">🏆</div>
+            <strong>Squad Leaderboard</strong>
+            <small>Объединяйтесь, чтобы попадать в недельный рейтинг команд.</small>
+          </div>
+          <div id="clanRulesCard" class="clan-rules-card hidden">
+            <strong>Как начисляются очки</strong>
+            <small>USDT-прогнозы: победа +3, проигрыш -1. Новый участник +5 один раз. Забранный daily task +5 в клан.</small>
           </div>
           <div id="userClanCard" class="user-clan-card hidden"></div>
-          <div id="clansList" class="clans-list">
-            <p class="muted">Загружаю кланы...</p>
-          </div>
-          <div class="clan-create-card">
+          <div id="clanDetailCard" class="clan-detail-card hidden"></div>
+          <div id="clanCreateCard" class="clan-create-card hidden">
             <strong>Создать свой клан</strong>
             <small>Стоимость 10 000. Можно добавить ссылку на канал.</small>
             <input id="clanNameInput" maxlength="28" placeholder="Название клана" />
             <input id="clanChannelInput" maxlength="160" placeholder="Ссылка на канал, необязательно" />
             <button id="clanCreateBtn" class="trade-confirm" type="button">Создать клан</button>
+          </div>
+          <div id="clansList" class="clans-list">
+            <p class="muted">Загружаю кланы...</p>
           </div>
         </div>
       </section>
@@ -533,6 +552,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260625-02" type="module"></script>
+    <script src="/app.js?v=20260625-03" type="module"></script>
   </body>
 </html>

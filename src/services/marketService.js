@@ -1956,6 +1956,11 @@ async function claimDailyTaskForUser(client, user, taskKey) {
     throw new Error("invalid_task");
   }
 
+  const isReady = await isDailyTaskReady(client, user.id, normalizedTaskKey);
+  if (!isReady) {
+    throw new Error("task_not_ready");
+  }
+
   const dayKey = getDayKey();
   const claimResult = await client.query(
     `
@@ -1998,11 +2003,27 @@ async function claimDailyTaskForUser(client, user, taskKey) {
   };
 }
 
-async function claimPredictionTasksForBuy(client, user, market) {
-  const bonuses = [];
-  if (isBtcMarketSymbol(market.symbol)) {
-    bonuses.push(await claimDailyTaskForUser(client, user, "daily_btc_prediction"));
-    const countResult = await client.query(
+async function isDailyTaskReady(client, userId, taskKey) {
+  if (taskKey === "daily_presence") {
+    return true;
+  }
+
+  if (taskKey === "daily_bet") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM trades
+        WHERE user_id = $1
+          AND action = 'BUY'
+          AND created_at >= date_trunc('day', now())
+      `,
+      [userId],
+    );
+    return Number(result.rows[0]?.count || 0) >= 1;
+  }
+
+  if (taskKey === "daily_btc_prediction" || taskKey === "daily_btc_5_predictions") {
+    const result = await client.query(
       `
         SELECT COUNT(*)::int AS count
         FROM trades
@@ -2012,54 +2033,65 @@ async function claimPredictionTasksForBuy(client, user, market) {
           AND markets.symbol = ANY($2)
           AND trades.created_at >= date_trunc('day', now())
       `,
-      [user.id, BTC_MARKET_SYMBOLS],
+      [userId, BTC_MARKET_SYMBOLS],
     );
-    if (Number(countResult.rows[0]?.count || 0) >= 5) {
-      bonuses.push(await claimDailyTaskForUser(client, user, "daily_btc_5_predictions"));
-    }
+    return Number(result.rows[0]?.count || 0) >= (taskKey === "daily_btc_5_predictions" ? 5 : 1);
   }
 
-  if (isSportsMarket(market)) {
-    bonuses.push(await claimDailyTaskForUser(client, user, "daily_football_prediction"));
+  if (taskKey === "daily_football_prediction") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM trades
+        JOIN markets ON markets.id = trades.market_id
+        WHERE trades.user_id = $1
+          AND trades.action = 'BUY'
+          AND markets.symbol LIKE $2
+          AND trades.created_at >= date_trunc('day', now())
+      `,
+      [userId, `${WORLD_CUP_SYMBOL_PREFIX}%`],
+    );
+    return Number(result.rows[0]?.count || 0) >= 1;
   }
 
-  return bonuses.filter((bonus) => bonus && !bonus.already_claimed && bonus.awarded > 0);
-}
-
-async function claimWinTasksForUser(client, userId) {
-  const userResult = await client.query("SELECT * FROM users WHERE id = $1", [userId]);
-  const user = userResult.rows[0];
-  if (!user) {
-    return [];
+  if (taskKey === "daily_win_1") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM positions
+        WHERE user_id = $1
+          AND status = 'resolved'
+          AND pnl > 0
+          AND updated_at >= date_trunc('day', now())
+      `,
+      [userId],
+    );
+    return Number(result.rows[0]?.count || 0) >= 1;
   }
 
-  const bonuses = [await claimDailyTaskForUser(client, user, "daily_win_1")];
-  const streakResult = await client.query(
-    `
-      SELECT
-        p.market_id,
-        MAX(CASE WHEN p.pnl > 0 THEN 1 ELSE 0 END) AS won,
-        MAX(m.resolved_at) AS resolved_at
-      FROM positions p
-      JOIN markets m ON m.id = p.market_id
-      WHERE p.user_id = $1
-        AND p.status = 'resolved'
-        AND m.status = 'resolved'
-      GROUP BY p.market_id
-      ORDER BY MAX(m.resolved_at) DESC
-      LIMIT 5
-    `,
-    [userId],
-  );
-
-  if (
-    streakResult.rows.length >= 5
-    && streakResult.rows.every((row) => Number(row.won || 0) > 0)
-  ) {
-    bonuses.push(await claimDailyTaskForUser(client, user, "daily_win_streak_5"));
+  if (taskKey === "daily_win_streak_5") {
+    const streakResult = await client.query(
+      `
+        SELECT
+          p.market_id,
+          MAX(CASE WHEN p.pnl > 0 THEN 1 ELSE 0 END) AS won,
+          MAX(m.resolved_at) AS resolved_at
+        FROM positions p
+        JOIN markets m ON m.id = p.market_id
+        WHERE p.user_id = $1
+          AND p.status = 'resolved'
+          AND m.status = 'resolved'
+        GROUP BY p.market_id
+        ORDER BY MAX(m.resolved_at) DESC
+        LIMIT 5
+      `,
+      [userId],
+    );
+    return streakResult.rows.length >= 5
+      && streakResult.rows.every((row) => Number(row.won || 0) > 0);
   }
 
-  return bonuses.filter((bonus) => bonus && !bonus.already_claimed && bonus.awarded > 0);
+  return false;
 }
 
 export async function claimDailyTask(input) {
@@ -2129,6 +2161,51 @@ async function getClansWithClient(client, userId = 0) {
   );
 
   const clans = result.rows.map(mapClan);
+  if (clans.length) {
+    const membersResult = await client.query(
+      `
+        SELECT
+          clan_members.clan_id,
+          clan_members.contribution_score,
+          clan_members.role,
+          clan_members.joined_at,
+          users.telegram_id,
+          users.username,
+          users.first_name,
+          ROW_NUMBER() OVER (
+            PARTITION BY clan_members.clan_id
+            ORDER BY clan_members.contribution_score DESC, clan_members.joined_at ASC
+          ) AS rank
+        FROM clan_members
+        JOIN users ON users.id = clan_members.user_id
+        WHERE clan_members.clan_id = ANY($1)
+        ORDER BY clan_members.clan_id, clan_members.contribution_score DESC, clan_members.joined_at ASC
+      `,
+      [clans.map((clan) => clan.id)],
+    );
+
+    const membersByClan = new Map();
+    for (const row of membersResult.rows) {
+      const clanId = Number(row.clan_id);
+      if (!membersByClan.has(clanId)) {
+        membersByClan.set(clanId, []);
+      }
+      membersByClan.get(clanId).push({
+        telegram_id: row.telegram_id,
+        username: row.username,
+        first_name: row.first_name,
+        role: row.role,
+        contribution_score: toNumber(row.contribution_score),
+        rank: Number(row.rank || 0),
+        joined_at: row.joined_at,
+      });
+    }
+
+    for (const clan of clans) {
+      clan.members = membersByClan.get(clan.id) || [];
+    }
+  }
+
   return {
     ok: true,
     clans,
@@ -2207,6 +2284,14 @@ export async function createClan(input) {
 
   return withTransaction(async (client) => {
     await ensureDefaultClans(client);
+    const duplicateResult = await client.query(
+      "SELECT id FROM clans WHERE LOWER(name) = LOWER($1) LIMIT 1",
+      [name],
+    );
+    if (duplicateResult.rows[0]) {
+      throw new Error("clan_exists");
+    }
+
     await debitCurrencyBalance(client, user.id, "STAR", 10000, "clan_create", "clan:create");
     const baseSlug = slugifyClanName(name);
     const slug = `${baseSlug}-${String(user.id).slice(-5)}`;
@@ -3080,8 +3165,6 @@ export async function buyOutcome(input) {
     );
 
     const referralBonus = await awardReferralBetBonus(client, user, marketId);
-    const dailyBetBonus = await claimDailyTaskForUser(client, user, "daily_bet");
-    const predictionBonuses = await claimPredictionTasksForBuy(client, user, market);
 
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
@@ -3095,8 +3178,6 @@ export async function buyOutcome(input) {
       position: mapPosition(positionResult.rows[0]),
       trade: mapTrade(tradeResult.rows[0]),
       referral_bonus: referralBonus,
-      daily_bet_bonus: dailyBetBonus,
-      prediction_bonuses: predictionBonuses,
       market: mapMarket({
         ...market,
         yes_price: nextYesPrice,
@@ -3538,7 +3619,6 @@ export async function resolveExpiredMarkets() {
             `market:${currentMarket.id}`,
             getBonusRatioForAmount(position.bonus_spent, position.spent),
           );
-          await claimWinTasksForUser(client, position.user_id);
         }
 
         if (currency === "USDT") {

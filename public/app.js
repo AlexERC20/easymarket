@@ -83,6 +83,9 @@ const state = {
   clans: [],
   userClan: null,
   clansLoading: false,
+  selectedClanId: null,
+  clanCreateOpen: false,
+  clanInfoOpen: false,
   marketPanel: "chat",
   orderbookSide: "YES",
   referralNudgeShown: false,
@@ -1354,6 +1357,9 @@ async function loadClans() {
     const data = await api(`/api/clans?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
     state.clans = data.clans || [];
     state.userClan = data.user_clan || null;
+    if (!state.clans.some((clan) => clan.id === state.selectedClanId)) {
+      state.selectedClanId = state.userClan?.id || state.clans[0]?.id || null;
+    }
   } finally {
     state.clansLoading = false;
     renderClans();
@@ -1634,10 +1640,8 @@ function ensureSelectedSideForMarket(market = getDisplayMarket()) {
 
 function getPreview(amount = state.selectedAmount, side = state.selectedSide) {
   const market = getDisplayMarket();
-  const price = market
-    ? Number(side === "YES" ? market.yes_price : market.no_price)
-    : 0.5;
-  const safePrice = Math.max(getMarketMinOutcomePrice(market), price || 0.5);
+  const quote = estimateBuyQuote({ market, side, amount });
+  const safePrice = quote.executionPrice;
   const net = Number(amount || 0);
   const shares = net / safePrice;
   const profit = shares - Number(amount || 0);
@@ -1646,6 +1650,28 @@ function getPreview(amount = state.selectedAmount, side = state.selectedSide) {
     shares,
     profit,
     price: safePrice,
+  };
+}
+
+function estimateBuyQuote({ market, side, amount }) {
+  const minPrice = getMarketMinOutcomePrice(market);
+  const rawPrice = market
+    ? Number(side === "YES" ? market.yes_price : market.no_price)
+    : 0.5;
+  const price = Math.max(minPrice, Math.min(1 - minPrice, rawPrice || 0.5));
+  const rawLiquidity = Math.max(1, Number(market?.liquidity || state.market?.liquidity || 10_000));
+  const baseLiquidity = isWorldCupMarket(market)
+    ? Math.max(1_500, Math.min(30_000, Math.sqrt(rawLiquidity) * 2.1))
+    : Math.max(1_200, Math.min(24_000, rawLiquidity));
+  const distanceFromCenter = Math.min(1, Math.abs(price - 0.5) / 0.5);
+  const depthFactor = MIN_TAIL_DEPTH_FACTOR + (1 - MIN_TAIL_DEPTH_FACTOR) * Math.pow(1 - distanceFromCenter, 2.35);
+  const liquidity = Math.max(35, baseLiquidity * depthFactor);
+  const impact = Math.min(0.42, (Number(amount || 0) / liquidity) * 0.85);
+  const nextPrice = Math.max(minPrice, Math.min(1 - minPrice, price + impact));
+  const executionPrice = Math.max(minPrice, Math.min(1 - minPrice, Math.max(price, nextPrice) * (1 + MARKET_MAKER_SPREAD_RATE)));
+  return {
+    executionPrice,
+    nextPrice,
   };
 }
 
@@ -1868,11 +1894,11 @@ function estimateSellQuote({ position, market, outcomePrice }) {
     : Math.max(1_200, Math.min(24_000, rawLiquidity));
   const distanceFromCenter = Math.min(1, Math.abs(price - 0.5) / 0.5);
   const depthFactor = MIN_TAIL_DEPTH_FACTOR + (1 - MIN_TAIL_DEPTH_FACTOR) * Math.pow(1 - distanceFromCenter, 2.35);
-  const liquidity = Math.max(150, baseLiquidity * depthFactor);
+  const liquidity = Math.max(35, baseLiquidity * depthFactor);
   const estimatedGross = shares * price;
   const impact = Math.min(0.42, (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER);
   const nextPrice = Math.max(minPrice, price - impact);
-  const extraExitPenalty = isWorldCupMarket(market) ? 0.02 : 0;
+  const extraExitPenalty = isWorldCupMarket(market) ? 0.03 : 0.015;
   const bidPrice = Math.max(minPrice, Math.min(price, nextPrice) * (1 - MARKET_MAKER_SPREAD_RATE - extraExitPenalty));
   const grossExitValue = shares * bidPrice;
   const spent = Number(position.spent || 0);
@@ -2110,15 +2136,24 @@ function renderLeaderboard() {
 function renderClans() {
   const list = $("clansList");
   const userCard = $("userClanCard");
-  if (!list || !userCard) {
+  const detailCard = $("clanDetailCard");
+  const createCard = $("clanCreateCard");
+  const rulesCard = $("clanRulesCard");
+  if (!list || !userCard || !detailCard || !createCard || !rulesCard) {
     return;
   }
+
+  rulesCard.classList.toggle("hidden", !state.clanInfoOpen);
+  createCard.classList.toggle("hidden", !state.clanCreateOpen);
 
   if (state.userClan) {
     userCard.classList.remove("hidden");
     userCard.innerHTML = `
-      <strong>Твой клан: ${escapeHtml(state.userClan.name)}</strong>
-      <small>Вклад: ${formatFire(state.userClan.user_contribution_score)} очков · место #${state.userClan.rank || "-"}</small>
+      <div class="user-clan-icon">${state.userClan.slug === "btc-bears" ? "▼" : "▲"}</div>
+      <div>
+        <strong>Твой клан: ${escapeHtml(state.userClan.name)}</strong>
+        <small>Вклад: ${formatFire(state.userClan.user_contribution_score)} очков · место #${state.userClan.rank || "-"}</small>
+      </div>
     `;
   } else {
     userCard.classList.add("hidden");
@@ -2132,11 +2167,58 @@ function renderClans() {
 
   if (!state.clans.length) {
     setInnerHtmlIfChanged(list, '<p class="muted">Кланы пока не созданы.</p>');
+    detailCard.classList.add("hidden");
     return;
   }
 
+  const selectedClan = state.clans.find((clan) => clan.id === state.selectedClanId)
+    || state.userClan
+    || state.clans[0];
+  state.selectedClanId = selectedClan?.id || null;
+
+  if (selectedClan) {
+    const members = (selectedClan.members || []).slice(0, 12);
+    const memberRows = members.length
+      ? members.map((member) => {
+        const name = member.username ? `@${member.username}` : member.first_name || `user ${member.telegram_id}`;
+        return `
+          <div class="clan-member-row ${String(member.telegram_id) === String(state.user?.telegram_id) ? "me" : ""}">
+            <span>${member.rank || "-"}</span>
+            <div class="clan-member-avatar">${escapeHtml((name.replace(/^@/, "")[0] || "?").toUpperCase())}</div>
+            <div>
+              <strong>${escapeHtml(name)}</strong>
+              <small>${formatFire(member.contribution_score)} очков${member.role === "owner" ? " · owner" : ""}</small>
+            </div>
+          </div>
+        `;
+      }).join("")
+      : '<p class="muted">В клане пока нет участников.</p>';
+
+    detailCard.classList.remove("hidden");
+    detailCard.innerHTML = `
+      <div class="clan-detail-hero">
+        <div class="clan-detail-avatar">${selectedClan.slug === "btc-bears" ? "▼" : "▲"}</div>
+        <div>
+          <strong>${escapeHtml(selectedClan.name)}</strong>
+          <small>${selectedClan.channel_url ? escapeHtml(selectedClan.channel_url) : `${formatFire(selectedClan.members_count)} участников`}</small>
+        </div>
+      </div>
+      <div class="clan-stat-grid">
+        <div><b>${selectedClan.rank || "-"}</b><span>место</span></div>
+        <div><b>5 000$</b><span>фонд</span></div>
+        <div><b>${formatFire(selectedClan.score)}</b><span>очки</span></div>
+      </div>
+      <div class="clan-goal-card">
+        <small>Ещё 16 дней</small>
+        <strong>Станьте участником розыгрыша призов</strong>
+        <span>Заработайте очки клана USDT-прогнозами и daily-заданиями.</span>
+      </div>
+      <div class="clan-members-list">${memberRows}</div>
+    `;
+  }
+
   const html = state.clans.map((clan) => `
-    <div class="clan-row ${clan.user_is_member ? "active" : ""}">
+    <div class="clan-row ${clan.user_is_member ? "active" : ""} ${clan.id === state.selectedClanId ? "selected" : ""}" data-open-clan="${clan.id}">
       <span class="clan-rank">${clan.rank}</span>
       <div class="clan-avatar">${clan.slug === "btc-bears" ? "▼" : "▲"}</div>
       <div class="clan-info">
@@ -2144,7 +2226,7 @@ function renderClans() {
         <small>${formatFire(clan.members_count)} участников · ${formatFire(clan.score)} очков</small>
       </div>
       <button class="task-button" data-join-clan="${clan.id}" type="button" ${clan.user_is_member ? "disabled" : ""}>
-        ${clan.user_is_member ? "Твой" : "Вступить"}
+        ${clan.user_is_member ? "Твой" : "Войти"}
       </button>
     </div>
   `).join("");
@@ -2327,7 +2409,8 @@ function renderBetSheet() {
   }
 
   const isBtc = isBtcMarket(market);
-  const price = Math.max(getMarketMinOutcomePrice(market), Number(side === "YES" ? market.yes_price : market.no_price) || 0.5);
+  const quote = estimateBuyQuote({ market, side, amount });
+  const price = quote.executionPrice;
   const shares = Number(amount || 0) / price;
   setTeamIconElement($("betTeamIcon"), isBtc ? "₿" : market.icon, isBtc ? "BTC" : market.team);
   if ($("betMarketTitle")) $("betMarketTitle").textContent = market.title || (isBtc ? "BTC Market" : "World Cup Winner");
@@ -3000,15 +3083,6 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
     triggerHaptic("success");
-    if (Number(result.daily_bet_bonus?.awarded || 0) > 0) {
-      showToast(`+${formatFire(result.daily_bet_bonus.awarded)} за первую ставку дня.`);
-    }
-    if (Array.isArray(result.prediction_bonuses)) {
-      const awarded = result.prediction_bonuses.reduce((sum, bonus) => sum + Number(bonus.awarded || 0), 0);
-      if (awarded > 0) {
-        showToast(`+${formatFire(awarded)} за дейлики прогнозов.`);
-      }
-    }
     renderMarket();
     renderMe();
     renderActivity();
@@ -3188,25 +3262,51 @@ $("clansSheet")?.addEventListener("click", (event) => {
   }
 });
 
+$("clanInfoBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  state.clanInfoOpen = !state.clanInfoOpen;
+  renderClans();
+});
+
+$("clanCreateToggleBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  state.clanCreateOpen = !state.clanCreateOpen;
+  if (state.clanCreateOpen) {
+    state.clanInfoOpen = false;
+  }
+  renderClans();
+});
+
 $("clansList")?.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-join-clan]");
+  const row = event.target.closest("[data-open-clan]");
+  if (row && !button) {
+    state.selectedClanId = Number(row.dataset.openClan);
+    state.clanCreateOpen = false;
+    triggerHaptic("selection");
+    renderClans();
+    return;
+  }
+
   if (!button || !state.user?.telegram_id) {
     return;
   }
+  event.stopPropagation();
   showButtonPressed(button);
   triggerHaptic("selection");
   try {
     const result = await api("/api/clans/join", {
       method: "POST",
-      body: {
+      body: JSON.stringify({
         telegram_id: state.user.telegram_id,
         username: state.user.username,
         first_name: state.user.first_name,
         clan_id: Number(button.dataset.joinClan),
-      },
+      }),
     });
     state.clans = result.clans || [];
     state.userClan = result.user_clan || null;
+    state.selectedClanId = state.userClan?.id || Number(button.dataset.joinClan);
     renderClans();
     showToast("Ты вступил в клан.");
   } catch {
@@ -3225,22 +3325,30 @@ $("clanCreateBtn")?.addEventListener("click", async () => {
   try {
     const result = await api("/api/clans/create", {
       method: "POST",
-      body: {
+      body: JSON.stringify({
         telegram_id: state.user.telegram_id,
         username: state.user.username,
         first_name: state.user.first_name,
         name: $("clanNameInput")?.value,
         channel_url: $("clanChannelInput")?.value,
-      },
+      }),
     });
     state.clans = result.clans || [];
     state.userClan = result.user_clan || null;
+    state.selectedClanId = result.created_clan?.id || state.userClan?.id || null;
+    state.clanCreateOpen = false;
     applyCurrencyBalance("STAR", result.balance ?? state.balance);
     renderClans();
     renderMe();
     showToast("Клан создан.");
   } catch (error) {
-    showToast(error.message === "insufficient_fire" ? "Не хватает звёзд на создание клана." : "Клан не создан.");
+    const messages = {
+      insufficient_fire: "Не хватает звёзд на создание клана.",
+      clan_name_required: "Название клана слишком короткое.",
+      clan_exists: "Такой клан уже есть.",
+      invalid_clan_channel: "Ссылка на канал выглядит неправильно.",
+    };
+    showToast(messages[error.message] || "Клан не создан.");
   }
 });
 
@@ -3675,6 +3783,43 @@ async function submitMarketComment() {
   }
 }
 
+async function claimDailyTaskByKey(taskKey, button = null) {
+  if (!state.user?.telegram_id) {
+    return;
+  }
+  showButtonPressed(button);
+  if (button) {
+    button.disabled = true;
+  }
+  try {
+    const result = await api("/api/tasks/daily", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        username: state.user.username,
+        first_name: state.user.first_name,
+        task_key: taskKey,
+      }),
+    });
+    state.balance = result.balance ?? state.balance;
+    renderMe();
+    if (result.already_claimed) {
+      showToast("Этот дейлик уже забран.");
+    } else if (Number(result.awarded || 0) > 0) {
+      triggerHaptic("success");
+      showToast(`+${formatFire(result.awarded)} за дейлик.`);
+    } else {
+      showToast("Дневной лимит бонусов уже достигнут.");
+    }
+  } catch (error) {
+    showToast(error.message === "task_not_ready" ? "Сначала выполни это задание." : "Не получилось забрать дейлик.");
+  } finally {
+    if (button) {
+      button.disabled = false;
+    }
+  }
+}
+
 function setTasksSheetOpen(open) {
   const sheet = $("tasksSheet");
   if (!sheet) return;
@@ -3778,6 +3923,15 @@ $("referralNudgeCloseBtn")?.addEventListener("click", () => {
 $("taskDailyPresenceBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   void claimDailyPresenceTask();
+});
+
+document.querySelector(".task-list")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-daily-task]");
+  if (!button) {
+    return;
+  }
+  triggerHaptic("selection");
+  void claimDailyTaskByKey(button.dataset.dailyTask, button);
 });
 
 $("openTelegramAppBtn")?.addEventListener("click", () => {
