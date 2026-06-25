@@ -75,12 +75,18 @@ DATABASE_CLEANUP_VACUUM=false
 DATABASE_CLEANUP_BATCH_SIZE=25000
 DATABASE_CLEANUP_MAX_BATCHES=80
 CLEANUP_PRICE_TICKS_HOURS=24
+CLEANUP_BTC_PRICE_TICKS_DAYS=7
+CLEANUP_OTHER_PRICE_TICKS_HOURS=24
 CLEANUP_PRICE_TICKS_TRUNCATE_ABOVE_MB=250
 CLEANUP_MARKET_COMMENTS_DAYS=3
+CLEANUP_CLOSED_MARKET_COMMENTS_MINUTES=15
 CLEANUP_DEPOSIT_EVENTS_DAYS=30
 CLEANUP_EXPIRED_DEPOSIT_INTENTS_DAYS=30
 CLEANUP_TASK_CLAIMS_DAYS=60
 CLEANUP_EMPTY_MARKETS_DAYS=14
+MARKET_SELL_FREEZE_SECONDS=7
+MARKET_MIN_HOLD_SECONDS=20
+MARKET_TAIL_EXIT_BLOCK_PRICE=0.08
 PUBLIC_WEB_URL=https://easymarket-rcuj.onrender.com
 PUBLIC_AV_BOT_URL=https://t.me/voit_help_bot?start=buy_stars
 PUBLIC_MINI_APP_URL=https://t.me/voit_help_bot?startapp=easymarket
@@ -105,8 +111,10 @@ PUBLIC_PRIVATE_CHAT_URL=https://t.me/tribute/app?startapp=stKL
 `PUBLIC_MINI_APP_URL` should point to the Telegram Mini App deep link, so referral shares open inside Telegram instead of the plain website.
 `TASK_PRIVATE_CHAT_FIRE` is a one-time private chat subscriber bonus completed through `/api/bridge/tasks/complete` with `task_key=private_chat`; it is not counted against the ordinary daily task cap.
 `DATABASE_CLEANUP_*` controls the daily Postgres cleanup job. The defaults keep balances, ledgers, deposits, withdrawals, positions, and trades, while pruning old chart ticks, comments, scanner events, expired deposit requests, old daily task claims, and empty technical markets. Cleanup deletes in batches to avoid long locks on a busy database. A startup safety cleanup also runs after deploy when cleanup is enabled.
-`PRICE_TICKS_DISABLED=false` keeps chart tick persistence on. Old raw ticks are pruned automatically, with `CLEANUP_PRICE_TICKS_HOURS=24` keeping a short rolling chart history instead of unbounded raw data. If `price_ticks` grows above `CLEANUP_PRICE_TICKS_TRUNCATE_ABOVE_MB`, startup/daily cleanup truncates only that disposable table to protect the 1 GB Postgres plan.
+`PRICE_TICKS_DISABLED=false` keeps chart tick persistence on. Old raw ticks are pruned automatically: `BTCUSDT` is kept for `CLEANUP_BTC_PRICE_TICKS_DAYS` days, while all other raw tick symbols are kept for `CLEANUP_OTHER_PRICE_TICKS_HOURS` hours. If `price_ticks` grows above `CLEANUP_PRICE_TICKS_TRUNCATE_ABOVE_MB`, startup/daily cleanup truncates only that disposable table to protect the 1 GB Postgres plan.
 `STARTUP_DATABASE_RESCUE_ENABLED=true` runs before migrations and can drop only the disposable `price_ticks` table when it is above `STARTUP_PRICE_TICKS_DROP_ABOVE_MB`; this protects startup on a nearly full Postgres disk.
+`CLEANUP_CLOSED_MARKET_COMMENTS_MINUTES` removes chat comments shortly after a market closes; balances, ledgers, withdrawals, deposits, trades, and user positions are kept.
+`MARKET_SELL_FREEZE_SECONDS`, `MARKET_MIN_HOLD_SECONDS`, and `MARKET_TAIL_EXIT_BLOCK_PRICE` protect the internal market maker from instant buy/sell farming, tail-price abuse, and last-second exits while EasyMarket does not have a real external order book.
 
 ## Render
 

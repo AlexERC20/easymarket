@@ -40,6 +40,7 @@ import { PriceUnavailableError } from "./services/priceService.js";
 import { runDatabaseCleanup, runStartupDatabaseRescue } from "./services/databaseCleanupService.js";
 import {
   cancelUserDepositIntent,
+  checkUserDepositIntent,
   createUsdtDepositIntent,
   getPublicUsdtDepositNetworks,
   getUserDepositIntent,
@@ -110,6 +111,9 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "invoice_failed",
     "invoice_not_configured",
     "sell_failed",
+    "sell_frozen",
+    "sell_min_hold",
+    "sell_tail_blocked",
   ]);
 
   if (message === "DATABASE_URL is not configured.") {
@@ -369,6 +373,25 @@ app.post("/api/usdt/deposits/intents/:intentId/cancel", async (req, res) => {
     res.status(200).json({
       ok: true,
       intent,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/usdt/deposits/intents/:intentId/check", async (req, res) => {
+  try {
+    const telegramId = getTelegramId(req);
+    if (!telegramId) {
+      throw new Error("telegram_id_missing");
+    }
+    const result = await checkUserDepositIntent({
+      intentId: req.params.intentId,
+      telegram_id: telegramId,
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
     });
   } catch (error) {
     sendApiError(res, error);
@@ -684,6 +707,9 @@ app.post("/api/market/:marketId/sell", async (req, res) => {
       "insufficient_shares",
       "invalid_market_price",
       "sell_failed",
+      "sell_frozen",
+      "sell_min_hold",
+      "sell_tail_blocked",
     ]);
     if (!(error instanceof PriceUnavailableError) && message !== "DATABASE_URL is not configured." && !sellPublicErrors.has(message)) {
       res.status(500).json({
@@ -693,6 +719,21 @@ app.post("/api/market/:marketId/sell", async (req, res) => {
       });
       return;
     }
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/withdrawals/:requestId/confirm", requireBridgeSecret, async (req, res) => {
+  try {
+    const request = await confirmUsdtWithdrawalRequest({
+      requestId: req.params.requestId,
+      token: req.body?.token,
+    });
+    res.status(200).json({
+      ok: true,
+      request,
+    });
+  } catch (error) {
     sendApiError(res, error);
   }
 });
@@ -742,6 +783,25 @@ app.post("/api/tasks/daily", async (req, res) => {
       username: req.body?.username,
       first_name: req.body?.first_name,
       task_key: req.body?.task_key ?? req.body?.taskKey,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/tasks/claim", async (req, res) => {
+  try {
+    const taskKey = req.body?.task_key ?? req.body?.taskKey;
+    if (!["av_channel", "av_chat"].includes(String(taskKey || ""))) {
+      throw new Error("invalid_task");
+    }
+    const result = await completeVerifiedTask({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      task_key: taskKey,
+      source: "mini_app_task",
     });
     res.status(200).json(result);
   } catch (error) {

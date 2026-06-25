@@ -186,6 +186,7 @@
                   <small>Отправить ровно</small>
                   <strong id="usdtDepositExactAmount">100.00 USDT</strong>
                   <span id="usdtDepositNetworkHint">в BEP20 или ERC20. Баланс после зачисления обновится автоматически.</span>
+                  <button id="usdtCheckIntentBtn" class="usdt-check-intent" type="button">Проверить зачисление</button>
                   <button id="usdtCancelIntentBtn" class="usdt-cancel-intent" type="button">Отменить заявку</button>
                 </div>
                 <div class="usdt-address-card hidden" data-usdt-address-card="evm">
@@ -338,6 +339,10 @@
 
         <div class="chart-frame">
           <canvas id="marketChart" class="market-chart" aria-label="BTC price chart"></canvas>
+          <div id="winOverlay" class="win-overlay hidden" aria-live="polite">
+            <small>YOU WON</small>
+            <strong id="winOverlayAmount">+0</strong>
+          </div>
           <div id="tradeBubbles" class="trade-bubbles" aria-hidden="true"></div>
         </div>
 

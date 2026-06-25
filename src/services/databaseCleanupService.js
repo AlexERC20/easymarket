@@ -23,12 +23,13 @@ async function deleteInBatches(sql, params = []) {
 }
 
 async function deleteOldPriceTicks() {
-  return deleteInBatches(
+  const btcDeleted = await deleteInBatches(
     `
       WITH doomed AS (
         SELECT id
         FROM price_ticks
-        WHERE created_at < now() - ($1::int * interval '1 hour')
+        WHERE symbol = 'BTCUSDT'
+          AND created_at < now() - ($1::int * interval '1 day')
         ORDER BY id ASC
         LIMIT $2
       )
@@ -36,8 +37,27 @@ async function deleteOldPriceTicks() {
       USING doomed
       WHERE ticks.id = doomed.id
     `,
-    [Math.round(config.cleanupPriceTicksHours)],
+    [Math.round(config.cleanupBtcPriceTicksDays)],
   );
+
+  const otherDeleted = await deleteInBatches(
+    `
+      WITH doomed AS (
+        SELECT id
+        FROM price_ticks
+        WHERE symbol <> 'BTCUSDT'
+          AND created_at < now() - ($1::int * interval '1 hour')
+        ORDER BY id ASC
+        LIMIT $2
+      )
+      DELETE FROM price_ticks ticks
+      USING doomed
+      WHERE ticks.id = doomed.id
+    `,
+    [Math.round(config.cleanupOtherPriceTicksHours || config.cleanupPriceTicksHours)],
+  );
+
+  return btcDeleted + otherDeleted;
 }
 
 async function truncatePriceTicksIfTooLarge() {
@@ -116,7 +136,7 @@ export async function runStartupDatabaseRescue() {
 }
 
 async function deleteOldMarketComments() {
-  return deleteInBatches(
+  const oldComments = await deleteInBatches(
     `
       WITH doomed AS (
         SELECT id
@@ -131,6 +151,26 @@ async function deleteOldMarketComments() {
     `,
     [Math.round(config.cleanupMarketCommentsDays)],
   );
+
+  const closedMarketComments = await deleteInBatches(
+    `
+      WITH doomed AS (
+        SELECT comments.id
+        FROM market_comments comments
+        JOIN markets ON markets.id = comments.market_id
+        WHERE markets.status <> 'open'
+          AND comments.created_at < now() - ($1::int * interval '1 minute')
+        ORDER BY comments.id ASC
+        LIMIT $2
+      )
+      DELETE FROM market_comments comments
+      USING doomed
+      WHERE comments.id = doomed.id
+    `,
+    [Math.round(config.cleanupClosedMarketCommentsMinutes)],
+  );
+
+  return oldComments + closedMarketComments;
 }
 
 async function deleteOldDepositEvents() {

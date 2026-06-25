@@ -135,6 +135,45 @@ function mapDepositIntent(row) {
   };
 }
 
+async function sendAdminDepositIntentNotification(user, intent) {
+  if (!config.telegramBotToken || !config.telegramAdminUserIds.length || !intent) {
+    return;
+  }
+
+  const name = user.username
+    ? `@${user.username}`
+    : (user.first_name || `user ${user.telegram_id}`);
+  const text = [
+    "Новая заявка на пополнение USDT",
+    "",
+    `Пользователь: ${name}`,
+    `telegram_id: ${user.telegram_id}`,
+    `Заявка #${intent.id}`,
+    `Сумма к отправке: ${intent.deposit_amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT`,
+    `Кошелек: ${intent.to_address}`,
+    `Сети: BEP20 / ERC20`,
+  ].join("\n");
+
+  await Promise.allSettled(config.telegramAdminUserIds.map(async (chatId) => {
+    const response = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        disable_web_page_preview: true,
+      }),
+    });
+    if (!response.ok) {
+      console.warn("[EasyMarket] deposit admin notify failed", {
+        intent_id: intent.id,
+        chat_id: chatId,
+        status: response.status,
+      });
+    }
+  }));
+}
+
 export async function expirePendingDepositIntents() {
   await query(
     `
@@ -174,7 +213,7 @@ export async function createUsdtDepositIntent(input) {
     );
 
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      const cents = randomInt(1, 99) / 100;
+      const cents = attempt === 0 ? 0 : randomInt(1, 99) / 100;
       const depositAmount = roundMoney(requestedAmount + cents, 2);
       const existsResult = await client.query(
         `
@@ -225,9 +264,12 @@ export async function createUsdtDepositIntent(input) {
     throw new Error("deposit_amount_collision");
   });
 
+  const mappedIntent = mapDepositIntent(intent);
+  void sendAdminDepositIntentNotification(user, mappedIntent);
+
   return {
     user,
-    intent: mapDepositIntent(intent),
+    intent: mappedIntent,
   };
 }
 
@@ -302,6 +344,36 @@ export async function cancelUserDepositIntent(input) {
   return mapDepositIntent(result.rows[0]);
 }
 
+export async function checkUserDepositIntent(input) {
+  const telegramId = String(input.telegram_id || "").trim();
+  if (!telegramId) {
+    throw new Error("telegram_id_missing");
+  }
+  const intentId = Number(input.intentId);
+  if (!Number.isSafeInteger(intentId) || intentId <= 0) {
+    throw new Error("deposit_intent_not_found");
+  }
+
+  const before = await getUserDepositIntent({
+    telegram_id: telegramId,
+    intentId,
+  });
+  if (!before) {
+    throw new Error("deposit_intent_not_found");
+  }
+
+  const scan = await scanUsdtDeposits();
+  const after = await getUserDepositIntent({
+    telegram_id: telegramId,
+    intentId,
+  });
+
+  return {
+    intent: after,
+    scan,
+  };
+}
+
 async function getScannerState(network) {
   const result = await query(
     `
@@ -367,10 +439,14 @@ async function matchDepositEvent(client, network, event) {
       FROM usdt_deposit_intents
       WHERE network = ANY($1::text[])
         AND status = ANY($5::text[])
-        AND deposit_amount = $2::numeric
+        AND (
+          deposit_amount = $2::numeric
+          OR requested_amount = $2::numeric
+        )
         AND created_at <= ($3::timestamptz + ($6::int * interval '1 minute'))
         AND expires_at >= ($3::timestamptz - ($6::int * interval '1 minute'))
       ORDER BY
+        CASE WHEN deposit_amount = $2::numeric THEN 0 ELSE 1 END,
         CASE WHEN status = 'pending' THEN 0 ELSE 1 END,
         CASE WHEN network = $4 THEN 0 ELSE 1 END,
         created_at ASC

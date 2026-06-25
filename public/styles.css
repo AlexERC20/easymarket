@@ -59,6 +59,7 @@ button {
   transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease, background 160ms ease;
 }
 
+button:active:not(:disabled),
 button.is-pressed:not(:disabled) {
   filter: brightness(1.08);
   transform: translateY(1px) scale(0.985);
@@ -151,9 +152,9 @@ p {
   display: flex;
   align-items: center;
   gap: 5px;
-  max-width: 108px;
+  max-width: 96px;
   color: var(--fire);
-  font-size: 23px;
+  font-size: 20px;
   font-weight: 900;
   letter-spacing: 0;
   line-height: 1;
@@ -162,8 +163,8 @@ p {
 
 #fireBalance {
   display: inline-block;
-  min-width: 58px;
-  max-width: 104px;
+  min-width: 50px;
+  max-width: 92px;
   overflow: hidden;
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
@@ -172,13 +173,13 @@ p {
 }
 
 #fireBalance.compact {
-  font-size: 0.78em;
-  max-width: 94px;
+  font-size: 0.72em;
+  max-width: 82px;
 }
 
 #fireBalance.tiny {
-  font-size: 0.62em;
-  max-width: 86px;
+  font-size: 0.56em;
+  max-width: 72px;
 }
 
 .currency-switch,
@@ -195,8 +196,8 @@ p {
 
 .currency-switch {
   flex: 0 0 auto;
-  min-height: 31px;
-  padding: 3px;
+  min-height: 29px;
+  padding: 2px;
 }
 
 .currency-switch button,
@@ -213,9 +214,9 @@ p {
 }
 
 .currency-switch button {
-  min-width: 32px;
-  min-height: 27px;
-  font-size: 13px;
+  min-width: 29px;
+  min-height: 25px;
+  font-size: 12px;
 }
 
 .currency-switch button.active,
@@ -465,7 +466,7 @@ h2 {
 .market-heading h2 {
   display: block;
   min-height: 18px;
-  font-size: clamp(16px, 4.35vw, 22px);
+  font-size: clamp(15px, 4vw, 20px);
   line-height: 1.08;
   overflow-wrap: anywhere;
 }
@@ -502,7 +503,7 @@ h2 {
 
 .countdown strong {
   color: var(--no);
-  font-size: clamp(27px, 8vw, 42px);
+  font-size: clamp(24px, 7.2vw, 37px);
   font-weight: 950;
   line-height: 0.96;
   font-variant-numeric: tabular-nums;
@@ -566,7 +567,7 @@ h2 {
   margin-top: 6px;
   overflow: hidden;
   color: #98a2b5;
-  font-size: clamp(24px, 6.4vw, 38px);
+  font-size: clamp(21px, 5.7vw, 34px);
   font-weight: 950;
   line-height: 1;
   text-overflow: ellipsis;
@@ -633,6 +634,61 @@ h2 {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+.win-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(25, 195, 125, 0.24), transparent 48%),
+    rgba(8, 13, 22, 0.72);
+  opacity: 0;
+  transform: scale(0.98);
+}
+
+.win-overlay.show {
+  animation: winReveal 2.8s ease both;
+}
+
+.win-overlay small,
+.win-overlay strong {
+  display: block;
+  text-align: center;
+}
+
+.win-overlay small {
+  color: var(--yes);
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+}
+
+.win-overlay strong {
+  margin-top: 8px;
+  color: var(--text);
+  font-size: clamp(30px, 10vw, 52px);
+  font-weight: 950;
+  line-height: 1;
+  text-shadow: 0 0 26px rgba(25, 195, 125, 0.42);
+}
+
+@keyframes winReveal {
+  0% {
+    opacity: 0;
+    transform: scale(0.94) translateY(8px);
+  }
+  14%, 74% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.02) translateY(-8px);
+  }
 }
 
 .trade-bubble {
@@ -844,11 +900,14 @@ h2 {
 }
 
 .mini-row,
-.activity-row {
+.activity-row,
+.leaderboard-row,
+.task-row {
   border: 1px solid var(--line-soft);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.04);
   padding: 11px;
+  animation: rowPop 170ms ease both;
 }
 
 .position-actions {
@@ -1332,7 +1391,7 @@ code {
   color: var(--no);
 }
 
-.topup-body strong {
+.topup-amount-display {
   color: var(--fire);
   font-size: clamp(34px, 12vw, 58px);
   font-weight: 950;
@@ -1560,6 +1619,7 @@ code {
 .world-cup-row {
   border-top: 1px solid var(--line-soft);
   padding-top: 12px;
+  animation: rowPop 170ms ease both;
 }
 
 .world-cup-row:first-child {

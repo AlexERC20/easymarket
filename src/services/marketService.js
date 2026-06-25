@@ -2035,7 +2035,7 @@ export async function updateLiveBtcPrice() {
         [market.id, btc.price, yesPrice, noPrice],
       );
 
-      if (market.symbol !== btc.symbol) {
+      if (!isBtcMarketSymbol(market.symbol) && market.symbol !== btc.symbol) {
         await persistPriceTick(client, market.symbol, btc.price, btc.source);
       }
     }
@@ -2788,9 +2788,24 @@ export async function sellOutcome(input) {
       throw new Error("market_closed");
     }
 
+    const nowMs = Date.now();
+    const endMs = new Date(market.end_time).getTime();
+    if (Number(config.marketSellFreezeSeconds || 0) > 0 && endMs - nowMs <= config.marketSellFreezeSeconds * 1000) {
+      throw new Error("sell_frozen");
+    }
+
     const positionShares = toNumber(position.shares);
     if (positionShares <= 0) {
       throw new Error("position_not_open");
+    }
+
+    const lastPositionChangeMs = new Date(position.updated_at || position.created_at).getTime();
+    if (
+      Number(config.marketMinHoldSeconds || 0) > 0
+      && Number.isFinite(lastPositionChangeMs)
+      && nowMs - lastPositionChangeMs < config.marketMinHoldSeconds * 1000
+    ) {
+      throw new Error("sell_min_hold");
     }
 
     const requestedShares = input.shares === undefined || input.shares === null
@@ -2805,6 +2820,18 @@ export async function sellOutcome(input) {
 
     const sharesToSell = Math.min(positionShares, requestedShares);
     const marketMinPrice = getMarketMinOutcomePrice(market);
+    const currentOutcomePrice = getMarketOutcomePrice(market, side);
+    const tailExitBlockPrice = Math.max(marketMinPrice, Number(config.marketTailExitBlockPrice || 0));
+    const boughtOutcomePrice = toNumber(position.avg_price);
+    if (
+      tailExitBlockPrice > 0
+      && (
+        currentOutcomePrice <= tailExitBlockPrice
+        || (boughtOutcomePrice > 0 && boughtOutcomePrice <= tailExitBlockPrice)
+      )
+    ) {
+      throw new Error("sell_tail_blocked");
+    }
     const quote = getSellExecutionQuote(market, side, sharesToSell);
     if (quote.executionPrice < marketMinPrice || quote.executionPrice > 1 - marketMinPrice) {
       throw new Error("invalid_market_price");

@@ -63,10 +63,6 @@ function adminConfirmUrl(requestId, token) {
   return `${config.publicWebUrl}/admin/withdrawals/${encodeURIComponent(requestId)}/confirm?token=${encodeURIComponent(token)}`;
 }
 
-function truncateAddress(address) {
-  return `${address.slice(0, 8)}...${address.slice(-6)}`;
-}
-
 async function sendAdminWithdrawalNotification(request, adminToken) {
   if (!config.telegramBotToken || !config.telegramAdminUserIds.length) {
     return;
@@ -82,21 +78,11 @@ async function sendAdminWithdrawalNotification(request, adminToken) {
     `telegram_id: ${request.telegram_id}`,
     `Сумма: ${request.amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT`,
     `Сеть: ${request.network_label}`,
-    `Кошелек: ${truncateAddress(request.to_address)}`,
+    `Кошелек: ${request.to_address}`,
     "",
-    "Проверь перевод вручную и подтверди заявку.",
+    "Проверь перевод вручную и подтверди заявку в AV-боте.",
+    `Bridge confirm: /confirm_withdrawal ${request.id} ${adminToken}`,
   ].join("\n");
-  const replyMarkup = {
-    inline_keyboard: [
-      [
-        {
-          text: "Подтвердить вывод",
-          url: adminConfirmUrl(request.id, adminToken),
-        },
-      ],
-    ],
-  };
-
   await Promise.allSettled(config.telegramAdminUserIds.map(async (chatId) => {
     const response = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`, {
       method: "POST",
@@ -104,7 +90,6 @@ async function sendAdminWithdrawalNotification(request, adminToken) {
       body: JSON.stringify({
         chat_id: chatId,
         text,
-        reply_markup: replyMarkup,
         disable_web_page_preview: true,
       }),
     });
