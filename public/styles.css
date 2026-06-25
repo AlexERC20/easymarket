@@ -1066,6 +1066,15 @@ code {
   gap: 10px;
 }
 
+.task-head .eyebrow {
+  display: none;
+}
+
+.task-head.sheet-close-only {
+  justify-content: flex-end;
+  padding-bottom: 4px;
+}
+
 .task-list {
   display: grid;
   gap: 9px;
@@ -2531,6 +2540,28 @@ code {
   background: linear-gradient(135deg, #58a6ff, #7c5cff);
   color: #fff;
   font-weight: 950;
+  overflow: hidden;
+}
+
+.clan-member-avatar.member-photo img,
+.clan-member-avatar.member-photo span {
+  grid-area: 1 / 1;
+}
+
+.clan-member-avatar.member-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.clan-member-avatar.member-photo span {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  background: linear-gradient(135deg, #58a6ff, #7c5cff);
 }
 
 .clan-member-row strong,

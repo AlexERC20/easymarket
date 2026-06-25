@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260626-01" />
+    <title>Polymarket</title>
+    <link rel="stylesheet" href="/styles.css?v=20260626-02" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
     <main class="app-shell">
       <header class="topbar">
-        <div class="app-title">EASYMARKET</div>
+        <div class="app-title">POLYMARKET</div>
         <div class="topbar-row">
           <div class="balance-line">
             <div class="currency-switch" aria-label="Валюта ставок">
@@ -100,7 +100,7 @@
               <div class="task-row">
                 <div>
                   <strong>Ежедневный вход</strong>
-                  <small>Проведи 5 минут в EasyMarket и забери +<span id="dailyPresenceTaskReward">50</span></small>
+                  <small>Проведи 5 минут в Polymarket и забери +<span id="dailyPresenceTaskReward">50</span></small>
                 </div>
                 <button id="taskDailyPresenceBtn" class="task-button" type="button">Таймер</button>
               </div>
@@ -121,7 +121,7 @@
               <div class="task-row">
                 <div>
                   <strong>1 прогноз на футбол</strong>
-                  <small>Сделай прогноз в World Cup market и забери +50</small>
+                  <small>Сделай футбольный прогноз и забери +50</small>
                 </div>
                 <button class="task-button" data-daily-task="daily_football_prediction" type="button">Забрать</button>
               </div>
@@ -342,26 +342,18 @@
 
       <section id="btcMarketsSheet" class="task-sheet hidden" aria-label="BTC markets">
         <div class="task-panel world-cup-panel">
-          <div class="task-head">
-            <div>
-              <p class="eyebrow">BTC markets</p>
-              <h2>Bitcoin Up / Down</h2>
-            </div>
+          <div class="task-head sheet-close-only">
             <button id="btcMarketsCloseBtn" class="icon-button" type="button" aria-label="Закрыть BTC markets">×</button>
           </div>
           <div id="btcMarketsList" class="world-cup-list">
-            <p class="muted">Загружаю BTC markets...</p>
+            <p class="muted">Загружаю...</p>
           </div>
         </div>
       </section>
 
       <section id="worldCupSheet" class="task-sheet hidden" aria-label="World Cup markets">
         <div class="task-panel world-cup-panel">
-          <div class="task-head">
-            <div>
-              <p class="eyebrow">Football markets</p>
-              <h2>World Cup Winner</h2>
-            </div>
+          <div class="task-head sheet-close-only">
             <button id="worldCupCloseBtn" class="icon-button" type="button" aria-label="Закрыть World Cup">×</button>
           </div>
           <div id="worldCupList" class="world-cup-list">
@@ -400,7 +392,7 @@
       </section>
 
       <section id="authCard" class="card hidden">
-        <h2>Открой EasyMarket в Telegram</h2>
+        <h2>Открой Polymarket в Telegram</h2>
         <p>
           Это Mini App. В браузере снаружи Telegram ставки и баланс не откроются.
         </p>
@@ -565,6 +557,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260626-01" type="module"></script>
+    <script src="/app.js?v=20260626-02" type="module"></script>
   </body>
 </html>

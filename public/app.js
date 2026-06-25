@@ -376,6 +376,20 @@ function clanIconMarkup(clan, className = "clan-avatar") {
   return `<div class="${className} ${theme.className}" aria-hidden="true">${theme.svg}</div>`;
 }
 
+function clanMemberAvatarMarkup(member, name) {
+  const avatarUrl = String(member?.avatar_url || "").trim();
+  const initial = escapeHtml((String(name || "").replace(/^@/, "")[0] || "?").toUpperCase());
+  if (avatarUrl) {
+    return `
+      <div class="clan-member-avatar member-photo" aria-hidden="true">
+        <img src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" decoding="async" onerror="this.style.display='none';this.nextElementSibling.style.opacity='1';" />
+        <span>${initial}</span>
+      </div>
+    `;
+  }
+  return `<div class="clan-member-avatar" aria-hidden="true">${initial}</div>`;
+}
+
 function normalizeChannelUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -2348,7 +2362,7 @@ function renderClans() {
         return `
           <div class="clan-member-row ${String(member.telegram_id) === String(state.user?.telegram_id) ? "me" : ""}">
             <span>${member.rank || "-"}</span>
-            <div class="clan-member-avatar">${escapeHtml((name.replace(/^@/, "")[0] || "?").toUpperCase())}</div>
+            ${clanMemberAvatarMarkup(member, name)}
             <div>
               <strong>${escapeHtml(name)}</strong>
               <small>${formatFire(member.contribution_score)} очков${member.role === "owner" ? " · owner" : ""}</small>
@@ -2462,7 +2476,7 @@ async function shareClan(clan) {
   }
   triggerHaptic("selection");
   const inviteUrl = buildClanInviteUrl(clan);
-  const text = `Вступай в клан ${clan.name} в EasyMarket.`;
+  const text = `Вступай в клан ${clan.name} в Polymarket.`;
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
@@ -2502,7 +2516,7 @@ function renderWorldCupList() {
   }
 
   if (!state.worldCupMarkets.length) {
-    container.innerHTML = '<p class="muted">World Cup markets пока загружаются.</p>';
+    container.innerHTML = '<p class="muted">Маркеты пока загружаются.</p>';
     return;
   }
 
@@ -2551,7 +2565,7 @@ function renderBtcMarketsList() {
   }
 
   if (!state.btcMarkets.length) {
-    container.innerHTML = '<p class="muted">BTC markets пока загружаются.</p>';
+    container.innerHTML = '<p class="muted">Маркеты пока загружаются.</p>';
     return;
   }
 
@@ -2664,7 +2678,7 @@ function renderBetSheet() {
   const price = quote.executionPrice;
   const shares = Number(amount || 0) / price;
   setTeamIconElement($("betTeamIcon"), isBtc ? "₿" : market.icon, isBtc ? "BTC" : market.team);
-  if ($("betMarketTitle")) $("betMarketTitle").textContent = market.title || (isBtc ? "BTC Market" : "World Cup Winner");
+  if ($("betMarketTitle")) $("betMarketTitle").textContent = market.title || (isBtc ? "Bitcoin Up / Down" : "World Cup Winner");
   if ($("betTeamName")) $("betTeamName").textContent = isBtc ? (market.title || "BTC Up or Down") : (market.team || "Team");
   if ($("betSideName")) {
     $("betSideName").textContent = marketSideLabel(market, side);
@@ -3963,7 +3977,7 @@ async function claimDailyPresenceTask() {
     if (result.already_claimed) {
       showToast("Ежедневный вход уже забран.");
     } else if (Number(result.awarded || 0) > 0) {
-      showToast(`+${formatFire(result.awarded)} за 5 минут в EasyMarket.`);
+      showToast(`+${formatFire(result.awarded)} за 5 минут в Polymarket.`);
     } else {
       showToast("Дневной лимит бонусов уже достигнут.");
     }
@@ -3998,7 +4012,7 @@ async function shareInvite({ awardShareTask = false } = {}) {
 
   const usdtBonus = Math.round(Number(state.publicConfig.referral_bet_bonus_usdt || 30));
   const inviteUrl = buildInviteUrl(state.user.telegram_id);
-  const text = `Залетай в EasyMarket. После первой ставки мне дадут ${formatFire(usdtBonus)} USDT.`;
+  const text = `Залетай в Polymarket. После первой ставки мне дадут ${formatFire(usdtBonus)} USDT.`;
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
@@ -4013,7 +4027,7 @@ async function shareInvite({ awardShareTask = false } = {}) {
   try {
     if (navigator.share) {
       await navigator.share({
-        title: "EasyMarket",
+        title: "Polymarket",
         text,
         url: inviteUrl,
       });
@@ -4285,7 +4299,7 @@ $("btcMarketsBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   setBtcMarketsSheetOpen(true);
   renderBtcMarketsList();
-  void runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => showToast("BTC markets пока не загрузились."));
+  void runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => showToast("Маркеты пока не загрузились."));
 });
 
 $("btcMarketsCloseBtn")?.addEventListener("click", () => {
@@ -4323,7 +4337,7 @@ $("worldCupBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   setWorldCupSheetOpen(true);
   renderWorldCupList();
-  void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => showToast("World Cup markets пока не загрузились."));
+  void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => showToast("Маркеты пока не загрузились."));
 });
 
 $("worldCupCloseBtn")?.addEventListener("click", () => {

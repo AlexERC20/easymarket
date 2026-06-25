@@ -830,6 +830,13 @@ function getClanChannelAvatarUrl(channelUrl) {
   return username ? `https://t.me/i/userpic/320/${encodeURIComponent(username)}.jpg` : null;
 }
 
+function getTelegramUserAvatarUrl(username) {
+  const cleanUsername = String(username || "").trim().replace(/^@/, "");
+  return /^[A-Za-z0-9_]{4,}$/.test(cleanUsername)
+    ? `https://t.me/i/userpic/320/${encodeURIComponent(cleanUsername)}.jpg`
+    : null;
+}
+
 async function ensureDefaultClans(client) {
   await client.query(
     `
@@ -2232,6 +2239,7 @@ async function getClansWithClient(client, userId = 0) {
         telegram_id: row.telegram_id,
         username: row.username,
         first_name: row.first_name,
+        avatar_url: getTelegramUserAvatarUrl(row.username),
         role: row.role,
         contribution_score: toNumber(row.contribution_score),
         rank: Number(row.rank || 0),
