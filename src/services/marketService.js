@@ -17,6 +17,7 @@ const MAX_SINGLE_TRADE_SHIFT = 0.42;
 const MIN_TAIL_DEPTH_FACTOR = 0.012;
 const REFERRAL_SIGNUP_BONUS = 100;
 const CURRENCIES = new Set(["STAR", "USDT"]);
+const WORLD_CUP_SYNC_INTERVAL_MS = 90_000;
 
 const BTC_MARKET_DEFS = [
   { key: "5M", symbol: MARKET_SYMBOL, label: "5m", title: "BTC Up or Down 5m", durationMinutes: null },
@@ -43,6 +44,10 @@ const WORLD_CUP_FALLBACK_MARKETS = [
   { polymarketId: "fallback-mexico", team: "Mexico", icon: "🇲🇽", yesPrice: 0.018, volume: 16_600_000 },
   { polymarketId: "fallback-canada", team: "Canada", icon: "🇨🇦", yesPrice: 0.012, volume: 12_300_000 },
 ];
+
+let worldCupSyncPromise = null;
+let worldCupLastSyncAt = 0;
+let worldCupLastSource = "cache";
 
 function getBtcMarketDef(symbol) {
   return BTC_MARKET_DEFS.find((definition) => definition.symbol === symbol) || null;
@@ -2900,7 +2905,7 @@ export async function getMarketChart(market, limit = 240) {
   return result.rows.map(mapMarketChartPoint);
 }
 
-export async function syncWorldCupMarkets() {
+async function performWorldCupSync() {
   const feed = await getWorldCupFeedMarkets();
   const endTime = new Date("2026-07-20T00:00:00Z");
   const now = new Date();
@@ -3004,6 +3009,27 @@ export async function syncWorldCupMarkets() {
   });
 
   return feed.source;
+}
+
+export async function syncWorldCupMarkets({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && worldCupLastSyncAt && now - worldCupLastSyncAt < WORLD_CUP_SYNC_INTERVAL_MS) {
+    return worldCupLastSource;
+  }
+
+  if (!worldCupSyncPromise) {
+    worldCupSyncPromise = performWorldCupSync()
+      .then((source) => {
+        worldCupLastSyncAt = Date.now();
+        worldCupLastSource = source;
+        return source;
+      })
+      .finally(() => {
+        worldCupSyncPromise = null;
+      });
+  }
+
+  return worldCupSyncPromise;
 }
 
 export async function getWorldCupMarkets() {

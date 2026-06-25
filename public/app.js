@@ -7,7 +7,6 @@ const USDT_AMOUNTS = [5, 10, 25, 100];
 const MIN_OUTCOME_PRICE = 0.001;
 const BTC_MIN_OUTCOME_PRICE = 0.001;
 const CHART_WINDOW_MS = 10_000;
-const CHART_RENDER_INTERVAL_MS = 100;
 const ACTIVE_MARKET_POLL_MS = 1_500;
 const MARKET_LIST_POLL_MS = 10_000;
 const COMMENTS_POLL_MS = 10_000;
@@ -1293,6 +1292,19 @@ async function runSingleFlight(key, task) {
   }
 }
 
+function isSheetOpen(id) {
+  const element = $(id);
+  return Boolean(element && !element.classList.contains("hidden"));
+}
+
+function shouldRefreshBtcMarkets() {
+  return Boolean(state.selectedBtcMarketId) || isSheetOpen("btcMarketsSheet");
+}
+
+function shouldRefreshWorldCupMarkets() {
+  return Boolean(state.selectedWorldCupMarketId) || isSheetOpen("worldCupSheet");
+}
+
 function maybeLoadComments(force = false) {
   const now = Date.now();
   if (!force && now - state.lastCommentsLoadAt < COMMENTS_POLL_MS) {
@@ -1316,8 +1328,12 @@ function scheduleCoreRefresh({ delay = 120, includeLists = true, includeComments
     ];
 
     if (includeLists) {
-      jobs.push(runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => undefined));
-      jobs.push(runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined));
+      if (shouldRefreshBtcMarkets()) {
+        jobs.push(runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => undefined));
+      }
+      if (shouldRefreshWorldCupMarkets()) {
+        jobs.push(runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined));
+      }
     }
 
     void Promise.all(jobs);
@@ -3440,10 +3456,13 @@ async function sellPosition({ side, positionId, marketId, shares }) {
   }
 }
 
-async function refreshAll() {
+async function refreshAll({ includeLists = false } = {}) {
   try {
     await loadMarket();
-    await loadBtcMarkets().catch(() => undefined);
+    if (includeLists) {
+      await loadBtcMarkets().catch(() => undefined);
+      await loadWorldCupMarkets().catch(() => undefined);
+    }
     await loadActivity();
     await loadMe();
     await loadRecentMarkets();
@@ -3485,7 +3504,7 @@ const refreshButton = $("refreshBtn");
 if (refreshButton) {
   refreshButton.addEventListener("click", () => {
     triggerHaptic("light");
-    void refreshAll();
+    void refreshAll({ includeLists: true });
   });
 }
 
@@ -4513,15 +4532,18 @@ document.addEventListener("click", (event) => {
 
 setInterval(updateTimer, 250);
 setInterval(updatePresenceTaskButton, 1_000);
-setInterval(renderMarketChart, CHART_RENDER_INTERVAL_MS);
 setInterval(() => {
   void runSingleFlight("market", loadMarket).catch(() => setConnection("Ошибка", "error"));
 }, ACTIVE_MARKET_POLL_MS);
 setInterval(() => {
-  void runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => undefined);
+  if (shouldRefreshBtcMarkets()) {
+    void runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => undefined);
+  }
 }, MARKET_LIST_POLL_MS);
 setInterval(() => {
-  void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined);
+  if (shouldRefreshWorldCupMarkets()) {
+    void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined);
+  }
 }, MARKET_LIST_POLL_MS);
 setInterval(() => maybeLoadComments(true), COMMENTS_POLL_MS);
 setInterval(() => {
@@ -4553,12 +4575,15 @@ loadPublicConfig()
     if (!authorized) {
       return null;
     }
-    return loadBtcMarkets()
-      .catch(() => undefined)
-      .then(() => loadWorldCupMarkets().catch(() => undefined))
-      .then(refreshAll)
+    return refreshAll()
       .then(() => handleClanLaunchLink().catch(() => showToast("Клан по ссылке не найден.")))
       .then(() => {
+        window.setTimeout(() => {
+          void runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => undefined);
+        }, 600);
+        window.setTimeout(() => {
+          void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined);
+        }, 1_200);
         window.setTimeout(showReferralNudge, 150_000);
       });
   })

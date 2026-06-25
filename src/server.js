@@ -558,7 +558,6 @@ app.get("/api/me", async (req, res) => {
 
 app.get("/api/market/active", async (_req, res) => {
   try {
-    await priceTick();
     const market = await getActiveMarket();
     let activity = [];
     let chart = [];

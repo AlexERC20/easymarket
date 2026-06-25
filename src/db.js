@@ -416,6 +416,12 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_trades_user_created
       ON trades(user_id, created_at DESC);
 
+    CREATE INDEX IF NOT EXISTS idx_trades_market_created
+      ON trades(market_id, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_trades_user_market_created
+      ON trades(user_id, market_id, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS market_comments (
       id BIGSERIAL PRIMARY KEY,
       market_id BIGINT NOT NULL REFERENCES markets(id) ON DELETE CASCADE,
@@ -459,6 +465,12 @@ export async function runMigrations() {
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_user_market_side_currency
       ON positions(user_id, market_id, side, currency);
+
+    CREATE INDEX IF NOT EXISTS idx_positions_user_status_currency
+      ON positions(user_id, status, currency);
+
+    CREATE INDEX IF NOT EXISTS idx_positions_market_status_currency
+      ON positions(market_id, status, currency);
 
     CREATE INDEX IF NOT EXISTS idx_trades_currency_created
       ON trades(currency, created_at DESC);
