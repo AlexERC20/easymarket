@@ -76,16 +76,14 @@ async function sendAdminWithdrawalNotification(request, adminToken) {
     ? `@${request.username}`
     : (request.first_name || `user ${request.telegram_id}`);
   const text = [
-    "Заявка на вывод USDT",
+    `💸 Вывод USDT #${request.id}`,
     "",
-    `Пользователь: ${name}`,
-    `telegram_id: ${request.telegram_id}`,
+    name,
     `Сумма: ${request.amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT`,
     `Сеть: ${request.network_label}`,
-    `Кошелек: ${request.to_address}`,
     "",
-    "Проверь перевод вручную и подтверди заявку в AV-боте.",
-    `Bridge confirm: /confirm_withdrawal ${request.id} ${adminToken}`,
+    "Кошелек:",
+    request.to_address,
   ].join("\n");
   const replyMarkup = {
     inline_keyboard: [
