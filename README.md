@@ -85,7 +85,6 @@ CLEANUP_EXPIRED_DEPOSIT_INTENTS_DAYS=30
 CLEANUP_TASK_CLAIMS_DAYS=60
 CLEANUP_EMPTY_MARKETS_DAYS=14
 MARKET_SELL_FREEZE_SECONDS=7
-MARKET_MIN_HOLD_SECONDS=20
 PUBLIC_WEB_URL=https://easymarket-rcuj.onrender.com
 PUBLIC_AV_BOT_URL=https://t.me/voit_help_bot?start=buy_stars
 PUBLIC_MINI_APP_URL=https://t.me/voit_help_bot?startapp=easymarket
@@ -113,7 +112,7 @@ PUBLIC_PRIVATE_CHAT_URL=https://t.me/tribute/app?startapp=stKL
 `PRICE_TICKS_DISABLED=false` keeps chart tick persistence on. Old raw ticks are pruned automatically: `BTCUSDT` is kept for `CLEANUP_BTC_PRICE_TICKS_DAYS` days, while all other raw tick symbols are kept for `CLEANUP_OTHER_PRICE_TICKS_HOURS` hours. If `price_ticks` grows above `CLEANUP_PRICE_TICKS_TRUNCATE_ABOVE_MB`, startup/daily cleanup truncates only that disposable table to protect the 1 GB Postgres plan.
 `STARTUP_DATABASE_RESCUE_ENABLED=true` runs before migrations and can drop only the disposable `price_ticks` table when it is above `STARTUP_PRICE_TICKS_DROP_ABOVE_MB`; this protects startup on a nearly full Postgres disk.
 `CLEANUP_CLOSED_MARKET_COMMENTS_MINUTES` removes chat comments shortly after a market closes; balances, ledgers, withdrawals, deposits, trades, and user positions are kept.
-`MARKET_SELL_FREEZE_SECONDS` and `MARKET_MIN_HOLD_SECONDS` protect the internal market maker from instant buy/sell farming and last-second exits. Tail abuse is handled by the internal market maker curve: liquidity is deepest near 50/50 and gets much thinner near the 0/100 tails, so large tail buys reprice sharply instead of staying cheap.
+`MARKET_SELL_FREEZE_SECONDS` blocks only last-second exits before market resolution. Instant buy/sell pricing is handled by the internal market maker curve: liquidity is deepest near 50/50 and gets much thinner near the 0/100 tails, so large tail buys or exits reprice sharply instead of staying cheap.
 
 ## Render
 

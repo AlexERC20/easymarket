@@ -14,7 +14,6 @@ const COMMENTS_POLL_MS = 10_000;
 const COLLAPSE_LIMIT = 3;
 const MARKET_BUY_CLOSE_BUFFER_MS = 400;
 const MARKET_SELL_FREEZE_SECONDS = 7;
-const MARKET_MIN_HOLD_SECONDS = 20;
 
 const state = {
   user: null,
@@ -1952,20 +1951,15 @@ function renderMe() {
     const expiresAt = position.market_end_time ? new Date(position.market_end_time).getTime() : 0;
     const secondsLeft = expiresAt > 0 ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 1_000)) : null;
     const marketIsLive = position.market_status === "open";
-    const lastChangedAt = new Date(position.updated_at || position.created_at || 0).getTime();
-    const holdSeconds = Number.isFinite(lastChangedAt) ? Math.floor((Date.now() - lastChangedAt) / 1000) : MARKET_MIN_HOLD_SECONDS;
     const frozen = secondsLeft !== null && secondsLeft <= MARKET_SELL_FREEZE_SECONDS;
-    const tooFresh = holdSeconds < MARKET_MIN_HOLD_SECONDS;
-    const canSell = marketIsLive && secondsLeft !== null && secondsLeft > MARKET_SELL_FREEZE_SECONDS && !tooFresh;
+    const canSell = marketIsLive && secondsLeft !== null && secondsLeft > MARKET_SELL_FREEZE_SECONDS;
     const sellLockMessage = !marketIsLive
       ? "Рынок уже рассчитан."
       : secondsLeft === 0
         ? "Рынок уже закрылся, ждём расчёт."
         : frozen
           ? "В последние секунды продажа закрыта."
-          : tooFresh
-            ? `Подожди ${Math.max(1, MARKET_MIN_HOLD_SECONDS - holdSeconds)}с перед продажей.`
-            : "";
+          : "";
     const marketBadge = secondsLeft === null
       ? ""
       : secondsLeft > 0
@@ -3206,7 +3200,6 @@ async function sellPosition({ side, positionId, marketId, shares }) {
       insufficient_shares: "Не хватает shares для продажи.",
       user_not_found: "Пользователь не найден.",
       sell_frozen: "В последние секунды продажа закрыта.",
-      sell_min_hold: "Слишком рано продавать. Подожди немного.",
       sell_failed: "Продажа не прошла. Попробуй ещё раз.",
     };
     const detail = error.detail ? ` (${error.detail})` : "";

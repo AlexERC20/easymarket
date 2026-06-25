@@ -117,7 +117,6 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "invoice_not_configured",
     "sell_failed",
     "sell_frozen",
-    "sell_min_hold",
     "clan_not_found",
     "clan_name_required",
     "invalid_clan_channel",
@@ -756,7 +755,6 @@ app.post("/api/market/:marketId/sell", async (req, res) => {
       "invalid_market_price",
       "sell_failed",
       "sell_frozen",
-      "sell_min_hold",
     ]);
     if (!(error instanceof PriceUnavailableError) && message !== "DATABASE_URL is not configured." && !sellPublicErrors.has(message)) {
       res.status(500).json({

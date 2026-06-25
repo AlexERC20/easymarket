@@ -3317,15 +3317,6 @@ export async function sellOutcome(input) {
       throw new Error("position_not_open");
     }
 
-    const lastPositionChangeMs = new Date(position.updated_at || position.created_at).getTime();
-    if (
-      Number(config.marketMinHoldSeconds || 0) > 0
-      && Number.isFinite(lastPositionChangeMs)
-      && nowMs - lastPositionChangeMs < config.marketMinHoldSeconds * 1000
-    ) {
-      throw new Error("sell_min_hold");
-    }
-
     const requestedShares = input.shares === undefined || input.shares === null
       ? positionShares
       : Number(input.shares);

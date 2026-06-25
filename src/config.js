@@ -73,7 +73,6 @@ export const config = {
   cleanupMarketCommentsDays: parseNumber(process.env.CLEANUP_MARKET_COMMENTS_DAYS, 3, 1),
   cleanupClosedMarketCommentsMinutes: parseNumber(process.env.CLEANUP_CLOSED_MARKET_COMMENTS_MINUTES, 15, 0),
   marketSellFreezeSeconds: parseNumber(process.env.MARKET_SELL_FREEZE_SECONDS, 7, 0),
-  marketMinHoldSeconds: parseNumber(process.env.MARKET_MIN_HOLD_SECONDS, 20, 0),
   cleanupDepositEventsDays: parseNumber(process.env.CLEANUP_DEPOSIT_EVENTS_DAYS, 30, 1),
   cleanupExpiredDepositIntentsDays: parseNumber(process.env.CLEANUP_EXPIRED_DEPOSIT_INTENTS_DAYS, 30, 1),
   cleanupTaskClaimsDays: parseNumber(process.env.CLEANUP_TASK_CLAIMS_DAYS, 60, 1),
