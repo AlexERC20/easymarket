@@ -796,14 +796,32 @@ function slugifyClanName(name) {
     .slice(0, 48) || `clan-${Date.now()}`;
 }
 
+const ALLOWED_CLAN_ICON_KEYS = new Set([
+  "bull",
+  "bear",
+  "fox",
+  "wolf",
+  "eagle",
+  "tiger",
+  "lion",
+  "shark",
+]);
+
+function normalizeClanIconKey(value) {
+  const iconKey = String(value || "").trim().toLowerCase();
+  return ALLOWED_CLAN_ICON_KEYS.has(iconKey) ? iconKey : "bull";
+}
+
 async function ensureDefaultClans(client) {
   await client.query(
     `
-      INSERT INTO clans (name, slug, kind)
+      INSERT INTO clans (name, slug, kind, icon_key)
       VALUES
-        ('BTC Bulls', 'btc-bulls', 'default'),
-        ('BTC Bears', 'btc-bears', 'default')
-      ON CONFLICT (slug) DO NOTHING
+        ('BTC Bulls', 'btc-bulls', 'default', 'bull'),
+        ('BTC Bears', 'btc-bears', 'default', 'bear')
+      ON CONFLICT (slug) DO UPDATE SET
+        icon_key = EXCLUDED.icon_key,
+        kind = EXCLUDED.kind
     `,
   );
 }
@@ -2110,6 +2128,7 @@ function mapClan(row) {
     name: row.name,
     slug: row.slug,
     channel_url: row.channel_url,
+    icon_key: normalizeClanIconKey(row.icon_key),
     kind: row.kind,
     members_count: Number(row.members_count || 0),
     score: toNumber(row.score),
@@ -2230,7 +2249,9 @@ export async function getClans(input = {}) {
 
 export async function joinClan(input) {
   const clanId = Number(input.clan_id ?? input.clanId);
-  if (!Number.isSafeInteger(clanId) || clanId <= 0) {
+  const clanSlug = String(input.clan_slug ?? input.clanSlug ?? "").trim();
+  const hasClanId = Number.isSafeInteger(clanId) && clanId > 0;
+  if (!hasClanId && !clanSlug) {
     throw new Error("clan_not_found");
   }
   const user = await upsertUser({
@@ -2241,10 +2262,13 @@ export async function joinClan(input) {
 
   return withTransaction(async (client) => {
     await ensureDefaultClans(client);
-    const clanResult = await client.query("SELECT * FROM clans WHERE id = $1", [clanId]);
+    const clanResult = hasClanId
+      ? await client.query("SELECT * FROM clans WHERE id = $1", [clanId])
+      : await client.query("SELECT * FROM clans WHERE slug = $1", [clanSlug]);
     if (!clanResult.rows[0]) {
       throw new Error("clan_not_found");
     }
+    const targetClanId = clanResult.rows[0].id;
 
     const existingResult = await client.query("SELECT * FROM clan_members WHERE user_id = $1", [user.id]);
     await client.query(
@@ -2255,7 +2279,7 @@ export async function joinClan(input) {
           clan_id = EXCLUDED.clan_id,
           role = 'member'
       `,
-      [clanId, user.id],
+      [targetClanId, user.id],
     );
 
     if (!existingResult.rows[0]) {
@@ -2269,6 +2293,7 @@ export async function joinClan(input) {
 export async function createClan(input) {
   const name = String(input.name || "").trim().slice(0, 28);
   const channelUrl = String(input.channel_url ?? input.channelUrl ?? "").trim().slice(0, 160) || null;
+  const iconKey = normalizeClanIconKey(input.icon_key ?? input.iconKey);
   if (name.length < 3) {
     throw new Error("clan_name_required");
   }
@@ -2294,14 +2319,21 @@ export async function createClan(input) {
 
     await debitCurrencyBalance(client, user.id, "STAR", 10000, "clan_create", "clan:create");
     const baseSlug = slugifyClanName(name);
-    const slug = `${baseSlug}-${String(user.id).slice(-5)}`;
+    let slug = `${baseSlug}-${String(user.id).slice(-5)}`;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const existingSlug = await client.query("SELECT id FROM clans WHERE slug = $1 LIMIT 1", [slug]);
+      if (!existingSlug.rows[0]) {
+        break;
+      }
+      slug = `${baseSlug}-${String(user.id).slice(-5)}-${attempt + 2}`;
+    }
     const clanResult = await client.query(
       `
-        INSERT INTO clans (name, slug, owner_user_id, channel_url, kind)
-        VALUES ($1, $2, $3, $4, 'custom')
+        INSERT INTO clans (name, slug, owner_user_id, channel_url, icon_key, kind)
+        VALUES ($1, $2, $3, $4, $5, 'custom')
         RETURNING *
       `,
-      [name, slug, user.id, channelUrl],
+      [name, slug, user.id, channelUrl, iconKey],
     );
 
     await client.query(
@@ -2318,17 +2350,33 @@ export async function createClan(input) {
 
     const balance = await getCurrencyBalanceSnapshot(client, user.id, "STAR");
     const clans = await getClansWithClient(client, user.id);
+    const createdClan = mapClan({
+      ...clanResult.rows[0],
+      members_count: 1,
+      score: 5,
+      user_is_member: 1,
+      user_contribution_score: 5,
+      rank: 0,
+    });
+    if (!clans.clans.some((clan) => clan.id === createdClan.id)) {
+      clans.clans.unshift({
+        ...createdClan,
+        members: [{
+          telegram_id: user.telegram_id,
+          username: user.username,
+          first_name: user.first_name,
+          role: "owner",
+          contribution_score: 5,
+          rank: 1,
+          joined_at: new Date().toISOString(),
+        }],
+      });
+    }
+    clans.user_clan = clans.clans.find((clan) => clan.id === createdClan.id) || createdClan;
     return {
       ...clans,
       balance: balance.total,
-      created_clan: mapClan({
-        ...clanResult.rows[0],
-        members_count: 1,
-        score: 5,
-        user_is_member: 1,
-        user_contribution_score: 5,
-        rank: 0,
-      }),
+      created_clan: createdClan,
     };
   });
 }

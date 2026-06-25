@@ -2140,12 +2140,14 @@ code {
   font-weight: 950;
 }
 
-.clan-avatar span,
-.user-clan-icon span,
-.clan-detail-avatar span {
+.clan-avatar svg,
+.user-clan-icon svg,
+.clan-detail-avatar svg,
+.clan-icon-option svg {
   display: block;
-  transform: translateY(1px);
-  filter: drop-shadow(0 4px 7px rgba(0, 0, 0, 0.28));
+  width: 68%;
+  height: 68%;
+  fill: currentColor;
 }
 
 .clan-avatar.bull,
@@ -2196,6 +2198,12 @@ code {
   background: linear-gradient(145deg, #d9a43a, #71501d);
 }
 
+.clan-avatar.shark,
+.user-clan-icon.shark,
+.clan-detail-avatar.shark {
+  background: linear-gradient(145deg, #46d5e8, #1d5a79);
+}
+
 .clan-info strong,
 .clan-info small {
   display: block;
@@ -2217,6 +2225,39 @@ code {
   min-height: 360px;
   align-content: start;
 }
+
+.clan-icon-picker {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.clan-icon-option {
+  height: 48px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 15px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(145deg, #253246, #101722);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.clan-icon-option.active {
+  border-color: rgba(94, 161, 255, 0.72);
+  box-shadow: 0 0 0 3px rgba(94, 161, 255, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+.clan-icon-option.bull { background: linear-gradient(145deg, #33b96f, #125b39); }
+.clan-icon-option.bear { background: linear-gradient(145deg, #ef5757, #61212a); }
+.clan-icon-option.fox { background: linear-gradient(145deg, #f0a44c, #7a3f19); }
+.clan-icon-option.wolf { background: linear-gradient(145deg, #7d96b7, #2e3f59); }
+.clan-icon-option.eagle { background: linear-gradient(145deg, #5ea1ff, #234d92); }
+.clan-icon-option.tiger { background: linear-gradient(145deg, #f7c24d, #95540c); }
+.clan-icon-option.lion { background: linear-gradient(145deg, #d9a43a, #71501d); }
+.clan-icon-option.shark { background: linear-gradient(145deg, #46d5e8, #1d5a79); }
 
 .clan-create-card input {
   min-height: 44px;
@@ -2393,6 +2434,35 @@ code {
   margin-top: 8px;
   color: rgba(255, 255, 255, 0.72);
   line-height: 1.35;
+}
+
+.clan-link-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.clan-link-button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 14px;
+  background: #2f8dff;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 950;
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.2), 0 10px 20px rgba(47, 141, 255, 0.18);
+  transition: transform 120ms ease, filter 120ms ease;
+}
+
+.clan-link-button.secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.16);
+}
+
+.clan-link-button:active {
+  transform: translateY(2px) scale(0.985);
+  filter: brightness(1.08);
 }
 
 .clan-members-list {

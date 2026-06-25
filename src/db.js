@@ -324,6 +324,7 @@ export async function runMigrations() {
       slug TEXT NOT NULL UNIQUE,
       owner_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
       channel_url TEXT,
+      icon_key TEXT NOT NULL DEFAULT 'bull',
       kind TEXT NOT NULL DEFAULT 'custom',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -332,6 +333,7 @@ export async function runMigrations() {
     ALTER TABLE clans
       ADD COLUMN IF NOT EXISTS owner_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS channel_url TEXT,
+      ADD COLUMN IF NOT EXISTS icon_key TEXT NOT NULL DEFAULT 'bull',
       ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'custom',
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 

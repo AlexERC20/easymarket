@@ -646,6 +646,7 @@ app.post("/api/clans/join", async (req, res) => {
       username: req.body?.username,
       first_name: req.body?.first_name,
       clan_id: req.body?.clan_id,
+      clan_slug: req.body?.clan_slug,
     });
     res.status(200).json(result);
   } catch (error) {
@@ -661,6 +662,7 @@ app.post("/api/clans/create", async (req, res) => {
       first_name: req.body?.first_name,
       name: req.body?.name,
       channel_url: req.body?.channel_url,
+      icon_key: req.body?.icon_key,
     });
     res.status(200).json(result);
   } catch (error) {

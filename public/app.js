@@ -83,6 +83,8 @@ const state = {
   userClan: null,
   clansLoading: false,
   clanCreating: false,
+  selectedClanIconKey: "bull",
+  handledClanLaunch: false,
   selectedClanId: null,
   clanView: "leaderboard",
   marketPanel: "chat",
@@ -287,14 +289,54 @@ function teamIconMarkup(icon, alt = "team") {
 }
 
 const CLAN_ICON_THEMES = [
-  { icon: "🐂", className: "bull" },
-  { icon: "🐻", className: "bear" },
-  { icon: "🦊", className: "fox" },
-  { icon: "🐺", className: "wolf" },
-  { icon: "🦅", className: "eagle" },
-  { icon: "🐯", className: "tiger" },
-  { icon: "🐼", className: "panda" },
-  { icon: "🦁", className: "lion" },
+  {
+    key: "bull",
+    label: "Bull",
+    className: "bull",
+    svg: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M13 14c-3.8-.8-6.7-3-8.3-6.4 6 .1 10.2 2.2 12.4 6.2 2.1-.9 4.4-1.3 6.9-1.3s4.8.4 6.9 1.3c2.2-4 6.4-6.1 12.4-6.2-1.6 3.4-4.5 5.6-8.3 6.4 1.9 2.1 2.8 4.9 2.8 8.2 0 8.2-5.7 15.1-13.8 15.1S10.2 30.4 10.2 22.2c0-3.3.9-6.1 2.8-8.2Zm5.2 17.6 3.6 3.4h4.4l3.6-3.4-4.4-3.1h-2.8l-4.4 3.1Zm-2.3-10.7 4.7 2.1.9-3.7-4.8-.8-.8 2.4Zm16.2 0-.8-2.4-4.8.8.9 3.7 4.7-2.1Z"/></svg>',
+  },
+  {
+    key: "bear",
+    label: "Bear",
+    className: "bear",
+    svg: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M14.3 12.6a7 7 0 0 1 6.4-6.1c1.1 1.2 2.2 2 3.3 2s2.2-.8 3.3-2a7 7 0 0 1 6.4 6.1 15.2 15.2 0 0 1 5.2 11.6c0 9.1-6.1 16.3-14.9 16.3S9.1 33.3 9.1 24.2c0-4.7 1.9-8.8 5.2-11.6Zm4.5 19.6 3.1 3h4.2l3.1-3-3.9-2.3h-2.6l-3.9 2.3Zm-2.6-10.9 4 2.2 1.2-3.5-4.1-1-1.1 2.3Zm15.6 0-1.1-2.3-4.1 1 1.2 3.5 4-2.2Z"/></svg>',
+  },
+  {
+    key: "fox",
+    label: "Fox",
+    className: "fox",
+    svg: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M9 8.5 20.2 13c1.2-.4 2.5-.6 3.8-.6s2.6.2 3.8.6L39 8.5l-3 15.3c.2 1 .3 2 .3 3.1 0 7.9-5 13.4-12.3 13.4S11.7 34.8 11.7 26.9c0-1.1.1-2.1.3-3.1L9 8.5Zm8.7 21.8 4.1 4.4h4.4l4.1-4.4L25.8 27h-3.6l-4.5 3.3Zm-.5-9 4.1 2.3.9-3.8-4.2-1.4-.8 2.9Zm13.6 0-.8-2.9-4.2 1.4.9 3.8 4.1-2.3Z"/></svg>',
+  },
+  {
+    key: "wolf",
+    label: "Wolf",
+    className: "wolf",
+    svg: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M7.3 7.8 19.6 15c1.4-.5 2.9-.8 4.4-.8s3 .3 4.4.8L40.7 7.8l-3.9 19.4c-1 8-5.7 13.3-12.8 13.3S12.2 35.2 11.2 27.2L7.3 7.8Zm10.4 22.7 4.2 4.1h4.2l4.2-4.1-4.7-2.2h-3.2l-4.7 2.2Zm-1-9.6 4.5 2.4.8-4.1-4.5-1.5-.8 3.2Zm14.6 0-.8-3.2-4.5 1.5.8 4.1 4.5-2.4Z"/></svg>',
+  },
+  {
+    key: "eagle",
+    label: "Eagle",
+    className: "eagle",
+    svg: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M4.6 15.5c8.5-2.7 14-1.7 16.7 2.8.7-.2 1.6-.3 2.7-.3s2 .1 2.7.3c2.7-4.5 8.2-5.5 16.7-2.8-5.5 3.7-9.1 7-10.7 9.9l3.1 9.2-8.7-3.3L24 40.5l-3.1-9.2-8.7 3.3 3.1-9.2c-1.6-2.9-5.2-6.2-10.7-9.9Zm15.9 8.4 3.5 2.4 3.5-2.4-3.5-2-3.5 2Z"/></svg>',
+  },
+  {
+    key: "tiger",
+    label: "Tiger",
+    className: "tiger",
+    svg: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M13.5 13.6C16 10.8 19.5 9.4 24 9.4s8 1.4 10.5 4.2l6.1-3.1-2.5 11.7c.2 1 .3 2.1.3 3.2 0 8.9-5.8 15.2-14.4 15.2S9.6 34.3 9.6 25.4c0-1.1.1-2.2.3-3.2L7.4 10.5l6.1 3.1Zm2.7 7.5 4.1 2 .9-3.7-4.3-1.1-.7 2.8Zm15.6 0-.7-2.8-4.3 1.1.9 3.7 4.1-2Zm-13.4-7.6 3.4 2.4-.4-4.2-3 1.8Zm11.2 0-3-1.8-.4 4.2 3.4-2.4Zm-11 17.4 3.3 3.6h4.2l3.3-3.6-4.2-2.2h-2.4l-4.2 2.2Z"/></svg>',
+  },
+  {
+    key: "lion",
+    label: "Lion",
+    className: "lion",
+    svg: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 5.7 29.2 10l6.7-.4 2 6.4 5.1 4.4-2.7 6.2.7 6.7-6 3.1-3.4 5.9-6.6-1.3-6.6 1.3-3.4-5.9-6-3.1.7-6.7L7 20.4l5.1-4.4 2-6.4 6.7.4L24 5.7Zm-6.2 24.8 4 4.2h4.4l4-4.2-4.6-2.4h-3.2l-4.6 2.4Zm-1.2-9.9 4.2 2.4 1-3.9-4.4-1.2-.8 2.7Zm14.8 0-.8-2.7-4.4 1.2 1 3.9 4.2-2.4Z"/></svg>',
+  },
+  {
+    key: "shark",
+    label: "Shark",
+    className: "shark",
+    svg: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M4.7 25.8c10.7-9.6 22.2-12.3 34.6-8.1l4-5.8 1 13-1 13-4-5.8C26.9 36.3 15.4 33.6 4.7 24Zm13.8-.4 5.5 3.3 5.5-3.3-5.5-2.5-5.5 2.5Zm15.7-4.2 3.7 1.7.9-2.7-3.8-.7-.8 1.7Z"/></svg>',
+  },
 ];
 
 function hashString(value) {
@@ -304,6 +346,11 @@ function hashString(value) {
 }
 
 function getClanIconTheme(clan = {}) {
+  const iconKey = String(clan.icon_key || clan.iconKey || "").toLowerCase();
+  const exactTheme = CLAN_ICON_THEMES.find((theme) => theme.key === iconKey);
+  if (exactTheme) {
+    return exactTheme;
+  }
   const slug = String(clan.slug || "").toLowerCase();
   if (slug === "btc-bulls") {
     return CLAN_ICON_THEMES[0];
@@ -317,7 +364,69 @@ function getClanIconTheme(clan = {}) {
 
 function clanIconMarkup(clan, className = "clan-avatar") {
   const theme = getClanIconTheme(clan);
-  return `<div class="${className} ${theme.className}"><span>${theme.icon}</span></div>`;
+  return `<div class="${className} ${theme.className}" aria-hidden="true">${theme.svg}</div>`;
+}
+
+function normalizeChannelUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (/^@[\w\d_]+$/i.test(raw)) {
+    return `https://t.me/${raw.replace(/^@/, "")}`;
+  }
+  if (/^t\.me\//i.test(raw)) {
+    return `https://${raw}`;
+  }
+  if (/^https?:\/\//i.test(raw)) {
+    return raw;
+  }
+  return raw;
+}
+
+function formatChannelLabel(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const url = new URL(normalizeChannelUrl(raw));
+    if (/^(www\.)?t\.me$/i.test(url.hostname)) {
+      const name = url.pathname.replace(/^\/+/, "").split("/")[0];
+      return name ? `@${name}` : "Канал";
+    }
+    return url.hostname.replace(/^www\./i, "");
+  } catch {
+    return raw.replace(/^https?:\/\//i, "").replace(/^t\.me\//i, "@");
+  }
+}
+
+function buildClanInviteUrl(clan) {
+  return buildTelegramMiniAppLaunchUrl(`clan_${clan?.id || ""}`);
+}
+
+function getLaunchClanId() {
+  const raw = String(getLaunchRefValue() || "").trim();
+  const match = raw.match(/^clan[_:-](\d+)$/i);
+  return match ? Number(match[1]) : null;
+}
+
+function renderClanIconPicker() {
+  const picker = $("clanIconPicker");
+  if (!picker) {
+    return;
+  }
+  const html = CLAN_ICON_THEMES.map((theme) => `
+    <button
+      class="clan-icon-option ${state.selectedClanIconKey === theme.key ? "active" : ""} ${theme.className}"
+      type="button"
+      data-clan-icon="${theme.key}"
+      aria-label="${escapeHtml(theme.label)}"
+    >
+      ${theme.svg}
+    </button>
+  `).join("");
+  setInnerHtmlIfChanged(picker, html);
 }
 
 function setTeamIconElement(element, icon, alt = "team") {
@@ -2187,6 +2296,7 @@ function renderClans() {
   const [eyebrow, title] = titles[view] || titles.leaderboard;
   if ($("clansEyebrow")) $("clansEyebrow").textContent = eyebrow;
   if ($("clansTitle")) $("clansTitle").textContent = title;
+  renderClanIconPicker();
 
   if (state.userClan) {
     userCard.classList.remove("hidden");
@@ -2221,6 +2331,8 @@ function renderClans() {
 
   if (view === "detail" && selectedClan) {
     const members = (selectedClan.members || []).slice(0, 12);
+    const channelUrl = normalizeChannelUrl(selectedClan.channel_url);
+    const channelLabel = formatChannelLabel(selectedClan.channel_url);
     const memberRows = members.length
       ? members.map((member) => {
         const name = member.username ? `@${member.username}` : member.first_name || `user ${member.telegram_id}`;
@@ -2242,7 +2354,7 @@ function renderClans() {
         ${clanIconMarkup(selectedClan, "clan-detail-avatar")}
         <div>
           <strong>${escapeHtml(selectedClan.name)}</strong>
-          <small>${selectedClan.channel_url ? escapeHtml(selectedClan.channel_url) : `${formatFire(selectedClan.members_count)} участников`}</small>
+          <small>${formatFire(selectedClan.members_count)} участников</small>
         </div>
       </div>
       <div class="clan-stat-grid">
@@ -2254,6 +2366,10 @@ function renderClans() {
         <small>Ещё 16 дней</small>
         <strong>Станьте участником розыгрыша призов</strong>
         <span>Заработайте очки клана USDT-прогнозами и daily-заданиями.</span>
+      </div>
+      <div class="clan-link-actions">
+        ${channelUrl ? `<button class="clan-link-button secondary" data-open-channel="${escapeHtml(channelUrl)}" type="button">${escapeHtml(channelLabel || "Канал клана")}</button>` : ""}
+        <button class="clan-link-button" data-share-clan="${selectedClan.id}" type="button">Позвать в клан</button>
       </div>
       ${selectedClan.user_is_member ? "" : `<button class="trade-confirm clan-join-main" data-join-clan="${selectedClan.id}" type="button">Вступить в клан</button>`}
       <div class="clan-members-list">${memberRows}</div>
@@ -2278,13 +2394,15 @@ function renderClans() {
   setInnerHtmlIfChanged(list, html);
 }
 
-async function joinClanFromButton(button) {
-  if (!button || !state.user?.telegram_id) {
+async function joinClan(payload, button = null, successMessage = "Ты вступил в клан.") {
+  if (!state.user?.telegram_id) {
     return;
   }
-  showButtonPressed(button);
+  if (button) {
+    showButtonPressed(button);
+    button.disabled = true;
+  }
   triggerHaptic("selection");
-  button.disabled = true;
   try {
     const result = await api("/api/clans/join", {
       method: "POST",
@@ -2292,19 +2410,69 @@ async function joinClanFromButton(button) {
         telegram_id: state.user.telegram_id,
         username: state.user.username,
         first_name: state.user.first_name,
-        clan_id: Number(button.dataset.joinClan),
+        ...payload,
       }),
     });
     state.clans = result.clans || [];
     state.userClan = result.user_clan || null;
-    state.selectedClanId = state.userClan?.id || Number(button.dataset.joinClan);
+    state.selectedClanId = state.userClan?.id || Number(payload.clan_id || 0) || null;
     state.clanView = "detail";
     renderClans();
-    showToast("Ты вступил в клан.");
+    showToast(successMessage);
   } catch {
-    button.disabled = false;
+    if (button) {
+      button.disabled = false;
+    }
     showToast("Не получилось вступить в клан.");
   }
+}
+
+async function joinClanFromButton(button) {
+  if (!button) {
+    return;
+  }
+  await joinClan({ clan_id: Number(button.dataset.joinClan) }, button);
+}
+
+async function handleClanLaunchLink() {
+  if (state.handledClanLaunch || !state.user?.telegram_id) {
+    return;
+  }
+  const clanId = getLaunchClanId();
+  if (!clanId) {
+    return;
+  }
+  state.handledClanLaunch = true;
+  $("clansSheet")?.classList.remove("hidden");
+  await joinClan({ clan_id: clanId }, null, "Ты вошёл в клан по ссылке.");
+}
+
+async function shareClan(clan) {
+  if (!clan?.id) {
+    return;
+  }
+  triggerHaptic("selection");
+  const inviteUrl = buildClanInviteUrl(clan);
+  const text = `Вступай в клан ${clan.name} в EasyMarket.`;
+  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
+  if (window.Telegram?.WebApp?.openTelegramLink) {
+    window.Telegram.WebApp.openTelegramLink(shareUrl);
+    return;
+  }
+  try {
+    if (navigator.share) {
+      await navigator.share({
+        title: clan.name,
+        text,
+        url: inviteUrl,
+      });
+      return;
+    }
+  } catch {
+    // Fall through to clipboard.
+  }
+  const copied = await copyToClipboard(inviteUrl);
+  showToast(copied ? "Ссылка на клан скопирована." : "Не получилось скопировать ссылку.");
 }
 
 function formatVolume(value) {
@@ -3373,12 +3541,37 @@ $("clansList")?.addEventListener("click", async (event) => {
 });
 
 $("clanDetailCard")?.addEventListener("click", (event) => {
+  const channelButton = event.target.closest("[data-open-channel]");
+  if (channelButton) {
+    event.preventDefault();
+    triggerHaptic("selection");
+    openTelegramUrl(channelButton.dataset.openChannel);
+    return;
+  }
+  const shareButton = event.target.closest("[data-share-clan]");
+  if (shareButton) {
+    event.preventDefault();
+    const clan = state.clans.find((item) => item.id === Number(shareButton.dataset.shareClan))
+      || state.userClan;
+    void shareClan(clan);
+    return;
+  }
   const button = event.target.closest("[data-join-clan]");
   if (!button) {
     return;
   }
   event.preventDefault();
   void joinClanFromButton(button);
+});
+
+$("clanIconPicker")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-clan-icon]");
+  if (!button) {
+    return;
+  }
+  state.selectedClanIconKey = button.dataset.clanIcon || "bull";
+  triggerHaptic("selection");
+  renderClanIconPicker();
 });
 
 $("clanCreateBtn")?.addEventListener("click", async () => {
@@ -3408,6 +3601,7 @@ $("clanCreateBtn")?.addEventListener("click", async () => {
         first_name: state.user.first_name,
         name,
         channel_url: channelUrl,
+        icon_key: state.selectedClanIconKey,
       }),
     });
     state.clans = result.clans || [];
@@ -4340,6 +4534,7 @@ loadPublicConfig()
       .catch(() => undefined)
       .then(() => loadWorldCupMarkets().catch(() => undefined))
       .then(refreshAll)
+      .then(() => handleClanLaunchLink().catch(() => showToast("Клан по ссылке не найден.")))
       .then(() => {
         window.setTimeout(showReferralNudge, 150_000);
       });
