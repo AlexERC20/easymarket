@@ -2140,6 +2140,38 @@ code {
   font-weight: 950;
 }
 
+.clan-avatar.channel-photo,
+.user-clan-icon.channel-photo,
+.clan-detail-avatar.channel-photo {
+  padding: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.clan-avatar.channel-photo img,
+.user-clan-icon.channel-photo img,
+.clan-detail-avatar.channel-photo img {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.clan-avatar.channel-photo .clan-avatar-fallback,
+.user-clan-icon.channel-photo .clan-avatar-fallback,
+.clan-detail-avatar.channel-photo .clan-avatar-fallback {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .clan-avatar svg,
 .user-clan-icon svg,
 .clan-detail-avatar svg,

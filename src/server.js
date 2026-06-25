@@ -15,9 +15,11 @@ import {
   completeVerifiedTask,
   createClan,
   createBtc5mMarket,
+  deleteClan,
   ensureActiveMarket,
   getActiveMarket,
   getBtcMarkets,
+  getBridgeClans,
   getClans,
   getFireLedgerEvents,
   getLeaderboard,
@@ -121,6 +123,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "clan_name_required",
     "invalid_clan_channel",
     "clan_exists",
+    "clan_default_locked",
   ]);
 
   if (message === "DATABASE_URL is not configured.") {
@@ -1031,6 +1034,29 @@ app.post("/api/bridge/users/reset-market-state", requireBridgeSecret, async (req
       amount: req.body?.amount ?? req.body?.balance,
       reason: req.body?.reason || "bug_bounty_reset",
       source: "bridge_user_reset",
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/clans", requireBridgeSecret, async (_req, res) => {
+  try {
+    const result = await getBridgeClans();
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/clans/:clanId/delete", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await deleteClan({
+      clan_id: req.params.clanId,
     });
     res.status(200).json({
       ok: true,

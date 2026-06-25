@@ -812,6 +812,24 @@ function normalizeClanIconKey(value) {
   return ALLOWED_CLAN_ICON_KEYS.has(iconKey) ? iconKey : "bull";
 }
 
+function getTelegramChannelUsername(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return null;
+  }
+  if (/^@[\w\d_]{4,}$/i.test(raw)) {
+    return raw.replace(/^@/, "");
+  }
+  const withoutProtocol = raw.replace(/^https?:\/\//i, "");
+  const match = withoutProtocol.match(/^(?:www\.)?t\.me\/([A-Za-z0-9_]{4,})(?:[/?#].*)?$/i);
+  return match?.[1] || null;
+}
+
+function getClanChannelAvatarUrl(channelUrl) {
+  const username = getTelegramChannelUsername(channelUrl);
+  return username ? `https://t.me/i/userpic/320/${encodeURIComponent(username)}.jpg` : null;
+}
+
 async function ensureDefaultClans(client) {
   await client.query(
     `
@@ -2128,6 +2146,7 @@ function mapClan(row) {
     name: row.name,
     slug: row.slug,
     channel_url: row.channel_url,
+    channel_avatar_url: getClanChannelAvatarUrl(row.channel_url),
     icon_key: normalizeClanIconKey(row.icon_key),
     kind: row.kind,
     members_count: Number(row.members_count || 0),
@@ -2245,6 +2264,10 @@ export async function getClans(input = {}) {
   const user = telegramId ? await getUserByTelegramId(telegramId) : null;
 
   return withTransaction((client) => getClansWithClient(client, user?.id || 0));
+}
+
+export async function getBridgeClans() {
+  return withTransaction((client) => getClansWithClient(client, 0));
 }
 
 export async function joinClan(input) {
@@ -2377,6 +2400,39 @@ export async function createClan(input) {
       ...clans,
       balance: balance.total,
       created_clan: createdClan,
+    };
+  });
+}
+
+export async function deleteClan(input) {
+  const clanId = Number(input.clan_id ?? input.clanId);
+  if (!Number.isSafeInteger(clanId) || clanId <= 0) {
+    throw new Error("clan_not_found");
+  }
+
+  return withTransaction(async (client) => {
+    await ensureDefaultClans(client);
+    const clanResult = await client.query("SELECT * FROM clans WHERE id = $1", [clanId]);
+    const clan = clanResult.rows[0];
+    if (!clan) {
+      throw new Error("clan_not_found");
+    }
+    if (String(clan.kind || "") === "default") {
+      throw new Error("clan_default_locked");
+    }
+
+    await client.query("DELETE FROM clans WHERE id = $1", [clanId]);
+    const clans = await getClansWithClient(client, 0);
+    return {
+      ...clans,
+      deleted_clan: mapClan({
+        ...clan,
+        members_count: 0,
+        score: 0,
+        user_is_member: 0,
+        user_contribution_score: 0,
+        rank: 0,
+      }),
     };
   });
 }

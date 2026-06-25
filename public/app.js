@@ -364,6 +364,15 @@ function getClanIconTheme(clan = {}) {
 
 function clanIconMarkup(clan, className = "clan-avatar") {
   const theme = getClanIconTheme(clan);
+  const avatarUrl = String(clan?.channel_avatar_url || "").trim();
+  if (avatarUrl) {
+    return `
+      <div class="${className} channel-photo ${theme.className}" aria-hidden="true">
+        <img src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" decoding="async" onerror="this.style.display='none';this.nextElementSibling.style.opacity='1';" />
+        <span class="clan-avatar-fallback">${theme.svg}</span>
+      </div>
+    `;
+  }
   return `<div class="${className} ${theme.className}" aria-hidden="true">${theme.svg}</div>`;
 }
 
