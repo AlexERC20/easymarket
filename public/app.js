@@ -82,6 +82,7 @@ const state = {
   clans: [],
   userClan: null,
   clansLoading: false,
+  clanCreating: false,
   selectedClanId: null,
   clanView: "leaderboard",
   marketPanel: "chat",
@@ -283,6 +284,40 @@ function teamIconMarkup(icon, alt = "team") {
     return `<img src="${escapeHtml(icon)}" alt="${escapeHtml(alt)}" loading="eager" decoding="async" />`;
   }
   return `<span>${escapeHtml(icon || "🏆")}</span>`;
+}
+
+const CLAN_ICON_THEMES = [
+  { icon: "🐂", className: "bull" },
+  { icon: "🐻", className: "bear" },
+  { icon: "🦊", className: "fox" },
+  { icon: "🐺", className: "wolf" },
+  { icon: "🦅", className: "eagle" },
+  { icon: "🐯", className: "tiger" },
+  { icon: "🐼", className: "panda" },
+  { icon: "🦁", className: "lion" },
+];
+
+function hashString(value) {
+  return String(value || "").split("").reduce((hash, char) => (
+    ((hash << 5) - hash + char.charCodeAt(0)) | 0
+  ), 0);
+}
+
+function getClanIconTheme(clan = {}) {
+  const slug = String(clan.slug || "").toLowerCase();
+  if (slug === "btc-bulls") {
+    return CLAN_ICON_THEMES[0];
+  }
+  if (slug === "btc-bears") {
+    return CLAN_ICON_THEMES[1];
+  }
+  const index = Math.abs(hashString(`${slug}:${clan.name || ""}`)) % (CLAN_ICON_THEMES.length - 2);
+  return CLAN_ICON_THEMES[index + 2];
+}
+
+function clanIconMarkup(clan, className = "clan-avatar") {
+  const theme = getClanIconTheme(clan);
+  return `<div class="${className} ${theme.className}"><span>${theme.icon}</span></div>`;
 }
 
 function setTeamIconElement(element, icon, alt = "team") {
@@ -2156,7 +2191,7 @@ function renderClans() {
   if (state.userClan) {
     userCard.classList.remove("hidden");
     userCard.innerHTML = `
-      <div class="user-clan-icon">${state.userClan.slug === "btc-bears" ? "▼" : "▲"}</div>
+      ${clanIconMarkup(state.userClan, "user-clan-icon")}
       <div>
         <strong>Твой клан: ${escapeHtml(state.userClan.name)}</strong>
         <small>Вклад: ${formatFire(state.userClan.user_contribution_score)} очков · место #${state.userClan.rank || "-"}</small>
@@ -2204,7 +2239,7 @@ function renderClans() {
 
     detailCard.innerHTML = `
       <div class="clan-detail-hero">
-        <div class="clan-detail-avatar">${selectedClan.slug === "btc-bears" ? "▼" : "▲"}</div>
+        ${clanIconMarkup(selectedClan, "clan-detail-avatar")}
         <div>
           <strong>${escapeHtml(selectedClan.name)}</strong>
           <small>${selectedClan.channel_url ? escapeHtml(selectedClan.channel_url) : `${formatFire(selectedClan.members_count)} участников`}</small>
@@ -2230,7 +2265,7 @@ function renderClans() {
   const html = state.clans.map((clan) => `
     <div class="clan-row ${clan.user_is_member ? "active" : ""} ${clan.id === state.selectedClanId ? "selected" : ""}" data-open-clan="${clan.id}">
       <span class="clan-rank">${clan.rank}</span>
-      <div class="clan-avatar">${clan.slug === "btc-bears" ? "▼" : "▲"}</div>
+      ${clanIconMarkup(clan)}
       <div class="clan-info">
         <strong>${escapeHtml(clan.name)}</strong>
         <small>${formatFire(clan.members_count)} участников · ${formatFire(clan.score)} очков</small>
@@ -2686,11 +2721,12 @@ function renderTopupSheet() {
   renderWalletHistory();
 }
 
-function openTopupSheet(amount, reason = "", mode = "topup") {
-  state.topup.amount = hasTopupAmountValue(amount) ? normalizeTopupAmount(amount, state.currency) : "";
+function openTopupSheet(amount, reason = "", mode = "topup", currencyOverride = null) {
+  const targetCurrency = normalizeCurrency(currencyOverride || (mode === "withdraw" ? "USDT" : state.currency));
+  state.topup.amount = hasTopupAmountValue(amount) ? normalizeTopupAmount(amount, targetCurrency) : "";
   state.topup.reason = reason;
   state.topup.mode = mode === "withdraw" ? "withdraw" : "topup";
-  state.topup.currency = state.topup.mode === "withdraw" ? "USDT" : state.currency;
+  state.topup.currency = targetCurrency;
   state.topup.historyOpen = false;
   renderTopupSheet();
   $("topupSheet")?.classList.remove("hidden");
@@ -3347,11 +3383,21 @@ $("clanDetailCard")?.addEventListener("click", (event) => {
 
 $("clanCreateBtn")?.addEventListener("click", async () => {
   const button = $("clanCreateBtn");
+  if (state.clanCreating) {
+    return;
+  }
   showButtonPressed(button);
   triggerHaptic("selection");
   if (!state.user?.telegram_id) {
     showToast("Открой Mini App из Telegram.");
     return;
+  }
+  const name = $("clanNameInput")?.value;
+  const channelUrl = $("clanChannelInput")?.value;
+  state.clanCreating = true;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Создаю...";
   }
   try {
     const result = await api("/api/clans/create", {
@@ -3360,8 +3406,8 @@ $("clanCreateBtn")?.addEventListener("click", async () => {
         telegram_id: state.user.telegram_id,
         username: state.user.username,
         first_name: state.user.first_name,
-        name: $("clanNameInput")?.value,
-        channel_url: $("clanChannelInput")?.value,
+        name,
+        channel_url: channelUrl,
       }),
     });
     state.clans = result.clans || [];
@@ -3374,12 +3420,22 @@ $("clanCreateBtn")?.addEventListener("click", async () => {
     showToast("Клан создан.");
   } catch (error) {
     const messages = {
-      insufficient_fire: "Не хватает звёзд на создание клана.",
+      insufficient_fire: "Нужно 10 000 звёзд на создание клана.",
       clan_name_required: "Название клана слишком короткое.",
       clan_exists: "Такой клан уже есть.",
       invalid_clan_channel: "Ссылка на канал выглядит неправильно.",
     };
+    if (error.message === "insufficient_fire") {
+      const missing = Math.max(0, 10000 - Number(state.balance || 0));
+      openTopupSheet(missing || 10000, "Для создания клана нужно 10 000 звёзд.", "topup", "STAR");
+    }
     showToast(messages[error.message] || "Клан не создан.");
+  } finally {
+    state.clanCreating = false;
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Создать клан";
+    }
   }
 });
 

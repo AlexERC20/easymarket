@@ -2133,9 +2133,67 @@ code {
   border-radius: 14px;
   display: grid;
   place-items: center;
-  background: linear-gradient(145deg, #1d2634, #0f141d);
-  color: #58d68d;
+  background: linear-gradient(145deg, #253246, #101722);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 10px 22px rgba(0, 0, 0, 0.2);
+  color: #fff;
   font-weight: 950;
+}
+
+.clan-avatar span,
+.user-clan-icon span,
+.clan-detail-avatar span {
+  display: block;
+  transform: translateY(1px);
+  filter: drop-shadow(0 4px 7px rgba(0, 0, 0, 0.28));
+}
+
+.clan-avatar.bull,
+.user-clan-icon.bull,
+.clan-detail-avatar.bull {
+  background: linear-gradient(145deg, #33b96f, #125b39);
+}
+
+.clan-avatar.bear,
+.user-clan-icon.bear,
+.clan-detail-avatar.bear {
+  background: linear-gradient(145deg, #ef5757, #61212a);
+}
+
+.clan-avatar.fox,
+.user-clan-icon.fox,
+.clan-detail-avatar.fox {
+  background: linear-gradient(145deg, #f0a44c, #7a3f19);
+}
+
+.clan-avatar.wolf,
+.user-clan-icon.wolf,
+.clan-detail-avatar.wolf {
+  background: linear-gradient(145deg, #7d96b7, #2e3f59);
+}
+
+.clan-avatar.eagle,
+.user-clan-icon.eagle,
+.clan-detail-avatar.eagle {
+  background: linear-gradient(145deg, #5ea1ff, #234d92);
+}
+
+.clan-avatar.tiger,
+.user-clan-icon.tiger,
+.clan-detail-avatar.tiger {
+  background: linear-gradient(145deg, #f7c24d, #95540c);
+}
+
+.clan-avatar.panda,
+.user-clan-icon.panda,
+.clan-detail-avatar.panda {
+  background: linear-gradient(145deg, #f5f7fb, #5f6b7d);
+}
+
+.clan-avatar.lion,
+.user-clan-icon.lion,
+.clan-detail-avatar.lion {
+  background: linear-gradient(145deg, #d9a43a, #71501d);
 }
 
 .clan-info strong,
@@ -2229,12 +2287,13 @@ code {
 .user-clan-icon {
   width: 42px;
   height: 42px;
-  border-radius: 50%;
+  border-radius: 14px;
   display: grid;
   place-items: center;
-  background: #3f8cf6;
   color: #fff;
   font-weight: 950;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13), 0 10px 22px rgba(0, 0, 0, 0.2);
 }
 
 .clan-detail-card {
@@ -2256,11 +2315,13 @@ code {
 .clan-detail-avatar {
   width: 72px;
   height: 72px;
-  border-radius: 50%;
+  border-radius: 22px;
   display: grid;
   place-items: center;
   background: rgba(0, 0, 0, 0.36);
-  font-size: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 14px 26px rgba(0, 0, 0, 0.24);
+  font-size: 30px;
   font-weight: 950;
 }
 

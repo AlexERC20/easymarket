@@ -329,6 +329,15 @@ export async function runMigrations() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    ALTER TABLE clans
+      ADD COLUMN IF NOT EXISTS owner_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS channel_url TEXT,
+      ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'custom',
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_clans_slug_unique
+      ON clans(slug);
+
     CREATE TABLE IF NOT EXISTS clan_members (
       clan_id BIGINT NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -337,6 +346,11 @@ export async function runMigrations() {
       joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (user_id)
     );
+
+    ALTER TABLE clan_members
+      ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'member',
+      ADD COLUMN IF NOT EXISTS contribution_score NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS joined_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
     CREATE INDEX IF NOT EXISTS idx_clan_members_clan
       ON clan_members(clan_id);
@@ -351,6 +365,9 @@ export async function runMigrations() {
       currency TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    ALTER TABLE clan_score_events
+      ADD COLUMN IF NOT EXISTS currency TEXT;
 
     CREATE INDEX IF NOT EXISTS idx_clan_score_events_clan_created
       ON clan_score_events(clan_id, created_at DESC);
