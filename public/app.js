@@ -1,11 +1,11 @@
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
 const SELL_IMPACT_MULTIPLIER = 1.1;
-const MIN_TAIL_DEPTH_FACTOR = 0.055;
+const MIN_TAIL_DEPTH_FACTOR = 0.012;
 const STAR_AMOUNTS = [50, 100, 500, 1000];
 const USDT_AMOUNTS = [5, 10, 25, 100];
 const MIN_OUTCOME_PRICE = 0.001;
-const BTC_MIN_OUTCOME_PRICE = 0.04;
+const BTC_MIN_OUTCOME_PRICE = 0.001;
 const CHART_WINDOW_MS = 10_000;
 const CHART_RENDER_INTERVAL_MS = 100;
 const ACTIVE_MARKET_POLL_MS = 1_500;
@@ -80,6 +80,12 @@ const state = {
     items: [],
   },
   leaderboardCurrency: "STAR",
+  clans: [],
+  userClan: null,
+  clansLoading: false,
+  marketPanel: "chat",
+  orderbookSide: "YES",
+  referralNudgeShown: false,
   taskTab: "tasks",
   expanded: {
     positions: false,
@@ -1338,6 +1344,22 @@ async function loadLeaderboard(currency = state.leaderboardCurrency, options = {
   }
 }
 
+async function loadClans() {
+  if (!state.user?.telegram_id) {
+    return;
+  }
+  state.clansLoading = true;
+  renderClans();
+  try {
+    const data = await api(`/api/clans?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
+    state.clans = data.clans || [];
+    state.userClan = data.user_clan || null;
+  } finally {
+    state.clansLoading = false;
+    renderClans();
+  }
+}
+
 function formatRelativeTime(value) {
   const ms = Date.now() - new Date(value).getTime();
   if (!Number.isFinite(ms) || ms < 60_000) return "now";
@@ -1391,20 +1413,30 @@ function renderComments() {
   }
   if (!market?.id) {
     setInnerHtmlIfChanged(container, '<p class="muted">Сначала выбери рынок.</p>');
+    renderOrderbookPanel();
     return;
   }
 
   if (state.commentsMarketId !== market.id || !state.comments.length) {
-    setInnerHtmlIfChanged(container, '<p class="muted">Комментариев пока нет.</p>');
+    setInnerHtmlIfChanged(container, "");
+    renderOrderbookPanel();
     return;
   }
 
   const html = state.comments.slice(0, 8).map((comment) => {
     const name = comment.username || comment.first_name || `user ${comment.telegram_id}`;
     const latestBet = comment.latest_bet;
+    const summary = comment.bet_summary || {};
     const isFresh = state.freshCommentIds.has(`${market.id}:${comment.id}`);
-    const betBadge = latestBet
-      ? `<span class="chat-bet side-${latestBet.side}">${actionLabel(latestBet.action)} ${marketSideLabel(market, latestBet.side)} ${formatCurrencyAmount(latestBet.amount, latestBet.currency)}</span>`
+    const summaryParts = [];
+    if (Number(summary.yes_amount || 0) > 0) {
+      summaryParts.push(`${marketSideLabel(market, "YES")} ${formatCurrencyAmount(summary.yes_amount, summary.currency)}`);
+    }
+    if (Number(summary.no_amount || 0) > 0) {
+      summaryParts.push(`${marketSideLabel(market, "NO")} ${formatCurrencyAmount(summary.no_amount, summary.currency)}`);
+    }
+    const betBadge = summaryParts.length
+      ? `<span class="chat-bet side-${latestBet?.side || "YES"}">${summaryParts.join(" · ")}</span>`
       : '<span class="chat-bet muted">без ставки</span>';
     return `
       <div class="chat-row ${isFresh ? "fresh" : ""}">
@@ -1418,6 +1450,75 @@ function renderComments() {
     `;
   }).join("");
   setInnerHtmlIfChanged(container, html);
+  renderOrderbookPanel();
+}
+
+function getOutcomePrice(market, side) {
+  const minPrice = getMarketMinOutcomePrice(market);
+  const raw = side === "YES" ? Number(market?.yes_price || 0.5) : Number(market?.no_price || 0.5);
+  return Math.min(1 - minPrice, Math.max(minPrice, raw));
+}
+
+function buildSyntheticOrderbook(market, side) {
+  const price = getOutcomePrice(market, side);
+  const volume = side === "YES" ? Number(market?.yes_volume || 0) : Number(market?.no_volume || 0);
+  const liquidity = Math.max(50, Number(market?.liquidity || 10000));
+  const depthBase = Math.max(12, Math.sqrt(liquidity + volume) * 0.7);
+  const minPrice = getMarketMinOutcomePrice(market);
+
+  return Array.from({ length: 5 }, (_, index) => {
+    const distance = index + 1;
+    const direction = index < 2 ? -1 : 1;
+    const step = (0.006 + Math.abs(price - 0.5) * 0.018) * distance;
+    const levelPrice = Math.min(1 - minPrice, Math.max(minPrice, price + direction * step));
+    const size = Math.max(1, Math.round(depthBase / Math.pow(distance, 0.62)));
+    return {
+      price: levelPrice,
+      size,
+      type: direction < 0 ? "bid" : "ask",
+    };
+  }).sort((a, b) => b.price - a.price);
+}
+
+function renderOrderbookPanel() {
+  const panel = $("marketOrderbookPanel");
+  const chatList = $("marketChatList");
+  const form = $("marketChatForm");
+  const list = $("orderbookList");
+  const market = getDisplayMarket();
+  if (!panel || !chatList || !form || !list) {
+    return;
+  }
+
+  const showBook = state.marketPanel === "book";
+  panel.classList.toggle("hidden", !showBook);
+  chatList.classList.toggle("hidden", showBook);
+  form.classList.toggle("hidden", showBook);
+  $("marketPanelChatBtn")?.classList.toggle("active", !showBook);
+  $("marketPanelBookBtn")?.classList.toggle("active", showBook);
+  $("orderbookYesBtn")?.classList.toggle("active", state.orderbookSide === "YES");
+  $("orderbookNoBtn")?.classList.toggle("active", state.orderbookSide === "NO");
+
+  if (!showBook || !market) {
+    return;
+  }
+
+  const side = state.orderbookSide;
+  const rows = buildSyntheticOrderbook(market, side);
+  const html = `
+    <div class="orderbook-head">
+      <span>${marketSideLabel(market, side)} book</span>
+      <b>${formatCents(getOutcomePrice(market, side))}</b>
+    </div>
+    ${rows.map((row) => `
+      <div class="orderbook-row ${row.type}">
+        <span>${row.type === "bid" ? "Bid" : "Ask"}</span>
+        <b>${formatCents(row.price)}</b>
+        <small>${row.size.toLocaleString("ru-RU")}</small>
+      </div>
+    `).join("")}
+  `;
+  setInnerHtmlIfChanged(list, html);
 }
 
 function mergeWorldCupChartPoint(market) {
@@ -1641,6 +1742,7 @@ function renderMarket() {
   document.querySelectorAll(".outcome-button, .amount-button").forEach((button) => {
     button.disabled = !hasMarket || !state.user || !canBuyMarket;
   });
+  renderOrderbookPanel();
 }
 
 function updateTimer() {
@@ -2003,6 +2105,50 @@ function renderLeaderboard() {
     ? '<div class="leaderboard-refresh-pill">Обновляю...</div>'
     : "";
   container.innerHTML = `${loadingPill}${rows}`;
+}
+
+function renderClans() {
+  const list = $("clansList");
+  const userCard = $("userClanCard");
+  if (!list || !userCard) {
+    return;
+  }
+
+  if (state.userClan) {
+    userCard.classList.remove("hidden");
+    userCard.innerHTML = `
+      <strong>Твой клан: ${escapeHtml(state.userClan.name)}</strong>
+      <small>Вклад: ${formatFire(state.userClan.user_contribution_score)} очков · место #${state.userClan.rank || "-"}</small>
+    `;
+  } else {
+    userCard.classList.add("hidden");
+    userCard.innerHTML = "";
+  }
+
+  if (state.clansLoading && !state.clans.length) {
+    setInnerHtmlIfChanged(list, '<p class="muted">Загружаю кланы...</p>');
+    return;
+  }
+
+  if (!state.clans.length) {
+    setInnerHtmlIfChanged(list, '<p class="muted">Кланы пока не созданы.</p>');
+    return;
+  }
+
+  const html = state.clans.map((clan) => `
+    <div class="clan-row ${clan.user_is_member ? "active" : ""}">
+      <span class="clan-rank">${clan.rank}</span>
+      <div class="clan-avatar">${clan.slug === "btc-bears" ? "▼" : "▲"}</div>
+      <div class="clan-info">
+        <strong>${escapeHtml(clan.name)}</strong>
+        <small>${formatFire(clan.members_count)} участников · ${formatFire(clan.score)} очков</small>
+      </div>
+      <button class="task-button" data-join-clan="${clan.id}" type="button" ${clan.user_is_member ? "disabled" : ""}>
+        ${clan.user_is_member ? "Твой" : "Вступить"}
+      </button>
+    </div>
+  `).join("");
+  setInnerHtmlIfChanged(list, html);
 }
 
 function formatVolume(value) {
@@ -2857,6 +3003,12 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
     if (Number(result.daily_bet_bonus?.awarded || 0) > 0) {
       showToast(`+${formatFire(result.daily_bet_bonus.awarded)} за первую ставку дня.`);
     }
+    if (Array.isArray(result.prediction_bonuses)) {
+      const awarded = result.prediction_bonuses.reduce((sum, bonus) => sum + Number(bonus.awarded || 0), 0);
+      if (awarded > 0) {
+        showToast(`+${formatFire(awarded)} за дейлики прогнозов.`);
+      }
+    }
     renderMarket();
     renderMe();
     renderActivity();
@@ -3017,6 +3169,78 @@ $("leaderboardCloseBtn")?.addEventListener("click", () => {
 $("leaderboardSheet")?.addEventListener("click", (event) => {
   if (event.target === $("leaderboardSheet")) {
     setLeaderboardSheetOpen(false);
+  }
+});
+
+$("clansBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  setClansSheetOpen(true);
+});
+
+$("clansCloseBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  setClansSheetOpen(false);
+});
+
+$("clansSheet")?.addEventListener("click", (event) => {
+  if (event.target === $("clansSheet")) {
+    setClansSheetOpen(false);
+  }
+});
+
+$("clansList")?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-join-clan]");
+  if (!button || !state.user?.telegram_id) {
+    return;
+  }
+  showButtonPressed(button);
+  triggerHaptic("selection");
+  try {
+    const result = await api("/api/clans/join", {
+      method: "POST",
+      body: {
+        telegram_id: state.user.telegram_id,
+        username: state.user.username,
+        first_name: state.user.first_name,
+        clan_id: Number(button.dataset.joinClan),
+      },
+    });
+    state.clans = result.clans || [];
+    state.userClan = result.user_clan || null;
+    renderClans();
+    showToast("Ты вступил в клан.");
+  } catch {
+    showToast("Не получилось вступить в клан.");
+  }
+});
+
+$("clanCreateBtn")?.addEventListener("click", async () => {
+  const button = $("clanCreateBtn");
+  showButtonPressed(button);
+  triggerHaptic("selection");
+  if (!state.user?.telegram_id) {
+    showToast("Открой Mini App из Telegram.");
+    return;
+  }
+  try {
+    const result = await api("/api/clans/create", {
+      method: "POST",
+      body: {
+        telegram_id: state.user.telegram_id,
+        username: state.user.username,
+        first_name: state.user.first_name,
+        name: $("clanNameInput")?.value,
+        channel_url: $("clanChannelInput")?.value,
+      },
+    });
+    state.clans = result.clans || [];
+    state.userClan = result.user_clan || null;
+    applyCurrencyBalance("STAR", result.balance ?? state.balance);
+    renderClans();
+    renderMe();
+    showToast("Клан создан.");
+  } catch (error) {
+    showToast(error.message === "insufficient_fire" ? "Не хватает звёзд на создание клана." : "Клан не создан.");
   }
 });
 
@@ -3468,6 +3692,27 @@ function setLeaderboardSheetOpen(open) {
   sheet.classList.toggle("hidden", !open);
 }
 
+function setClansSheetOpen(open) {
+  const sheet = $("clansSheet");
+  if (!sheet) return;
+  if (open) {
+    void loadClans().catch(() => showToast("Кланы пока не загрузились."));
+  }
+  sheet.classList.toggle("hidden", !open);
+}
+
+function showReferralNudge() {
+  if (state.referralNudgeShown || !state.user?.telegram_id) {
+    return;
+  }
+  state.referralNudgeShown = true;
+  $("referralNudge")?.classList.remove("hidden");
+}
+
+function hideReferralNudge() {
+  $("referralNudge")?.classList.add("hidden");
+}
+
 $("tasksBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   renderTaskRewards();
@@ -3521,6 +3766,15 @@ $("taskShareBtn").addEventListener("click", () => {
   void shareInvite({ awardShareTask: true });
 });
 
+$("referralNudgeShareBtn")?.addEventListener("click", () => {
+  hideReferralNudge();
+  void shareInvite({ awardShareTask: true });
+});
+
+$("referralNudgeCloseBtn")?.addEventListener("click", () => {
+  hideReferralNudge();
+});
+
 $("taskDailyPresenceBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   void claimDailyPresenceTask();
@@ -3535,6 +3789,52 @@ $("marketChatForm")?.addEventListener("submit", (event) => {
   event.preventDefault();
   void submitMarketComment();
 });
+
+$("marketPanelChatBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  state.marketPanel = "chat";
+  renderOrderbookPanel();
+});
+
+$("marketPanelBookBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  state.marketPanel = "book";
+  renderOrderbookPanel();
+});
+
+$("orderbookYesBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  state.orderbookSide = "YES";
+  renderOrderbookPanel();
+});
+
+$("orderbookNoBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  state.orderbookSide = "NO";
+  renderOrderbookPanel();
+});
+
+let chatPanelTouchStartX = null;
+let chatPanelTouchStartY = null;
+document.querySelector(".market-chat-card")?.addEventListener("touchstart", (event) => {
+  const touch = event.changedTouches?.[0];
+  if (!touch) return;
+  chatPanelTouchStartX = touch.clientX;
+  chatPanelTouchStartY = touch.clientY;
+}, { passive: true });
+
+document.querySelector(".market-chat-card")?.addEventListener("touchend", (event) => {
+  const touch = event.changedTouches?.[0];
+  if (!touch || chatPanelTouchStartX === null || chatPanelTouchStartY === null) return;
+  const dx = touch.clientX - chatPanelTouchStartX;
+  const dy = touch.clientY - chatPanelTouchStartY;
+  chatPanelTouchStartX = null;
+  chatPanelTouchStartY = null;
+  if (Math.abs(dx) < 42 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+  state.marketPanel = dx < 0 ? "book" : "chat";
+  triggerHaptic("selection");
+  renderOrderbookPanel();
+}, { passive: true });
 
 $("btcMarketsBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
@@ -3797,7 +4097,10 @@ loadPublicConfig()
     return loadBtcMarkets()
       .catch(() => undefined)
       .then(() => loadWorldCupMarkets().catch(() => undefined))
-      .then(refreshAll);
+      .then(refreshAll)
+      .then(() => {
+        window.setTimeout(showReferralNudge, 150_000);
+      });
   })
   .catch((error) => {
     setConnection("Ошибка входа", "error");

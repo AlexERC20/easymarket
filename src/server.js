@@ -13,10 +13,12 @@ import {
   claimDailyTask,
   claimShareTask,
   completeVerifiedTask,
+  createClan,
   createBtc5mMarket,
   ensureActiveMarket,
   getActiveMarket,
   getBtcMarkets,
+  getClans,
   getFireLedgerEvents,
   getLeaderboard,
   getMarketActivity,
@@ -28,6 +30,7 @@ import {
   getUserSnapshot,
   getUsdtLedgerEvents,
   getWorldCupMarkets,
+  joinClan,
   resetUserMarketStateByUsername,
   resolveExpiredMarkets,
   sellOutcome,
@@ -114,6 +117,9 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "sell_failed",
     "sell_frozen",
     "sell_min_hold",
+    "clan_not_found",
+    "clan_name_required",
+    "invalid_clan_channel",
   ]);
 
   if (message === "DATABASE_URL is not configured.") {
@@ -616,6 +622,46 @@ app.get("/api/btc/markets", async (_req, res) => {
       ok: true,
       markets,
     });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/clans", async (req, res) => {
+  try {
+    const result = await getClans({
+      telegram_id: req.query.telegram_id,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/clans/join", async (req, res) => {
+  try {
+    const result = await joinClan({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      clan_id: req.body?.clan_id,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/clans/create", async (req, res) => {
+  try {
+    const result = await createClan({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      name: req.body?.name,
+      channel_url: req.body?.channel_url,
+    });
+    res.status(200).json(result);
   } catch (error) {
     sendApiError(res, error);
   }

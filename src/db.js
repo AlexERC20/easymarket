@@ -318,6 +318,47 @@ export async function runMigrations() {
       UNIQUE(user_id, task_key, day_key)
     );
 
+    CREATE TABLE IF NOT EXISTS clans (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      slug TEXT NOT NULL UNIQUE,
+      owner_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      channel_url TEXT,
+      kind TEXT NOT NULL DEFAULT 'custom',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS clan_members (
+      clan_id BIGINT NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL DEFAULT 'member',
+      contribution_score NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_clan_members_clan
+      ON clan_members(clan_id);
+
+    CREATE TABLE IF NOT EXISTS clan_score_events (
+      id BIGSERIAL PRIMARY KEY,
+      clan_id BIGINT NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      market_id BIGINT REFERENCES markets(id) ON DELETE SET NULL,
+      points NUMERIC(20, 8) NOT NULL,
+      reason TEXT NOT NULL,
+      currency TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_clan_score_events_clan_created
+      ON clan_score_events(clan_id, created_at DESC);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_clan_score_events_once_per_market_reason
+      ON clan_score_events(user_id, market_id, reason)
+      WHERE market_id IS NOT NULL;
+
     CREATE TABLE IF NOT EXISTS positions (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

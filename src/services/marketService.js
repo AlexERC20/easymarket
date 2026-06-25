@@ -7,14 +7,14 @@ const WORLD_CUP_EVENT_SLUG = "world-cup-winner";
 const WORLD_CUP_SYMBOL_PREFIX = "WCUP:";
 const MIN_PRICE = 0.001;
 const MAX_PRICE = 0.999;
-const BTC_MIN_PRICE = 0.04;
+const BTC_MIN_PRICE = 0.001;
 const DEFAULT_FEE_BPS = 200;
 const DEFAULT_PROFIT_FEE_BPS = 500;
 const DEFAULT_MARKET_MAKER_SPREAD_BPS = 300;
 const BUY_IMPACT_MULTIPLIER = 0.85;
 const SELL_IMPACT_MULTIPLIER = 1.1;
 const MAX_SINGLE_TRADE_SHIFT = 0.42;
-const MIN_TAIL_DEPTH_FACTOR = 0.055;
+const MIN_TAIL_DEPTH_FACTOR = 0.012;
 const REFERRAL_SIGNUP_BONUS = 100;
 const CURRENCIES = new Set(["STAR", "USDT"]);
 
@@ -84,7 +84,7 @@ function mapMarket(row) {
   const btcDefinition = getBtcMarketDef(row.symbol);
   const minPrice = btcDefinition ? BTC_MIN_PRICE : MIN_PRICE;
   const yesPrice = roundOutcomePrice(toNumber(row.yes_price), minPrice);
-  const noPrice = roundOutcomePrice(1 - yesPrice, minPrice);
+  const noPrice = roundOutcomePrice(toNumber(row.no_price, 1 - yesPrice), minPrice);
 
   return {
     id: Number(row.id),
@@ -196,6 +196,8 @@ function mapMarketComment(row) {
   const latestBetAmount = row.latest_bet_amount === null || row.latest_bet_amount === undefined
     ? null
     : toNumber(row.latest_bet_amount);
+  const yesBetAmount = toNumber(row.yes_bet_amount);
+  const noBetAmount = toNumber(row.no_bet_amount);
   return {
     id: Number(row.id),
     market_id: Number(row.market_id),
@@ -215,6 +217,12 @@ function mapMarketComment(row) {
         currency: normalizeCurrency(row.latest_bet_currency),
         created_at: row.latest_bet_created_at,
       },
+    bet_summary: {
+      yes_amount: yesBetAmount,
+      no_amount: noBetAmount,
+      currency: normalizeCurrency(row.bet_summary_currency || row.latest_bet_currency),
+      total_amount: Math.round((yesBetAmount + noBetAmount) * 100) / 100,
+    },
   };
 }
 
@@ -432,16 +440,15 @@ function roundOutcomePrice(value, minPrice = MIN_PRICE) {
   return Math.round(clamp(Number(value || 0), minPrice, 1 - minPrice) * 100_000_000) / 100_000_000;
 }
 
-function getOutcomePriceFromYes(yesPrice, side, minPrice = MIN_PRICE) {
-  const normalizedYesPrice = roundOutcomePrice(yesPrice, minPrice);
-  return side === "YES" ? normalizedYesPrice : roundOutcomePrice(1 - normalizedYesPrice, minPrice);
-}
-
 function getMarketOutcomePrice(market, side) {
   const minPrice = getMarketMinOutcomePrice(market);
   return side === "YES"
     ? roundOutcomePrice(toNumber(market.yes_price), minPrice)
     : roundOutcomePrice(toNumber(market.no_price), minPrice);
+}
+
+function getOppositeSide(side) {
+  return side === "YES" ? "NO" : "YES";
 }
 
 function getCurrentPriceForMarket(market) {
@@ -460,26 +467,68 @@ function getEffectiveMarketMakerLiquidity(market, outcomePrice) {
   const baseLiquidity = isSportsMarket(market)
     ? Math.max(1_500, Math.min(30_000, Math.sqrt(rawLiquidity) * 2.1))
     : Math.max(1_200, Math.min(24_000, rawLiquidity));
-  return Math.max(150, baseLiquidity * getTailDepthFactor(outcomePrice, getMarketMinOutcomePrice(market)));
+  return Math.max(35, baseLiquidity * getTailDepthFactor(outcomePrice, getMarketMinOutcomePrice(market)));
+}
+
+function getFairOutcomePrice(market, side, currentPrice = getCurrentPriceForMarket(market)) {
+  const minPrice = getMarketMinOutcomePrice(market);
+  if (isSportsMarket(market)) {
+    const yesPrice = roundOutcomePrice(toNumber(market.yes_price, 0.5), minPrice);
+    const noPrice = roundOutcomePrice(toNumber(market.no_price, 1 - yesPrice), minPrice);
+    return side === "YES" ? yesPrice : noPrice;
+  }
+
+  const fairYesPrice = roundOutcomePrice(getMarketMakerYesPrice(market, currentPrice, { fast: true }), minPrice);
+  return side === "YES" ? fairYesPrice : roundOutcomePrice(1 - fairYesPrice, minPrice);
+}
+
+function driftOutcomePrice(market, side, currentPrice, strength = 0.08) {
+  const minPrice = getMarketMinOutcomePrice(market);
+  const current = getMarketOutcomePrice(market, side);
+  const fair = getFairOutcomePrice(market, side, currentPrice);
+  return roundOutcomePrice(current * (1 - strength) + fair * strength, minPrice);
+}
+
+function buildDualBookPrices(market, side, nextSidePrice, options = {}) {
+  const currentPrice = options.currentPrice ?? getCurrentPriceForMarket(market);
+  const oppositeSide = getOppositeSide(side);
+  const minPrice = getMarketMinOutcomePrice(market);
+  const driftStrength = options.oppositeDriftStrength ?? 0.08;
+  const nextOppositePrice = driftOutcomePrice(market, oppositeSide, currentPrice, driftStrength);
+
+  return {
+    nextYesPrice: side === "YES"
+      ? roundOutcomePrice(nextSidePrice, minPrice)
+      : nextOppositePrice,
+    nextNoPrice: side === "NO"
+      ? roundOutcomePrice(nextSidePrice, minPrice)
+      : nextOppositePrice,
+  };
 }
 
 function getBuyExecutionQuote(market, side, amount) {
   const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
-  const liquidity = getEffectiveMarketMakerLiquidity(market, oldOutcomePrice);
+  const fairOutcomePrice = getFairOutcomePrice(market, side);
+  const bookPrice = Math.max(oldOutcomePrice, fairOutcomePrice);
+  const liquidity = getEffectiveMarketMakerLiquidity(market, bookPrice);
   const rawTradeShift = (amount / liquidity) * BUY_IMPACT_MULTIPLIER;
-  const tradeShift = (side === "YES" ? 1 : -1) * Math.min(MAX_SINGLE_TRADE_SHIFT, rawTradeShift);
+  const tradeShift = Math.min(MAX_SINGLE_TRADE_SHIFT, rawTradeShift);
   const repricedMarket = {
     ...market,
     yes_volume: toNumber(market.yes_volume) + (side === "YES" ? amount : 0),
     no_volume: toNumber(market.no_volume) + (side === "NO" ? amount : 0),
   };
-  const nextYesPrice = roundOutcomePrice(getMarketMakerYesPrice(
+  const nextOutcomePrice = roundOutcomePrice(
+    Math.max(bookPrice, oldOutcomePrice * 0.72 + fairOutcomePrice * 0.28) + tradeShift,
+    minPrice,
+  );
+  const { nextYesPrice, nextNoPrice } = buildDualBookPrices(
     repricedMarket,
-    getCurrentPriceForMarket(market),
-    { fast: true, tradeShift },
-  ), minPrice);
-  const nextOutcomePrice = getOutcomePriceFromYes(nextYesPrice, side, minPrice);
+    side,
+    nextOutcomePrice,
+    { oppositeDriftStrength: 0.05 },
+  );
   const spread = getMarketMakerSpreadBps() / 10_000;
   const executionPrice = roundOutcomePrice(Math.max(oldOutcomePrice, nextOutcomePrice) * (1 + spread), minPrice);
 
@@ -487,7 +536,7 @@ function getBuyExecutionQuote(market, side, amount) {
     oldOutcomePrice,
     executionPrice,
     nextYesPrice,
-    nextNoPrice: roundOutcomePrice(1 - nextYesPrice, minPrice),
+    nextNoPrice,
   };
 }
 
@@ -495,9 +544,10 @@ function getSellExecutionQuote(market, side, sharesToSell) {
   const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
   const estimatedGross = Math.max(0, sharesToSell * oldOutcomePrice);
+  const fairOutcomePrice = getFairOutcomePrice(market, side);
   const liquidity = getEffectiveMarketMakerLiquidity(market, oldOutcomePrice);
   const rawTradeShift = (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER;
-  const tradeShift = (side === "YES" ? -1 : 1) * Math.min(MAX_SINGLE_TRADE_SHIFT, rawTradeShift);
+  const tradeShift = Math.min(MAX_SINGLE_TRADE_SHIFT, rawTradeShift);
   const repricedMarket = {
     ...market,
     yes_volume: side === "YES"
@@ -507,14 +557,16 @@ function getSellExecutionQuote(market, side, sharesToSell) {
       ? Math.max(0, toNumber(market.no_volume) - estimatedGross)
       : toNumber(market.no_volume),
   };
-  const nextYesPrice = roundOutcomePrice(getMarketMakerYesPrice(
+  const driftedOutcomePrice = oldOutcomePrice * 0.86 + fairOutcomePrice * 0.14;
+  const nextOutcomePrice = roundOutcomePrice(Math.min(oldOutcomePrice, driftedOutcomePrice) - tradeShift, minPrice);
+  const { nextYesPrice, nextNoPrice } = buildDualBookPrices(
     repricedMarket,
-    getCurrentPriceForMarket(market),
-    { fast: true, tradeShift },
-  ), minPrice);
-  const nextOutcomePrice = getOutcomePriceFromYes(nextYesPrice, side, minPrice);
+    side,
+    nextOutcomePrice,
+    { oppositeDriftStrength: 0.04 },
+  );
   const spread = getMarketMakerSpreadBps() / 10_000;
-  const exitPenalty = isSportsMarket(market) ? 0.02 : 0;
+  const exitPenalty = isSportsMarket(market) ? 0.03 : 0.015;
   const executionPrice = roundOutcomePrice(Math.min(oldOutcomePrice, nextOutcomePrice) * (1 - spread - exitPenalty), minPrice);
   const gross = roundMoney(sharesToSell * executionPrice);
 
@@ -523,7 +575,7 @@ function getSellExecutionQuote(market, side, sharesToSell) {
     executionPrice,
     gross,
     nextYesPrice,
-    nextNoPrice: roundOutcomePrice(1 - nextYesPrice, minPrice),
+    nextNoPrice,
     nextYesVolume: repricedMarket.yes_volume,
     nextNoVolume: repricedMarket.no_volume,
   };
@@ -683,6 +735,11 @@ async function getDailyBonusRemaining(client, userId) {
           'task_av_chat',
           'task_daily_presence',
           'task_daily_bet',
+          'task_daily_btc_prediction',
+          'task_daily_football_prediction',
+          'task_daily_btc_5_predictions',
+          'task_daily_win_1',
+          'task_daily_win_streak_5',
           'referral_bet_bonus'
         )
         AND created_at >= date_trunc('day', now())
@@ -726,6 +783,103 @@ async function awardBonusWithDailyCap(client, userId, amount, reason, source) {
     awarded,
     daily_remaining: Math.max(0, Math.round((remaining - awarded) * 100) / 100),
     cap_reached: awarded < requestedAmount,
+  };
+}
+
+function slugifyClanName(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/https?:\/\//g, "")
+    .replace(/[^a-z0-9а-яё]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || `clan-${Date.now()}`;
+}
+
+async function ensureDefaultClans(client) {
+  await client.query(
+    `
+      INSERT INTO clans (name, slug, kind)
+      VALUES
+        ('BTC Bulls', 'btc-bulls', 'default'),
+        ('BTC Bears', 'btc-bears', 'default')
+      ON CONFLICT (slug) DO NOTHING
+    `,
+  );
+}
+
+async function awardClanPoints(client, userId, marketId, points, reason, currency = null) {
+  const numericPoints = Math.round(Number(points || 0) * 100) / 100;
+  if (!numericPoints) {
+    return null;
+  }
+
+  const memberResult = await client.query(
+    `
+      SELECT clan_id
+      FROM clan_members
+      WHERE user_id = $1
+      LIMIT 1
+    `,
+    [userId],
+  );
+  const clanId = memberResult.rows[0]?.clan_id;
+  if (!clanId) {
+    return null;
+  }
+
+  if (marketId) {
+    const existingResult = await client.query(
+      `
+        SELECT id
+        FROM clan_score_events
+        WHERE user_id = $1
+          AND market_id = $2
+          AND reason = $3
+        LIMIT 1
+      `,
+      [userId, marketId, reason],
+    );
+    if (existingResult.rows[0]) {
+      return null;
+    }
+  } else {
+    const existingResult = await client.query(
+      `
+        SELECT id
+        FROM clan_score_events
+        WHERE user_id = $1
+          AND market_id IS NULL
+          AND reason = $2
+          AND created_at >= date_trunc('day', now())
+        LIMIT 1
+      `,
+      [userId, reason],
+    );
+    if (existingResult.rows[0]) {
+      return null;
+    }
+  }
+
+  await client.query(
+    `
+      INSERT INTO clan_score_events (clan_id, user_id, market_id, points, reason, currency)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `,
+    [clanId, userId, marketId || null, numericPoints, reason, currency],
+  );
+  await client.query(
+    `
+      UPDATE clan_members
+      SET contribution_score = contribution_score + $2
+      WHERE user_id = $1
+    `,
+    [userId, numericPoints],
+  );
+
+  return {
+    clan_id: Number(clanId),
+    points: numericPoints,
   };
 }
 
@@ -1791,6 +1945,11 @@ async function claimDailyTaskForUser(client, user, taskKey) {
   const taskAmounts = {
     daily_presence: Math.round(Number(config.taskDailyPresenceFire || 0)),
     daily_bet: Math.round(Number(config.taskDailyBetFire || 0)),
+    daily_btc_prediction: 50,
+    daily_football_prediction: 50,
+    daily_btc_5_predictions: 300,
+    daily_win_1: 50,
+    daily_win_streak_5: 300,
   };
   const amount = taskAmounts[normalizedTaskKey];
   if (!amount) {
@@ -1821,6 +1980,7 @@ async function claimDailyTaskForUser(client, user, taskKey) {
       getTaskReason(normalizedTaskKey),
       `task:${normalizedTaskKey}:${dayKey}`,
     );
+    await awardClanPoints(client, user.id, null, 5, `daily_task:${normalizedTaskKey}:${dayKey}`, "STAR");
   }
 
   const balanceResult = await client.query(
@@ -1838,6 +1998,70 @@ async function claimDailyTaskForUser(client, user, taskKey) {
   };
 }
 
+async function claimPredictionTasksForBuy(client, user, market) {
+  const bonuses = [];
+  if (isBtcMarketSymbol(market.symbol)) {
+    bonuses.push(await claimDailyTaskForUser(client, user, "daily_btc_prediction"));
+    const countResult = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM trades
+        JOIN markets ON markets.id = trades.market_id
+        WHERE trades.user_id = $1
+          AND trades.action = 'BUY'
+          AND markets.symbol = ANY($2)
+          AND trades.created_at >= date_trunc('day', now())
+      `,
+      [user.id, BTC_MARKET_SYMBOLS],
+    );
+    if (Number(countResult.rows[0]?.count || 0) >= 5) {
+      bonuses.push(await claimDailyTaskForUser(client, user, "daily_btc_5_predictions"));
+    }
+  }
+
+  if (isSportsMarket(market)) {
+    bonuses.push(await claimDailyTaskForUser(client, user, "daily_football_prediction"));
+  }
+
+  return bonuses.filter((bonus) => bonus && !bonus.already_claimed && bonus.awarded > 0);
+}
+
+async function claimWinTasksForUser(client, userId) {
+  const userResult = await client.query("SELECT * FROM users WHERE id = $1", [userId]);
+  const user = userResult.rows[0];
+  if (!user) {
+    return [];
+  }
+
+  const bonuses = [await claimDailyTaskForUser(client, user, "daily_win_1")];
+  const streakResult = await client.query(
+    `
+      SELECT
+        p.market_id,
+        MAX(CASE WHEN p.pnl > 0 THEN 1 ELSE 0 END) AS won,
+        MAX(m.resolved_at) AS resolved_at
+      FROM positions p
+      JOIN markets m ON m.id = p.market_id
+      WHERE p.user_id = $1
+        AND p.status = 'resolved'
+        AND m.status = 'resolved'
+      GROUP BY p.market_id
+      ORDER BY MAX(m.resolved_at) DESC
+      LIMIT 5
+    `,
+    [userId],
+  );
+
+  if (
+    streakResult.rows.length >= 5
+    && streakResult.rows.every((row) => Number(row.won || 0) > 0)
+  ) {
+    bonuses.push(await claimDailyTaskForUser(client, user, "daily_win_streak_5"));
+  }
+
+  return bonuses.filter((bonus) => bonus && !bonus.already_claimed && bonus.awarded > 0);
+}
+
 export async function claimDailyTask(input) {
   const user = await upsertUser({
     telegram_id: input.telegram_id,
@@ -1846,6 +2070,182 @@ export async function claimDailyTask(input) {
   });
 
   return withTransaction(async (client) => claimDailyTaskForUser(client, user, input.task_key ?? input.taskKey));
+}
+
+function mapClan(row) {
+  return {
+    id: Number(row.id),
+    name: row.name,
+    slug: row.slug,
+    channel_url: row.channel_url,
+    kind: row.kind,
+    members_count: Number(row.members_count || 0),
+    score: toNumber(row.score),
+    user_is_member: Boolean(row.user_is_member),
+    user_contribution_score: toNumber(row.user_contribution_score),
+    rank: Number(row.rank || 0),
+  };
+}
+
+async function getClansWithClient(client, userId = 0) {
+  await ensureDefaultClans(client);
+  const result = await client.query(
+      `
+        WITH scores AS (
+          SELECT clan_id, COALESCE(SUM(points), 0) AS score
+          FROM clan_score_events
+          GROUP BY clan_id
+        ),
+        members AS (
+          SELECT clan_id, COUNT(*)::int AS members_count
+          FROM clan_members
+          GROUP BY clan_id
+        ),
+        user_membership AS (
+          SELECT clan_id, contribution_score
+          FROM clan_members
+          WHERE user_id = $1
+        ),
+        clan_totals AS (
+          SELECT
+            clans.*,
+            COALESCE(scores.score, 0) AS score,
+            COALESCE(members.members_count, 0) AS members_count,
+            CASE WHEN user_membership.clan_id IS NULL THEN 0 ELSE 1 END AS user_is_member,
+            COALESCE(user_membership.contribution_score, 0) AS user_contribution_score
+          FROM clans
+          LEFT JOIN scores ON scores.clan_id = clans.id
+          LEFT JOIN members ON members.clan_id = clans.id
+          LEFT JOIN user_membership ON user_membership.clan_id = clans.id
+        )
+        SELECT
+          *,
+          RANK() OVER (ORDER BY score DESC, members_count DESC, id ASC)::int AS rank
+        FROM clan_totals
+        ORDER BY score DESC, members_count DESC, id ASC
+        LIMIT 50
+      `,
+    [userId || 0],
+  );
+
+  const clans = result.rows.map(mapClan);
+  return {
+    ok: true,
+    clans,
+    user_clan: clans.find((clan) => clan.user_is_member) || null,
+    rules: {
+      join_points: 5,
+      win_points: 3,
+      loss_points: -1,
+      daily_task_points: 5,
+      create_cost: 10000,
+      weekly_pool_usdt: 5000,
+    },
+  };
+}
+
+export async function getClans(input = {}) {
+  const telegramId = String(input.telegram_id ?? "").trim();
+  const user = telegramId ? await getUserByTelegramId(telegramId) : null;
+
+  return withTransaction((client) => getClansWithClient(client, user?.id || 0));
+}
+
+export async function joinClan(input) {
+  const clanId = Number(input.clan_id ?? input.clanId);
+  if (!Number.isSafeInteger(clanId) || clanId <= 0) {
+    throw new Error("clan_not_found");
+  }
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+
+  return withTransaction(async (client) => {
+    await ensureDefaultClans(client);
+    const clanResult = await client.query("SELECT * FROM clans WHERE id = $1", [clanId]);
+    if (!clanResult.rows[0]) {
+      throw new Error("clan_not_found");
+    }
+
+    const existingResult = await client.query("SELECT * FROM clan_members WHERE user_id = $1", [user.id]);
+    await client.query(
+      `
+        INSERT INTO clan_members (clan_id, user_id, role)
+        VALUES ($1, $2, 'member')
+        ON CONFLICT (user_id) DO UPDATE SET
+          clan_id = EXCLUDED.clan_id,
+          role = 'member'
+      `,
+      [clanId, user.id],
+    );
+
+    if (!existingResult.rows[0]) {
+      await awardClanPoints(client, user.id, null, 5, "member_join", null);
+    }
+
+    return getClansWithClient(client, user.id);
+  });
+}
+
+export async function createClan(input) {
+  const name = String(input.name || "").trim().slice(0, 28);
+  const channelUrl = String(input.channel_url ?? input.channelUrl ?? "").trim().slice(0, 160) || null;
+  if (name.length < 3) {
+    throw new Error("clan_name_required");
+  }
+  if (channelUrl && !/^https?:\/\/|^t\.me\/|^@/i.test(channelUrl)) {
+    throw new Error("invalid_clan_channel");
+  }
+
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+
+  return withTransaction(async (client) => {
+    await ensureDefaultClans(client);
+    await debitCurrencyBalance(client, user.id, "STAR", 10000, "clan_create", "clan:create");
+    const baseSlug = slugifyClanName(name);
+    const slug = `${baseSlug}-${String(user.id).slice(-5)}`;
+    const clanResult = await client.query(
+      `
+        INSERT INTO clans (name, slug, owner_user_id, channel_url, kind)
+        VALUES ($1, $2, $3, $4, 'custom')
+        RETURNING *
+      `,
+      [name, slug, user.id, channelUrl],
+    );
+
+    await client.query(
+      `
+        INSERT INTO clan_members (clan_id, user_id, role)
+        VALUES ($1, $2, 'owner')
+        ON CONFLICT (user_id) DO UPDATE SET
+          clan_id = EXCLUDED.clan_id,
+          role = 'owner'
+      `,
+      [clanResult.rows[0].id, user.id],
+    );
+    await awardClanPoints(client, user.id, null, 5, "member_join", null);
+
+    const balance = await getCurrencyBalanceSnapshot(client, user.id, "STAR");
+    const clans = await getClansWithClient(client, user.id);
+    return {
+      ...clans,
+      balance: balance.total,
+      created_clan: mapClan({
+        ...clanResult.rows[0],
+        members_count: 1,
+        score: 5,
+        user_is_member: 1,
+        user_contribution_score: 5,
+        rank: 0,
+      }),
+    };
+  });
 }
 
 export async function getFireLedgerEvents(input = {}) {
@@ -2041,7 +2441,11 @@ export async function updateLiveBtcPrice() {
 
     for (const market of markets.rows) {
       const yesPrice = getMarketMakerYesPrice(market, btc.price);
-      const noPrice = 1 - yesPrice;
+      const noTargetPrice = roundOutcomePrice(1 - yesPrice, getMarketMinOutcomePrice(market));
+      const noPrice = roundOutcomePrice(
+        toNumber(market.no_price, noTargetPrice) * 0.32 + noTargetPrice * 0.68,
+        getMarketMinOutcomePrice(market),
+      );
 
       await client.query(
         `
@@ -2128,7 +2532,10 @@ export async function getMarketComments(marketId, limit = 30) {
         latest_trade.price AS latest_bet_price,
         latest_trade.shares AS latest_bet_shares,
         latest_trade.currency AS latest_bet_currency,
-        latest_trade.created_at AS latest_bet_created_at
+        latest_trade.created_at AS latest_bet_created_at,
+        bet_summary.yes_amount AS yes_bet_amount,
+        bet_summary.no_amount AS no_bet_amount,
+        bet_summary.currency AS bet_summary_currency
       FROM market_comments comments
       JOIN users ON users.id = comments.user_id
       LEFT JOIN LATERAL (
@@ -2139,6 +2546,15 @@ export async function getMarketComments(marketId, limit = 30) {
         ORDER BY created_at DESC
         LIMIT 1
       ) latest_trade ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          COALESCE(SUM(CASE WHEN side = 'YES' AND action = 'BUY' THEN amount WHEN side = 'YES' AND action = 'SELL' THEN -amount ELSE 0 END), 0) AS yes_amount,
+          COALESCE(SUM(CASE WHEN side = 'NO' AND action = 'BUY' THEN amount WHEN side = 'NO' AND action = 'SELL' THEN -amount ELSE 0 END), 0) AS no_amount,
+          (ARRAY_AGG(currency ORDER BY created_at DESC))[1] AS currency
+        FROM trades
+        WHERE trades.user_id = comments.user_id
+          AND trades.market_id = comments.market_id
+      ) bet_summary ON true
       WHERE comments.market_id = $1
       ORDER BY comments.created_at DESC
       LIMIT $2
@@ -2324,14 +2740,14 @@ export async function syncWorldCupMarkets() {
             UPDATE markets
             SET question = $2,
                 current_price = $3,
-                yes_price = (yes_price * 0.70 + $3::numeric * 0.30),
-                no_price = 1 - (yes_price * 0.70 + $3::numeric * 0.30),
-                liquidity = $4,
-                end_time = $5
+                yes_price = (yes_price * 0.75 + $3::numeric * 0.25),
+                no_price = (no_price * 0.75 + $4::numeric * 0.25),
+                liquidity = $5,
+                end_time = $6
             WHERE id = $1
             RETURNING *
           `,
-          [existingMarket.id, question, yesPrice, liquidity, endTime],
+          [existingMarket.id, question, yesPrice, noPrice, liquidity, endTime],
         )
         : await client.query(
           `
@@ -2665,6 +3081,7 @@ export async function buyOutcome(input) {
 
     const referralBonus = await awardReferralBetBonus(client, user, marketId);
     const dailyBetBonus = await claimDailyTaskForUser(client, user, "daily_bet");
+    const predictionBonuses = await claimPredictionTasksForBuy(client, user, market);
 
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
@@ -2679,6 +3096,7 @@ export async function buyOutcome(input) {
       trade: mapTrade(tradeResult.rows[0]),
       referral_bonus: referralBonus,
       daily_bet_bonus: dailyBetBonus,
+      prediction_bonuses: predictionBonuses,
       market: mapMarket({
         ...market,
         yes_price: nextYesPrice,
@@ -3119,6 +3537,18 @@ export async function resolveExpiredMarkets() {
             `market_payout${reasonSuffix}`,
             `market:${currentMarket.id}`,
             getBonusRatioForAmount(position.bonus_spent, position.spent),
+          );
+          await claimWinTasksForUser(client, position.user_id);
+        }
+
+        if (currency === "USDT") {
+          await awardClanPoints(
+            client,
+            position.user_id,
+            currentMarket.id,
+            position.side === winner ? 3 : -1,
+            "market_result",
+            currency,
           );
         }
       }

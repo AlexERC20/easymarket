@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260625-01" />
+    <link rel="stylesheet" href="/styles.css?v=20260625-02" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -51,6 +51,14 @@
                 <path d="M17.5 19v-9.5" />
                 <path d="M4.5 19.2h15" />
                 <path d="m12 3.5.9 1.8 2 .3-1.4 1.4.3 2-1.8-.9-1.8.9.3-2-1.4-1.4 2-.3.9-1.8Z" />
+              </svg>
+            </button>
+            <button id="clansBtn" class="icon-button clan-action" type="button" aria-label="Кланы">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7.5 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                <path d="M16.5 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                <path d="M3.8 20.2v-1.4c0-3 1.8-5.2 3.7-5.2s3.7 2.2 3.7 5.2v1.4" />
+                <path d="M12.8 20.2v-1.4c0-3 1.8-5.2 3.7-5.2s3.7 2.2 3.7 5.2v1.4" />
               </svg>
             </button>
             <button id="walletBtn" class="icon-button wallet-action" type="button" aria-label="Кошелек">
@@ -132,6 +140,41 @@
               <div>
                 <strong>Первая ставка дня</strong>
                 <small>Поставь 1 ставку и получи +<span id="dailyBetTaskReward">50</span> автоматически</small>
+              </div>
+              <button class="task-button" type="button" disabled>Auto</button>
+            </div>
+            <div class="task-row">
+              <div>
+                <strong>1 прогноз по BTC</strong>
+                <small>Сделай прогноз в любом BTC-маркете и получи +50</small>
+              </div>
+              <button class="task-button" type="button" disabled>Auto</button>
+            </div>
+            <div class="task-row">
+              <div>
+                <strong>1 прогноз на футбол</strong>
+                <small>Сделай прогноз в World Cup market и получи +50</small>
+              </div>
+              <button class="task-button" type="button" disabled>Auto</button>
+            </div>
+            <div class="task-row">
+              <div>
+                <strong>5 прогнозов по BTC</strong>
+                <small>Пять BTC-прогнозов за день дают +300</small>
+              </div>
+              <button class="task-button" type="button" disabled>Auto</button>
+            </div>
+            <div class="task-row">
+              <div>
+                <strong>Выиграй прогноз</strong>
+                <small>Первая победа дня даёт +50</small>
+              </div>
+              <button class="task-button" type="button" disabled>Auto</button>
+            </div>
+            <div class="task-row">
+              <div>
+                <strong>5 побед подряд</strong>
+                <small>Серия из пяти побед даёт +300</small>
               </div>
               <button class="task-button" type="button" disabled>Auto</button>
             </div>
@@ -234,6 +277,33 @@
           </div>
           <div id="leaderboardList" class="leaderboard-list">
             <p class="muted">Загружаю рейтинг...</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="clansSheet" class="task-sheet hidden" aria-label="Кланы">
+        <div class="task-panel clans-panel">
+          <div class="task-head">
+            <div>
+              <p class="eyebrow">Squad wars</p>
+              <h2>Кланы</h2>
+            </div>
+            <button id="clansCloseBtn" class="icon-button" type="button" aria-label="Закрыть кланы">×</button>
+          </div>
+          <div class="clan-hero">
+            <strong>BTC Bulls vs BTC Bears</strong>
+            <small>USDT-прогнозы дают очки клану: победа +3, проигрыш -1, новый участник +5.</small>
+          </div>
+          <div id="userClanCard" class="user-clan-card hidden"></div>
+          <div id="clansList" class="clans-list">
+            <p class="muted">Загружаю кланы...</p>
+          </div>
+          <div class="clan-create-card">
+            <strong>Создать свой клан</strong>
+            <small>Стоимость 10 000. Можно добавить ссылку на канал.</small>
+            <input id="clanNameInput" maxlength="28" placeholder="Название клана" />
+            <input id="clanChannelInput" maxlength="160" placeholder="Ссылка на канал, необязательно" />
+            <button id="clanCreateBtn" class="trade-confirm" type="button">Создать клан</button>
           </div>
         </div>
       </section>
@@ -387,9 +457,19 @@
       <section class="card market-chat-card">
         <div class="market-chat-head">
           <span>онлайн:<b id="marketChatOnline">0</b></span>
+          <div class="market-panel-tabs" role="tablist" aria-label="Чат и стаканы">
+            <button id="marketPanelChatBtn" class="active" type="button">Чат</button>
+            <button id="marketPanelBookBtn" type="button">Стаканы</button>
+          </div>
         </div>
         <div id="marketChatList" class="market-chat-list">
-          <p class="muted">Комментариев пока нет.</p>
+        </div>
+        <div id="marketOrderbookPanel" class="market-orderbook-panel hidden">
+          <div class="orderbook-side-toggle" role="tablist" aria-label="Сторона стакана">
+            <button id="orderbookYesBtn" class="active" type="button">YES / UP</button>
+            <button id="orderbookNoBtn" type="button">NO / DOWN</button>
+          </div>
+          <div id="orderbookList" class="orderbook-list"></div>
         </div>
         <form id="marketChatForm" class="market-chat-form">
           <input id="marketChatInput" type="text" maxlength="240" placeholder="Написать сообщение..." autocomplete="off" />
@@ -442,8 +522,17 @@
       </section>
 
       <div id="toast" class="toast hidden"></div>
+
+      <section id="referralNudge" class="referral-nudge hidden" aria-label="Рассказать друзьям">
+        <div>
+          <strong>Позови друга</strong>
+          <small>После его первой ставки тебе начислим 30 USDT.</small>
+        </div>
+        <button id="referralNudgeShareBtn" type="button">Share</button>
+        <button id="referralNudgeCloseBtn" type="button" aria-label="Скрыть">×</button>
+      </section>
     </main>
 
-    <script src="/app.js?v=20260625-01" type="module"></script>
+    <script src="/app.js?v=20260625-02" type="module"></script>
   </body>
 </html>
