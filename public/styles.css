@@ -2042,6 +2042,24 @@ code {
 .clans-panel {
   max-height: 88vh;
   overflow-y: auto;
+  padding: 0;
+}
+
+.clans-panel > .task-head {
+  padding: 14px 14px 10px;
+}
+
+.clan-view {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px;
+  animation: softRise 180ms ease both;
+}
+
+.clan-view.hidden,
+#clansBackBtn.hidden,
+.clan-head-actions .hidden {
+  display: none;
 }
 
 .clan-hero,
@@ -2074,8 +2092,12 @@ code {
 
 .clans-list {
   display: grid;
-  gap: 8px;
-  margin: 12px 0;
+  gap: 0;
+  margin: 0;
+  border-radius: 22px;
+  background: #25262a;
+  overflow: hidden;
+  padding: 8px 10px;
 }
 
 .clan-row {
@@ -2083,10 +2105,15 @@ code {
   grid-template-columns: 28px 42px 1fr auto;
   align-items: center;
   gap: 10px;
-  border-radius: 18px;
-  background: rgba(15, 21, 30, 0.9);
-  padding: 10px;
+  border-radius: 0;
+  background: transparent;
+  padding: 11px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   animation: softRise 180ms ease both;
+}
+
+.clan-row:last-child {
+  border-bottom: 0;
 }
 
 .clan-row.active {
@@ -2129,6 +2156,8 @@ code {
 .clan-create-card {
   display: grid;
   gap: 9px;
+  min-height: 360px;
+  align-content: start;
 }
 
 .clan-create-card input {
@@ -2177,12 +2206,6 @@ code {
   background: #25262a;
   padding: 14px;
   animation: softRise 180ms ease both;
-}
-
-.clan-rules-card.hidden,
-.clan-detail-card.hidden,
-.clan-create-card.hidden {
-  display: none;
 }
 
 .clan-rules-card strong,

@@ -84,8 +84,7 @@ const state = {
   userClan: null,
   clansLoading: false,
   selectedClanId: null,
-  clanCreateOpen: false,
-  clanInfoOpen: false,
+  clanView: "leaderboard",
   marketPanel: "chat",
   orderbookSide: "YES",
   referralNudgeShown: false,
@@ -2137,14 +2136,28 @@ function renderClans() {
   const list = $("clansList");
   const userCard = $("userClanCard");
   const detailCard = $("clanDetailCard");
-  const createCard = $("clanCreateCard");
-  const rulesCard = $("clanRulesCard");
-  if (!list || !userCard || !detailCard || !createCard || !rulesCard) {
+  if (!list || !userCard || !detailCard) {
     return;
   }
 
-  rulesCard.classList.toggle("hidden", !state.clanInfoOpen);
-  createCard.classList.toggle("hidden", !state.clanCreateOpen);
+  const view = state.clanView || "leaderboard";
+  $("clansLeaderboardView")?.classList.toggle("hidden", view !== "leaderboard");
+  $("clanDetailView")?.classList.toggle("hidden", view !== "detail");
+  $("clanCreateView")?.classList.toggle("hidden", view !== "create");
+  $("clanRulesView")?.classList.toggle("hidden", view !== "rules");
+  $("clansBackBtn")?.classList.toggle("hidden", view === "leaderboard");
+  $("clanInfoBtn")?.classList.toggle("hidden", view === "rules");
+  $("clanCreateToggleBtn")?.classList.toggle("hidden", view === "create");
+
+  const titles = {
+    leaderboard: ["Squad wars", "Кланы"],
+    detail: ["Clan profile", "Участники"],
+    create: ["Create squad", "Новый клан"],
+    rules: ["Scoring", "Очки клана"],
+  };
+  const [eyebrow, title] = titles[view] || titles.leaderboard;
+  if ($("clansEyebrow")) $("clansEyebrow").textContent = eyebrow;
+  if ($("clansTitle")) $("clansTitle").textContent = title;
 
   if (state.userClan) {
     userCard.classList.remove("hidden");
@@ -2162,12 +2175,13 @@ function renderClans() {
 
   if (state.clansLoading && !state.clans.length) {
     setInnerHtmlIfChanged(list, '<p class="muted">Загружаю кланы...</p>');
+    detailCard.innerHTML = "";
     return;
   }
 
   if (!state.clans.length) {
     setInnerHtmlIfChanged(list, '<p class="muted">Кланы пока не созданы.</p>');
-    detailCard.classList.add("hidden");
+    detailCard.innerHTML = "";
     return;
   }
 
@@ -2176,7 +2190,7 @@ function renderClans() {
     || state.clans[0];
   state.selectedClanId = selectedClan?.id || null;
 
-  if (selectedClan) {
+  if (view === "detail" && selectedClan) {
     const members = (selectedClan.members || []).slice(0, 12);
     const memberRows = members.length
       ? members.map((member) => {
@@ -2194,7 +2208,6 @@ function renderClans() {
       }).join("")
       : '<p class="muted">В клане пока нет участников.</p>';
 
-    detailCard.classList.remove("hidden");
     detailCard.innerHTML = `
       <div class="clan-detail-hero">
         <div class="clan-detail-avatar">${selectedClan.slug === "btc-bears" ? "▼" : "▲"}</div>
@@ -2213,8 +2226,11 @@ function renderClans() {
         <strong>Станьте участником розыгрыша призов</strong>
         <span>Заработайте очки клана USDT-прогнозами и daily-заданиями.</span>
       </div>
+      ${selectedClan.user_is_member ? "" : `<button class="trade-confirm clan-join-main" data-join-clan="${selectedClan.id}" type="button">Вступить в клан</button>`}
       <div class="clan-members-list">${memberRows}</div>
     `;
+  } else {
+    detailCard.innerHTML = "";
   }
 
   const html = state.clans.map((clan) => `
@@ -2231,6 +2247,35 @@ function renderClans() {
     </div>
   `).join("");
   setInnerHtmlIfChanged(list, html);
+}
+
+async function joinClanFromButton(button) {
+  if (!button || !state.user?.telegram_id) {
+    return;
+  }
+  showButtonPressed(button);
+  triggerHaptic("selection");
+  button.disabled = true;
+  try {
+    const result = await api("/api/clans/join", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        username: state.user.username,
+        first_name: state.user.first_name,
+        clan_id: Number(button.dataset.joinClan),
+      }),
+    });
+    state.clans = result.clans || [];
+    state.userClan = result.user_clan || null;
+    state.selectedClanId = state.userClan?.id || Number(button.dataset.joinClan);
+    state.clanView = "detail";
+    renderClans();
+    showToast("Ты вступил в клан.");
+  } catch {
+    button.disabled = false;
+    showToast("Не получилось вступить в клан.");
+  }
 }
 
 function formatVolume(value) {
@@ -3264,16 +3309,19 @@ $("clansSheet")?.addEventListener("click", (event) => {
 
 $("clanInfoBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
-  state.clanInfoOpen = !state.clanInfoOpen;
+  state.clanView = "rules";
   renderClans();
 });
 
 $("clanCreateToggleBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
-  state.clanCreateOpen = !state.clanCreateOpen;
-  if (state.clanCreateOpen) {
-    state.clanInfoOpen = false;
-  }
+  state.clanView = "create";
+  renderClans();
+});
+
+$("clansBackBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  state.clanView = "leaderboard";
   renderClans();
 });
 
@@ -3282,7 +3330,7 @@ $("clansList")?.addEventListener("click", async (event) => {
   const row = event.target.closest("[data-open-clan]");
   if (row && !button) {
     state.selectedClanId = Number(row.dataset.openClan);
-    state.clanCreateOpen = false;
+    state.clanView = "detail";
     triggerHaptic("selection");
     renderClans();
     return;
@@ -3292,26 +3340,16 @@ $("clansList")?.addEventListener("click", async (event) => {
     return;
   }
   event.stopPropagation();
-  showButtonPressed(button);
-  triggerHaptic("selection");
-  try {
-    const result = await api("/api/clans/join", {
-      method: "POST",
-      body: JSON.stringify({
-        telegram_id: state.user.telegram_id,
-        username: state.user.username,
-        first_name: state.user.first_name,
-        clan_id: Number(button.dataset.joinClan),
-      }),
-    });
-    state.clans = result.clans || [];
-    state.userClan = result.user_clan || null;
-    state.selectedClanId = state.userClan?.id || Number(button.dataset.joinClan);
-    renderClans();
-    showToast("Ты вступил в клан.");
-  } catch {
-    showToast("Не получилось вступить в клан.");
+  void joinClanFromButton(button);
+});
+
+$("clanDetailCard")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-join-clan]");
+  if (!button) {
+    return;
   }
+  event.preventDefault();
+  void joinClanFromButton(button);
 });
 
 $("clanCreateBtn")?.addEventListener("click", async () => {
@@ -3336,7 +3374,7 @@ $("clanCreateBtn")?.addEventListener("click", async () => {
     state.clans = result.clans || [];
     state.userClan = result.user_clan || null;
     state.selectedClanId = result.created_clan?.id || state.userClan?.id || null;
-    state.clanCreateOpen = false;
+    state.clanView = "detail";
     applyCurrencyBalance("STAR", result.balance ?? state.balance);
     renderClans();
     renderMe();
@@ -3841,6 +3879,7 @@ function setClansSheetOpen(open) {
   const sheet = $("clansSheet");
   if (!sheet) return;
   if (open) {
+    state.clanView = "leaderboard";
     void loadClans().catch(() => showToast("Кланы пока не загрузились."));
   }
   sheet.classList.toggle("hidden", !open);
