@@ -1406,41 +1406,60 @@ async function getUserMarketStats(userId, limit = 40) {
   const safeLimit = Math.max(1, Math.min(100, Number(limit) || 40));
   const result = await query(
     `
-      SELECT
-        p.market_id,
-        p.currency,
-        m.symbol,
+      WITH grouped_stats AS (
+        SELECT
+          p.market_id,
+          p.currency,
+          m.symbol,
+          CASE
+            WHEN m.symbol = ANY($2) THEN 'BTC_UPDOWN'
+            WHEN m.symbol LIKE '${WORLD_CUP_SYMBOL_PREFIX}%' THEN 'WORLD_CUP_WINNER'
+            ELSE NULL
+          END AS market_type,
+          meta.team,
+          meta.icon,
+          m.question,
+          m.status AS market_status,
+          m.winner,
+          COUNT(*) AS positions_count,
+          COUNT(*) FILTER (WHERE p.status = 'open') AS open_positions_count,
+          SUM(p.spent) AS spent,
+          SUM(p.payout) AS payout,
+          SUM(p.pnl) AS pnl,
+          MAX(p.updated_at) AS updated_at
+        FROM positions p
+        JOIN markets m ON m.id = p.market_id
+        LEFT JOIN world_cup_market_meta meta ON meta.symbol = m.symbol
+        WHERE p.user_id = $1
+        GROUP BY
+          p.market_id,
+          p.currency,
+          m.symbol,
+          meta.team,
+          meta.icon,
+          m.question,
+          m.status,
+          m.winner
+      ),
+      ranked_stats AS (
+        SELECT
+          grouped_stats.*,
+          ROW_NUMBER() OVER (ORDER BY updated_at DESC) AS recent_rank
+        FROM grouped_stats
+      )
+      SELECT *
+      FROM ranked_stats
+      WHERE open_positions_count > 0
+        OR market_status NOT IN ('resolved', 'price_error', 'superseded')
+        OR recent_rank <= $3
+      ORDER BY
         CASE
-          WHEN m.symbol = ANY($2) THEN 'BTC_UPDOWN'
-          WHEN m.symbol LIKE '${WORLD_CUP_SYMBOL_PREFIX}%' THEN 'WORLD_CUP_WINNER'
-          ELSE NULL
-        END AS market_type,
-        meta.team,
-        meta.icon,
-        m.question,
-        m.status AS market_status,
-        m.winner,
-        COUNT(*) AS positions_count,
-        COUNT(*) FILTER (WHERE p.status = 'open') AS open_positions_count,
-        SUM(p.spent) AS spent,
-        SUM(p.payout) AS payout,
-        SUM(p.pnl) AS pnl,
-        MAX(p.updated_at) AS updated_at
-      FROM positions p
-      JOIN markets m ON m.id = p.market_id
-      LEFT JOIN world_cup_market_meta meta ON meta.symbol = m.symbol
-      WHERE p.user_id = $1
-      GROUP BY
-        p.market_id,
-        p.currency,
-        m.symbol,
-        meta.team,
-        meta.icon,
-        m.question,
-        m.status,
-        m.winner
-      ORDER BY MAX(p.updated_at) DESC
-      LIMIT $3
+          WHEN open_positions_count > 0 AND market_status = 'open' THEN 0
+          WHEN market_status NOT IN ('resolved', 'price_error', 'superseded') THEN 1
+          ELSE 2
+        END,
+        updated_at DESC
+      LIMIT 120
     `,
     [userId, BTC_MARKET_SYMBOLS, safeLimit],
   );
@@ -1467,6 +1486,13 @@ export async function getUserSnapshot(telegramId) {
     getUsdtBonusBalanceByUserId(user.id),
     query(
       `
+        WITH recent_positions AS (
+          SELECT id
+          FROM positions
+          WHERE user_id = $1
+          ORDER BY updated_at DESC
+          LIMIT 20
+        )
         SELECT
           p.*,
           m.question,
@@ -1481,8 +1507,19 @@ export async function getUserSnapshot(telegramId) {
         JOIN markets m ON m.id = p.market_id
         LEFT JOIN world_cup_market_meta meta ON meta.symbol = m.symbol
         WHERE p.user_id = $1
-        ORDER BY p.updated_at DESC
-        LIMIT 20
+          AND (
+            p.status = 'open'
+            OR m.status NOT IN ('resolved', 'price_error', 'superseded')
+            OR p.id IN (SELECT id FROM recent_positions)
+          )
+        ORDER BY
+          CASE
+            WHEN p.status = 'open' AND m.status = 'open' THEN 0
+            WHEN m.status NOT IN ('resolved', 'price_error', 'superseded') THEN 1
+            ELSE 2
+          END,
+          p.updated_at DESC
+        LIMIT 120
       `,
       [user.id],
     ),
