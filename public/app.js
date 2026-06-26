@@ -1,3 +1,11 @@
+import {
+  hideLightningLoader,
+  initLightningMotion,
+  showSuccessLightningBurst,
+  triggerBalancePulse,
+  triggerButtonLightning,
+} from "./lightning-motion.js?v=20260626-01";
+
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
 const SELL_IMPACT_MULTIPLIER = 1.1;
@@ -153,6 +161,8 @@ const state = {
 
 const textAnimations = new WeakMap();
 const $ = (id) => document.getElementById(id);
+
+initLightningMotion();
 
 const formatFire = (value) => Math.floor(Number(value || 0)).toLocaleString("ru-RU");
 const formatFireDecimal = (value) => Number(value || 0).toLocaleString("ru-RU", {
@@ -922,26 +932,11 @@ function showToast(message) {
 }
 
 function triggerLightningFlash(kind = "success") {
-  if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
-    return;
-  }
-  const flash = document.createElement("div");
-  flash.className = `lightning-flash ${kind}`;
-  flash.setAttribute("aria-hidden", "true");
-  document.body.appendChild(flash);
-  window.setTimeout(() => flash.remove(), 520);
+  showSuccessLightningBurst(kind === "success" ? "Success" : "Energy");
 }
 
 function triggerRewardBurst(label = "⚡") {
-  if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
-    return;
-  }
-  const burst = document.createElement("div");
-  burst.className = "reward-burst";
-  burst.textContent = label;
-  burst.setAttribute("aria-hidden", "true");
-  document.body.appendChild(burst);
-  window.setTimeout(() => burst.remove(), 980);
+  showSuccessLightningBurst(label === "⚡" ? "Success" : label);
 }
 
 function showWinOverlay(label) {
@@ -1023,6 +1018,7 @@ function animateText(element, nextValue, formatter, duration = 360) {
   element.classList.remove("balance-pop");
   void element.offsetWidth;
   element.classList.add("balance-pop");
+  triggerBalancePulse(element);
 
   const previousAnimation = textAnimations.get(element);
   if (previousAnimation) {
@@ -1409,6 +1405,7 @@ async function upsertMe() {
         }
       }, 1_800);
     }
+    hideLightningLoader();
     return false;
   }
 
@@ -2537,6 +2534,7 @@ async function joinClan(payload, button = null, successMessage = "Ты всту�
     state.selectedClanId = state.userClan?.id || Number(payload.clan_id || 0) || null;
     state.clanView = "detail";
     renderClans();
+    triggerLightningFlash("success");
     showToast(successMessage);
   } catch {
     if (button) {
@@ -3026,6 +3024,7 @@ function closeTopupSheet() {
 
 function showButtonPressed(button) {
   if (!button || button.disabled) return;
+  triggerButtonLightning(button);
   button.classList.remove("is-pressed");
   void button.offsetWidth;
   button.classList.add("is-pressed");
@@ -3060,6 +3059,7 @@ async function refreshDepositIntent() {
     if (data.intent?.status === "credited") {
       stopDepositPolling();
       triggerHaptic("success");
+      triggerLightningFlash("success");
       showToast("USDT зачислены на баланс.");
       await loadMe();
       return;
@@ -3131,6 +3131,7 @@ async function createUsdtDepositIntent() {
     });
     state.topup.intent = result.intent;
     triggerHaptic("success");
+    triggerLightningFlash("success");
     showToast("Заявка создана. Отправь точную сумму.");
     startDepositPolling();
   } catch (error) {
@@ -3199,6 +3200,7 @@ async function checkUsdtDepositIntent() {
     if (state.topup.intent?.status === "credited") {
       stopDepositPolling();
       triggerHaptic("success");
+      triggerLightningFlash("success");
       showToast("USDT зачислены.");
     } else {
       triggerHaptic("warning");
@@ -3260,6 +3262,7 @@ async function createUsdtWithdrawalRequest() {
     state.withdrawal.reason = "Заявка создана и отправлена админу. Статус будет в истории.";
     state.topup.historyOpen = true;
     triggerHaptic("success");
+    triggerLightningFlash("success");
     showToast("Заявка на вывод создана.");
     await loadWalletHistory();
     await loadMe().catch(() => undefined);
@@ -3318,6 +3321,7 @@ async function startStarsTopup() {
       tg.openInvoice(invoiceUrl, (status) => {
         if (status === "paid") {
           triggerHaptic("success");
+          triggerLightningFlash("success");
           showToast("Оплата прошла. Обновляю баланс...");
           closeTopupSheet();
           void refreshBalanceAfterInvoice();
@@ -3747,6 +3751,7 @@ $("clanCreateBtn")?.addEventListener("click", async () => {
     applyCurrencyBalance("STAR", result.balance ?? state.balance);
     renderClans();
     renderMe();
+    triggerLightningFlash("success");
     showToast("Клан создан.");
   } catch (error) {
     const messages = {
@@ -4198,6 +4203,7 @@ async function submitMarketComment() {
     state.commentsMarketId = market.id;
     state.commentsOnlineCount = Math.max(1, Number(state.commentsOnlineCount || 0));
     triggerHaptic("success");
+    triggerLightningFlash("success");
     renderComments();
   } catch (error) {
     triggerHaptic("error");
@@ -4691,9 +4697,11 @@ loadPublicConfig()
           void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined);
         }, 1_200);
         window.setTimeout(showReferralNudge, 150_000);
-      });
+      })
+      .finally(hideLightningLoader);
   })
   .catch((error) => {
+    hideLightningLoader();
     setConnection("Ошибка входа", "error");
     $("authCard").classList.remove("hidden");
     showToast(error.message || "Не удалось создать пользователя.");

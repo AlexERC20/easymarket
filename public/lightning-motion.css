@@ -1,0 +1,358 @@
+:root {
+  --lm-lime: #b7ff4d;
+  --lm-cyan: #35f6ff;
+  --lm-purple: #a56cff;
+  --lm-yellow: #ffe66d;
+  --lm-glow: 0 0 22px rgba(183, 255, 77, 0.45), 0 0 42px rgba(53, 246, 255, 0.18);
+  --lm-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lm-energy-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0.18;
+  mix-blend-mode: screen;
+}
+
+.lm-energy-bg span {
+  position: absolute;
+  width: 1px;
+  height: 120px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, transparent, rgba(53, 246, 255, 0.5), rgba(183, 255, 77, 0.12), transparent);
+  filter: blur(0.2px);
+  transform: rotate(22deg);
+  animation: lmEnergyDrift 8s var(--lm-ease) infinite;
+}
+
+.lm-energy-bg span:nth-child(1) { left: 10%; top: 12%; animation-delay: -1.2s; }
+.lm-energy-bg span:nth-child(2) { left: 82%; top: 5%; animation-delay: -3.7s; height: 150px; }
+.lm-energy-bg span:nth-child(3) { left: 58%; top: 54%; animation-delay: -5.4s; }
+.lm-energy-bg span:nth-child(4) { left: 23%; top: 74%; animation-delay: -7.1s; height: 90px; }
+.lm-energy-bg span:nth-child(5) { left: 92%; top: 68%; animation-delay: -2.1s; }
+.lm-energy-bg span:nth-child(6) { left: 42%; top: 18%; animation-delay: -6.2s; height: 180px; }
+
+.lm-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 50% 36%, rgba(183, 255, 77, 0.16), transparent 26%),
+    radial-gradient(circle at 50% 64%, rgba(53, 246, 255, 0.09), transparent 32%),
+    rgba(7, 10, 16, 0.94);
+  opacity: 1;
+  transition: opacity 260ms var(--lm-ease), transform 260ms var(--lm-ease);
+}
+
+.lm-loader.hidden {
+  display: grid;
+  opacity: 0;
+  transform: scale(1.01);
+  pointer-events: none;
+}
+
+.lm-loader-card {
+  position: relative;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  min-width: 158px;
+  min-height: 158px;
+  border: 1px solid rgba(183, 255, 77, 0.24);
+  border-radius: 28px;
+  background: rgba(12, 18, 27, 0.72);
+  box-shadow: var(--lm-glow), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.lm-loader-card::before,
+.lm-loader-card::after {
+  content: "";
+  position: absolute;
+  inset: 20px;
+  border: 1px solid rgba(53, 246, 255, 0.12);
+  border-radius: 50%;
+  animation: lmLoaderRing 1.6s var(--lm-ease) infinite;
+}
+
+.lm-loader-card::after {
+  inset: 34px;
+  border-color: rgba(183, 255, 77, 0.14);
+  animation-delay: -0.58s;
+}
+
+.lm-loader-bolt {
+  position: relative;
+  z-index: 1;
+  width: 72px;
+  height: 72px;
+  filter: drop-shadow(0 0 14px rgba(183, 255, 77, 0.7));
+  animation: lmBoltPulse 900ms var(--lm-ease) infinite, lmElectricFlicker 1.3s steps(2, end) infinite;
+}
+
+.lm-loader-bolt path,
+.lm-burst-bolt path {
+  fill: url(#lmBoltGradient);
+  stroke: rgba(255, 255, 255, 0.64);
+  stroke-width: 0.75;
+}
+
+.lm-loader-card strong {
+  position: relative;
+  z-index: 1;
+  color: rgba(243, 246, 251, 0.92);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.16em;
+}
+
+.lm-clickable {
+  position: relative;
+  overflow: hidden;
+  transform: translateZ(0);
+}
+
+.lm-button-flash {
+  position: absolute;
+  inset: -24%;
+  z-index: 4;
+  pointer-events: none;
+  background:
+    linear-gradient(115deg, transparent 0 38%, rgba(255, 230, 109, 0.75) 43%, rgba(53, 246, 255, 0.55) 47%, transparent 54%),
+    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(183, 255, 77, 0.4), transparent 34%);
+  mix-blend-mode: screen;
+  opacity: 0;
+  animation: lmButtonFlash 520ms var(--lm-ease) both;
+}
+
+.lm-spark {
+  position: absolute;
+  left: var(--lm-x, 50%);
+  top: var(--lm-y, 50%);
+  z-index: 5;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--lm-lime);
+  box-shadow: 0 0 12px rgba(183, 255, 77, 0.8);
+  pointer-events: none;
+  animation: lmSpark 620ms var(--lm-ease) both;
+}
+
+.lm-lightning-tap {
+  animation: lmTapSpring 360ms var(--lm-ease) both;
+}
+
+.lm-lightning-card {
+  position: relative;
+  transition: transform 180ms var(--lm-ease), border-color 180ms var(--lm-ease), box-shadow 180ms var(--lm-ease), filter 180ms var(--lm-ease);
+}
+
+.lm-lightning-card::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: 7;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    linear-gradient(90deg, transparent 0 16%, rgba(183, 255, 77, 0.85) 26%, rgba(53, 246, 255, 0.75) 36%, transparent 47%) top left / 220% 2px no-repeat,
+    linear-gradient(180deg, transparent 0 16%, rgba(165, 108, 255, 0.55) 26%, rgba(53, 246, 255, 0.65) 36%, transparent 47%) top right / 2px 220% no-repeat,
+    linear-gradient(270deg, transparent 0 16%, rgba(183, 255, 77, 0.6) 26%, rgba(53, 246, 255, 0.55) 36%, transparent 47%) bottom right / 220% 2px no-repeat;
+  opacity: 0;
+}
+
+.lm-lightning-card:hover,
+.lm-lightning-card.lm-card-active {
+  transform: translateY(-3px);
+  border-color: rgba(183, 255, 77, 0.36);
+  box-shadow: var(--shadow), var(--lm-glow);
+}
+
+.lm-lightning-card:hover::after,
+.lm-lightning-card.lm-card-active::after {
+  opacity: 1;
+  animation: lmCardEdgeRun 760ms var(--lm-ease) both;
+}
+
+.lm-success-burst {
+  position: fixed;
+  left: 50%;
+  top: 45%;
+  z-index: 998;
+  width: 176px;
+  min-height: 150px;
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: lmBurstOut 880ms var(--lm-ease) both;
+}
+
+.lm-success-burst::before {
+  content: "";
+  position: absolute;
+  inset: 18px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(183, 255, 77, 0.42), rgba(53, 246, 255, 0.12) 48%, transparent 70%);
+  filter: blur(2px);
+  animation: lmBurstCore 880ms var(--lm-ease) both;
+}
+
+.lm-success-burst strong {
+  position: relative;
+  z-index: 2;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 950;
+  text-shadow: 0 0 24px rgba(183, 255, 77, 0.9);
+}
+
+.lm-burst-bolt {
+  position: relative;
+  z-index: 2;
+  width: 62px;
+  height: 62px;
+  filter: drop-shadow(0 0 16px rgba(183, 255, 77, 0.8));
+  animation: lmBurstBolt 780ms var(--lm-ease) both;
+}
+
+.lm-success-burst .lm-spark {
+  animation-duration: 840ms;
+}
+
+.lm-balance-pulse {
+  animation: lmBalancePulse 380ms var(--lm-ease) both;
+}
+
+.lm-tab-group {
+  position: relative;
+}
+
+.lm-tab-group button {
+  position: relative;
+}
+
+.lm-tab-group button::after {
+  content: "";
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--lm-cyan), var(--lm-lime), transparent);
+  box-shadow: 0 0 14px rgba(183, 255, 77, 0.7);
+  opacity: 0;
+  transform: scaleX(0.2);
+  transition: transform 220ms var(--lm-ease), opacity 220ms var(--lm-ease);
+}
+
+.lm-tab-group button.active::after {
+  opacity: 1;
+  transform: scaleX(1);
+  animation: lmTabGlow 1.2s var(--lm-ease) infinite alternate;
+}
+
+@keyframes lmEnergyDrift {
+  0% { opacity: 0; transform: translate3d(-24px, 40px, 0) rotate(22deg); }
+  22% { opacity: 0.75; }
+  100% { opacity: 0; transform: translate3d(26px, -160px, 0) rotate(22deg); }
+}
+
+@keyframes lmLoaderRing {
+  0% { opacity: 0.1; transform: scale(0.72); }
+  54% { opacity: 0.7; }
+  100% { opacity: 0; transform: scale(1.22); }
+}
+
+@keyframes lmBoltPulse {
+  0%, 100% { transform: scale(0.94) rotate(-2deg); }
+  48% { transform: scale(1.08) rotate(2deg); }
+}
+
+@keyframes lmElectricFlicker {
+  0%, 12%, 38%, 70%, 100% { opacity: 1; }
+  13%, 40%, 72% { opacity: 0.72; }
+}
+
+@keyframes lmButtonFlash {
+  0% { opacity: 0; transform: translateX(-20%) scale(0.94); }
+  20% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(20%) scale(1.05); }
+}
+
+@keyframes lmSpark {
+  0% { opacity: 1; transform: translate(-50%, -50%) scale(0.7); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--lm-dx, 20px)), calc(-50% + var(--lm-dy, -24px))) scale(0.15); }
+}
+
+@keyframes lmTapSpring {
+  0% { transform: scale(1); }
+  36% { transform: scale(0.96); }
+  100% { transform: scale(1); }
+}
+
+@keyframes lmCardEdgeRun {
+  0% { background-position: 220% 0, 100% 220%, -120% 100%; }
+  100% { background-position: -120% 0, 100% -120%, 220% 100%; }
+}
+
+@keyframes lmBurstOut {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.72); }
+  18% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+  72% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -62%) scale(1.16); }
+}
+
+@keyframes lmBurstCore {
+  0% { opacity: 0; transform: scale(0.45); }
+  24% { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 0; transform: scale(1.42); }
+}
+
+@keyframes lmBurstBolt {
+  0% { opacity: 0; transform: scale(0.62) rotate(-12deg); }
+  22% { opacity: 1; transform: scale(1.14) rotate(4deg); }
+  100% { opacity: 0; transform: scale(1.02) rotate(10deg); }
+}
+
+@keyframes lmBalancePulse {
+  0% { transform: scale(1); filter: drop-shadow(0 0 0 transparent); }
+  48% { transform: scale(1.12); filter: drop-shadow(0 0 14px rgba(183, 255, 77, 0.78)); }
+  100% { transform: scale(1); filter: drop-shadow(0 0 0 transparent); }
+}
+
+@keyframes lmTabGlow {
+  from { filter: brightness(0.92); }
+  to { filter: brightness(1.3); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lm-energy-bg,
+  .lm-loader,
+  .lm-button-flash,
+  .lm-spark,
+  .lm-success-burst {
+    display: none !important;
+  }
+
+  .lm-lightning-card,
+  .lm-lightning-card:hover,
+  .lm-lightning-card.lm-card-active {
+    transform: none !important;
+    box-shadow: var(--shadow);
+  }
+
+  .lm-tab-group button::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
