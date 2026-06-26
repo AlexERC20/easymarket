@@ -6,7 +6,7 @@ import {
   triggerButtonLightning,
   triggerPaperPlaneBurst,
   triggerScreenLightning,
-} from "./lightning-motion.js?v=20260626-03";
+} from "./lightning-motion.js?v=20260626-04";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;

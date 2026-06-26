@@ -137,8 +137,8 @@ export function triggerButtonLightning(button, event = null, options = {}) {
   const x = event?.clientX ? event.clientX - rect.left : rect.width / 2;
   const y = event?.clientY ? event.clientY - rect.top : rect.height / 2;
   const tier = normalizeTier(options.tier ?? button.dataset.motionTier ?? button.dataset.lmTier ?? 1);
-  const sparkCounts = [0, 4, 6, 9, 14];
-  const durations = [0, 760, 940, 1240, 1700];
+  const sparkCounts = [0, 5, 9, 15, 24];
+  const durations = [0, 760, 980, 1220, 1500];
 
   button.classList.add("lm-clickable");
   button.classList.remove("lm-tier-1", "lm-tier-2", "lm-tier-3", "lm-tier-4");
@@ -156,6 +156,7 @@ export function triggerButtonLightning(button, event = null, options = {}) {
 
   window.setTimeout(() => {
     button.classList.remove("lm-lightning-tap");
+    button.classList.remove("lm-tier-1", "lm-tier-2", "lm-tier-3", "lm-tier-4");
     flash.remove();
   }, durations[tier]);
 }

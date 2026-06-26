@@ -119,38 +119,82 @@
 
 .lm-button-flash {
   position: absolute;
-  inset: -24%;
+  inset: -36%;
   z-index: 4;
   pointer-events: none;
-  background:
-    linear-gradient(115deg, transparent 0 34%, rgba(255, 230, 109, 0.92) 42%, rgba(53, 246, 255, 0.78) 48%, rgba(183, 255, 77, 0.42) 52%, transparent 62%),
-    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(183, 255, 77, 0.7), rgba(53, 246, 255, 0.2) 28%, transparent 48%);
+  background: transparent;
   mix-blend-mode: screen;
   opacity: 0;
   animation: lmButtonFlash 860ms var(--lm-ease) both;
 }
 
+.lm-button-flash::before,
+.lm-button-flash::after {
+  content: "";
+  position: absolute;
+  left: -22%;
+  top: calc(var(--lm-y, 50%) - 2px);
+  width: 148%;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.96), rgba(183, 255, 77, 0.92), rgba(53, 246, 255, 0.72), transparent);
+  filter: drop-shadow(0 0 8px rgba(183, 255, 77, 0.86)) drop-shadow(0 0 14px rgba(53, 246, 255, 0.42));
+  transform: rotate(-17deg);
+  clip-path: polygon(0 46%, 22% 46%, 27% 0, 35% 100%, 43% 46%, 61% 46%, 66% 5%, 74% 96%, 82% 46%, 100% 46%, 100% 58%, 78% 58%, 73% 100%, 65% 8%, 58% 58%, 40% 58%, 35% 100%, 27% 0, 20% 58%, 0 58%);
+}
+
+.lm-button-flash::after {
+  top: calc(var(--lm-y, 50%) + 8px);
+  width: 118%;
+  height: 2px;
+  opacity: 0.62;
+  transform: rotate(-17deg) translateX(16%);
+  filter: drop-shadow(0 0 7px rgba(53, 246, 255, 0.48));
+}
+
 .lm-button-flash.tier-2 {
-  background:
-    linear-gradient(115deg, transparent 0 30%, rgba(255, 230, 109, 0.95) 39%, rgba(53, 246, 255, 0.88) 48%, rgba(183, 255, 77, 0.55) 58%, transparent 70%),
-    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(183, 255, 77, 0.82), rgba(53, 246, 255, 0.28) 34%, transparent 54%);
   animation-duration: 960ms;
+}
+
+.lm-button-flash.tier-2::before {
+  height: 5px;
+  filter: drop-shadow(0 0 10px rgba(183, 255, 77, 0.92)) drop-shadow(0 0 16px rgba(53, 246, 255, 0.48));
 }
 
 .lm-button-flash.tier-3 {
   inset: -42%;
-  background:
-    linear-gradient(116deg, transparent 0 24%, rgba(255, 255, 255, 0.88) 34%, rgba(183, 255, 77, 0.9) 43%, rgba(53, 246, 255, 0.78) 52%, rgba(165, 108, 255, 0.46) 62%, transparent 74%),
-    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(183, 255, 77, 0.96), rgba(53, 246, 255, 0.34) 38%, transparent 60%);
   animation: lmButtonFlashStrong 1.22s var(--lm-ease) both;
+}
+
+.lm-button-flash.tier-3::before {
+  height: 6px;
+  width: 162%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 1), rgba(255, 230, 109, 0.92), rgba(183, 255, 77, 0.98), rgba(53, 246, 255, 0.84), transparent);
+  filter: drop-shadow(0 0 12px rgba(183, 255, 77, 0.98)) drop-shadow(0 0 20px rgba(53, 246, 255, 0.56));
+}
+
+.lm-button-flash.tier-3::after {
+  height: 3px;
+  opacity: 0.78;
 }
 
 .lm-button-flash.tier-4 {
   inset: -64%;
-  background:
-    linear-gradient(116deg, transparent 0 18%, rgba(255, 255, 255, 0.96) 30%, rgba(255, 230, 109, 0.96) 38%, rgba(183, 255, 77, 0.9) 48%, rgba(53, 246, 255, 0.86) 58%, rgba(165, 108, 255, 0.62) 68%, transparent 80%),
-    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(255, 255, 255, 0.78), rgba(183, 255, 77, 0.56) 28%, rgba(53, 246, 255, 0.3) 48%, transparent 66%);
   animation: lmButtonFlashEpic 1.68s var(--lm-ease) both;
+}
+
+.lm-button-flash.tier-4::before {
+  height: 8px;
+  width: 182%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 1), rgba(255, 230, 109, 1), rgba(183, 255, 77, 1), rgba(53, 246, 255, 0.92), rgba(165, 108, 255, 0.58), transparent);
+  filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.55)) drop-shadow(0 0 22px rgba(183, 255, 77, 0.98)) drop-shadow(0 0 32px rgba(53, 246, 255, 0.62));
+}
+
+.lm-button-flash.tier-4::after {
+  top: calc(var(--lm-y, 50%) + 12px);
+  width: 152%;
+  height: 4px;
+  opacity: 0.86;
 }
 
 .lm-spark {
@@ -169,14 +213,6 @@
 
 .lm-lightning-tap {
   animation: lmTapSpring 460ms var(--lm-ease) both;
-}
-
-.lm-clickable.lm-tier-3 {
-  box-shadow: 0 0 22px rgba(183, 255, 77, 0.16), 0 0 34px rgba(53, 246, 255, 0.12);
-}
-
-.lm-clickable.lm-tier-4 {
-  box-shadow: 0 0 28px rgba(183, 255, 77, 0.22), 0 0 52px rgba(53, 246, 255, 0.16), 0 0 80px rgba(165, 108, 255, 0.12);
 }
 
 .lm-lightning-card {
