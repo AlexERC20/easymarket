@@ -4,7 +4,9 @@ import {
   showSuccessLightningBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260626-02";
+  triggerPaperPlaneBurst,
+  triggerScreenLightning,
+} from "./lightning-motion.js?v=20260626-03";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -171,6 +173,12 @@ const formatFireDecimal = (value) => Number(value || 0).toLocaleString("ru-RU", 
 });
 const normalizeCurrency = (value) => (String(value || "STAR").toUpperCase() === "USDT" ? "USDT" : "STAR");
 const getAmountsForCurrency = (currency = state.currency) => (normalizeCurrency(currency) === "USDT" ? USDT_AMOUNTS : STAR_AMOUNTS);
+const getStakeTier = (amount = 0, currency = state.currency) => {
+  const amounts = getAmountsForCurrency(currency);
+  const value = Number(amount || 0);
+  const index = amounts.findIndex((item) => value <= item);
+  return Math.max(1, Math.min(4, index === -1 ? 4 : index + 1));
+};
 const formatCurrencyAmount = (value, currency = state.currency) => {
   const safeCurrency = normalizeCurrency(currency);
   const formatted = Number(value || 0).toLocaleString("ru-RU", {
@@ -932,25 +940,50 @@ function showToast(message) {
   setTimeout(() => toast.classList.add("hidden"), 2600);
 }
 
-function triggerLightningFlash(kind = "success") {
-  showSuccessLightningBurst(kind === "success" ? "Success" : "Energy");
+function triggerLightningFlash(kind = "success", options = {}) {
+  showSuccessLightningBurst(kind === "success" ? "Success" : "Energy", options);
 }
 
-function triggerRewardBurst(label = "⚡") {
-  showSuccessLightningBurst(label === "⚡" ? "Success" : label);
+function triggerRewardBurst(label = "⚡", options = {}) {
+  showSuccessLightningBurst(label === "⚡" ? "Success" : label, options);
 }
 
-function showWinOverlay(label) {
+function triggerTaskCompleteMotion() {
+  triggerScreenLightning("task");
+  showSuccessLightningBurst("CLAIMED", {
+    tier: 3,
+    variant: "storm",
+  });
+}
+
+function triggerBetSuccessMotion(amount, currency) {
+  const tier = getStakeTier(amount, currency);
+  triggerLightningFlash("success", {
+    tier,
+    variant: tier >= 4 ? "epic" : "success",
+  });
+}
+
+function showWinOverlay(label, tier = 2) {
   const overlay = $("winOverlay");
   const amount = $("winOverlayAmount");
   if (!overlay || !amount || !label) {
     return;
   }
-  triggerLightningFlash("success");
-  triggerRewardBurst("⚡");
+  const safeTier = Math.max(1, Math.min(4, Number(tier || 2)));
+  triggerLightningFlash("success", {
+    tier: safeTier,
+    variant: safeTier >= 4 ? "epic" : "success",
+  });
+  triggerRewardBurst(safeTier >= 4 ? "JACKPOT" : "WIN", {
+    tier: safeTier,
+    variant: safeTier >= 4 ? "epic" : "success",
+  });
   amount.textContent = label;
   overlay.classList.remove("hidden");
   overlay.classList.remove("show");
+  overlay.classList.remove("tier-1", "tier-2", "tier-3", "tier-4");
+  overlay.classList.add(`tier-${safeTier}`);
   void overlay.offsetWidth;
   overlay.classList.add("show");
   if (state.winOverlayTimer) {
@@ -960,7 +993,7 @@ function showWinOverlay(label) {
     overlay.classList.remove("show");
     overlay.classList.add("hidden");
     state.winOverlayTimer = null;
-  }, 4400);
+  }, safeTier >= 4 ? 5200 : 4400);
 }
 
 function setConnection(status, type = "") {
@@ -1546,8 +1579,13 @@ function handleSettlements(positions) {
       const label = Array.from(winsByCurrency.entries())
         .map(([currency, value]) => formatSignedCurrencyAmount(value, currency))
         .join(" · ");
+      const winTier = newWins.reduce((maxTier, position) => {
+        const currency = normalizeCurrency(position.currency);
+        const stake = Number(position.spent || position.payout || 0);
+        return Math.max(maxTier, getStakeTier(stake, currency));
+      }, 1);
       showToast(`Есть выигрыш: ${label}`);
-      showWinOverlay(label);
+      showWinOverlay(label, winTier);
     }
   }
 
@@ -2316,6 +2354,7 @@ function renderTradeTicket() {
   document.querySelectorAll(".amount-button").forEach((button, index) => {
     const amount = amounts[index] || amounts[0];
     button.dataset.amount = String(amount);
+    button.dataset.motionTier = String(getStakeTier(amount, state.currency));
     const amountPreview = getPreview(amount, side);
     const pendingKey = market ? getBuyIntentKey(market.id, side, amount, state.currency) : null;
     const nextLabel = formatWholeCurrencyAmount(amount, state.currency);
@@ -2836,10 +2875,12 @@ function renderBetSheet() {
   document.querySelectorAll("[data-bet-add]").forEach((button, index) => {
     const addAmount = amounts[index] || amounts[0];
     button.dataset.betAdd = String(addAmount);
+    button.dataset.motionTier = String(getStakeTier(addAmount, state.currency));
     button.textContent = `+${formatCurrencyAmount(addAmount, state.currency)}`;
   });
   if ($("betConfirmBtn")) {
     $("betConfirmBtn").disabled = !amount || !state.user;
+    $("betConfirmBtn").dataset.motionTier = String(getStakeTier(amount, state.currency));
     $("betConfirmBtn").textContent = amount ? `Trade ${formatCurrencyAmount(amount, state.currency)}` : "Trade";
   }
 }
@@ -3518,7 +3559,7 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
     triggerHaptic("success");
-    triggerLightningFlash("success");
+    triggerBetSuccessMotion(buyAmount, currency);
     renderMarket();
     renderMe();
     renderActivity();
@@ -4087,8 +4128,7 @@ async function claimShareTask() {
     }
     if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
-      triggerLightningFlash("success");
-      triggerRewardBurst("⚡");
+      triggerTaskCompleteMotion();
       showToast(`+${formatFire(result.awarded)} за share.`);
       return;
     }
@@ -4120,8 +4160,7 @@ async function claimSimpleTask(taskKey) {
     }
     if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
-      triggerLightningFlash("success");
-      triggerRewardBurst("⚡");
+      triggerTaskCompleteMotion();
       showToast(`+${formatFire(result.awarded)} за задание.`);
       return;
     }
@@ -4161,8 +4200,7 @@ async function claimDailyPresenceTask() {
       showToast("Ежедневный вход уже забран.");
     } else if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
-      triggerLightningFlash("success");
-      triggerRewardBurst("⚡");
+      triggerTaskCompleteMotion();
       showToast(`+${formatFire(result.awarded)} за 5 минут в EasyMarket.`);
     } else {
       showToast("Дневной лимит бонусов уже достигнут.");
@@ -4277,7 +4315,7 @@ async function submitMarketComment() {
     state.commentsMarketId = market.id;
     state.commentsOnlineCount = Math.max(1, Number(state.commentsOnlineCount || 0));
     triggerHaptic("success");
-    triggerLightningFlash("success");
+    triggerPaperPlaneBurst(submitButton);
     renderComments();
   } catch (error) {
     triggerHaptic("error");
@@ -4317,8 +4355,7 @@ async function claimDailyTaskByKey(taskKey, button = null) {
       showToast("Этот дейлик уже забран.");
     } else if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
-      triggerLightningFlash("success");
-      triggerRewardBurst("⚡");
+      triggerTaskCompleteMotion();
       showToast(`+${formatFire(result.awarded)} за дейлик.`);
     } else {
       showToast("Дневной лимит бонусов уже достигнут.");

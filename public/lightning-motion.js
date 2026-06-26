@@ -44,6 +44,7 @@ const TAB_GROUP_SELECTOR = [
 
 let motionInitialized = false;
 let lastSuccessAt = 0;
+let lastScreenLightningAt = 0;
 
 function reducedMotion() {
   return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
@@ -115,7 +116,13 @@ function appendSparks(target, x, y, count = 5) {
   }
 }
 
-export function triggerButtonLightning(button, event = null) {
+function normalizeTier(value = 1) {
+  const tier = Number(value || 1);
+  if (!Number.isFinite(tier)) return 1;
+  return Math.max(1, Math.min(4, Math.round(tier)));
+}
+
+export function triggerButtonLightning(button, event = null, options = {}) {
   if (!button || button.disabled) {
     return;
   }
@@ -129,23 +136,28 @@ export function triggerButtonLightning(button, event = null) {
   const rect = button.getBoundingClientRect();
   const x = event?.clientX ? event.clientX - rect.left : rect.width / 2;
   const y = event?.clientY ? event.clientY - rect.top : rect.height / 2;
+  const tier = normalizeTier(options.tier ?? button.dataset.motionTier ?? button.dataset.lmTier ?? 1);
+  const sparkCounts = [0, 4, 6, 9, 14];
+  const durations = [0, 760, 940, 1240, 1700];
 
   button.classList.add("lm-clickable");
+  button.classList.remove("lm-tier-1", "lm-tier-2", "lm-tier-3", "lm-tier-4");
+  button.classList.add(`lm-tier-${tier}`);
   button.classList.remove("lm-lightning-tap");
   void button.offsetWidth;
   button.classList.add("lm-lightning-tap");
 
   const flash = document.createElement("span");
-  flash.className = "lm-button-flash";
+  flash.className = `lm-button-flash tier-${tier}`;
   flash.style.setProperty("--lm-x", `${x}px`);
   flash.style.setProperty("--lm-y", `${y}px`);
   button.appendChild(flash);
-  appendSparks(button, x, y, 6);
+  appendSparks(button, x, y, sparkCounts[tier]);
 
   window.setTimeout(() => {
     button.classList.remove("lm-lightning-tap");
     flash.remove();
-  }, 940);
+  }, durations[tier]);
 }
 
 export function triggerCardLightning(card) {
@@ -160,22 +172,63 @@ export function triggerCardLightning(card) {
   window.setTimeout(() => card.classList.remove("lm-card-active"), 820);
 }
 
-export function showSuccessLightningBurst(label = "Success") {
+export function showSuccessLightningBurst(label = "Success", options = {}) {
   const now = Date.now();
   if (now - lastSuccessAt < 260) {
     return;
   }
   lastSuccessAt = now;
 
+  const tier = normalizeTier(options.tier ?? 2);
+  const variant = options.variant ? String(options.variant).replace(/[^a-z0-9_-]/gi, "") : "success";
+  const durations = [0, 1500, 1900, 2400, 3200];
+  const sparkCounts = [0, 8, 12, 16, 24];
   const burst = document.createElement("div");
-  burst.className = "lm-success-burst";
+  burst.className = `lm-success-burst tier-${tier} ${variant}`;
   burst.innerHTML = `
     ${boltSvg("lm-burst-bolt")}
     <strong>${String(label || "Success").replace(/[<>&]/g, "")}</strong>
   `;
   document.body.appendChild(burst);
-  appendSparks(burst, 110, 92, 12);
-  window.setTimeout(() => burst.remove(), 1900);
+  appendSparks(burst, 110, 92, sparkCounts[tier]);
+  window.setTimeout(() => burst.remove(), durations[tier]);
+}
+
+export function triggerScreenLightning(kind = "task") {
+  const now = Date.now();
+  if (now - lastScreenLightningAt < 420) {
+    return;
+  }
+  lastScreenLightningAt = now;
+
+  const overlay = document.createElement("div");
+  overlay.className = `lm-screen-lightning ${String(kind || "task").replace(/[^a-z0-9_-]/gi, "")}`;
+  overlay.innerHTML = `
+    <span></span>
+    <span></span>
+    <span></span>
+  `;
+  document.body.appendChild(overlay);
+  window.setTimeout(() => overlay.remove(), 1800);
+}
+
+export function triggerPaperPlaneBurst(target = null) {
+  const rect = target?.getBoundingClientRect?.();
+  const startX = rect ? rect.left + rect.width / 2 : window.innerWidth * 0.82;
+  const startY = rect ? rect.top + rect.height / 2 : window.innerHeight * 0.74;
+  const plane = document.createElement("div");
+  plane.className = "lm-paper-plane";
+  plane.style.setProperty("--lm-plane-x", `${startX}px`);
+  plane.style.setProperty("--lm-plane-y", `${startY}px`);
+  plane.innerHTML = `
+    <svg viewBox="0 0 42 42" aria-hidden="true">
+      <path d="M35.6 5.8 5.9 18.1c-1.9.8-1.8 3.5.2 4.1l8.4 2.5 3.1 9.5c.6 1.8 3 2.1 4 .5L37.9 8.9c1.1-1.8-.4-4-2.3-3.1Z" />
+      <path d="m15 24.4 13.7-10.2-9.9 13.8" />
+    </svg>
+  `;
+  document.body.appendChild(plane);
+  appendSparks(plane, 22, 20, 5);
+  window.setTimeout(() => plane.remove(), 1500);
 }
 
 export function triggerBalancePulse(element) {
