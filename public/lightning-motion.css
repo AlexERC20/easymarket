@@ -114,14 +114,18 @@
 .lm-clickable {
   position: relative;
   overflow: hidden;
+  isolation: isolate;
   transform: translateZ(0);
 }
 
 .lm-button-flash {
   position: absolute;
-  inset: -24%;
+  inset: 0;
   z-index: 4;
   pointer-events: none;
+  border-radius: var(--lm-radius, inherit);
+  clip-path: inset(0 round var(--lm-radius, 12px));
+  overflow: hidden;
   background:
     linear-gradient(115deg, transparent 0 34%, rgba(255, 230, 109, 0.92) 42%, rgba(53, 246, 255, 0.78) 48%, rgba(183, 255, 77, 0.42) 52%, transparent 62%),
     radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(183, 255, 77, 0.7), rgba(53, 246, 255, 0.2) 28%, transparent 48%);
@@ -156,10 +160,11 @@
 .lm-lightning-card::after {
   content: "";
   position: absolute;
-  inset: -1px;
+  inset: 0;
   z-index: 7;
   pointer-events: none;
-  border-radius: inherit;
+  border-radius: var(--lm-radius, inherit);
+  clip-path: inset(0 round var(--lm-radius, 18px));
   background:
     linear-gradient(90deg, transparent 0 16%, rgba(183, 255, 77, 0.85) 26%, rgba(53, 246, 255, 0.75) 36%, transparent 47%) top left / 220% 2px no-repeat,
     linear-gradient(180deg, transparent 0 16%, rgba(165, 108, 255, 0.55) 26%, rgba(53, 246, 255, 0.65) 36%, transparent 47%) top right / 2px 220% no-repeat,

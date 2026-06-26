@@ -115,6 +115,16 @@ function appendSparks(target, x, y, count = 5) {
   }
 }
 
+function syncMotionRadius(element, fallback = "14px") {
+  if (!element || !window.getComputedStyle) {
+    return;
+  }
+
+  const styles = window.getComputedStyle(element);
+  const radius = styles.borderRadius && styles.borderRadius !== "0px" ? styles.borderRadius : fallback;
+  element.style.setProperty("--lm-radius", radius);
+}
+
 export function triggerButtonLightning(button, event = null) {
   if (!button || button.disabled) {
     return;
@@ -131,6 +141,7 @@ export function triggerButtonLightning(button, event = null) {
   const y = event?.clientY ? event.clientY - rect.top : rect.height / 2;
 
   button.classList.add("lm-clickable");
+  syncMotionRadius(button, "12px");
   button.classList.remove("lm-lightning-tap");
   void button.offsetWidth;
   button.classList.add("lm-lightning-tap");
@@ -153,6 +164,7 @@ export function triggerCardLightning(card) {
     return;
   }
 
+  syncMotionRadius(card, "18px");
   card.classList.add("lm-lightning-card");
   card.classList.remove("lm-card-active");
   void card.offsetWidth;
@@ -207,6 +219,7 @@ export function hideLightningLoader() {
 
 export function refreshLightningTargets(root = document) {
   root.querySelectorAll?.(CARD_SELECTOR).forEach((card) => {
+    syncMotionRadius(card, "18px");
     card.classList.add("lm-lightning-card");
   });
 
