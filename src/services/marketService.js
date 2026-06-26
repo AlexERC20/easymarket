@@ -727,6 +727,23 @@ function getTaskReason(taskKey) {
   return `task_${String(taskKey || "").replace(/[^a-z0-9_]/gi, "_").toLowerCase()}`;
 }
 
+function getClanTaskPoints(taskKey) {
+  const points = {
+    share_friend: 2,
+    av_channel: 5,
+    av_chat: 5,
+    private_chat: 10,
+    daily_presence: 2,
+    daily_bet: 3,
+    daily_btc_prediction: 3,
+    daily_football_prediction: 3,
+    daily_btc_5_predictions: 8,
+    daily_win_1: 5,
+    daily_win_streak_5: 12,
+  };
+  return points[String(taskKey || "").trim()] || 0;
+}
+
 async function getDailyBonusRemaining(client, userId) {
   const result = await client.query(
     `
@@ -1895,6 +1912,7 @@ export async function claimShareTask(input) {
         getTaskReason(taskKey),
         `task:${taskKey}:${dayKey}`,
       );
+      await awardClanPoints(client, user.id, null, getClanTaskPoints(taskKey), `task:${taskKey}:${dayKey}`, "STAR");
     }
 
     const balanceResult = await client.query(
@@ -1970,6 +1988,7 @@ export async function completeVerifiedTask(input) {
           `task:${taskKey}`,
         );
       }
+      await awardClanPoints(client, user.id, null, getClanTaskPoints(taskKey), `verified_task:${taskKey}`, "STAR");
     }
 
     const balanceResult = await client.query(
@@ -2033,7 +2052,14 @@ async function claimDailyTaskForUser(client, user, taskKey) {
       getTaskReason(normalizedTaskKey),
       `task:${normalizedTaskKey}:${dayKey}`,
     );
-    await awardClanPoints(client, user.id, null, 5, `daily_task:${normalizedTaskKey}:${dayKey}`, "STAR");
+    await awardClanPoints(
+      client,
+      user.id,
+      null,
+      getClanTaskPoints(normalizedTaskKey),
+      `daily_task:${normalizedTaskKey}:${dayKey}`,
+      "STAR",
+    );
   }
 
   const balanceResult = await client.query(
@@ -2265,9 +2291,15 @@ async function getClansWithClient(client, userId = 0) {
       join_points: 5,
       win_points: 3,
       loss_points: -1,
-      daily_task_points: 5,
+      daily_task_points: 2,
+      daily_bet_points: 3,
+      daily_hard_task_points: 8,
+      streak_points: 12,
+      share_points: 2,
+      subscribe_points: 5,
+      private_chat_points: 10,
       create_cost: 10000,
-      weekly_pool_usdt: 5000,
+      weekly_prizes_usdt: [5000, 3000, 1000],
     },
   };
 }

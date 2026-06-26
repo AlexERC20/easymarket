@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Polymarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260626-02" />
+    <title>EasyMarket</title>
+    <link rel="stylesheet" href="/styles.css?v=20260626-03" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
     <main class="app-shell">
       <header class="topbar">
-        <div class="app-title">POLYMARKET</div>
+        <div class="app-title">EASYMARKET</div>
         <div class="topbar-row">
           <div class="balance-line">
             <div class="currency-switch" aria-label="Валюта ставок">
@@ -100,7 +100,7 @@
               <div class="task-row">
                 <div>
                   <strong>Ежедневный вход</strong>
-                  <small>Проведи 5 минут в Polymarket и забери +<span id="dailyPresenceTaskReward">50</span></small>
+                  <small>Проведи 5 минут в EasyMarket и забери +<span id="dailyPresenceTaskReward">50</span></small>
                 </div>
                 <button id="taskDailyPresenceBtn" class="task-button" type="button">Таймер</button>
               </div>
@@ -306,9 +306,14 @@
           </div>
           <div id="clansLeaderboardView" class="clan-view">
             <div class="clan-hero">
-              <div class="clan-trophy">🏆</div>
-              <strong>Squad Leaderboard</strong>
-              <small>Объединяйтесь, чтобы попадать в недельный рейтинг команд.</small>
+              <div class="clan-trophy">⚡</div>
+              <strong>Клановая лига</strong>
+              <small>Фонд недели получает топ-3 клана. Внутри клана приз делится пропорционально личному вкладу.</small>
+              <div class="clan-prize-podium">
+                <span><b>1</b> 5 000 USDT</span>
+                <span><b>2</b> 3 000 USDT</span>
+                <span><b>3</b> 1 000 USDT</span>
+              </div>
             </div>
             <div id="userClanCard" class="user-clan-card hidden"></div>
             <div id="clansList" class="clans-list">
@@ -333,8 +338,33 @@
 
           <div id="clanRulesView" class="clan-view hidden">
             <div id="clanRulesCard" class="clan-rules-card">
-              <strong>Как начисляются очки</strong>
-              <small>USDT-прогнозы: победа +3, проигрыш -1. Новый участник +5 один раз. Забранный daily task +5 в клан. Звёздные маркеты на клановые войны не влияют.</small>
+              <div class="rules-hero">
+                <span>⚡</span>
+                <div>
+                  <strong>Правила клановой лиги</strong>
+                  <small>Соревнование идёт по очкам. Звёздные маркеты дают личный фан, а клановую войну двигают USDT-прогнозы и задания.</small>
+                </div>
+              </div>
+              <div class="rules-prize-grid">
+                <div><b>1 место</b><span>5 000 USDT</span></div>
+                <div><b>2 место</b><span>3 000 USDT</span></div>
+                <div><b>3 место</b><span>1 000 USDT</span></div>
+              </div>
+              <p class="rules-note">Приз клана делится между участниками пропорционально их личным очкам вклада.</p>
+              <div class="rules-score-list">
+                <div><span>USDT победа</span><b>+3</b></div>
+                <div><span>USDT проигрыш</span><b class="negative">-1</b></div>
+                <div><span>Новый участник</span><b>+5</b></div>
+                <div><span>Ежедневный вход</span><b>+2</b></div>
+                <div><span>Первая ставка дня</span><b>+3</b></div>
+                <div><span>BTC / футбол прогноз</span><b>+3</b></div>
+                <div><span>5 BTC прогнозов</span><b>+8</b></div>
+                <div><span>Победный прогноз</span><b>+5</b></div>
+                <div><span>5 побед подряд</span><b>+12</b></div>
+                <div><span>Share друзьям</span><b>+2</b></div>
+                <div><span>Подписки AV/чат</span><b>+5</b></div>
+                <div><span>Приватка</span><b>+10</b></div>
+              </div>
             </div>
           </div>
         </div>
@@ -392,7 +422,7 @@
       </section>
 
       <section id="authCard" class="card hidden">
-        <h2>Открой Polymarket в Telegram</h2>
+        <h2>Открой EasyMarket в Telegram</h2>
         <p>
           Это Mini App. В браузере снаружи Telegram ставки и баланс не откроются.
         </p>
@@ -557,6 +587,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260626-02" type="module"></script>
+    <script src="/app.js?v=20260626-03" type="module"></script>
   </body>
 </html>

@@ -276,7 +276,7 @@ app.post("/api/stars/invoice", async (req, res) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: `${amount.toLocaleString("ru-RU")} звезд`,
-        description: `Пополнение баланса Polymarket: ${amount.toLocaleString("ru-RU")}⭐`,
+        description: `Пополнение баланса EasyMarket: ${amount.toLocaleString("ru-RU")}⭐`,
         payload,
         provider_token: "",
         currency: "XTR",
@@ -473,7 +473,7 @@ app.get("/admin/withdrawals/:requestId/confirm", async (req, res) => {
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <title>Polymarket withdrawal</title>
+          <title>EasyMarket withdrawal</title>
           <style>
             body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #080d16; color: #f3f6fb; font-family: Inter, system-ui, sans-serif; }
             main { width: min(420px, calc(100% - 32px)); border: 1px solid rgba(255,255,255,.1); border-radius: 18px; background: #111823; padding: 22px; box-shadow: 0 24px 70px rgba(0,0,0,.5); }

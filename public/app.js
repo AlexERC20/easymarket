@@ -10,6 +10,7 @@ const CHART_WINDOW_MS = 10_000;
 const ACTIVE_MARKET_POLL_MS = 1_500;
 const MARKET_LIST_POLL_MS = 10_000;
 const COMMENTS_POLL_MS = 10_000;
+const LEADERBOARD_CACHE_MS = 90_000;
 const COLLAPSE_LIMIT = 3;
 const MARKET_BUY_CLOSE_BUFFER_MS = 400;
 const MARKET_SELL_FREEZE_SECONDS = 7;
@@ -30,6 +31,10 @@ const state = {
   leaderboardCache: {
     STAR: null,
     USDT: null,
+  },
+  leaderboardCacheAt: {
+    STAR: 0,
+    USDT: 0,
   },
   leaderboardLoading: false,
   leaderboardRequestId: 0,
@@ -425,6 +430,20 @@ function formatChannelLabel(value) {
 
 function buildClanInviteUrl(clan) {
   return buildTelegramMiniAppLaunchUrl(`clan_${clan?.id || ""}`);
+}
+
+function getClanPrizeUsdt(rank) {
+  const prizes = {
+    1: 5000,
+    2: 3000,
+    3: 1000,
+  };
+  return prizes[Number(rank)] || 0;
+}
+
+function formatClanPrize(rank) {
+  const prize = getClanPrizeUsdt(rank);
+  return prize > 0 ? `${formatFire(prize)}$` : "топ-3";
 }
 
 function getLaunchClanId() {
@@ -895,7 +914,33 @@ function showToast(message) {
   const toast = $("toast");
   toast.textContent = message;
   toast.classList.remove("hidden");
+  toast.classList.remove("toast-show");
+  void toast.offsetWidth;
+  toast.classList.add("toast-show");
   setTimeout(() => toast.classList.add("hidden"), 2600);
+}
+
+function triggerLightningFlash(kind = "success") {
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
+    return;
+  }
+  const flash = document.createElement("div");
+  flash.className = `lightning-flash ${kind}`;
+  flash.setAttribute("aria-hidden", "true");
+  document.body.appendChild(flash);
+  window.setTimeout(() => flash.remove(), 520);
+}
+
+function triggerRewardBurst(label = "⚡") {
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
+    return;
+  }
+  const burst = document.createElement("div");
+  burst.className = "reward-burst";
+  burst.textContent = label;
+  burst.setAttribute("aria-hidden", "true");
+  document.body.appendChild(burst);
+  window.setTimeout(() => burst.remove(), 980);
 }
 
 function showWinOverlay(label) {
@@ -904,6 +949,8 @@ function showWinOverlay(label) {
   if (!overlay || !amount || !label) {
     return;
   }
+  triggerLightningFlash("success");
+  triggerRewardBurst("⚡");
   amount.textContent = label;
   overlay.classList.remove("hidden");
   overlay.classList.remove("show");
@@ -971,6 +1018,10 @@ function animateText(element, nextValue, formatter, duration = 360) {
     element.textContent = formatter(numericValue);
     return;
   }
+
+  element.classList.remove("balance-pop");
+  void element.offsetWidth;
+  element.classList.add("balance-pop");
 
   const previousAnimation = textAnimations.get(element);
   if (previousAnimation) {
@@ -1493,14 +1544,27 @@ async function loadRecentMarkets() {
 
 async function loadLeaderboard(currency = state.leaderboardCurrency, options = {}) {
   const normalizedCurrency = normalizeCurrency(currency);
+  const cached = state.leaderboardCache[normalizedCurrency];
+  const cachedAt = Number(state.leaderboardCacheAt[normalizedCurrency] || 0);
+  const cacheFresh = Boolean(cached && Date.now() - cachedAt < LEADERBOARD_CACHE_MS);
+  if (!options.force && cacheFresh) {
+    if (state.leaderboardCurrency === normalizedCurrency) {
+      state.leaderboard = cached;
+      state.leaderboardLoading = false;
+      renderLeaderboard();
+    }
+    return;
+  }
+
   const requestId = state.leaderboardRequestId + 1;
   state.leaderboardRequestId = requestId;
-  state.leaderboardLoading = true;
 
-  if (!options.background) {
-    if (state.leaderboardCache[normalizedCurrency]) {
-      state.leaderboard = state.leaderboardCache[normalizedCurrency];
-    }
+  if (cached && state.leaderboardCurrency === normalizedCurrency) {
+    state.leaderboard = cached;
+  }
+  state.leaderboardLoading = !cached || Boolean(options.force);
+
+  if (!options.background || cached) {
     renderLeaderboard();
   }
 
@@ -1508,6 +1572,7 @@ async function loadLeaderboard(currency = state.leaderboardCurrency, options = {
     const data = await api(`/api/leaderboard?limit=30&currency=${encodeURIComponent(normalizedCurrency)}`);
     const players = data.players || [];
     state.leaderboardCache[normalizedCurrency] = players;
+    state.leaderboardCacheAt[normalizedCurrency] = Date.now();
 
     if (state.leaderboardCurrency === normalizedCurrency && state.leaderboardRequestId === requestId) {
       state.leaderboard = players;
@@ -2327,10 +2392,10 @@ function renderClans() {
   $("clanCreateToggleBtn")?.classList.toggle("hidden", view === "create");
 
   const titles = {
-    leaderboard: ["Squad wars", "Кланы"],
-    detail: ["Clan profile", "Участники"],
-    create: ["Create squad", "Новый клан"],
-    rules: ["Scoring", "Очки клана"],
+    leaderboard: ["Лига", "Кланы"],
+    detail: ["Клан", "Участники"],
+    create: ["Создание", "Новый клан"],
+    rules: ["Правила", "Очки клана"],
   };
   const [eyebrow, title] = titles[view] || titles.leaderboard;
   if ($("clansEyebrow")) $("clansEyebrow").textContent = eyebrow;
@@ -2372,6 +2437,7 @@ function renderClans() {
     const members = (selectedClan.members || []).slice(0, 12);
     const channelUrl = normalizeChannelUrl(selectedClan.channel_url);
     const channelLabel = formatChannelLabel(selectedClan.channel_url);
+    const clanPrize = getClanPrizeUsdt(selectedClan.rank);
     const memberRows = members.length
       ? members.map((member) => {
         const name = member.username ? `@${member.username}` : member.first_name || `user ${member.telegram_id}`;
@@ -2398,13 +2464,13 @@ function renderClans() {
       </div>
       <div class="clan-stat-grid">
         <div><b>${selectedClan.rank || "-"}</b><span>место</span></div>
-        <div><b>5 000$</b><span>фонд</span></div>
+        <div><b>${formatClanPrize(selectedClan.rank)}</b><span>фонд</span></div>
         <div><b>${formatFire(selectedClan.score)}</b><span>очки</span></div>
       </div>
       <div class="clan-goal-card">
-        <small>Ещё 16 дней</small>
-        <strong>Станьте участником розыгрыша призов</strong>
-        <span>Заработайте очки клана USDT-прогнозами и daily-заданиями.</span>
+        <small>Недельная клановая лига</small>
+        <strong>${clanPrize > 0 ? `Текущий фонд места: ${formatFire(clanPrize)} USDT` : "Залетайте в топ-3, чтобы открыть фонд"}</strong>
+        <span>Если клан финиширует в призах, фонд делится между участниками пропорционально личному вкладу в очки клана.</span>
       </div>
       <div class="clan-link-actions">
         ${channelUrl ? `<button class="clan-link-button secondary" data-open-channel="${escapeHtml(channelUrl)}" type="button">${escapeHtml(channelLabel || "Канал клана")}</button>` : ""}
@@ -2492,7 +2558,7 @@ async function shareClan(clan) {
   }
   triggerHaptic("selection");
   const inviteUrl = buildClanInviteUrl(clan);
-  const text = `Вступай в клан ${clan.name} в Polymarket.`;
+  const text = `Вступай в клан ${clan.name} в EasyMarket.`;
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
@@ -3365,6 +3431,7 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
     triggerHaptic("success");
+    triggerLightningFlash("success");
     renderMarket();
     renderMe();
     renderActivity();
@@ -3426,6 +3493,7 @@ async function sellPosition({ side, positionId, marketId, shares }) {
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
     triggerHaptic("success");
+    triggerLightningFlash("success");
     const pnl = Number(result.sale?.pnl || 0);
     showToast(`Продано ${sideLabel(side)}: ${formatSignedCurrencyAmount(pnl, result.currency || state.currency)}`);
     renderMarket();
@@ -3826,10 +3894,12 @@ document.querySelectorAll("[data-leaderboard-currency]").forEach((button) => {
     }
     triggerHaptic("selection");
     state.leaderboardCurrency = nextCurrency;
+    const cachedAt = Number(state.leaderboardCacheAt[nextCurrency] || 0);
+    const cacheFresh = Boolean(state.leaderboardCache[nextCurrency] && Date.now() - cachedAt < LEADERBOARD_CACHE_MS);
     if (state.leaderboardCache[nextCurrency]) {
       state.leaderboard = state.leaderboardCache[nextCurrency];
     }
-    state.leaderboardLoading = true;
+    state.leaderboardLoading = !cacheFresh;
     renderLeaderboard();
     void loadLeaderboard(nextCurrency).catch(() => {
       state.leaderboardLoading = false;
@@ -3928,6 +3998,9 @@ async function claimShareTask() {
       return;
     }
     if (Number(result.awarded || 0) > 0) {
+      triggerHaptic("success");
+      triggerLightningFlash("success");
+      triggerRewardBurst("⚡");
       showToast(`+${formatFire(result.awarded)} за share.`);
       return;
     }
@@ -3959,6 +4032,8 @@ async function claimSimpleTask(taskKey) {
     }
     if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
+      triggerLightningFlash("success");
+      triggerRewardBurst("⚡");
       showToast(`+${formatFire(result.awarded)} за задание.`);
       return;
     }
@@ -3996,7 +4071,10 @@ async function claimDailyPresenceTask() {
     if (result.already_claimed) {
       showToast("Ежедневный вход уже забран.");
     } else if (Number(result.awarded || 0) > 0) {
-      showToast(`+${formatFire(result.awarded)} за 5 минут в Polymarket.`);
+      triggerHaptic("success");
+      triggerLightningFlash("success");
+      triggerRewardBurst("⚡");
+      showToast(`+${formatFire(result.awarded)} за 5 минут в EasyMarket.`);
     } else {
       showToast("Дневной лимит бонусов уже достигнут.");
     }
@@ -4031,7 +4109,7 @@ async function shareInvite({ awardShareTask = false } = {}) {
 
   const usdtBonus = Math.round(Number(state.publicConfig.referral_bet_bonus_usdt || 30));
   const inviteUrl = buildInviteUrl(state.user.telegram_id);
-  const text = `Залетай в Polymarket. После первой ставки мне дадут ${formatFire(usdtBonus)} USDT.`;
+  const text = `Залетай в EasyMarket. После первой ставки мне дадут ${formatFire(usdtBonus)} USDT.`;
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
@@ -4046,7 +4124,7 @@ async function shareInvite({ awardShareTask = false } = {}) {
   try {
     if (navigator.share) {
       await navigator.share({
-        title: "Polymarket",
+        title: "EasyMarket",
         text,
         url: inviteUrl,
       });
@@ -4130,6 +4208,8 @@ async function claimDailyTaskByKey(taskKey, button = null) {
       showToast("Этот дейлик уже забран.");
     } else if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
+      triggerLightningFlash("success");
+      triggerRewardBurst("⚡");
       showToast(`+${formatFire(result.awarded)} за дейлик.`);
     } else {
       showToast("Дневной лимит бонусов уже достигнут.");
