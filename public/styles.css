@@ -1267,6 +1267,27 @@ code {
   color: var(--text);
 }
 
+.task-row.sound-toggle-row {
+  margin-top: 10px;
+  border-color: rgba(53, 246, 255, 0.2);
+  background:
+    radial-gradient(circle at 16% 0%, rgba(183, 255, 77, 0.09), transparent 36%),
+    rgba(255, 255, 255, 0.04);
+}
+
+.task-button.sound-toggle-button {
+  min-width: 64px;
+}
+
+.task-button.sound-toggle-button.active {
+  border-color: rgba(183, 255, 77, 0.68);
+  background:
+    linear-gradient(135deg, rgba(183, 255, 77, 0.2), rgba(53, 246, 255, 0.12)),
+    #142015;
+  color: var(--neon-lime);
+  box-shadow: 0 0 18px rgba(183, 255, 77, 0.16);
+}
+
 .task-row {
   border: 1px solid var(--line-soft);
   border-radius: 14px;
@@ -1381,6 +1402,9 @@ code {
   inset: -40% -80%;
   z-index: -1;
   background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.2) 48%, transparent 66%);
+  filter: blur(7px);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 24%, #000 76%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, #000 24%, #000 76%, transparent 100%);
   transform: translateX(-45%);
   animation: taskClaimableSweep 2.4s var(--ease-default) infinite;
 }

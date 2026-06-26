@@ -126,6 +126,9 @@
   border-radius: var(--lm-radius, inherit);
   clip-path: inset(0 round var(--lm-radius, 12px));
   overflow: hidden;
+  --lm-soft-mask: radial-gradient(ellipse 86% 76% at 50% 50%, #000 0 42%, rgba(0, 0, 0, 0.72) 62%, transparent 100%);
+  -webkit-mask-image: var(--lm-soft-mask);
+  mask-image: var(--lm-soft-mask);
   background:
     linear-gradient(115deg, transparent 0 34%, rgba(255, 230, 109, 0.92) 42%, rgba(53, 246, 255, 0.78) 48%, rgba(183, 255, 77, 0.42) 52%, transparent 62%),
     radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(183, 255, 77, 0.7), rgba(53, 246, 255, 0.2) 28%, transparent 48%);
@@ -165,6 +168,10 @@
   pointer-events: none;
   border-radius: var(--lm-radius, inherit);
   clip-path: inset(0 round var(--lm-radius, 18px));
+  --lm-card-mask: radial-gradient(ellipse 96% 92% at 50% 50%, #000 0 58%, rgba(0, 0, 0, 0.68) 78%, transparent 100%);
+  -webkit-mask-image: var(--lm-card-mask);
+  mask-image: var(--lm-card-mask);
+  filter: blur(0.2px) drop-shadow(0 0 8px rgba(53, 246, 255, 0.2));
   background:
     linear-gradient(90deg, transparent 0 16%, rgba(183, 255, 77, 0.85) 26%, rgba(53, 246, 255, 0.75) 36%, transparent 47%) top left / 220% 2px no-repeat,
     linear-gradient(180deg, transparent 0 16%, rgba(165, 108, 255, 0.55) 26%, rgba(53, 246, 255, 0.65) 36%, transparent 47%) top right / 2px 220% no-repeat,

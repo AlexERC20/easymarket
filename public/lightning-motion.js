@@ -44,9 +44,173 @@ const TAB_GROUP_SELECTOR = [
 
 let motionInitialized = false;
 let lastSuccessAt = 0;
+let audioContext = null;
+let soundEnabled = false;
+let lastSoundAt = 0;
+let lastSoundKind = "";
+
+try {
+  soundEnabled = window.localStorage?.getItem("easymarket_motion_sound") === "1";
+} catch {
+  soundEnabled = false;
+}
 
 function reducedMotion() {
   return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+}
+
+function getAudioContext() {
+  if (!soundEnabled) {
+    return null;
+  }
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    return null;
+  }
+
+  if (!audioContext) {
+    audioContext = new AudioContextClass();
+  }
+
+  if (audioContext.state === "suspended") {
+    void audioContext.resume();
+  }
+
+  return audioContext;
+}
+
+function safeStop(node, time) {
+  try {
+    node.stop(time);
+  } catch {
+    // One-shot WebAudio nodes can only be stopped once.
+  }
+}
+
+function connectEnvelope(ctx, destination, startAt, duration, volume) {
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, volume), startAt + Math.min(0.035, duration * 0.22));
+  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+  gain.connect(destination);
+  return gain;
+}
+
+function playSweep({ delay = 0, duration = 0.18, start = 130, peak = 650, end = 190, volume = 0.13 } = {}) {
+  const ctx = getAudioContext();
+  if (!ctx) {
+    return;
+  }
+
+  const startAt = ctx.currentTime + delay;
+  const filter = ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.Q.setValueAtTime(0.9, startAt);
+  filter.frequency.setValueAtTime(Math.max(80, start * 2.5), startAt);
+  filter.frequency.exponentialRampToValueAtTime(Math.max(120, peak * 1.7), startAt + duration * 0.52);
+  filter.frequency.exponentialRampToValueAtTime(Math.max(90, end * 2.2), startAt + duration);
+
+  const gain = connectEnvelope(ctx, ctx.destination, startAt, duration, volume);
+  filter.connect(gain);
+
+  [0, -7, 12].forEach((detune, index) => {
+    const osc = ctx.createOscillator();
+    osc.type = index === 1 ? "triangle" : "sawtooth";
+    osc.detune.setValueAtTime(detune, startAt);
+    osc.frequency.setValueAtTime(start, startAt);
+    osc.frequency.exponentialRampToValueAtTime(peak, startAt + duration * 0.42);
+    osc.frequency.exponentialRampToValueAtTime(end, startAt + duration);
+    osc.connect(filter);
+    osc.start(startAt);
+    safeStop(osc, startAt + duration + 0.04);
+  });
+}
+
+function playHum({ delay = 0, duration = 0.42, volume = 0.035 } = {}) {
+  const ctx = getAudioContext();
+  if (!ctx) {
+    return;
+  }
+
+  const startAt = ctx.currentTime + delay;
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.setValueAtTime(260, startAt);
+  filter.frequency.exponentialRampToValueAtTime(520, startAt + duration * 0.48);
+  filter.frequency.exponentialRampToValueAtTime(180, startAt + duration);
+
+  const gain = connectEnvelope(ctx, ctx.destination, startAt, duration, volume);
+  filter.connect(gain);
+
+  [54, 108].forEach((frequency, index) => {
+    const osc = ctx.createOscillator();
+    osc.type = index === 0 ? "sine" : "triangle";
+    osc.frequency.setValueAtTime(frequency, startAt);
+    osc.connect(filter);
+    osc.start(startAt);
+    safeStop(osc, startAt + duration + 0.04);
+  });
+}
+
+export function isMotionSoundEnabled() {
+  return soundEnabled;
+}
+
+export async function setMotionSoundEnabled(enabled) {
+  soundEnabled = Boolean(enabled);
+  try {
+    window.localStorage?.setItem("easymarket_motion_sound", soundEnabled ? "1" : "0");
+  } catch {
+    // Storage can be unavailable in hardened webviews.
+  }
+
+  if (soundEnabled) {
+    const ctx = getAudioContext();
+    if (ctx?.state === "suspended") {
+      await ctx.resume().catch(() => undefined);
+    }
+    playMotionSound("toggle");
+  }
+
+  return soundEnabled;
+}
+
+export function playMotionSound(kind = "tap") {
+  if (!soundEnabled || reducedMotion()) {
+    return;
+  }
+
+  const now = Date.now();
+  const normalizedKind = kind === "selection" || kind === "light" || kind === "medium" ? "tap" : kind;
+  const minGap = normalizedKind === "win" ? 1200 : normalizedKind === "success" ? 280 : 150;
+  if (lastSoundKind === normalizedKind && now - lastSoundAt < minGap) {
+    return;
+  }
+  lastSoundKind = normalizedKind;
+  lastSoundAt = now;
+
+  if (normalizedKind === "win") {
+    playHum({ duration: 1.55, volume: 0.045 });
+    playSweep({ delay: 0.02, duration: 0.52, start: 95, peak: 820, end: 150, volume: 0.16 });
+    playSweep({ delay: 0.36, duration: 0.58, start: 180, peak: 980, end: 120, volume: 0.15 });
+    playSweep({ delay: 0.82, duration: 0.72, start: 120, peak: 1120, end: 210, volume: 0.13 });
+    return;
+  }
+
+  if (normalizedKind === "success" || normalizedKind === "toggle") {
+    playHum({ duration: 0.52, volume: 0.034 });
+    playSweep({ duration: 0.24, start: 120, peak: 760, end: 210, volume: 0.12 });
+    playSweep({ delay: 0.18, duration: 0.26, start: 210, peak: 900, end: 160, volume: 0.09 });
+    return;
+  }
+
+  if (normalizedKind === "warning" || normalizedKind === "error") {
+    playSweep({ duration: 0.2, start: 190, peak: 360, end: 95, volume: normalizedKind === "error" ? 0.13 : 0.1 });
+    return;
+  }
+
+  playSweep({ duration: 0.15, start: 135, peak: 610, end: 190, volume: 0.09 });
 }
 
 function boltSvg(className = "lm-loader-bolt") {
@@ -152,6 +316,7 @@ export function triggerButtonLightning(button, event = null) {
   flash.style.setProperty("--lm-y", `${y}px`);
   button.appendChild(flash);
   appendSparks(button, x, y, 6);
+  playMotionSound("tap");
 
   window.setTimeout(() => {
     button.classList.remove("lm-lightning-tap");
@@ -187,6 +352,7 @@ export function showSuccessLightningBurst(label = "Success") {
   `;
   document.body.appendChild(burst);
   appendSparks(burst, 110, 92, 12);
+  playMotionSound("success");
   window.setTimeout(() => burst.remove(), 1900);
 }
 

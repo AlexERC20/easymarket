@@ -1,10 +1,13 @@
 import {
   hideLightningLoader,
   initLightningMotion,
+  isMotionSoundEnabled,
+  playMotionSound,
+  setMotionSoundEnabled,
   showSuccessLightningBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260626-06";
+} from "./lightning-motion.js?v=20260626-07";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -555,8 +558,16 @@ function triggerHaptic(type = "light") {
             ? [28, 24, 18]
         : type === "selection"
           ? [14, 18, 10]
-          : 24;
+      : 24;
     navigator.vibrate(pattern);
+  }
+
+  if (type === "win") {
+    playMotionSound("win");
+  } else if (type === "success" || type === "warning" || type === "error") {
+    playMotionSound(type);
+  } else {
+    playMotionSound("tap");
   }
 }
 
@@ -1254,7 +1265,17 @@ function renderTaskRewards() {
   if ($("refTaskUsdtReward")) $("refTaskUsdtReward").textContent = formatFire(refUsdt);
   if ($("dailyPresenceTaskReward")) $("dailyPresenceTaskReward").textContent = formatFire(dailyPresence);
   if ($("dailyBetTaskReward")) $("dailyBetTaskReward").textContent = formatFire(dailyBet);
+  renderSoundToggle();
   renderTaskButtonStates();
+}
+
+function renderSoundToggle() {
+  const button = $("motionSoundToggleBtn");
+  if (!button) return;
+  const enabled = isMotionSoundEnabled();
+  button.classList.toggle("active", enabled);
+  button.setAttribute("aria-pressed", enabled ? "true" : "false");
+  button.textContent = enabled ? "Вкл" : "Выкл";
 }
 
 function getDailyTaskStatus(taskKey) {
@@ -4390,6 +4411,13 @@ document.querySelectorAll("[data-task-tab]").forEach((button) => {
 $("tasksCloseBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   setTasksSheetOpen(false);
+});
+
+$("motionSoundToggleBtn")?.addEventListener("click", async () => {
+  triggerHaptic("selection");
+  const enabled = await setMotionSoundEnabled(!isMotionSoundEnabled());
+  renderSoundToggle();
+  showToast(enabled ? "Звук включен." : "Звук выключен.");
 });
 
 $("tasksSheet").addEventListener("click", (event) => {
