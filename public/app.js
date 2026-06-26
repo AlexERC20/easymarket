@@ -105,6 +105,7 @@ const state = {
   activityLoaded: false,
   settlementsLoaded: false,
   seenActivityIds: new Set(),
+  bubbledActivityIds: new Set(),
   freshActivityIds: new Set(),
   seenSettledPositionIds: new Set(),
   pendingBuy: false,
@@ -1474,6 +1475,18 @@ function handleActivity(activity) {
   state.activity = nextActivity;
 }
 
+function handleMarketActivity(activity) {
+  const marketActivity = activity || [];
+  if (state.activityLoaded) {
+    marketActivity
+      .filter((trade) => !state.seenActivityIds.has(trade.id))
+      .reverse()
+      .forEach(showTradeBubble);
+  }
+
+  marketActivity.forEach((trade) => state.seenActivityIds.add(trade.id));
+}
+
 function handleSettlements(positions) {
   const settled = (positions || [])
     .filter((position) => position.status !== "open")
@@ -1504,6 +1517,7 @@ async function loadMarket() {
   const data = await api("/api/market/active");
   state.market = data.market;
   state.chartPoints = mergeChartPoints(data.chart, data.market);
+  handleMarketActivity(data.activity || []);
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
@@ -3332,12 +3346,24 @@ async function startStarsTopup() {
 
 function showTradeBubble(trade) {
   const container = $("tradeBubbles");
+  const market = getDisplayMarket();
+  if (!container || !trade?.id || !market || Number(trade.market_id) !== Number(market.id)) {
+    return;
+  }
+  if (state.bubbledActivityIds.has(trade.id)) {
+    return;
+  }
+  state.bubbledActivityIds.add(trade.id);
+  if (state.bubbledActivityIds.size > 240) {
+    state.bubbledActivityIds.delete(state.bubbledActivityIds.values().next().value);
+  }
   const bubble = document.createElement("div");
   const name = trade.username || trade.first_name || "user";
   const action = trade.action || "BUY";
   bubble.className = `trade-bubble ${sideClass(trade.side)}`;
   bubble.textContent = `${name} ${actionLabel(action)} ${sideLabel(trade.side)} ${formatCurrencyAmount(trade.amount, trade.currency)}`;
-  bubble.style.left = `${24 + Math.random() * 52}%`;
+  bubble.style.left = `${12 + Math.random() * 54}%`;
+  bubble.style.animationDelay = `${Math.random() * 120}ms`;
   container.appendChild(bubble);
   setTimeout(() => bubble.remove(), 2600);
 }
