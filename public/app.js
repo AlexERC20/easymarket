@@ -103,6 +103,7 @@ const state = {
   orderbookSide: "YES",
   referralNudgeShown: false,
   taskTab: "tasks",
+  dailyTasks: {},
   expanded: {
     positions: false,
     activity: false,
@@ -1253,6 +1254,48 @@ function renderTaskRewards() {
   if ($("refTaskUsdtReward")) $("refTaskUsdtReward").textContent = formatFire(refUsdt);
   if ($("dailyPresenceTaskReward")) $("dailyPresenceTaskReward").textContent = formatFire(dailyPresence);
   if ($("dailyBetTaskReward")) $("dailyBetTaskReward").textContent = formatFire(dailyBet);
+  renderTaskButtonStates();
+}
+
+function getDailyTaskStatus(taskKey) {
+  return state.dailyTasks?.[taskKey] || {
+    ready: false,
+    claimed: false,
+  };
+}
+
+function setTaskButtonVisualState(button, status) {
+  if (!button) return;
+  const claimed = Boolean(status?.claimed);
+  const claimable = Boolean(status?.ready) && !claimed;
+  button.classList.toggle("claimable", claimable);
+  button.classList.toggle("claimed", claimed);
+  button.classList.toggle("not-ready", !claimable && !claimed);
+  if (claimed) {
+    button.textContent = "Забрано";
+  } else if (button.dataset.dailyTask) {
+    button.textContent = "Забрать";
+  }
+}
+
+function markDailyTaskClaimed(taskKey) {
+  if (!taskKey) return;
+  state.dailyTasks = {
+    ...state.dailyTasks,
+    [taskKey]: {
+      ...(state.dailyTasks?.[taskKey] || {}),
+      ready: true,
+      claimed: true,
+    },
+  };
+  renderTaskButtonStates();
+}
+
+function renderTaskButtonStates() {
+  document.querySelectorAll("[data-daily-task]").forEach((button) => {
+    setTaskButtonVisualState(button, getDailyTaskStatus(button.dataset.dailyTask));
+  });
+  updatePresenceTaskButton();
 }
 
 function getMarketStatTitle(stat) {
@@ -1420,10 +1463,12 @@ async function upsertMe() {
   state.usdtBonusBalance = data.usdt_bonus_balance || 0;
   state.positions = data.positions || [];
   state.marketStats = data.market_stats || [];
+  state.dailyTasks = data.daily_tasks || {};
   state.presence.startedAt = Date.now();
   document.body.classList.remove("auth-only");
   $("authCard").classList.add("hidden");
   setConnection("LIVE", "online");
+  renderTaskButtonStates();
   return true;
 }
 
@@ -1542,9 +1587,11 @@ async function loadMe() {
   state.positions = data.positions || [];
   state.recentTrades = data.recent_trades || [];
   state.marketStats = data.market_stats || [];
+  state.dailyTasks = data.daily_tasks || {};
   handleSettlements(state.positions);
   renderMe();
   renderTaskStats();
+  renderTaskButtonStates();
 }
 
 async function loadRecentMarkets() {
@@ -4108,6 +4155,7 @@ async function claimDailyPresenceTask() {
     });
     state.balance = result.balance ?? state.balance;
     state.presence.claimed = true;
+    markDailyTaskClaimed("daily_presence");
     renderMe();
     if (result.already_claimed) {
       showToast("Ежедневный вход уже забран.");
@@ -4128,17 +4176,33 @@ async function claimDailyPresenceTask() {
 
 function updatePresenceTaskButton() {
   const button = $("taskDailyPresenceBtn");
-  if (!button || !state.presence.startedAt || state.presence.claimed) {
+  if (!button || !state.presence.startedAt) {
+    return;
+  }
+  const status = getDailyTaskStatus("daily_presence");
+  if (state.presence.claimed || status.claimed) {
+    setTaskButtonVisualState(button, {
+      ready: true,
+      claimed: true,
+    });
     return;
   }
   const elapsed = Date.now() - state.presence.startedAt;
   const remainingMs = Math.max(0, 5 * 60_000 - elapsed);
   if (remainingMs <= 0) {
     button.textContent = "Забрать";
+    setTaskButtonVisualState(button, {
+      ready: true,
+      claimed: false,
+    });
     return;
   }
   const seconds = Math.ceil(remainingMs / 1000);
   button.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  setTaskButtonVisualState(button, {
+    ready: false,
+    claimed: false,
+  });
 }
 
 async function shareInvite({ awardShareTask = false } = {}) {
@@ -4245,6 +4309,9 @@ async function claimDailyTaskByKey(taskKey, button = null) {
       }),
     });
     state.balance = result.balance ?? state.balance;
+    if (result.already_claimed || Number(result.awarded || 0) > 0) {
+      markDailyTaskClaimed(taskKey);
+    }
     renderMe();
     if (result.already_claimed) {
       showToast("Этот дейлик уже забран.");

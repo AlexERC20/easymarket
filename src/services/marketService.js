@@ -29,6 +29,15 @@ const BTC_MARKET_DEFS = [
 ];
 
 const BTC_MARKET_SYMBOLS = BTC_MARKET_DEFS.map((definition) => definition.symbol);
+const DAILY_TASK_KEYS = [
+  "daily_presence",
+  "daily_bet",
+  "daily_btc_prediction",
+  "daily_football_prediction",
+  "daily_btc_5_predictions",
+  "daily_win_1",
+  "daily_win_streak_5",
+];
 
 const WORLD_CUP_FALLBACK_MARKETS = [
   { polymarketId: "fallback-france", team: "France", icon: "🇫🇷", yesPrice: 0.171, volume: 54_606_121 },
@@ -1480,7 +1489,7 @@ export async function getUserSnapshot(telegramId) {
     return null;
   }
 
-  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats] = await Promise.all([
+  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, dailyTasks] = await Promise.all([
     getBalanceByUserId(user.id),
     getUsdtBalanceByUserId(user.id),
     getUsdtBonusBalanceByUserId(user.id),
@@ -1534,6 +1543,7 @@ export async function getUserSnapshot(telegramId) {
       [user.id],
     ),
     getUserMarketStats(user.id),
+    getUserDailyTaskStatus(user.id),
   ]);
   const usdtTotalBalance = Math.round((usdtCashBalance + usdtBonusBalance) * 100) / 100;
 
@@ -1546,6 +1556,7 @@ export async function getUserSnapshot(telegramId) {
     positions: positionsResult.rows.map(mapPosition),
     recent_trades: tradesResult.rows.map(mapTrade),
     market_stats: marketStats,
+    daily_tasks: dailyTasks,
   };
 }
 
@@ -2203,6 +2214,36 @@ async function isDailyTaskReady(client, userId, taskKey) {
   }
 
   return false;
+}
+
+async function getUserDailyTaskStatus(userId) {
+  const dayKey = getDayKey();
+  const claimsResult = await query(
+    `
+      SELECT task_key
+      FROM fire_task_claims
+      WHERE user_id = $1
+        AND day_key = $2
+        AND task_key = ANY($3::text[])
+    `,
+    [userId, dayKey, DAILY_TASK_KEYS],
+  );
+  const claimedTasks = new Set(claimsResult.rows.map((row) => row.task_key));
+  const queryClient = { query };
+  const entries = await Promise.all(DAILY_TASK_KEYS.map(async (taskKey) => {
+    let ready = false;
+    try {
+      ready = await isDailyTaskReady(queryClient, userId, taskKey);
+    } catch {
+      ready = false;
+    }
+    return [taskKey, {
+      ready,
+      claimed: claimedTasks.has(taskKey),
+    }];
+  }));
+
+  return Object.fromEntries(entries);
 }
 
 export async function claimDailyTask(input) {
