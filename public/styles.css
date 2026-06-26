@@ -749,34 +749,6 @@ h2 {
   animation: winGlowPulse 4.4s var(--ease-default) both;
 }
 
-.win-overlay.tier-4 {
-  background:
-    radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.2), transparent 18%),
-    radial-gradient(circle at 50% 42%, rgba(255, 230, 109, 0.32), transparent 28%),
-    radial-gradient(circle at 50% 54%, rgba(183, 255, 77, 0.4), transparent 38%),
-    radial-gradient(circle at 50% 62%, rgba(53, 246, 255, 0.22), transparent 48%),
-    rgba(8, 13, 22, 0.88);
-}
-
-.win-overlay.tier-4.show {
-  animation-duration: 5.2s;
-}
-
-.win-overlay.tier-4.show::before,
-.win-overlay.tier-4.show::after {
-  animation-duration: 5.2s;
-}
-
-.win-overlay.tier-4 strong {
-  font-size: clamp(40px, 12vw, 68px);
-  color: #fff;
-  text-shadow:
-    0 0 16px rgba(255, 255, 255, 0.72),
-    0 0 34px rgba(255, 230, 109, 0.62),
-    0 0 54px rgba(183, 255, 77, 0.68),
-    0 0 80px rgba(53, 246, 255, 0.42);
-}
-
 .win-overlay small,
 .win-overlay strong {
   display: block;
