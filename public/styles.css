@@ -765,31 +765,47 @@ h2 {
   font-size: 11px;
   font-weight: 950;
   white-space: nowrap;
-  animation: bubbleFloat 2.4s var(--ease-default) forwards;
+  max-width: min(82%, 280px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  will-change: transform, opacity, filter;
+  animation: bubbleFloat var(--bubble-duration, 4.4s) var(--ease-default) forwards;
 }
 
 .trade-bubble.yes {
   color: var(--yes);
+  border-color: rgba(25, 195, 125, 0.28);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36), 0 0 18px rgba(25, 195, 125, 0.14);
 }
 
 .trade-bubble.no {
   color: var(--no);
+  border-color: rgba(239, 70, 111, 0.28);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36), 0 0 18px rgba(239, 70, 111, 0.14);
 }
 
 @keyframes bubbleFloat {
   0% {
     opacity: 0;
-    transform: translate(-50%, 22px) scale(0.94);
+    transform: translate(calc(-50% + var(--bubble-start-x, 0px)), 28px) scale(0.9);
+    filter: blur(0.2px);
   }
-  15% {
+  12% {
     opacity: 1;
+    transform: translate(calc(-50% + var(--bubble-start-x, 0px)), 0) scale(1);
+    filter: blur(0);
   }
-  78% {
+  58% {
     opacity: 1;
+    transform: translate(calc(-50% + var(--bubble-mid-x, 14px)), var(--bubble-mid-y, -64px)) scale(1.02);
+  }
+  82% {
+    opacity: 0.72;
   }
   100% {
     opacity: 0;
-    transform: translate(-50%, -86px) scale(1);
+    transform: translate(calc(-50% + var(--bubble-end-x, -20px)), var(--bubble-end-y, -132px)) scale(0.98);
+    filter: blur(0.4px);
   }
 }
 

@@ -3366,10 +3366,20 @@ function showTradeBubble(trade) {
   const action = trade.action || "BUY";
   bubble.className = `trade-bubble ${sideClass(trade.side)}`;
   bubble.textContent = `${name} ${actionLabel(action)} ${sideLabel(trade.side)} ${formatCurrencyAmount(trade.amount, trade.currency)}`;
-  bubble.style.left = `${12 + Math.random() * 54}%`;
-  bubble.style.animationDelay = `${Math.random() * 120}ms`;
+  const duration = 3900 + Math.random() * 1400;
+  const delay = Math.random() * 420;
+  const rise = -(86 + Math.random() * 84);
+  bubble.style.left = `${10 + Math.random() * 72}%`;
+  bubble.style.bottom = `${18 + Math.random() * 72}px`;
+  bubble.style.animationDelay = `${delay}ms`;
+  bubble.style.setProperty("--bubble-duration", `${duration}ms`);
+  bubble.style.setProperty("--bubble-start-x", `${-14 + Math.random() * 28}px`);
+  bubble.style.setProperty("--bubble-mid-x", `${-36 + Math.random() * 72}px`);
+  bubble.style.setProperty("--bubble-end-x", `${-46 + Math.random() * 92}px`);
+  bubble.style.setProperty("--bubble-mid-y", `${rise * 0.56}px`);
+  bubble.style.setProperty("--bubble-end-y", `${rise}px`);
   container.appendChild(bubble);
-  setTimeout(() => bubble.remove(), 2600);
+  setTimeout(() => bubble.remove(), duration + delay + 500);
 }
 
 function upsertLocalPosition(position) {
