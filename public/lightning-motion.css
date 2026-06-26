@@ -123,11 +123,11 @@
   z-index: 4;
   pointer-events: none;
   background:
-    linear-gradient(115deg, transparent 0 38%, rgba(255, 230, 109, 0.75) 43%, rgba(53, 246, 255, 0.55) 47%, transparent 54%),
-    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(183, 255, 77, 0.4), transparent 34%);
+    linear-gradient(115deg, transparent 0 34%, rgba(255, 230, 109, 0.92) 42%, rgba(53, 246, 255, 0.78) 48%, rgba(183, 255, 77, 0.42) 52%, transparent 62%),
+    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(183, 255, 77, 0.7), rgba(53, 246, 255, 0.2) 28%, transparent 48%);
   mix-blend-mode: screen;
   opacity: 0;
-  animation: lmButtonFlash 520ms var(--lm-ease) both;
+  animation: lmButtonFlash 860ms var(--lm-ease) both;
 }
 
 .lm-spark {
@@ -141,11 +141,11 @@
   background: var(--lm-lime);
   box-shadow: 0 0 12px rgba(183, 255, 77, 0.8);
   pointer-events: none;
-  animation: lmSpark 620ms var(--lm-ease) both;
+  animation: lmSpark 940ms var(--lm-ease) both;
 }
 
 .lm-lightning-tap {
-  animation: lmTapSpring 360ms var(--lm-ease) both;
+  animation: lmTapSpring 460ms var(--lm-ease) both;
 }
 
 .lm-lightning-card {
@@ -185,14 +185,14 @@
   left: 50%;
   top: 45%;
   z-index: 998;
-  width: 176px;
-  min-height: 150px;
+  width: 224px;
+  min-height: 188px;
   display: grid;
   place-items: center;
   gap: 6px;
   pointer-events: none;
   transform: translate(-50%, -50%);
-  animation: lmBurstOut 880ms var(--lm-ease) both;
+  animation: lmBurstOut 1.72s var(--lm-ease) both;
 }
 
 .lm-success-burst::before {
@@ -201,31 +201,31 @@
   inset: 18px;
   border-radius: 50%;
   background:
-    radial-gradient(circle, rgba(183, 255, 77, 0.42), rgba(53, 246, 255, 0.12) 48%, transparent 70%);
+    radial-gradient(circle, rgba(183, 255, 77, 0.58), rgba(53, 246, 255, 0.2) 48%, rgba(165, 108, 255, 0.1) 62%, transparent 76%);
   filter: blur(2px);
-  animation: lmBurstCore 880ms var(--lm-ease) both;
+  animation: lmBurstCore 1.72s var(--lm-ease) both;
 }
 
 .lm-success-burst strong {
   position: relative;
   z-index: 2;
   color: #fff;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 950;
-  text-shadow: 0 0 24px rgba(183, 255, 77, 0.9);
+  text-shadow: 0 0 16px rgba(255, 255, 255, 0.72), 0 0 30px rgba(183, 255, 77, 0.95), 0 0 46px rgba(53, 246, 255, 0.55);
 }
 
 .lm-burst-bolt {
   position: relative;
   z-index: 2;
-  width: 62px;
-  height: 62px;
-  filter: drop-shadow(0 0 16px rgba(183, 255, 77, 0.8));
-  animation: lmBurstBolt 780ms var(--lm-ease) both;
+  width: 78px;
+  height: 78px;
+  filter: drop-shadow(0 0 18px rgba(183, 255, 77, 0.92)) drop-shadow(0 0 30px rgba(53, 246, 255, 0.44));
+  animation: lmBurstBolt 1.56s var(--lm-ease) both;
 }
 
 .lm-success-burst .lm-spark {
-  animation-duration: 840ms;
+  animation-duration: 1.2s;
 }
 
 .lm-balance-pulse {
@@ -285,7 +285,8 @@
 
 @keyframes lmButtonFlash {
   0% { opacity: 0; transform: translateX(-20%) scale(0.94); }
-  20% { opacity: 1; }
+  18% { opacity: 1; }
+  54% { opacity: 0.78; }
   100% { opacity: 0; transform: translateX(20%) scale(1.05); }
 }
 
@@ -307,8 +308,8 @@
 
 @keyframes lmBurstOut {
   0% { opacity: 0; transform: translate(-50%, -50%) scale(0.72); }
-  18% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
-  72% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  16% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+  76% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
   100% { opacity: 0; transform: translate(-50%, -62%) scale(1.16); }
 }
 
@@ -337,22 +338,23 @@
 
 @media (prefers-reduced-motion: reduce) {
   .lm-energy-bg,
-  .lm-loader,
-  .lm-button-flash,
-  .lm-spark,
-  .lm-success-burst {
+  .lm-loader {
     display: none !important;
   }
 
   .lm-lightning-card,
   .lm-lightning-card:hover,
   .lm-lightning-card.lm-card-active {
-    transform: none !important;
-    box-shadow: var(--shadow);
+    transform: translateY(-1px) !important;
   }
 
-  .lm-tab-group button::after {
-    transition: none !important;
-    animation: none !important;
+  .lm-button-flash {
+    animation-duration: 720ms !important;
+  }
+
+  .lm-success-burst,
+  .lm-success-burst::before,
+  .lm-burst-bolt {
+    animation-duration: 1.15s !important;
   }
 }

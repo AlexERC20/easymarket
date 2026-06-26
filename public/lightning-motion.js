@@ -96,11 +96,12 @@ function ensureEnergyBackground() {
 }
 
 function appendSparks(target, x, y, count = 5) {
-  if (!target || reducedMotion()) {
+  if (!target) {
     return;
   }
 
-  for (let index = 0; index < count; index += 1) {
+  const safeCount = reducedMotion() ? Math.min(2, count) : count;
+  for (let index = 0; index < safeCount; index += 1) {
     const spark = document.createElement("span");
     const angle = (Math.PI * 2 * index) / count + Math.random() * 0.7;
     const distance = 18 + Math.random() * 24;
@@ -110,12 +111,12 @@ function appendSparks(target, x, y, count = 5) {
     spark.style.setProperty("--lm-dx", `${Math.cos(angle) * distance}px`);
     spark.style.setProperty("--lm-dy", `${Math.sin(angle) * distance}px`);
     target.appendChild(spark);
-    window.setTimeout(() => spark.remove(), 760);
+    window.setTimeout(() => spark.remove(), 1100);
   }
 }
 
 export function triggerButtonLightning(button, event = null) {
-  if (!button || button.disabled || reducedMotion()) {
+  if (!button || button.disabled) {
     return;
   }
 
@@ -139,16 +140,16 @@ export function triggerButtonLightning(button, event = null) {
   flash.style.setProperty("--lm-x", `${x}px`);
   flash.style.setProperty("--lm-y", `${y}px`);
   button.appendChild(flash);
-  appendSparks(button, x, y, 4);
+  appendSparks(button, x, y, 6);
 
   window.setTimeout(() => {
     button.classList.remove("lm-lightning-tap");
     flash.remove();
-  }, 620);
+  }, 940);
 }
 
 export function triggerCardLightning(card) {
-  if (!card || reducedMotion()) {
+  if (!card) {
     return;
   }
 
@@ -160,12 +161,8 @@ export function triggerCardLightning(card) {
 }
 
 export function showSuccessLightningBurst(label = "Success") {
-  if (reducedMotion()) {
-    return;
-  }
-
   const now = Date.now();
-  if (now - lastSuccessAt < 360) {
+  if (now - lastSuccessAt < 260) {
     return;
   }
   lastSuccessAt = now;
@@ -177,12 +174,12 @@ export function showSuccessLightningBurst(label = "Success") {
     <strong>${String(label || "Success").replace(/[<>&]/g, "")}</strong>
   `;
   document.body.appendChild(burst);
-  appendSparks(burst, 88, 78, 8);
-  window.setTimeout(() => burst.remove(), 980);
+  appendSparks(burst, 110, 92, 12);
+  window.setTimeout(() => burst.remove(), 1900);
 }
 
 export function triggerBalancePulse(element) {
-  if (!element || reducedMotion()) {
+  if (!element) {
     return;
   }
 
@@ -193,10 +190,6 @@ export function triggerBalancePulse(element) {
 }
 
 export function showLightningLoader() {
-  if (reducedMotion()) {
-    return null;
-  }
-
   const loader = ensureLoader();
   loader.classList.remove("hidden");
   return loader;

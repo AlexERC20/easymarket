@@ -4,7 +4,7 @@ import {
   showSuccessLightningBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260626-01";
+} from "./lightning-motion.js?v=20260626-02";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -960,7 +960,7 @@ function showWinOverlay(label) {
     overlay.classList.remove("show");
     overlay.classList.add("hidden");
     state.winOverlayTimer = null;
-  }, 2800);
+  }, 4400);
 }
 
 function setConnection(status, type = "") {
