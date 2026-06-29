@@ -3907,19 +3907,6 @@ code {
     display: none !important;
   }
 
-  .aquarium-dom-fish,
-  .aquarium-dom-food {
-    animation: none !important;
-  }
-
-  .aquarium-dom-fish {
-    left: 54% !important;
-  }
-
-  .aquarium-dom-food {
-    display: none !important;
-  }
-
   .market-card,
   .task-panel,
   .bet-panel,

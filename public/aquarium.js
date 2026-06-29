@@ -53,6 +53,8 @@ let domFish = [];
 let domFood = [];
 let domRafId = 0;
 let domLastTs = 0;
+let domIntervalId = 0;
+let domLastFrameAt = 0;
 
 function readEnabledFlag() {
   try {
@@ -79,6 +81,13 @@ function canAnimateAquarium() {
   // Telegram on iOS runs inside WKWebView. Some builds can report the document
   // as hidden while the Mini App is visibly active, which killed the fish loop.
   return enabled && !reducedMotion() && (!document.hidden || isTelegramMiniApp());
+}
+
+function canAnimateDomAquarium() {
+  // DOM fallback is the compatibility path for iOS Telegram WebView. Do not
+  // gate it on prefers-reduced-motion: on some iPhones Telegram reports reduce
+  // by default, which prevented fish from being created at all.
+  return enabled && shouldUseDomAquarium() && (!document.hidden || isTelegramMiniApp());
 }
 
 function rand(min, max) {
@@ -160,7 +169,7 @@ function measureDomLayer() {
 }
 
 function primeDomAquarium() {
-  if (!enabled || reducedMotion()) {
+  if (!enabled) {
     return false;
   }
   const measured = measureDomLayer();
@@ -205,6 +214,7 @@ function clearDomAquarium() {
   domFish = [];
   domFood = [];
   domLastTs = 0;
+  domLastFrameAt = 0;
   if (domLayer) {
     domLayer.remove();
     domLayer = null;
@@ -417,43 +427,71 @@ function renderDomAquarium() {
   }
 }
 
-function domFrame(ts) {
-  domRafId = 0;
-  if (!canAnimateAquarium() || !shouldUseDomAquarium()) {
-    return;
-  }
+function stepDomAquarium(ts) {
   const measured = measureDomLayer();
   if (!measured) {
-    window.setTimeout(() => startDomLoop(), 300);
-    return;
+    return false;
   }
   if (domLastTs && ts - domLastTs < FRAME_MS) {
-    domRafId = requestAnimationFrame(domFrame);
-    return;
+    return true;
   }
   const dt = domLastTs ? Math.min(0.05, (ts - domLastTs) / 1000) : 0.033;
   domLastTs = ts;
+  domLastFrameAt = Date.now();
   tilt += (tiltTarget - tilt) * Math.min(1, dt * 4);
   updateDomFood(dt, measured.width, measured.height);
   updateDomFish(dt, measured.width, measured.height);
   renderDomAquarium();
+  return true;
+}
+
+function domFrame(ts) {
+  domRafId = 0;
+  if (!canAnimateDomAquarium()) {
+    return;
+  }
+  if (!stepDomAquarium(ts)) {
+    window.setTimeout(() => startDomLoop(), 300);
+    return;
+  }
   if (enabled && (domFish.length || domFood.length)) {
     domRafId = requestAnimationFrame(domFrame);
   }
 }
 
 function startDomLoop() {
-  if (domRafId || !canAnimateAquarium() || !shouldUseDomAquarium()) {
+  if (!canAnimateDomAquarium()) {
     return;
   }
-  domLastTs = 0;
-  domRafId = requestAnimationFrame(domFrame);
+  if (!domRafId) {
+    domLastTs = 0;
+    domRafId = requestAnimationFrame(domFrame);
+  }
+  if (!domIntervalId) {
+    domIntervalId = window.setInterval(() => {
+      if (!canAnimateDomAquarium()) {
+        return;
+      }
+      const now = Date.now();
+      // iOS Telegram can pause or starve rAF while a WebApp remains visible.
+      // Step manually only when rAF has not advanced recently.
+      if (!domLastFrameAt || now - domLastFrameAt > 180) {
+        if (!stepDomAquarium(performance.now())) {
+          domLastTs = 0;
+        }
+      }
+    }, 120);
+  }
 }
 
 function stopDomLoop() {
   if (domRafId) {
     cancelAnimationFrame(domRafId);
     domRafId = 0;
+  }
+  if (domIntervalId) {
+    window.clearInterval(domIntervalId);
+    domIntervalId = 0;
   }
 }
 
@@ -1112,7 +1150,7 @@ export function initAquarium() {
     }
   });
 
-  if (enabled && !reducedMotion()) {
+  if (enabled) {
     primeAquarium(18);
   }
 }
