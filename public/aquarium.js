@@ -7,6 +7,7 @@
 // falling onto the next round's fresh screen where the fish are already living.
 
 const STORAGE_KEY = "easymarket_aquarium";
+const USER_CHOICE_KEY = "easymarket_aquarium_choice_v2";
 const MAX_FOOD = 80;
 const FISH_MIN = 2;
 const FISH_MAX = 3;
@@ -47,10 +48,16 @@ const foodImages = new Map();
 
 let waterGrad = null;
 let waterGradH = 0;
+let domLayer = null;
+let domFishReady = false;
 
 function readEnabledFlag() {
   try {
     const raw = window.localStorage?.getItem(STORAGE_KEY);
+    const hasNewChoice = window.localStorage?.getItem(USER_CHOICE_KEY) === "1";
+    if (isTelegramMiniApp() && raw === "0" && !hasNewChoice) {
+      return true;
+    }
     return raw === null || raw === undefined ? true : raw === "1";
   } catch {
     return true;
@@ -83,6 +90,7 @@ export function setAquariumEnabled(next) {
   enabled = Boolean(next);
   try {
     window.localStorage?.setItem(STORAGE_KEY, enabled ? "1" : "0");
+    window.localStorage?.setItem(USER_CHOICE_KEY, "1");
   } catch {
     // storage can be unavailable in hardened webviews
   }
@@ -95,10 +103,98 @@ export function setAquariumEnabled(next) {
     fish = [];
     food = [];
     bubbles = [];
+    pendingFoodAvatars = [];
     foodImages.clear();
+    clearDomAquarium();
     clearCanvas();
   }
   return enabled;
+}
+
+function shouldUseDomAquarium() {
+  if (!isTelegramMiniApp()) {
+    return false;
+  }
+  const platform = String(window.Telegram?.WebApp?.platform || "").toLowerCase();
+  const ua = String(window.navigator?.userAgent || "").toLowerCase();
+  return platform.includes("ios")
+    || platform.includes("mac")
+    || platform.includes("tdesktop")
+    || /iphone|ipad|ipod|macintosh|mac os/.test(ua);
+}
+
+function ensureDomLayer() {
+  if (!shouldUseDomAquarium()) {
+    return null;
+  }
+  if (domLayer?.isConnected) {
+    return domLayer;
+  }
+  const host = document.querySelector(".chart-frame");
+  if (!host) {
+    return null;
+  }
+  domLayer = document.createElement("div");
+  domLayer.className = "aquarium-dom-layer";
+  domLayer.setAttribute("aria-hidden", "true");
+  host.appendChild(domLayer);
+  domFishReady = false;
+  return domLayer;
+}
+
+function primeDomAquarium() {
+  if (!enabled) {
+    return false;
+  }
+  const layer = ensureDomLayer();
+  if (!layer) {
+    return false;
+  }
+  if (domFishReady && layer.querySelector(".aquarium-dom-fish")) {
+    return true;
+  }
+  layer.querySelectorAll(".aquarium-dom-fish").forEach((node) => node.remove());
+  const fishCount = 3;
+  for (let i = 0; i < fishCount; i += 1) {
+    const fishEl = document.createElement("span");
+    fishEl.className = `aquarium-dom-fish fish-${i + 1}`;
+    fishEl.style.setProperty("--fish-top", `${74 + i * 7}%`);
+    fishEl.style.setProperty("--fish-delay", `${-i * 2.4}s`);
+    fishEl.style.setProperty("--fish-duration", `${12 + i * 2.2}s`);
+    fishEl.style.setProperty("--fish-scale", `${0.84 + i * 0.08}`);
+    layer.appendChild(fishEl);
+  }
+  domFishReady = true;
+  return true;
+}
+
+function clearDomAquarium() {
+  domFishReady = false;
+  if (domLayer) {
+    domLayer.remove();
+    domLayer = null;
+  }
+}
+
+function appendDomFood(avatars) {
+  if (!enabled || !Array.isArray(avatars) || !avatars.length) {
+    return;
+  }
+  const layer = ensureDomLayer();
+  if (!layer) {
+    return;
+  }
+  primeDomAquarium();
+  avatars.slice(-36).forEach((avatar, index) => {
+    const crumb = document.createElement("span");
+    crumb.className = `aquarium-dom-food ${avatar.side === "NO" ? "no" : "yes"}`;
+    crumb.textContent = String(avatar.initial || "•").slice(0, 1);
+    crumb.style.left = `${Math.max(7, Math.min(93, Number(avatar.xFrac || 0.5) * 100))}%`;
+    crumb.style.top = `${Math.max(9, Math.min(66, Number(avatar.yFrac || 0.45) * 100))}%`;
+    crumb.style.setProperty("--food-delay", `${Math.min(900, index * 24)}ms`);
+    layer.appendChild(crumb);
+    window.setTimeout(() => crumb.remove(), 7600 + index * 24);
+  });
 }
 
 function getFoodImage(url) {
@@ -218,6 +314,7 @@ function ensureFish() {
 }
 
 export function primeAquarium(retries = 10) {
+  primeDomAquarium();
   if (!canAnimateAquarium()) {
     return false;
   }
@@ -300,6 +397,7 @@ export function spillAquariumFood(avatars) {
   if (!enabled || !Array.isArray(avatars) || !avatars.length) {
     return;
   }
+  appendDomFood(avatars);
   if (!measure()) {
     queuePendingFood(avatars);
     primeAquarium(16);

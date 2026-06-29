@@ -814,6 +814,148 @@ h2 {
   will-change: transform;
 }
 
+.aquarium-dom-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.aquarium-dom-fish {
+  position: absolute;
+  top: var(--fish-top, 78%);
+  left: -28px;
+  width: 18px;
+  height: 10px;
+  border-radius: 999px 80% 80% 999px;
+  background:
+    radial-gradient(circle at 72% 34%, #fff 0 7%, #10151f 8% 12%, transparent 13%),
+    linear-gradient(90deg, #ffb347, #ffe4a8);
+  box-shadow:
+    0 0 10px rgba(255, 179, 71, 0.34),
+    0 0 18px rgba(53, 246, 255, 0.08);
+  opacity: 0.9;
+  transform: translate3d(0, 0, 0) scale(var(--fish-scale, 1));
+  -webkit-transform: translate3d(0, 0, 0) scale(var(--fish-scale, 1));
+  animation: aquariumDomSwim var(--fish-duration, 13s) linear var(--fish-delay, 0s) infinite;
+}
+
+.aquarium-dom-fish::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 1px;
+  width: 8px;
+  height: 8px;
+  background: #ff8a3c;
+  clip-path: polygon(100% 50%, 0 0, 0 100%);
+  transform-origin: right center;
+  animation: aquariumDomTail 620ms ease-in-out infinite alternate;
+}
+
+.aquarium-dom-fish.fish-2 {
+  background:
+    radial-gradient(circle at 72% 34%, #fff 0 7%, #10151f 8% 12%, transparent 13%),
+    linear-gradient(90deg, #46d4ff, #bff2ff);
+  box-shadow:
+    0 0 10px rgba(70, 212, 255, 0.34),
+    0 0 18px rgba(183, 255, 77, 0.08);
+}
+
+.aquarium-dom-fish.fish-2::before {
+  background: #2aa7ff;
+}
+
+.aquarium-dom-fish.fish-3 {
+  background:
+    radial-gradient(circle at 72% 34%, #fff 0 7%, #10151f 8% 12%, transparent 13%),
+    linear-gradient(90deg, #b07bff, #e7d6ff);
+  box-shadow:
+    0 0 10px rgba(176, 123, 255, 0.34),
+    0 0 18px rgba(53, 246, 255, 0.08);
+}
+
+.aquarium-dom-fish.fish-3::before {
+  background: #8a5cff;
+}
+
+.aquarium-dom-food {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.95), rgba(25, 195, 125, 0.84) 44%, rgba(14, 20, 32, 0.92));
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 5px;
+  font-weight: 950;
+  line-height: 1;
+  box-shadow: 0 0 8px rgba(25, 195, 125, 0.44);
+  transform: translate3d(-50%, -50%, 0);
+  -webkit-transform: translate3d(-50%, -50%, 0);
+  animation: aquariumDomFood 7.2s ease-in var(--food-delay, 0ms) both;
+}
+
+.aquarium-dom-food.no {
+  background: radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.95), rgba(239, 70, 111, 0.84) 44%, rgba(14, 20, 32, 0.92));
+  box-shadow: 0 0 8px rgba(239, 70, 111, 0.42);
+}
+
+@keyframes aquariumDomSwim {
+  0% {
+    transform: translate3d(-28px, 0, 0) scale(var(--fish-scale, 1));
+  }
+
+  48% {
+    transform: translate3d(calc(100vw + 28px), -7px, 0) scale(var(--fish-scale, 1));
+  }
+
+  49% {
+    transform: translate3d(calc(100vw + 28px), -7px, 0) scaleX(-1) scale(var(--fish-scale, 1));
+  }
+
+  98% {
+    transform: translate3d(-28px, 5px, 0) scaleX(-1) scale(var(--fish-scale, 1));
+  }
+
+  100% {
+    transform: translate3d(-28px, 0, 0) scale(var(--fish-scale, 1));
+  }
+}
+
+@keyframes aquariumDomTail {
+  from {
+    transform: rotate(-14deg);
+  }
+
+  to {
+    transform: rotate(18deg);
+  }
+}
+
+@keyframes aquariumDomFood {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, -70%, 0) scale(0.72);
+  }
+
+  10% {
+    opacity: 1;
+  }
+
+  72% {
+    opacity: 0.9;
+    transform: translate3d(calc(-50% + 8px), 78px, 0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(-50% - 5px), 118px, 0) scale(0.56);
+  }
+}
+
 .trade-bubbles {
   position: absolute;
   inset: 0;
@@ -1257,16 +1399,18 @@ h2 {
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
   margin-top: 9px;
-  contain: layout paint;
   overflow-anchor: none;
 }
 
 .amount-button {
   position: relative;
+  display: grid;
+  align-content: center;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
   -webkit-user-select: none;
+  min-width: 0;
   height: 49px;
   min-height: 49px;
   border: 1px solid var(--line);
@@ -1275,6 +1419,7 @@ h2 {
   color: var(--text);
   padding: 7px 4px;
   transform: translateZ(0);
+  -webkit-transform: translateZ(0);
   overflow: hidden;
   isolation: isolate;
   transition:
@@ -1284,11 +1429,17 @@ h2 {
     filter var(--motion-fast) var(--ease-default),
     box-shadow var(--motion-fast) var(--ease-default);
   will-change: transform, filter;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 .amount-button strong,
 .amount-button small {
   display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .amount-button strong {
@@ -3794,6 +3945,19 @@ code {
   .lightning-flash,
   .reward-burst,
   .task-button.claimable::after {
+    display: none !important;
+  }
+
+  .aquarium-dom-fish,
+  .aquarium-dom-food {
+    animation: none !important;
+  }
+
+  .aquarium-dom-fish {
+    left: 54% !important;
+  }
+
+  .aquarium-dom-food {
     display: none !important;
   }
 

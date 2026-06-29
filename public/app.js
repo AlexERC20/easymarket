@@ -8,14 +8,14 @@ import {
   showWalletFlowBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260629-17";
+} from "./lightning-motion.js?v=20260629-18";
 import {
   initAquarium,
   isAquariumEnabled,
   primeAquarium,
   setAquariumEnabled,
   spillAquariumFood,
-} from "./aquarium.js?v=20260629-23";
+} from "./aquarium.js?v=20260629-24";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -5691,6 +5691,7 @@ getAmountsForCurrency().forEach((amount, index) => {
     button.classList.add("active");
   }
 });
+renderTradeTicket();
 
 loadPublicConfig()
   .then(upsertMe)

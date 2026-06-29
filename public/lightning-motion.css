@@ -116,9 +116,6 @@
   overflow: hidden;
   isolation: isolate;
   border-radius: var(--lm-radius, inherit);
-  clip-path: inset(0 round var(--lm-radius, 12px));
-  contain: paint;
-  transform: translateZ(0);
 }
 
 .lm-clickable[data-stake-tier="1"] {
