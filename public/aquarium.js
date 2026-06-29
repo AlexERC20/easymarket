@@ -123,7 +123,17 @@ function getFoodImage(url) {
 }
 
 function measure() {
-  if (!canvas) {
+  // Re-acquire the canvas if it was ever detached (defensive: the chart area
+  // is static markup, but this keeps the layer alive through any DOM rebuild).
+  if (!canvas || !canvas.isConnected) {
+    const el = document.getElementById("aquariumCanvas");
+    if (el instanceof HTMLCanvasElement) {
+      canvas = el;
+      ctx = canvas.getContext("2d");
+      waterGrad = null;
+    }
+  }
+  if (!canvas || !ctx) {
     return false;
   }
   const rect = canvas.getBoundingClientRect();
