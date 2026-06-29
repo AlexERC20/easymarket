@@ -2,6 +2,11 @@
 
 Telegram Mini App / Web App MVP with a ⭐-based YES/NO prediction market.
 
+Project orientation docs:
+
+- [PROJECT_MAP.md](./PROJECT_MAP.md) — repository map, backend/frontend/data overview, API and safety notes.
+- [CLAUDE_CONTEXT.md](./CLAUDE_CONTEXT.md) — compact context file for Claude/UI-motion development sessions.
+
 The first market type is BTC 5M:
 
 ```text
