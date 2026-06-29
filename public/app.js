@@ -7,7 +7,7 @@ import {
   showSuccessLightningBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260629-01";
+} from "./lightning-motion.js?v=20260629-02";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -84,6 +84,7 @@ const state = {
     pollTimer: null,
     historyOpen: false,
     checking: false,
+    afterAction: null,
   },
   withdrawal: {
     amount: "",
@@ -106,7 +107,7 @@ const state = {
   selectedClanId: null,
   clanView: "leaderboard",
   marketPanel: "chat",
-  feedPanel: "activity",
+  feedPanel: "positions",
   orderbookSide: "YES",
   lossRefundOffers: [],
   referralNudgeShown: false,
@@ -2364,8 +2365,8 @@ function renderMe() {
           ? `Вернём до ${formatCurrencyAmount(pendingLossOffer.amount, "USDT")} на бонусный баланс.`
           : `Позови друга в EasyMarket. После его первой ставки вернём до ${formatCurrencyAmount(pendingLossOffer.amount, "USDT")} на бонусный баланс.`
         }</small>
-        <button class="task-button claimable" ${lossOfferCost ? `data-loss-refund-stars="${pendingLossOffer.id}"` : "data-loss-refund-share"} type="button">
-          ${lossOfferCost ? `Вернуть за ${lossOfferCost}` : "Позвать"}
+        <button class="task-button claimable" ${lossOfferCost ? `data-loss-refund-stars="${pendingLossOffer.id}" data-loss-refund-cost="${lossOfferCost}"` : "data-loss-refund-share"} type="button">
+          ${lossOfferCost ? `Пополнить за ${lossOfferCost}` : "Позвать"}
         </button>
       </div>
     `
@@ -2537,11 +2538,20 @@ function renderRecentMarkets() {
 }
 
 function renderFeedPanel() {
-  const showActivity = state.feedPanel !== "recent";
-  $("activitySection")?.classList.toggle("hidden", !showActivity);
-  $("activitySection")?.classList.toggle("active", showActivity);
-  $("recentSection")?.classList.toggle("hidden", showActivity);
-  $("recentSection")?.classList.toggle("active", !showActivity);
+  const panels = ["positions", "activity", "recent"];
+  if (!panels.includes(state.feedPanel)) {
+    state.feedPanel = "positions";
+  }
+  const currentPanel = state.feedPanel;
+  $("activitySection")?.classList.toggle("hidden", currentPanel !== "positions");
+  $("activitySection")?.classList.toggle("active", currentPanel === "positions");
+  $("recentSection")?.classList.toggle("hidden", currentPanel !== "activity");
+  $("recentSection")?.classList.toggle("active", currentPanel === "activity");
+  $("marketResultsSection")?.classList.toggle("hidden", currentPanel !== "recent");
+  $("marketResultsSection")?.classList.toggle("active", currentPanel === "recent");
+  document.querySelectorAll("[data-feed-panel]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.feedPanel === currentPanel);
+  });
 }
 
 function renderLeaderboard() {
@@ -3206,20 +3216,24 @@ function renderTopupSheet() {
   renderWalletHistory();
 }
 
-function openTopupSheet(amount, reason = "", mode = "topup", currencyOverride = null) {
+function openTopupSheet(amount, reason = "", mode = "topup", currencyOverride = null, afterAction = null) {
   const targetCurrency = normalizeCurrency(currencyOverride || (mode === "withdraw" ? "USDT" : state.currency));
   state.topup.amount = hasTopupAmountValue(amount) ? normalizeTopupAmount(amount, targetCurrency) : "";
   state.topup.reason = reason;
   state.topup.mode = mode === "withdraw" ? "withdraw" : "topup";
   state.topup.currency = targetCurrency;
   state.topup.historyOpen = false;
+  state.topup.afterAction = afterAction;
   renderTopupSheet();
   $("topupSheet")?.classList.remove("hidden");
 }
 
-function closeTopupSheet() {
+function closeTopupSheet(options = {}) {
   $("topupSheet")?.classList.add("hidden");
   state.topup.historyOpen = false;
+  if (options.clearAfterAction !== false) {
+    state.topup.afterAction = null;
+  }
 }
 
 function showButtonPressed(button) {
@@ -3242,7 +3256,25 @@ async function refreshBalanceAfterInvoice() {
   for (let attempt = 0; attempt < 8; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, attempt < 2 ? 900 : 1500));
     await loadMe().catch(() => undefined);
+    const handled = await maybeRunTopupAfterAction().catch(() => false);
+    if (handled) {
+      return;
+    }
   }
+}
+
+async function maybeRunTopupAfterAction() {
+  const action = state.topup.afterAction;
+  if (!action || action.type !== "loss_refund_stars") {
+    return false;
+  }
+  const requiredBalance = Number(action.startBalance || 0) + Number(action.amount || 0) - 0.01;
+  if (Number(state.balance || 0) < requiredBalance) {
+    return false;
+  }
+  state.topup.afterAction = null;
+  await claimLossRefundWithStars(action.offerId);
+  return true;
 }
 
 async function refreshDepositIntent() {
@@ -3520,7 +3552,7 @@ async function startStarsTopup() {
         if (status === "paid") {
           showTopupSuccessAnimation("TOP UP");
           showToast("Оплата прошла. Обновляю баланс...");
-          closeTopupSheet();
+          closeTopupSheet({ clearAfterAction: false });
           void refreshBalanceAfterInvoice();
           return;
         }
@@ -4123,10 +4155,22 @@ document.addEventListener("pointerdown", (event) => {
   });
 });
 
+document.querySelectorAll("[data-feed-panel]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const panel = button.dataset.feedPanel;
+    if (!["positions", "activity", "recent"].includes(panel) || state.feedPanel === panel) {
+      return;
+    }
+    triggerHaptic("selection");
+    state.feedPanel = panel;
+    renderFeedPanel();
+  });
+});
+
 let feedTouchStartX = null;
 let feedTouchStartY = null;
 document.addEventListener("touchstart", (event) => {
-  if (!event.target.closest("#activitySection, #recentSection")) {
+  if (!event.target.closest("#activitySection, #recentSection, #marketResultsSection, #feedTabs")) {
     return;
   }
   const touch = event.touches?.[0];
@@ -4148,7 +4192,15 @@ document.addEventListener("touchend", (event) => {
   const dx = touch.clientX - startX;
   const dy = touch.clientY - startY;
   if (Math.abs(dx) < 44 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
-  state.feedPanel = dx < 0 ? "recent" : "activity";
+  const panels = ["positions", "activity", "recent"];
+  const currentIndex = Math.max(0, panels.indexOf(state.feedPanel));
+  const nextIndex = dx < 0
+    ? Math.min(panels.length - 1, currentIndex + 1)
+    : Math.max(0, currentIndex - 1);
+  if (nextIndex === currentIndex) {
+    return;
+  }
+  state.feedPanel = panels[nextIndex];
   triggerHaptic("selection");
   renderFeedPanel();
 }, { passive: true });
@@ -4573,15 +4625,41 @@ function setClansSheetOpen(open) {
 }
 
 function showReferralNudge() {
-  if (state.referralNudgeShown || !state.user?.telegram_id) {
+  if (state.referralNudgeShown || !state.user?.telegram_id || !canShowReferralNudgeToday()) {
     return;
   }
   state.referralNudgeShown = true;
+  markReferralNudgeShownToday();
   $("referralNudge")?.classList.remove("hidden");
 }
 
 function hideReferralNudge() {
   $("referralNudge")?.classList.add("hidden");
+}
+
+function getReferralNudgeStorageKey() {
+  const day = new Date().toISOString().slice(0, 10);
+  return `easymarket:referral_nudge:${state.user?.telegram_id || "anon"}:${day}`;
+}
+
+function getReferralNudgeCountToday() {
+  try {
+    return Math.max(0, Number(localStorage.getItem(getReferralNudgeStorageKey()) || 0));
+  } catch {
+    return 0;
+  }
+}
+
+function canShowReferralNudgeToday() {
+  return getReferralNudgeCountToday() < 2;
+}
+
+function markReferralNudgeShownToday() {
+  try {
+    localStorage.setItem(getReferralNudgeStorageKey(), String(getReferralNudgeCountToday() + 1));
+  } catch {
+    // Storage can be unavailable inside some WebViews; the session flag still prevents spam.
+  }
 }
 
 $("tasksBtn").addEventListener("click", () => {
@@ -4740,7 +4818,20 @@ document.addEventListener("click", (event) => {
   }
   event.preventDefault();
   triggerHaptic("selection");
-  void claimLossRefundWithStars(button.dataset.lossRefundStars);
+  const amount = Math.max(1, Number(button.dataset.lossRefundCost || 0));
+  const offerId = Number(button.dataset.lossRefundStars || 0);
+  openTopupSheet(
+    amount,
+    "Пополните звёзды, чтобы вернуть проигрыш.",
+    "topup",
+    "STAR",
+    {
+      type: "loss_refund_stars",
+      offerId,
+      amount,
+      startBalance: Number(state.balance || 0),
+    },
+  );
 });
 
 $("btcMarketsBtn")?.addEventListener("click", () => {
