@@ -771,6 +771,13 @@ h2 {
   height: 100%;
 }
 
+.aquarium-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
 .trade-bubbles {
   position: absolute;
   inset: 0;

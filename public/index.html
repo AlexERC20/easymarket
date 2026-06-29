@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260629-17" />
+    <link rel="stylesheet" href="/styles.css?v=20260629-18" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260629-17" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -112,6 +112,13 @@
               <small>Energy-saber клики, победы и важные отклики.</small>
             </div>
             <button id="motionSoundToggleBtn" class="task-button sound-toggle-button" type="button" aria-pressed="false">Выкл</button>
+          </div>
+          <div class="task-row sound-toggle-row">
+            <div>
+              <strong>Аквариум на графике</strong>
+              <small>Кружочки ставок опадают кормом, рыбки плавают и едят их.</small>
+            </div>
+            <button id="aquariumToggleBtn" class="task-button sound-toggle-button" type="button" aria-pressed="false">Выкл</button>
           </div>
           <div class="task-list">
             <details class="task-group" open>
@@ -498,6 +505,7 @@
 
         <div class="chart-frame">
           <canvas id="marketChart" class="market-chart" aria-label="BTC price chart"></canvas>
+          <canvas id="aquariumCanvas" class="aquarium-layer" aria-hidden="true"></canvas>
           <div id="winOverlay" class="win-overlay hidden" aria-live="polite">
             <small>YOU WON</small>
             <strong id="winOverlayAmount">+0</strong>
@@ -632,6 +640,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260629-17" type="module"></script>
+    <script src="/app.js?v=20260629-18" type="module"></script>
   </body>
 </html>

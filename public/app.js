@@ -9,6 +9,12 @@ import {
   triggerBalancePulse,
   triggerButtonLightning,
 } from "./lightning-motion.js?v=20260629-17";
+import {
+  initAquarium,
+  isAquariumEnabled,
+  setAquariumEnabled,
+  spillAquariumFood,
+} from "./aquarium.js?v=20260629-18";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -149,6 +155,7 @@ const state = {
   seenActivityIds: new Set(),
   bubbledActivityIds: new Set(),
   chartTradesByMarket: new Map(),
+  aquariumSnapshot: null,
   freshActivityIds: new Set(),
   seenSettledPositionIds: new Set(),
   pendingBuy: false,
@@ -201,6 +208,7 @@ const sheetHeightTimers = new WeakMap();
 const $ = (id) => document.getElementById(id);
 
 initLightningMotion();
+initAquarium();
 
 const formatFire = (value) => Math.floor(Number(value || 0)).toLocaleString("ru-RU");
 const formatFireDecimal = (value) => Number(value || 0).toLocaleString("ru-RU", {
@@ -1049,6 +1057,8 @@ function drawMarketChartFrame() {
     drawSmoothPath(ctx, pathPoints);
 
     const chartTrades = getChartTradesForMarket(market, windowStart, windowEnd);
+    const captureAvatars = isAquariumEnabled();
+    const frameAvatars = captureAvatars ? [] : null;
     chartTrades.forEach((trade) => {
       const x = scaleX(trade.at);
       const nearest = pathPoints.reduce((best, point) => (
@@ -1061,6 +1071,16 @@ function drawMarketChartFrame() {
       const avatarDirection = trade.side === "YES" ? -1 : 1;
       const avatarGap = dotSize + avatarRadius + Math.max(1.5, 1.2 * dpr);
       const avatarY = dotY + avatarDirection * avatarGap;
+      if (captureAvatars) {
+        frameAvatars.push({
+          xFrac: x / width,
+          yFrac: avatarY / height,
+          url: getTradeAvatarUrl(trade),
+          color: getTradeAvatarColor(trade),
+          initial: getTradeAvatarInitial(trade),
+          side: trade.side === "YES" ? "YES" : "NO",
+        });
+      }
       ctx.save();
       ctx.fillStyle = trade.side === "YES" ? "rgba(25,195,125,0.95)" : "rgba(239,70,111,0.92)";
       ctx.shadowColor = trade.side === "YES" ? "rgba(25,195,125,0.75)" : "rgba(239,70,111,0.72)";
@@ -1081,6 +1101,9 @@ function drawMarketChartFrame() {
         bottom: bottom - 2 * dpr,
       });
     });
+    if (captureAvatars) {
+      state.aquariumSnapshot = { marketId: String(market.id || ""), avatars: frameAvatars };
+    }
   }
 
   const latest = pathPoints[pathPoints.length - 1];
@@ -1155,6 +1178,11 @@ function showRoundTransition(market) {
   triggerHaptic("round");
   showSuccessLightningBurst("NEXT ROUND");
   showToast("Раунд завершён. Готовлю следующий...");
+  // Spill this round's avatar dots into the aquarium as falling food. The layer
+  // persists across the data refresh, so the crumbs land on the next screen.
+  if (state.aquariumSnapshot?.marketId === String(market.id)) {
+    spillAquariumFood(state.aquariumSnapshot.avatars || []);
+  }
 }
 
 function showTopupSuccessAnimation(label = "TOP UP") {
@@ -1480,6 +1508,7 @@ function renderTaskRewards() {
   if ($("dailyPresenceTaskReward")) $("dailyPresenceTaskReward").textContent = formatFire(dailyPresence);
   if ($("dailyBetTaskReward")) $("dailyBetTaskReward").textContent = formatFire(dailyBet);
   renderSoundToggle();
+  renderAquariumToggle();
   renderTaskButtonStates();
 }
 
@@ -1487,6 +1516,15 @@ function renderSoundToggle() {
   const button = $("motionSoundToggleBtn");
   if (!button) return;
   const enabled = isMotionSoundEnabled();
+  button.classList.toggle("active", enabled);
+  button.setAttribute("aria-pressed", enabled ? "true" : "false");
+  button.textContent = enabled ? "Вкл" : "Выкл";
+}
+
+function renderAquariumToggle() {
+  const button = $("aquariumToggleBtn");
+  if (!button) return;
+  const enabled = isAquariumEnabled();
   button.classList.toggle("active", enabled);
   button.setAttribute("aria-pressed", enabled ? "true" : "false");
   button.textContent = enabled ? "Вкл" : "Выкл";
@@ -5106,6 +5144,13 @@ $("motionSoundToggleBtn")?.addEventListener("click", async () => {
   const enabled = await setMotionSoundEnabled(!isMotionSoundEnabled());
   renderSoundToggle();
   showToast(enabled ? "Звук включен." : "Звук выключен.");
+});
+
+$("aquariumToggleBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  const enabled = setAquariumEnabled(!isAquariumEnabled());
+  renderAquariumToggle();
+  showToast(enabled ? "Аквариум включен." : "Аквариум выключен.");
 });
 
 $("tasksSheet").addEventListener("click", (event) => {
