@@ -49,7 +49,10 @@ const foodImages = new Map();
 let waterGrad = null;
 let waterGradH = 0;
 let domLayer = null;
-let domFishReady = false;
+let domFish = [];
+let domFood = [];
+let domRafId = 0;
+let domLastTs = 0;
 
 function readEnabledFlag() {
   try {
@@ -100,6 +103,7 @@ export function setAquariumEnabled(next) {
     primeAquarium();
   } else {
     stopLoop();
+    stopDomLoop();
     fish = [];
     food = [];
     bubbles = [];
@@ -138,38 +142,69 @@ function ensureDomLayer() {
   domLayer.className = "aquarium-dom-layer";
   domLayer.setAttribute("aria-hidden", "true");
   host.appendChild(domLayer);
-  domFishReady = false;
+  domFish = [];
+  domFood = [];
   return domLayer;
 }
 
-function primeDomAquarium() {
-  if (!enabled) {
-    return false;
-  }
+function measureDomLayer() {
   const layer = ensureDomLayer();
   if (!layer) {
+    return null;
+  }
+  const rect = layer.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) {
+    return null;
+  }
+  return { layer, width: rect.width, height: rect.height };
+}
+
+function primeDomAquarium() {
+  if (!enabled || reducedMotion()) {
     return false;
   }
-  if (domFishReady && layer.querySelector(".aquarium-dom-fish")) {
+  const measured = measureDomLayer();
+  if (!measured) {
+    return false;
+  }
+  const { layer, width, height } = measured;
+  if (domFish.length && layer.querySelector(".aquarium-dom-fish")) {
+    startDomLoop();
     return true;
   }
   layer.querySelectorAll(".aquarium-dom-fish").forEach((node) => node.remove());
   const fishCount = 3;
+  const palettes = ["gold", "cyan", "violet"];
   for (let i = 0; i < fishCount; i += 1) {
-    const fishEl = document.createElement("span");
-    fishEl.className = `aquarium-dom-fish fish-${i + 1}`;
-    fishEl.style.setProperty("--fish-top", `${74 + i * 7}%`);
-    fishEl.style.setProperty("--fish-delay", `${-i * 2.4}s`);
-    fishEl.style.setProperty("--fish-duration", `${12 + i * 2.2}s`);
-    fishEl.style.setProperty("--fish-scale", `${0.84 + i * 0.08}`);
-    layer.appendChild(fishEl);
+    const el = document.createElement("span");
+    const scale = 0.84 + i * 0.08;
+    el.className = `aquarium-dom-fish fish-${i + 1} ${palettes[i] || "gold"}`;
+    layer.appendChild(el);
+    domFish.push({
+      el,
+      x: rand(width * 0.16, width * 0.82),
+      y: rand(height * 0.72, height * 0.92),
+      vx: rand(-1, 1) * 12 || 8,
+      vy: rand(-3, 3),
+      scale,
+      speed: rand(15, 26),
+      dir: Math.random() > 0.5 ? 1 : -1,
+      target: null,
+      satietyUntil: 0,
+      wanderUntil: 0,
+      wanderVx: rand(-1, 1),
+      wanderVy: rand(-0.45, 0.45),
+    });
   }
-  domFishReady = true;
+  startDomLoop();
   return true;
 }
 
 function clearDomAquarium() {
-  domFishReady = false;
+  stopDomLoop();
+  domFish = [];
+  domFood = [];
+  domLastTs = 0;
   if (domLayer) {
     domLayer.remove();
     domLayer = null;
@@ -186,15 +221,240 @@ function appendDomFood(avatars) {
   }
   primeDomAquarium();
   avatars.slice(-36).forEach((avatar, index) => {
+    const measured = measureDomLayer();
+    if (!measured) {
+      return;
+    }
     const crumb = document.createElement("span");
-    crumb.className = `aquarium-dom-food ${avatar.side === "NO" ? "no" : "yes"}`;
+    const side = avatar.side === "NO" ? "NO" : "YES";
+    const x = Math.max(7, Math.min(93, Number(avatar.xFrac || 0.5) * 100)) / 100 * measured.width;
+    const y = Math.max(9, Math.min(66, Number(avatar.yFrac || 0.45) * 100)) / 100 * measured.height;
+    crumb.className = `aquarium-dom-food ${side === "NO" ? "no" : "yes"}`;
     crumb.textContent = String(avatar.initial || "•").slice(0, 1);
-    crumb.style.left = `${Math.max(7, Math.min(93, Number(avatar.xFrac || 0.5) * 100))}%`;
-    crumb.style.top = `${Math.max(9, Math.min(66, Number(avatar.yFrac || 0.45) * 100))}%`;
-    crumb.style.setProperty("--food-delay", `${Math.min(900, index * 24)}ms`);
     layer.appendChild(crumb);
-    window.setTimeout(() => crumb.remove(), 7600 + index * 24);
+    domFood.push({
+      el: crumb,
+      x,
+      y,
+      vx: rand(-7, 7),
+      vy: rand(5, 15),
+      r: rand(3.6, 5.4),
+      restY: rand(measured.height * 0.76, measured.height * 0.95),
+      settled: false,
+      bornAt: Date.now() + Math.min(900, index * 24),
+      wobble: Math.random() * Math.PI * 2,
+      eat: 0,
+      claimedBy: null,
+      side,
+    });
   });
+  while (domFood.length > 72) {
+    domFood.shift()?.el?.remove();
+  }
+  startDomLoop();
+}
+
+function domBandTop(height) {
+  return height * 0.7;
+}
+
+function domBandBottom(height) {
+  return height * 0.975;
+}
+
+function nearestDomFoodFor(fishItem) {
+  const now = Date.now();
+  let best = null;
+  let bestDist = 130 * 130;
+  for (const crumb of domFood) {
+    if (crumb.eat > 0 || now < crumb.bornAt + FOOD_ARM_MS) {
+      continue;
+    }
+    if (crumb.claimedBy && crumb.claimedBy !== fishItem) {
+      continue;
+    }
+    const dx = crumb.x - fishItem.x;
+    const dy = crumb.y - fishItem.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestDist) {
+      bestDist = d;
+      best = crumb;
+    }
+  }
+  return best;
+}
+
+function updateDomFood(dt, width, height) {
+  const drift = tilt * 28;
+  const now = Date.now();
+  for (const crumb of domFood) {
+    if (now < crumb.bornAt) {
+      continue;
+    }
+    if (crumb.eat > 0) {
+      crumb.eat += dt / (EAT_MS / 1000);
+      continue;
+    }
+    if (!crumb.settled) {
+      crumb.vy += 42 * dt;
+      crumb.vy = Math.min(crumb.vy, 60);
+      crumb.x += crumb.vx * dt;
+      crumb.y += crumb.vy * dt;
+      crumb.vx *= 0.985;
+      if (crumb.y >= crumb.restY) {
+        crumb.y = crumb.restY;
+        crumb.vy = 0;
+        crumb.settled = true;
+      }
+    } else {
+      crumb.wobble += dt * 1.5;
+      crumb.x += (drift + Math.sin(crumb.wobble) * 5) * dt;
+      crumb.y += Math.cos(crumb.wobble * 0.8) * 3 * dt;
+      crumb.y += (crumb.restY - crumb.y) * 0.6 * dt;
+    }
+    crumb.x = Math.max(6, Math.min(width - 6, crumb.x));
+    crumb.y = Math.max(4, Math.min(height - 4, crumb.y));
+  }
+  domFood = domFood.filter((crumb) => {
+    const keep = crumb.eat < 1;
+    if (!keep) {
+      crumb.el?.remove();
+    }
+    return keep;
+  });
+}
+
+function updateDomFish(dt, width, height) {
+  const now = Date.now();
+  const top = domBandTop(height);
+  const bottom = domBandBottom(height);
+  for (const f of domFish) {
+    if (f.target && (f.target.eat > 0 || !domFood.includes(f.target))) {
+      if (f.target?.claimedBy === f) {
+        f.target.claimedBy = null;
+      }
+      f.target = null;
+    }
+    if (!f.target && now > f.satietyUntil) {
+      const prey = nearestDomFoodFor(f);
+      if (prey) {
+        prey.claimedBy = f;
+        f.target = prey;
+      }
+    }
+
+    let ax = 0;
+    let ay = 0;
+    if (f.target) {
+      const dx = f.target.x - f.x;
+      const dy = f.target.y - f.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      ax = (dx / dist) * f.speed * 1.7;
+      ay = (dy / dist) * f.speed * 1.7;
+      if (dist < 12 + f.target.r) {
+        f.target.eat = Math.max(f.target.eat, 0.0001);
+        f.target.claimedBy = null;
+        f.target = null;
+        f.satietyUntil = now + rand(1400, 3300);
+      }
+    } else {
+      if (now > f.wanderUntil) {
+        f.wanderUntil = now + rand(800, 2100);
+        f.wanderVx = rand(-1, 1);
+        f.wanderVy = rand(-0.55, 0.55);
+      }
+      ax = f.wanderVx * f.speed * 0.75 + tilt * 10;
+      ay = f.wanderVy * f.speed * 0.75;
+    }
+
+    f.vx += ax * dt;
+    f.vy += ay * dt;
+    const sp = Math.hypot(f.vx, f.vy);
+    const maxSp = f.speed * (f.target ? 2.1 : 1.2);
+    if (sp > maxSp) {
+      f.vx = (f.vx / sp) * maxSp;
+      f.vy = (f.vy / sp) * maxSp;
+    }
+    f.vx *= 0.96;
+    f.vy *= 0.94;
+    f.x += f.vx * dt;
+    f.y += f.vy * dt;
+
+    const margin = 16;
+    if (f.x < margin) {
+      f.x = margin;
+      f.vx = Math.abs(f.vx);
+    } else if (f.x > width - margin) {
+      f.x = width - margin;
+      f.vx = -Math.abs(f.vx);
+    }
+    if (f.y < top) {
+      f.y = top;
+      f.vy = Math.abs(f.vy) * 0.6;
+    } else if (f.y > bottom) {
+      f.y = bottom;
+      f.vy = -Math.abs(f.vy) * 0.6;
+    }
+    if (Math.abs(f.vx) > 1.4) {
+      f.dir = f.vx >= 0 ? 1 : -1;
+    }
+  }
+}
+
+function renderDomAquarium() {
+  for (const f of domFish) {
+    const angle = Math.max(-0.18, Math.min(0.18, f.vy * 0.018));
+    f.el.style.transform = `translate3d(${(f.x - 9).toFixed(1)}px, ${(f.y - 5).toFixed(1)}px, 0) scaleX(${f.dir}) scale(${f.scale}) rotate(${angle.toFixed(3)}rad)`;
+  }
+  const now = Date.now();
+  for (const crumb of domFood) {
+    const bornAlpha = now < crumb.bornAt ? 0 : 1;
+    const shrink = crumb.eat > 0 ? Math.max(0, 1 - crumb.eat) : 1;
+    crumb.el.style.opacity = String(Math.min(1, bornAlpha * (0.9 + shrink * 0.1)));
+    crumb.el.style.width = `${(crumb.r * 2 * shrink).toFixed(1)}px`;
+    crumb.el.style.height = `${(crumb.r * 2 * shrink).toFixed(1)}px`;
+    crumb.el.style.transform = `translate3d(${(crumb.x - crumb.r).toFixed(1)}px, ${(crumb.y - crumb.r).toFixed(1)}px, 0) scale(${Math.max(0.2, shrink).toFixed(3)})`;
+  }
+}
+
+function domFrame(ts) {
+  domRafId = 0;
+  if (!canAnimateAquarium() || !shouldUseDomAquarium()) {
+    return;
+  }
+  const measured = measureDomLayer();
+  if (!measured) {
+    window.setTimeout(() => startDomLoop(), 300);
+    return;
+  }
+  if (domLastTs && ts - domLastTs < FRAME_MS) {
+    domRafId = requestAnimationFrame(domFrame);
+    return;
+  }
+  const dt = domLastTs ? Math.min(0.05, (ts - domLastTs) / 1000) : 0.033;
+  domLastTs = ts;
+  tilt += (tiltTarget - tilt) * Math.min(1, dt * 4);
+  updateDomFood(dt, measured.width, measured.height);
+  updateDomFish(dt, measured.width, measured.height);
+  renderDomAquarium();
+  if (enabled && (domFish.length || domFood.length)) {
+    domRafId = requestAnimationFrame(domFrame);
+  }
+}
+
+function startDomLoop() {
+  if (domRafId || !canAnimateAquarium() || !shouldUseDomAquarium()) {
+    return;
+  }
+  domLastTs = 0;
+  domRafId = requestAnimationFrame(domFrame);
+}
+
+function stopDomLoop() {
+  if (domRafId) {
+    cancelAnimationFrame(domRafId);
+    domRafId = 0;
+  }
 }
 
 function getFoodImage(url) {

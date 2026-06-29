@@ -824,8 +824,8 @@ h2 {
 
 .aquarium-dom-fish {
   position: absolute;
-  top: var(--fish-top, 78%);
-  left: -28px;
+  top: 0;
+  left: 0;
   width: 18px;
   height: 10px;
   border-radius: 999px 80% 80% 999px;
@@ -836,9 +836,9 @@ h2 {
     0 0 10px rgba(255, 179, 71, 0.34),
     0 0 18px rgba(53, 246, 255, 0.08);
   opacity: 0.9;
-  transform: translate3d(0, 0, 0) scale(var(--fish-scale, 1));
-  -webkit-transform: translate3d(0, 0, 0) scale(var(--fish-scale, 1));
-  animation: aquariumDomSwim var(--fish-duration, 13s) linear var(--fish-delay, 0s) infinite;
+  transform: translate3d(-40px, 160px, 0);
+  -webkit-transform: translate3d(-40px, 160px, 0);
+  will-change: transform;
 }
 
 .aquarium-dom-fish::before {
@@ -882,6 +882,8 @@ h2 {
 
 .aquarium-dom-food {
   position: absolute;
+  top: 0;
+  left: 0;
   width: 8px;
   height: 8px;
   display: grid;
@@ -893,36 +895,14 @@ h2 {
   font-weight: 950;
   line-height: 1;
   box-shadow: 0 0 8px rgba(25, 195, 125, 0.44);
-  transform: translate3d(-50%, -50%, 0);
-  -webkit-transform: translate3d(-50%, -50%, 0);
-  animation: aquariumDomFood 7.2s ease-in var(--food-delay, 0ms) both;
+  transform: translate3d(-40px, -40px, 0);
+  -webkit-transform: translate3d(-40px, -40px, 0);
+  will-change: transform, opacity;
 }
 
 .aquarium-dom-food.no {
   background: radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.95), rgba(239, 70, 111, 0.84) 44%, rgba(14, 20, 32, 0.92));
   box-shadow: 0 0 8px rgba(239, 70, 111, 0.42);
-}
-
-@keyframes aquariumDomSwim {
-  0% {
-    transform: translate3d(-28px, 0, 0) scale(var(--fish-scale, 1));
-  }
-
-  48% {
-    transform: translate3d(calc(100vw + 28px), -7px, 0) scale(var(--fish-scale, 1));
-  }
-
-  49% {
-    transform: translate3d(calc(100vw + 28px), -7px, 0) scaleX(-1) scale(var(--fish-scale, 1));
-  }
-
-  98% {
-    transform: translate3d(-28px, 5px, 0) scaleX(-1) scale(var(--fish-scale, 1));
-  }
-
-  100% {
-    transform: translate3d(-28px, 0, 0) scale(var(--fish-scale, 1));
-  }
 }
 
 @keyframes aquariumDomTail {
@@ -932,27 +912,6 @@ h2 {
 
   to {
     transform: rotate(18deg);
-  }
-}
-
-@keyframes aquariumDomFood {
-  0% {
-    opacity: 0;
-    transform: translate3d(-50%, -70%, 0) scale(0.72);
-  }
-
-  10% {
-    opacity: 1;
-  }
-
-  72% {
-    opacity: 0.9;
-    transform: translate3d(calc(-50% + 8px), 78px, 0) scale(1);
-  }
-
-  100% {
-    opacity: 0;
-    transform: translate3d(calc(-50% - 5px), 118px, 0) scale(0.56);
   }
 }
 
