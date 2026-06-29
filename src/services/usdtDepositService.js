@@ -34,6 +34,15 @@ function ensurePositiveDepositAmount(value) {
   return amount;
 }
 
+function buildDepositAmountCandidates(requestedAmount) {
+  const offsets = Array.from({ length: 99 }, (_, index) => (index + 1) / 100);
+  for (let index = offsets.length - 1; index > 0; index -= 1) {
+    const swapIndex = randomInt(0, index + 1);
+    [offsets[index], offsets[swapIndex]] = [offsets[swapIndex], offsets[index]];
+  }
+  return [0, ...offsets].map((offset) => roundMoney(requestedAmount + offset, 2));
+}
+
 function normalizeAddress(value) {
   try {
     return getAddress(String(value || "").trim());
@@ -194,24 +203,25 @@ export async function createUsdtDepositIntent(input) {
   });
 
   const intent = await withTransaction(async (client) => {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      const cents = attempt === 0 ? 0 : randomInt(1, 99) / 100;
-      const depositAmount = roundMoney(requestedAmount + cents, 2);
-      const existsResult = await client.query(
-        `
-          SELECT id
-          FROM usdt_deposit_intents
-          WHERE status = 'pending'
-            AND deposit_amount = $1::numeric
-            AND network = ANY($2::text[])
-          LIMIT 1
-        `,
-        [depositAmount, ["ANY", ...networks.map((item) => item.key)]],
-      );
-      if (existsResult.rows[0]) {
-        continue;
-      }
+    const existingResult = await client.query(
+      `
+        SELECT *
+        FROM usdt_deposit_intents
+        WHERE user_id = $1
+          AND status = 'pending'
+          AND requested_amount = $2::numeric
+          AND network = ANY($3::text[])
+        ORDER BY created_at DESC
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [user.id, requestedAmount, ["ANY", ...networks.map((item) => item.key)]],
+    );
+    if (existingResult.rows[0]) {
+      return existingResult.rows[0];
+    }
 
+    for (const depositAmount of buildDepositAmountCandidates(requestedAmount)) {
       const result = await client.query(
         `
           INSERT INTO usdt_deposit_intents (
@@ -230,6 +240,8 @@ export async function createUsdtDepositIntent(input) {
             $4,
             now() + ($5::int * interval '1 minute')
           )
+          ON CONFLICT (network, deposit_amount) WHERE status = 'pending'
+          DO NOTHING
           RETURNING *
         `,
         [
@@ -240,7 +252,9 @@ export async function createUsdtDepositIntent(input) {
           Math.round(config.usdtDepositIntentMinutes),
         ],
       );
-      return result.rows[0];
+      if (result.rows[0]) {
+        return result.rows[0];
+      }
     }
 
     throw new Error("deposit_amount_collision");
@@ -420,16 +434,10 @@ async function matchDepositEvent(client, network, event) {
       SELECT *
       FROM usdt_deposit_intents
       WHERE network = ANY($1::text[])
-        AND status = ANY($5::text[])
-        AND (
-          deposit_amount = $2::numeric
-          OR requested_amount = $2::numeric
-        )
-        AND created_at <= ($3::timestamptz + ($6::int * interval '1 minute'))
-        AND expires_at >= ($3::timestamptz - ($6::int * interval '1 minute'))
+        AND status = 'pending'
+        AND deposit_amount = $2::numeric
+        AND created_at <= ($3::timestamptz + ($5::int * interval '1 minute'))
       ORDER BY
-        CASE WHEN deposit_amount = $2::numeric THEN 0 ELSE 1 END,
-        CASE WHEN status = 'pending' THEN 0 ELSE 1 END,
         CASE WHEN network = $4 THEN 0 ELSE 1 END,
         created_at ASC
       LIMIT 1
@@ -440,7 +448,6 @@ async function matchDepositEvent(client, network, event) {
       event.amount,
       event.chain_timestamp || new Date(),
       network.key,
-      ["pending", "expired"],
       Math.round(config.usdtDepositMatchGraceMinutes),
     ],
   );
@@ -511,6 +518,13 @@ async function matchDepositEvent(client, network, event) {
     `,
     [network.key, event.tx_hash, event.log_index, intent.id],
   );
+  console.log("[EasyMarket] USDT deposit credited", {
+    intent_id: intent.id,
+    user_id: intent.user_id,
+    network: network.key,
+    amount: event.amount,
+    tx_hash: String(event.tx_hash || "").slice(0, 12),
+  });
   return true;
 }
 

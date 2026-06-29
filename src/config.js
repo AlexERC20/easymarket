@@ -124,7 +124,7 @@ export const config = {
       || process.env.BSC_SCAN_API_KEY
       || ""
   ).trim(),
-  evmScanPageSize: parseNumber(process.env.EVM_SCAN_PAGE_SIZE || process.env.BSCSCAN_PAGE_SIZE, 50, 1),
+  evmScanPageSize: parseNumber(process.env.EVM_SCAN_PAGE_SIZE || process.env.BSCSCAN_PAGE_SIZE, 200, 1),
   usdtBscExplorerChainId: (
     process.env.USDT_BSC_EXPLORER_CHAIN_ID
       || process.env.BSCSCAN_CHAIN_ID
