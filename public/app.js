@@ -21,6 +21,7 @@ const MIN_OUTCOME_PRICE = 0.001;
 const BTC_MIN_OUTCOME_PRICE = 0.001;
 const CHART_WINDOW_MS = 10_000;
 const BTC_5M_CHART_HISTORY_RATIO = 0.5;
+const CHART_AVATAR_RADIUS_CSS = 3.8;
 const ACTIVE_MARKET_POLL_MS = 1_500;
 const MARKET_LIST_POLL_MS = 10_000;
 const COMMENTS_POLL_MS = 10_000;
@@ -28,6 +29,7 @@ const LEADERBOARD_CACHE_MS = 90_000;
 const COLLAPSE_LIMIT = 3;
 const MARKET_BUY_CLOSE_BUFFER_MS = 400;
 const MARKET_SELL_FREEZE_SECONDS = 7;
+const chartAvatarImages = new Map();
 
 const state = {
   user: null,
@@ -644,6 +646,104 @@ function roundedRectPath(ctx, x, y, width, height, radius) {
   ctx.quadraticCurveTo(x, y, x + r, y);
 }
 
+function getTelegramUserAvatarUrl(username) {
+  const cleanUsername = String(username || "").trim().replace(/^@/, "");
+  return /^[A-Za-z0-9_]{4,}$/.test(cleanUsername)
+    ? `https://t.me/i/userpic/320/${encodeURIComponent(cleanUsername)}.jpg`
+    : "";
+}
+
+function getTradeAvatarUrl(trade) {
+  return String(trade?.avatar_url || getTelegramUserAvatarUrl(trade?.username) || "").trim();
+}
+
+function getTradeAvatarInitial(trade) {
+  const raw = String(trade?.username || trade?.first_name || trade?.telegram_id || "?").trim().replace(/^@/, "");
+  return (raw[0] || "?").toUpperCase();
+}
+
+function getTradeAvatarColor(trade) {
+  const seed = String(trade?.telegram_id || trade?.username || trade?.id || "user");
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) % 360;
+  }
+  return `hsl(${hash} 78% 58%)`;
+}
+
+function getCachedTradeAvatarImage(url) {
+  if (!url) {
+    return null;
+  }
+
+  const cached = chartAvatarImages.get(url);
+  if (cached) {
+    return cached.loaded && !cached.failed ? cached.image : null;
+  }
+
+  const image = new Image();
+  const entry = { image, loaded: false, failed: false };
+  chartAvatarImages.set(url, entry);
+  image.decoding = "async";
+  image.onload = () => {
+    entry.loaded = true;
+    renderMarketChart();
+  };
+  image.onerror = () => {
+    entry.failed = true;
+  };
+  image.src = url;
+  return null;
+}
+
+function drawChartTradeAvatar(ctx, trade, x, y, radius, bounds) {
+  const safeRadius = Math.max(2, radius);
+  const centerX = Math.max(bounds.left + safeRadius, Math.min(bounds.right - safeRadius, x));
+  const centerY = Math.max(bounds.top + safeRadius, Math.min(bounds.bottom - safeRadius, y));
+  const avatarUrl = getTradeAvatarUrl(trade);
+  const image = getCachedTradeAvatarImage(avatarUrl);
+
+  ctx.save();
+  ctx.shadowColor = trade.side === "YES" ? "rgba(25,195,125,0.34)" : "rgba(239,70,111,0.32)";
+  ctx.shadowBlur = Math.max(3, safeRadius * 1.2);
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, safeRadius, 0, Math.PI * 2);
+  ctx.clip();
+
+  if (image) {
+    ctx.drawImage(image, centerX - safeRadius, centerY - safeRadius, safeRadius * 2, safeRadius * 2);
+  } else {
+    const gradient = ctx.createRadialGradient(
+      centerX - safeRadius * 0.35,
+      centerY - safeRadius * 0.4,
+      0,
+      centerX,
+      centerY,
+      safeRadius * 1.4,
+    );
+    gradient.addColorStop(0, "rgba(255,255,255,0.82)");
+    gradient.addColorStop(0.32, getTradeAvatarColor(trade));
+    gradient.addColorStop(1, "rgba(14,20,32,0.96)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(centerX - safeRadius, centerY - safeRadius, safeRadius * 2, safeRadius * 2);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `${Math.max(5, safeRadius * 1.15)}px Inter, system-ui, sans-serif`;
+    ctx.fillText(getTradeAvatarInitial(trade), centerX, centerY + safeRadius * 0.04);
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.lineWidth = Math.max(0.8, safeRadius * 0.26);
+  ctx.strokeStyle = trade.side === "YES" ? "rgba(25,195,125,0.86)" : "rgba(239,70,111,0.84)";
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, safeRadius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function getDisplayMarket() {
   if (state.selectedBtcMarketId) {
     return state.btcMarkets.find((market) => market.id === state.selectedBtcMarketId) || state.market;
@@ -785,7 +885,7 @@ function drawMarketChartFrame() {
     return;
   }
 
-  const { width, height } = resizeCanvas(canvas);
+  const { dpr, width, height } = resizeCanvas(canvas);
   const appBg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#080d16";
   const worldCup = isWorldCupMarket(market);
   const openPrice = worldCup
@@ -933,12 +1033,17 @@ function drawMarketChartFrame() {
       ), pathPoints[0]);
       const own = String(trade.telegram_id || "") === String(state.user?.telegram_id || "");
       const dotSize = own ? 4.6 : 2.5;
+      const dotY = nearest.y + (own ? -7 : 7);
+      const avatarRadius = Math.max(dotSize + 1, CHART_AVATAR_RADIUS_CSS * dpr);
+      const avatarDirection = trade.side === "YES" ? -1 : 1;
+      const avatarGap = dotSize + avatarRadius + Math.max(1.5, 1.2 * dpr);
+      const avatarY = dotY + avatarDirection * avatarGap;
       ctx.save();
       ctx.fillStyle = trade.side === "YES" ? "rgba(25,195,125,0.95)" : "rgba(239,70,111,0.92)";
       ctx.shadowColor = trade.side === "YES" ? "rgba(25,195,125,0.75)" : "rgba(239,70,111,0.72)";
       ctx.shadowBlur = own ? 16 : 9;
       ctx.beginPath();
-      ctx.arc(x, nearest.y + (own ? -7 : 7), dotSize, 0, Math.PI * 2);
+      ctx.arc(x, dotY, dotSize, 0, Math.PI * 2);
       ctx.fill();
       if (own) {
         ctx.lineWidth = 1.4;
@@ -946,6 +1051,12 @@ function drawMarketChartFrame() {
         ctx.stroke();
       }
       ctx.restore();
+      drawChartTradeAvatar(ctx, trade, x, avatarY, avatarRadius, {
+        left,
+        right: currentX - 2 * dpr,
+        top: top + 2 * dpr,
+        bottom: bottom - 2 * dpr,
+      });
     });
   }
 
@@ -3662,6 +3773,7 @@ function addLocalActivity(trade) {
     telegram_id: state.user?.telegram_id,
     username: state.user?.username,
     first_name: state.user?.first_name,
+    avatar_url: getTelegramUserAvatarUrl(state.user?.username),
   };
   state.activity = [enriched, ...state.activity].slice(0, 24);
   rememberChartTrades([enriched]);

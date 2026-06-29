@@ -236,6 +236,7 @@ function mapMarketActivity(row) {
     telegram_id: row.telegram_id,
     username: row.username,
     first_name: row.first_name,
+    avatar_url: getTelegramUserAvatarUrl(row.username),
     action: row.action || "BUY",
     side: row.side,
     amount: toNumber(row.amount),
