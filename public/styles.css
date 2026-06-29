@@ -1441,6 +1441,9 @@ h2 {
   -webkit-transform: translateZ(0);
   overflow: hidden;
   isolation: isolate;
+  contain: paint;
+  clip-path: inset(0 round 10px);
+  -webkit-clip-path: inset(0 round 10px);
   transition:
     transform var(--motion-fast) var(--spring-soft),
     border-color var(--motion-fast) var(--ease-default),
