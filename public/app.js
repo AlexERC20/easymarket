@@ -8,7 +8,7 @@ import {
   showWalletFlowBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260629-14";
+} from "./lightning-motion.js?v=20260629-15";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -27,6 +27,8 @@ const ACTIVE_MARKET_POLL_MS = 1_500;
 const MARKET_LIST_POLL_MS = 10_000;
 const COMMENTS_POLL_MS = 10_000;
 const LEADERBOARD_CACHE_MS = 90_000;
+const SHEET_CLOSE_MS = 280;
+const SHEET_HEIGHT_MORPH_MS = 280;
 const COLLAPSE_LIMIT = 3;
 const MARKET_BUY_CLOSE_BUFFER_MS = 400;
 const MARKET_SELL_FREEZE_SECONDS = 7;
@@ -176,6 +178,8 @@ const state = {
 };
 
 const textAnimations = new WeakMap();
+const sheetCloseTimers = new WeakMap();
+const sheetHeightTimers = new WeakMap();
 const $ = (id) => document.getElementById(id);
 
 initLightningMotion();
@@ -1527,10 +1531,12 @@ function getMarketStatTitle(stat) {
 
 function renderTaskTabs() {
   const isStats = state.taskTab === "stats";
-  $("tasksTabTasks")?.classList.toggle("active", !isStats);
-  $("tasksTabStats")?.classList.toggle("active", isStats);
-  document.querySelector(".task-list")?.classList.toggle("hidden", isStats);
-  $("taskStatsPanel")?.classList.toggle("hidden", !isStats);
+  morphSheetContent("tasksSheet", `tasks:${isStats ? "stats" : "rewards"}`, () => {
+    $("tasksTabTasks")?.classList.toggle("active", !isStats);
+    $("tasksTabStats")?.classList.toggle("active", isStats);
+    document.querySelector(".task-list")?.classList.toggle("hidden", isStats);
+    $("taskStatsPanel")?.classList.toggle("hidden", !isStats);
+  });
 }
 
 function renderTaskStats() {
@@ -1599,6 +1605,100 @@ async function runSingleFlight(key, task) {
 function isSheetOpen(id) {
   const element = $(id);
   return Boolean(element && !element.classList.contains("hidden"));
+}
+
+function prefersReducedMotion() {
+  return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+}
+
+function openSheet(sheetOrId) {
+  const sheet = typeof sheetOrId === "string" ? $(sheetOrId) : sheetOrId;
+  if (!sheet) return;
+  const pendingTimer = sheetCloseTimers.get(sheet);
+  if (pendingTimer) {
+    window.clearTimeout(pendingTimer);
+    sheetCloseTimers.delete(sheet);
+  }
+  sheet.classList.remove("hidden", "sheet-closing");
+  sheet.classList.add("sheet-open");
+}
+
+function closeSheet(sheetOrId, options = {}) {
+  const sheet = typeof sheetOrId === "string" ? $(sheetOrId) : sheetOrId;
+  if (!sheet || sheet.classList.contains("hidden")) return;
+  const finish = () => {
+    sheet.classList.add("hidden");
+    sheet.classList.remove("sheet-open", "sheet-closing");
+    sheetCloseTimers.delete(sheet);
+    options.afterClose?.();
+  };
+  const pendingTimer = sheetCloseTimers.get(sheet);
+  if (pendingTimer) {
+    window.clearTimeout(pendingTimer);
+  }
+  if (prefersReducedMotion() || options.instant) {
+    finish();
+    return;
+  }
+  sheet.classList.add("sheet-closing");
+  sheet.classList.remove("sheet-open");
+  const timer = window.setTimeout(finish, options.duration || SHEET_CLOSE_MS);
+  sheetCloseTimers.set(sheet, timer);
+}
+
+function getSheetPanel(sheetOrId) {
+  const sheet = typeof sheetOrId === "string" ? $(sheetOrId) : sheetOrId;
+  return sheet?.querySelector(".task-panel, .bet-panel") || null;
+}
+
+function beginSheetContentMorph(sheetOrId, viewKey) {
+  const sheet = typeof sheetOrId === "string" ? $(sheetOrId) : sheetOrId;
+  const panel = getSheetPanel(sheet);
+  if (!panel || sheet?.classList.contains("hidden") || sheet?.classList.contains("sheet-closing") || prefersReducedMotion()) {
+    if (panel) panel.dataset.motionView = viewKey || "";
+    return { panel, viewKey, animate: false };
+  }
+
+  const previousView = panel.dataset.motionView || "";
+  if (previousView === (viewKey || "")) {
+    return { panel, viewKey, animate: false };
+  }
+
+  const pendingTimer = sheetHeightTimers.get(panel);
+  if (pendingTimer) {
+    window.clearTimeout(pendingTimer);
+    sheetHeightTimers.delete(panel);
+  }
+
+  const startHeight = panel.getBoundingClientRect().height;
+  panel.style.height = `${startHeight}px`;
+  panel.style.overflowY = "hidden";
+  panel.classList.add("sheet-height-morphing", "sheet-view-animating");
+  return { panel, viewKey, animate: true };
+}
+
+function finishSheetContentMorph(morph) {
+  const panel = morph?.panel;
+  if (!panel) return;
+  panel.dataset.motionView = morph.viewKey || "";
+  if (!morph.animate) return;
+  const endHeight = panel.scrollHeight;
+  window.requestAnimationFrame(() => {
+    panel.style.height = `${endHeight}px`;
+  });
+  const timer = window.setTimeout(() => {
+    panel.style.height = "";
+    panel.style.overflowY = "";
+    panel.classList.remove("sheet-height-morphing", "sheet-view-animating");
+    sheetHeightTimers.delete(panel);
+  }, SHEET_HEIGHT_MORPH_MS);
+  sheetHeightTimers.set(panel, timer);
+}
+
+function morphSheetContent(sheetOrId, viewKey, mutate) {
+  const morph = beginSheetContentMorph(sheetOrId, viewKey);
+  mutate();
+  finishSheetContentMorph(morph);
 }
 
 function shouldRefreshBtcMarkets() {
@@ -2746,24 +2846,26 @@ function renderClans() {
   }
 
   const view = state.clanView || "leaderboard";
-  $("clansLeaderboardView")?.classList.toggle("hidden", view !== "leaderboard");
-  $("clanDetailView")?.classList.toggle("hidden", view !== "detail");
-  $("clanCreateView")?.classList.toggle("hidden", view !== "create");
-  $("clanRulesView")?.classList.toggle("hidden", view !== "rules");
-  $("clansBackBtn")?.classList.toggle("hidden", view === "leaderboard");
-  $("clanInfoBtn")?.classList.toggle("hidden", view === "rules");
-  $("clanCreateToggleBtn")?.classList.toggle("hidden", view === "create");
+  morphSheetContent("clansSheet", `clans:${view}`, () => {
+    $("clansLeaderboardView")?.classList.toggle("hidden", view !== "leaderboard");
+    $("clanDetailView")?.classList.toggle("hidden", view !== "detail");
+    $("clanCreateView")?.classList.toggle("hidden", view !== "create");
+    $("clanRulesView")?.classList.toggle("hidden", view !== "rules");
+    $("clansBackBtn")?.classList.toggle("hidden", view === "leaderboard");
+    $("clanInfoBtn")?.classList.toggle("hidden", view === "rules");
+    $("clanCreateToggleBtn")?.classList.toggle("hidden", view === "create");
 
-  const titles = {
-    leaderboard: ["Лига", "Кланы"],
-    detail: ["Клан", "Участники"],
-    create: ["Создание", "Новый клан"],
-    rules: ["Правила", "Очки клана"],
-  };
-  const [eyebrow, title] = titles[view] || titles.leaderboard;
-  if ($("clansEyebrow")) $("clansEyebrow").textContent = eyebrow;
-  if ($("clansTitle")) $("clansTitle").textContent = title;
-  renderClanIconPicker();
+    const titles = {
+      leaderboard: ["Лига", "Кланы"],
+      detail: ["Клан", "Участники"],
+      create: ["Создание", "Новый клан"],
+      rules: ["Правила", "Очки клана"],
+    };
+    const [eyebrow, title] = titles[view] || titles.leaderboard;
+    if ($("clansEyebrow")) $("clansEyebrow").textContent = eyebrow;
+    if ($("clansTitle")) $("clansTitle").textContent = title;
+    renderClanIconPicker();
+  });
 
   if (state.userClan) {
     userCard.classList.remove("hidden");
@@ -3052,9 +3154,11 @@ function renderBtcMarketsList() {
 }
 
 function setBtcMarketsSheetOpen(open) {
-  const sheet = $("btcMarketsSheet");
-  if (!sheet) return;
-  sheet.classList.toggle("hidden", !open);
+  if (open) {
+    openSheet("btcMarketsSheet");
+  } else {
+    closeSheet("btcMarketsSheet");
+  }
 }
 
 function animateMarketSwitch() {
@@ -3087,9 +3191,11 @@ function selectBtcMarket(marketId) {
 }
 
 function setWorldCupSheetOpen(open) {
-  const sheet = $("worldCupSheet");
-  if (!sheet) return;
-  sheet.classList.toggle("hidden", !open);
+  if (open) {
+    openSheet("worldCupSheet");
+  } else {
+    closeSheet("worldCupSheet");
+  }
 }
 
 function selectWorldCupMarket(marketId) {
@@ -3158,11 +3264,11 @@ function openBetSheet(market, side = "YES") {
     currency: state.currency,
   };
   renderBetSheet();
-  $("betSheet")?.classList.remove("hidden");
+  openSheet("betSheet");
 }
 
 function closeBetSheet() {
-  $("betSheet")?.classList.add("hidden");
+  closeSheet("betSheet");
 }
 
 function walletStatusLabel(status) {
@@ -3248,6 +3354,12 @@ function renderTopupSheet() {
     ? state.publicConfig.usdt_deposit_networks
     : [];
   const hasUsdtNetworks = networks.length > 0;
+  const walletViewKey = isHistoryOpen
+    ? "history"
+    : isTopupMode
+      ? `topup:${currency}:${hasPendingIntent ? "pending" : "entry"}`
+      : `withdraw:${currency}`;
+  const walletMorph = beginSheetContentMorph("topupSheet", `wallet:${walletViewKey}`);
   $("topupModePanel")?.classList.toggle("hidden", isHistoryOpen || !isTopupMode);
   $("withdrawModePanel")?.classList.toggle("hidden", isHistoryOpen || isTopupMode);
   $("walletHistoryPanel")?.classList.toggle("hidden", !isHistoryOpen);
@@ -3368,6 +3480,7 @@ function renderTopupSheet() {
     $("withdrawSubmitBtn").textContent = state.withdrawal.pending ? "Создаю заявку..." : "Вывести";
   }
   renderWalletHistory();
+  finishSheetContentMorph(walletMorph);
 }
 
 function openTopupSheet(amount, reason = "", mode = "topup", currencyOverride = null, afterAction = null) {
@@ -3379,12 +3492,12 @@ function openTopupSheet(amount, reason = "", mode = "topup", currencyOverride = 
   state.topup.historyOpen = false;
   state.topup.afterAction = afterAction;
   renderTopupSheet();
-  $("topupSheet")?.classList.remove("hidden");
+  openSheet("topupSheet");
 }
 
 function closeTopupSheet(options = {}) {
-  $("topupSheet")?.classList.add("hidden");
   state.topup.historyOpen = false;
+  closeSheet("topupSheet");
   if (options.clearAfterAction !== false) {
     state.topup.afterAction = null;
   }
@@ -4828,14 +4941,20 @@ function setTasksSheetOpen(open) {
     renderTaskRewards();
     renderTaskTabs();
     renderTaskStats();
+    openSheet(sheet);
+  } else {
+    closeSheet(sheet);
   }
-  sheet.classList.toggle("hidden", !open);
 }
 
 function setLeaderboardSheetOpen(open) {
   const sheet = $("leaderboardSheet");
   if (!sheet) return;
-  sheet.classList.toggle("hidden", !open);
+  if (open) {
+    openSheet(sheet);
+  } else {
+    closeSheet(sheet);
+  }
 }
 
 function setClansSheetOpen(open) {
@@ -4844,8 +4963,10 @@ function setClansSheetOpen(open) {
   if (open) {
     state.clanView = "leaderboard";
     void loadClans().catch(() => showToast("Кланы пока не загрузились."));
+    openSheet(sheet);
+  } else {
+    closeSheet(sheet);
   }
-  sheet.classList.toggle("hidden", !open);
 }
 
 function showReferralNudge() {

@@ -1400,6 +1400,11 @@ code {
   animation: sheetBackdropIn var(--motion-normal) var(--ease-default) both;
 }
 
+.task-sheet.sheet-closing {
+  pointer-events: none;
+  animation: sheetBackdropOut 240ms var(--ease-default) both;
+}
+
 .task-sheet.hidden {
   display: none;
 }
@@ -1420,16 +1425,42 @@ code {
 
 .task-panel {
   width: min(100%, 430px);
+  max-height: calc(100dvh - max(54px, env(safe-area-inset-top)) - max(18px, env(safe-area-inset-bottom)));
   margin: 0 auto max(10px, env(safe-area-inset-bottom));
   border: 1px solid var(--line);
   border-radius: 18px;
   background: linear-gradient(180deg, rgba(22, 28, 40, 0.99), rgba(8, 13, 22, 0.99));
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.62);
   padding: 14px;
+  overflow-y: auto;
+  transform-origin: center bottom;
+  overscroll-behavior: contain;
+  will-change: transform, opacity;
 }
 
 .task-sheet:not(.hidden) .task-panel {
   animation: bottomSheetIn var(--motion-slow) var(--spring-soft) both;
+}
+
+.task-sheet.sheet-closing .task-panel,
+.task-sheet.sheet-closing .bet-panel {
+  animation: bottomSheetOut 260ms var(--ease-default) both;
+}
+
+.task-panel.sheet-height-morphing,
+.bet-panel.sheet-height-morphing {
+  transition: height 260ms var(--ease-default);
+}
+
+.sheet-view-animating :is(
+  .wallet-mode-panel,
+  .wallet-history-panel,
+  .usdt-deposit-panel,
+  .task-list,
+  .task-stats-panel,
+  .clan-view
+):not(.hidden) {
+  animation: sheetViewIn 240ms var(--ease-default) both;
 }
 
 .task-head,
@@ -2450,12 +2481,17 @@ code {
 
 .bet-panel {
   width: min(100%, 430px);
+  max-height: calc(100dvh - max(54px, env(safe-area-inset-top)) - max(18px, env(safe-area-inset-bottom)));
   margin: 0 auto max(10px, env(safe-area-inset-bottom));
   border: 1px solid var(--line);
   border-radius: 28px;
   background: #11161f;
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.68);
   padding: 14px;
+  overflow-y: auto;
+  transform-origin: center bottom;
+  overscroll-behavior: contain;
+  will-change: transform, opacity;
 }
 
 .task-sheet:not(.hidden) .bet-panel {
@@ -3489,12 +3525,20 @@ code {
 @keyframes bottomSheetIn {
   from {
     opacity: 0;
-    transform: translateY(20px) scale(0.985);
+    transform: translateY(28px) scale(0.97);
+    filter: blur(2px);
+  }
+
+  68% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.004);
+    filter: blur(0);
   }
 
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+    filter: blur(0);
   }
 }
 
@@ -3505,6 +3549,44 @@ code {
 
   to {
     background: rgba(0, 0, 0, 0.44);
+  }
+}
+
+@keyframes bottomSheetOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(22px) scale(0.975);
+    filter: blur(2px);
+  }
+}
+
+@keyframes sheetBackdropOut {
+  from {
+    background: rgba(0, 0, 0, 0.44);
+  }
+
+  to {
+    background: rgba(0, 0, 0, 0);
+  }
+}
+
+@keyframes sheetViewIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.992);
+    filter: blur(1px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
   }
 }
 
@@ -3606,8 +3688,18 @@ code {
   .world-cup-card,
   .btc-market-card,
   .activity-row,
-  .position-card {
+  .position-card,
+  .task-sheet,
+  .sheet-view-animating :is(
+    .wallet-mode-panel,
+    .wallet-history-panel,
+    .usdt-deposit-panel,
+    .task-list,
+    .task-stats-panel,
+    .clan-view
+  ) {
     animation: none !important;
+    transition: none !important;
   }
 }
 
