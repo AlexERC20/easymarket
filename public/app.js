@@ -1426,7 +1426,15 @@ function getTelegramUser() {
   };
 
   if (tg) {
+    const platform = String(tg.platform || "").toLowerCase();
+    const mobileByPlatform = platform === "ios" || platform === "android";
+    const mobileByViewport = window.matchMedia?.("(pointer: coarse)")?.matches
+      && Math.min(window.innerWidth || 0, window.screen?.width || 0) <= 820;
+    const mobileShell = mobileByPlatform || mobileByViewport;
     const applyTelegramViewport = () => {
+      if (!mobileShell) {
+        return;
+      }
       const height = Number(tg.viewportStableHeight || tg.viewportHeight || 0);
       if (height > 0) {
         document.documentElement.style.setProperty("--tg-app-height", `${height}px`);
@@ -1434,10 +1442,16 @@ function getTelegramUser() {
     };
     try {
       document.body.classList.add("telegram-shell");
+      document.body.classList.toggle("telegram-desktop-shell", !mobileShell);
       tg.ready();
-      tg.expand();
-      tg.requestFullscreen?.();
-      tg.disableVerticalSwipes?.();
+      if (mobileShell) {
+        tg.expand();
+        tg.requestFullscreen?.();
+        tg.disableVerticalSwipes?.();
+      } else {
+        document.documentElement.style.removeProperty("--tg-app-height");
+        tg.exitFullscreen?.();
+      }
       applyTelegramViewport();
       tg.onEvent?.("viewportChanged", applyTelegramViewport);
     } catch {

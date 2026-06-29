@@ -115,6 +115,28 @@ p {
   padding-bottom: calc(max(20px, env(safe-area-inset-bottom)) + 8px);
 }
 
+body.telegram-desktop-shell {
+  overflow: auto;
+  background:
+    radial-gradient(circle at 50% -12%, rgba(67, 210, 255, 0.12), transparent 42%),
+    radial-gradient(circle at 18% 24%, rgba(163, 100, 255, 0.11), transparent 34%),
+    var(--bg);
+}
+
+.telegram-desktop-shell .app-shell {
+  width: min(430px, calc(100vw - 32px));
+  min-height: min(820px, calc(100dvh - 32px));
+  height: min(820px, calc(100dvh - 32px));
+  margin: 16px auto;
+  padding-top: 24px;
+  padding-bottom: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 28px;
+  box-shadow:
+    0 30px 120px rgba(0, 0, 0, 0.54),
+    0 0 0 1px rgba(34, 211, 238, 0.06);
+}
+
 .topbar,
 .wallet-strip,
 .market-hero,
