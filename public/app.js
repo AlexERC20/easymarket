@@ -14,8 +14,9 @@ import {
   isAquariumEnabled,
   primeAquarium,
   setAquariumEnabled,
+  setAquariumRuntimeAllowed,
   spillAquariumFood,
-} from "./aquarium.js?v=20260630-02";
+} from "./aquarium.js?v=20260630-03";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -158,6 +159,7 @@ const state = {
   chartTradesByMarket: new Map(),
   aquariumSnapshot: null,
   aquariumSnapAt: 0,
+  aquariumRuntimeAllowed: false,
   freshActivityIds: new Set(),
   seenSettledPositionIds: new Set(),
   pendingBuy: false,
@@ -808,6 +810,23 @@ function isBtcFiveMinuteMarket(market = getDisplayMarket()) {
   return isBtcMarket(market) && String(market?.symbol || "") === "BTCUSDT";
 }
 
+function shouldRunAquariumForMarket(market = getDisplayMarket()) {
+  return isBtcFiveMinuteMarket(market);
+}
+
+function syncAquariumRuntimeForMarket(market = getDisplayMarket()) {
+  const allowed = shouldRunAquariumForMarket(market);
+  if (state.aquariumRuntimeAllowed !== allowed) {
+    state.aquariumRuntimeAllowed = allowed;
+    setAquariumRuntimeAllowed(allowed);
+    if (!allowed) {
+      state.aquariumSnapshot = null;
+      state.aquariumSnapAt = 0;
+    }
+  }
+  return allowed;
+}
+
 function isMarketOpenForBuy(market, bufferMs = MARKET_BUY_CLOSE_BUFFER_MS) {
   if (!market || market.status !== "open" || !market.end_time) {
     return false;
@@ -975,6 +994,7 @@ function drawMarketChartFrame() {
   const { dpr, width, height } = resizeCanvas(canvas);
   const appBg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#080d16";
   const worldCup = isWorldCupMarket(market);
+  const aquariumAllowed = syncAquariumRuntimeForMarket(market);
   const openPrice = worldCup
     ? Math.max(0.1, Math.min(99.9, Number(market.yes_price || 0.5) * 100))
     : Number(market.open_price || 0);
@@ -1115,7 +1135,7 @@ function drawMarketChartFrame() {
     const chartTrades = getChartTradesForMarket(market, windowStart, windowEnd);
     // Only snapshot avatars when the aquarium is on, and at most ~3x/sec, so the
     // chart's hot render loop is not allocating a fresh snapshot every frame.
-    const captureAvatars = isAquariumEnabled() && nowMs - (state.aquariumSnapAt || 0) > 300;
+    const captureAvatars = aquariumAllowed && isAquariumEnabled() && nowMs - (state.aquariumSnapAt || 0) > 300;
     const frameAvatars = captureAvatars ? [] : null;
     chartTrades.forEach((trade) => {
       const x = scaleX(trade.at);
@@ -1199,7 +1219,9 @@ function drawMarketChartFrame() {
 }
 
 function renderMarketChart() {
-  primeAquarium();
+  if (syncAquariumRuntimeForMarket()) {
+    primeAquarium();
+  }
   if (state.chartRaf) {
     return;
   }
@@ -1238,9 +1260,11 @@ function showRoundTransition(market) {
   triggerHaptic("round");
   showSuccessLightningBurst("NEXT ROUND");
   showToast("Раунд завершён. Готовлю следующий...");
-  // Spill this round's avatar dots into the aquarium as falling food. The layer
-  // persists across the data refresh, so the crumbs land on the next screen.
-  spillAquariumFood(buildAquariumFoodForMarket(market));
+  if (shouldRunAquariumForMarket(market)) {
+    // Spill 5m BTC avatar dots into the aquarium as falling food. Long/sports
+    // markets keep the chart lightweight and skip the aquarium entirely.
+    spillAquariumFood(buildAquariumFoodForMarket(market));
+  }
 }
 
 function showTopupSuccessAnimation(label = "TOP UP") {

@@ -26,6 +26,7 @@ const FISH_PALETTES = [
 let canvas = null;
 let ctx = null;
 let enabled = false;
+let runtimeAllowed = false;
 let initialized = false;
 
 let cssW = 0;
@@ -81,14 +82,14 @@ function isTelegramMiniApp() {
 function canAnimateAquarium() {
   // Telegram on iOS runs inside WKWebView. Some builds can report the document
   // as hidden while the Mini App is visibly active, which killed the fish loop.
-  return enabled && !reducedMotion() && (!document.hidden || isTelegramMiniApp());
+  return enabled && runtimeAllowed && !reducedMotion() && (!document.hidden || isTelegramMiniApp());
 }
 
 function canAnimateDomAquarium() {
   // DOM fallback is the compatibility path for iOS Telegram WebView. Do not
   // gate it on prefers-reduced-motion: on some iPhones Telegram reports reduce
   // by default, which prevented fish from being created at all.
-  return enabled && shouldUseDomAquarium() && (!document.hidden || isTelegramMiniApp());
+  return enabled && runtimeAllowed && shouldUseDomAquarium() && (!document.hidden || isTelegramMiniApp());
 }
 
 function rand(min, max) {
@@ -123,6 +124,32 @@ export function setAquariumEnabled(next) {
     clearCanvas();
   }
   return enabled;
+}
+
+function clearAquariumRuntime() {
+  stopLoop();
+  stopDomLoop();
+  fish = [];
+  food = [];
+  bubbles = [];
+  pendingFoodAvatars = [];
+  foodImages.clear();
+  clearDomAquarium();
+  clearCanvas();
+}
+
+export function setAquariumRuntimeAllowed(next) {
+  const allowed = Boolean(next);
+  if (runtimeAllowed === allowed) {
+    return runtimeAllowed;
+  }
+  runtimeAllowed = allowed;
+  if (!runtimeAllowed) {
+    clearAquariumRuntime();
+  } else if (enabled) {
+    primeAquarium(10);
+  }
+  return runtimeAllowed;
 }
 
 function shouldUseDomAquarium() {
