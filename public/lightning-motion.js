@@ -19,6 +19,7 @@ const BUTTON_SELECTOR = [
   ".orderbook-side-toggle button",
   ".withdraw-network-toggle button",
   ".referral-nudge button",
+  ".top-more-item",
 ].join(",");
 
 const CARD_SELECTOR = [

@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260629-12" />
-    <link rel="stylesheet" href="/lightning-motion.css?v=20260629-12" />
+    <link rel="stylesheet" href="/styles.css?v=20260629-14" />
+    <link rel="stylesheet" href="/lightning-motion.css?v=20260629-14" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -45,23 +45,6 @@
                 <path d="m14 12.9 1.8 2.7" />
               </svg>
             </button>
-            <button id="leaderboardBtn" class="icon-button leaderboard-action" type="button" aria-label="Рейтинг">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M6.5 19V11" />
-                <path d="M12 19V5" />
-                <path d="M17.5 19v-9.5" />
-                <path d="M4.5 19.2h15" />
-                <path d="m12 3.5.9 1.8 2 .3-1.4 1.4.3 2-1.8-.9-1.8.9.3-2-1.4-1.4 2-.3.9-1.8Z" />
-              </svg>
-            </button>
-            <button id="clansBtn" class="icon-button clan-action" type="button" aria-label="Кланы">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M7.5 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
-                <path d="M16.5 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
-                <path d="M3.8 20.2v-1.4c0-3 1.8-5.2 3.7-5.2s3.7 2.2 3.7 5.2v1.4" />
-                <path d="M12.8 20.2v-1.4c0-3 1.8-5.2 3.7-5.2s3.7 2.2 3.7 5.2v1.4" />
-              </svg>
-            </button>
             <button id="walletBtn" class="icon-button wallet-action" type="button" aria-label="Кошелек">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M4.5 7.5h14.2a1.8 1.8 0 0 1 1.8 1.8v8a1.8 1.8 0 0 1-1.8 1.8H5.8a2.3 2.3 0 0 1-2.3-2.3V7.5Z" />
@@ -78,6 +61,34 @@
                 <path d="M5 3.5h14a1.5 1.5 0 0 1 1.5 1.5v14a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V5A1.5 1.5 0 0 1 5 3.5Z" />
               </svg>
             </button>
+            <button id="topMoreBtn" class="icon-button more-action" type="button" aria-label="Еще" aria-expanded="false" aria-controls="topMoreMenu">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5.5 12h.1" />
+                <path d="M12 12h.1" />
+                <path d="M18.5 12h.1" />
+              </svg>
+            </button>
+            <div id="topMoreMenu" class="top-more-menu hidden" role="menu" aria-label="Еще">
+              <button id="leaderboardBtn" class="top-more-item leaderboard-action" type="button" role="menuitem">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6.5 19V11" />
+                  <path d="M12 19V5" />
+                  <path d="M17.5 19v-9.5" />
+                  <path d="M4.5 19.2h15" />
+                  <path d="m12 3.5.9 1.8 2 .3-1.4 1.4.3 2-1.8-.9-1.8.9.3-2-1.4-1.4 2-.3.9-1.8Z" />
+                </svg>
+                <span>Рейтинг</span>
+              </button>
+              <button id="clansBtn" class="top-more-item clan-action" type="button" role="menuitem">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7.5 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                  <path d="M16.5 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                  <path d="M3.8 20.2v-1.4c0-3 1.8-5.2 3.7-5.2s3.7 2.2 3.7 5.2v1.4" />
+                  <path d="M12.8 20.2v-1.4c0-3 1.8-5.2 3.7-5.2s3.7 2.2 3.7 5.2v1.4" />
+                </svg>
+                <span>Кланы</span>
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -617,6 +628,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260629-13" type="module"></script>
+    <script src="/app.js?v=20260629-14" type="module"></script>
   </body>
 </html>

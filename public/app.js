@@ -8,7 +8,7 @@ import {
   showWalletFlowBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260629-13";
+} from "./lightning-motion.js?v=20260629-14";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -3399,6 +3399,21 @@ function showButtonPressed(button) {
   setTimeout(() => button.classList.remove("is-pressed"), 150);
 }
 
+function setTopMoreMenuOpen(open) {
+  const menu = $("topMoreMenu");
+  const button = $("topMoreBtn");
+  if (!menu || !button) {
+    return;
+  }
+  menu.classList.toggle("hidden", !open);
+  button.classList.toggle("active", Boolean(open));
+  button.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function closeTopMoreMenu() {
+  setTopMoreMenuOpen(false);
+}
+
 function stopDepositPolling() {
   if (state.topup.pollTimer) {
     clearInterval(state.topup.pollTimer);
@@ -4054,11 +4069,20 @@ if (refreshButton) {
 
 $("walletBtn").addEventListener("click", () => {
   triggerHaptic("selection");
+  closeTopMoreMenu();
   openTopupSheet("", "", "topup");
+});
+
+$("topMoreBtn")?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  triggerHaptic("selection");
+  showButtonPressed($("topMoreBtn"));
+  setTopMoreMenuOpen($("topMoreMenu")?.classList.contains("hidden"));
 });
 
 $("leaderboardBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
+  closeTopMoreMenu();
   setLeaderboardSheetOpen(true);
   void loadLeaderboard().catch(() => showToast("Рейтинг пока не загрузился."));
 });
@@ -4076,6 +4100,7 @@ $("leaderboardSheet")?.addEventListener("click", (event) => {
 
 $("clansBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
+  closeTopMoreMenu();
   setClansSheetOpen(true);
 });
 
@@ -4087,6 +4112,18 @@ $("clansCloseBtn")?.addEventListener("click", () => {
 $("clansSheet")?.addEventListener("click", (event) => {
   if (event.target === $("clansSheet")) {
     setClansSheetOpen(false);
+  }
+});
+
+document.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element) || !event.target.closest(".top-actions")) {
+    closeTopMoreMenu();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeTopMoreMenu();
   }
 });
 
