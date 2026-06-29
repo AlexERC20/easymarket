@@ -259,17 +259,18 @@ function ensureEnergyBackground() {
   document.body.prepend(bg);
 }
 
-function appendSparks(target, x, y, count = 5) {
+function appendSparks(target, x, y, count = 5, tier = 1) {
   if (!target) {
     return;
   }
 
   const safeCount = reducedMotion() ? Math.min(2, count) : count;
+  const safeTier = Math.max(1, Math.min(4, Number(tier) || 1));
   for (let index = 0; index < safeCount; index += 1) {
     const spark = document.createElement("span");
     const angle = (Math.PI * 2 * index) / count + Math.random() * 0.7;
-    const distance = 18 + Math.random() * 24;
-    spark.className = "lm-spark";
+    const distance = 18 + Math.random() * (20 + safeTier * 8);
+    spark.className = `lm-spark tier-${safeTier}`;
     spark.style.setProperty("--lm-x", `${x}px`);
     spark.style.setProperty("--lm-y", `${y}px`);
     spark.style.setProperty("--lm-dx", `${Math.cos(angle) * distance}px`);
@@ -320,15 +321,17 @@ export function triggerButtonLightning(button, event = null) {
 
   const flash = document.createElement("span");
   const tier = getStakeTier(button);
+  button.dataset.lmActiveTier = String(tier);
   flash.className = `lm-button-flash tier-${tier}`;
   flash.style.setProperty("--lm-x", `${x}px`);
   flash.style.setProperty("--lm-y", `${y}px`);
   button.appendChild(flash);
-  appendSparks(button, x, y, 5 + tier * 2);
+  appendSparks(button, x, y, 5 + tier * 3, tier);
   playMotionSound("tap");
 
   window.setTimeout(() => {
     button.classList.remove("lm-lightning-tap");
+    delete button.dataset.lmActiveTier;
     flash.remove();
   }, tier >= 4 ? 1280 : 940);
 }

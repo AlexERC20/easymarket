@@ -7,7 +7,7 @@ import {
   showSuccessLightningBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260629-02";
+} from "./lightning-motion.js?v=20260629-05";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
