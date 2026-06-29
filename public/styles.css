@@ -1463,13 +1463,13 @@ code {
   padding: 14px;
 }
 
-.task-sheet:not(.hidden) {
-  animation: sheetBackdropIn var(--motion-normal) var(--ease-default) both;
+.task-sheet.sheet-open {
+  animation: sheetBackdropIn 320ms var(--ease-default) both;
 }
 
 .task-sheet.sheet-closing {
   pointer-events: none;
-  animation: sheetBackdropOut 240ms var(--ease-default) both;
+  animation: sheetBackdropOut 340ms var(--ease-default) both;
 }
 
 .task-sheet.hidden {
@@ -1505,18 +1505,18 @@ code {
   will-change: transform, opacity;
 }
 
-.task-sheet:not(.hidden) .task-panel {
-  animation: bottomSheetIn var(--motion-slow) var(--spring-soft) both;
+.task-sheet.sheet-open .task-panel {
+  animation: bottomSheetIn 520ms var(--spring-soft) both;
 }
 
 .task-sheet.sheet-closing .task-panel,
 .task-sheet.sheet-closing .bet-panel {
-  animation: bottomSheetOut 260ms var(--ease-default) both;
+  animation: bottomSheetOut 340ms var(--ease-default) both;
 }
 
 .task-panel.sheet-height-morphing,
 .bet-panel.sheet-height-morphing {
-  transition: height 260ms var(--ease-default);
+  transition: height 340ms var(--ease-default);
 }
 
 .sheet-view-animating :is(
@@ -1527,7 +1527,7 @@ code {
   .task-stats-panel,
   .clan-view
 ):not(.hidden) {
-  animation: sheetViewIn 240ms var(--ease-default) both;
+  animation: sheetViewIn 340ms var(--ease-default) both;
 }
 
 .task-head,
@@ -2561,8 +2561,8 @@ code {
   will-change: transform, opacity;
 }
 
-.task-sheet:not(.hidden) .bet-panel {
-  animation: bottomSheetIn var(--motion-slow) var(--spring-soft) both;
+.task-sheet.sheet-open .bet-panel {
+  animation: bottomSheetIn 520ms var(--spring-soft) both;
 }
 
 .sheet-grabber {
@@ -3592,13 +3592,13 @@ code {
 @keyframes bottomSheetIn {
   from {
     opacity: 0;
-    transform: translateY(28px) scale(0.97);
-    filter: blur(2px);
+    transform: translateY(44px) scale(0.94);
+    filter: blur(5px);
   }
 
-  68% {
+  62% {
     opacity: 1;
-    transform: translateY(-2px) scale(1.004);
+    transform: translateY(-5px) scale(1.008);
     filter: blur(0);
   }
 
@@ -3628,8 +3628,8 @@ code {
 
   to {
     opacity: 0;
-    transform: translateY(22px) scale(0.975);
-    filter: blur(2px);
+    transform: translateY(34px) scale(0.965);
+    filter: blur(4px);
   }
 }
 
@@ -3646,8 +3646,14 @@ code {
 @keyframes sheetViewIn {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.992);
-    filter: blur(1px);
+    transform: translateY(16px) scale(0.985);
+    filter: blur(3px);
+  }
+
+  70% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.002);
+    filter: blur(0);
   }
 
   to {

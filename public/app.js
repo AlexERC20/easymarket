@@ -8,7 +8,7 @@ import {
   showWalletFlowBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260629-16";
+} from "./lightning-motion.js?v=20260629-17";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -27,8 +27,8 @@ const ACTIVE_MARKET_POLL_MS = 1_500;
 const MARKET_LIST_POLL_MS = 10_000;
 const COMMENTS_POLL_MS = 10_000;
 const LEADERBOARD_CACHE_MS = 90_000;
-const SHEET_CLOSE_MS = 280;
-const SHEET_HEIGHT_MORPH_MS = 280;
+const SHEET_CLOSE_MS = 360;
+const SHEET_HEIGHT_MORPH_MS = 360;
 const COLLAPSE_LIMIT = 3;
 const MARKET_BUY_CLOSE_BUFFER_MS = 400;
 const MARKET_SELL_FREEZE_SECONDS = 7;
@@ -1637,7 +1637,8 @@ function openSheet(sheetOrId) {
     window.clearTimeout(pendingTimer);
     sheetCloseTimers.delete(sheet);
   }
-  sheet.classList.remove("hidden", "sheet-closing");
+  sheet.classList.remove("hidden", "sheet-open", "sheet-closing");
+  void sheet.offsetWidth;
   sheet.classList.add("sheet-open");
 }
 
@@ -3063,7 +3064,7 @@ async function handleClanLaunchLink() {
     return;
   }
   state.handledClanLaunch = true;
-  $("clansSheet")?.classList.remove("hidden");
+  setClansSheetOpen(true);
   await joinClan({ clan_id: clanId }, null, "Ты вошёл в клан по ссылке.");
 }
 
