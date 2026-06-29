@@ -56,6 +56,11 @@ let lastAccY = null;
 let lastAccZ = null;
 let lastShakeFeedAt = 0;
 let feedProvider = null;
+// Telegram Mini App sensor API (Bot API 8.0+). iOS Telegram blocks the W3C
+// devicemotion/deviceorientation events, so we drive tilt/shake from these.
+let tgAccelStarted = false;
+let tgOrientStarted = false;
+let tgSensorListeners = false;
 
 const foodImages = new Map();
 
@@ -132,6 +137,7 @@ export function setAquariumEnabled(next) {
   } else {
     stopLoop();
     stopDomLoop();
+    stopTelegramSensors();
     fish = [];
     food = [];
     bubbles = [];
@@ -146,6 +152,7 @@ export function setAquariumEnabled(next) {
 function clearAquariumRuntime() {
   stopLoop();
   stopDomLoop();
+  stopTelegramSensors();
   fish = [];
   food = [];
   bubbles = [];
@@ -794,30 +801,24 @@ export function spillAquariumFood(avatars) {
   }
 }
 
-function tiltHandler(event) {
-  // gamma: left-right tilt in degrees (-90..90)
-  const gamma = Number(event.gamma);
-  if (!Number.isFinite(gamma)) {
+// Tilt drift, fed from W3C deviceorientation (degrees) or Telegram (converted).
+function ingestOrientationGamma(gammaDeg) {
+  if (!Number.isFinite(gammaDeg)) {
     return;
   }
-  tiltTarget = Math.max(-1, Math.min(1, gamma / 34));
+  tiltTarget = Math.max(-1, Math.min(1, gammaDeg / 34));
 }
 
-function motionHandler(event) {
-  const acceleration = event.accelerationIncludingGravity || event.acceleration || {};
-  const x = Number(acceleration.x);
-  const y = Number(acceleration.y);
-  const z = Number(acceleration.z);
+// Shake detection + impulse, fed from W3C devicemotion or Telegram accelerometer.
+function ingestAccel(x, y, z) {
   if (!Number.isFinite(x)) {
     return;
   }
   const delta = lastMotionX === null ? 0 : x - lastMotionX;
   lastMotionX = x;
-  tiltTarget = Math.max(-1, Math.min(1, tiltTarget + x * 0.012));
-  tiltImpulse = Math.max(-2.4, Math.min(2.4, tiltImpulse + x * 0.035 + delta * 0.12));
+  tiltImpulse = Math.max(-2.4, Math.min(2.4, tiltImpulse + delta * 0.12));
 
-  // Shake = a sharp jerk across the axes. A deliberate shake feeds the fish and
-  // scatters whatever crumbs are already in the tank, even mid-round.
+  // Shake = a sharp jerk across the axes -> feed the fish and scatter the crumbs.
   if (Number.isFinite(y) && Number.isFinite(z) && lastAccX !== null) {
     const jerk = Math.abs(x - lastAccX) + Math.abs(y - lastAccY) + Math.abs(z - lastAccZ);
     if (jerk > SHAKE_JERK) {
@@ -827,6 +828,78 @@ function motionHandler(event) {
   lastAccX = x;
   lastAccY = y;
   lastAccZ = z;
+}
+
+function tiltHandler(event) {
+  ingestOrientationGamma(Number(event.gamma)); // degrees
+}
+
+function motionHandler(event) {
+  const a = event.accelerationIncludingGravity || event.acceleration || {};
+  ingestAccel(Number(a.x), Number(a.y), Number(a.z));
+}
+
+// Telegram Mini App native sensors — the only path that works in iOS Telegram.
+function startTelegramSensors() {
+  const tg = window.Telegram?.WebApp;
+  if (!tg) {
+    return false;
+  }
+  if (!tgSensorListeners && typeof tg.onEvent === "function") {
+    tg.onEvent("accelerometerChanged", () => {
+      const a = tg.Accelerometer || {};
+      ingestAccel(Number(a.x), Number(a.y), Number(a.z));
+    });
+    tg.onEvent("deviceOrientationChanged", () => {
+      const o = tg.DeviceOrientation || {};
+      // Telegram reports gamma in radians; our tilt math expects degrees.
+      ingestOrientationGamma(Number(o.gamma) * (180 / Math.PI));
+    });
+    tgSensorListeners = true;
+  }
+  let started = false;
+  if (typeof tg.Accelerometer?.start === "function" && !tgAccelStarted) {
+    tgAccelStarted = true;
+    try {
+      tg.Accelerometer.start({ refresh_rate: 50 });
+      started = true;
+    } catch {
+      tgAccelStarted = false;
+    }
+  }
+  if (typeof tg.DeviceOrientation?.start === "function" && !tgOrientStarted) {
+    tgOrientStarted = true;
+    try {
+      tg.DeviceOrientation.start({ refresh_rate: 60 });
+      started = true;
+    } catch {
+      tgOrientStarted = false;
+    }
+  }
+  return started;
+}
+
+function stopTelegramSensors() {
+  const tg = window.Telegram?.WebApp;
+  if (!tg) {
+    return;
+  }
+  if (tgAccelStarted) {
+    try {
+      tg.Accelerometer?.stop?.();
+    } catch {
+      // ignore
+    }
+    tgAccelStarted = false;
+  }
+  if (tgOrientStarted) {
+    try {
+      tg.DeviceOrientation?.stop?.();
+    } catch {
+      // ignore
+    }
+    tgOrientStarted = false;
+  }
 }
 
 function onShake(strength = 1) {
@@ -890,6 +963,9 @@ function startleFish(strength = 1) {
 }
 
 function requestTiltAccess() {
+  // Telegram's native sensors are the only ones that work inside iOS Telegram.
+  startTelegramSensors();
+
   const addOrientation = () => {
     if (tiltListening) {
       return;
