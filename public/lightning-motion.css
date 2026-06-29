@@ -228,9 +228,10 @@
   border-radius: var(--lm-radius, inherit);
   clip-path: inset(0 round var(--lm-radius, 12px));
   mix-blend-mode: screen;
-  filter:
-    drop-shadow(0 0 4px color-mix(in srgb, var(--lm-tier-accent, #b7ff4d) 90%, white))
-    drop-shadow(0 0 9px color-mix(in srgb, var(--lm-tier-accent-2, #35f6ff) 66%, transparent));
+  filter: none;
+  --lm-bolt-mask: radial-gradient(ellipse 88% 78% at 50% 50%, #000 0 52%, rgba(0, 0, 0, 0.7) 72%, transparent 100%);
+  -webkit-mask-image: var(--lm-bolt-mask);
+  mask-image: var(--lm-bolt-mask);
 }
 
 .lm-bolt-layer path {
@@ -243,6 +244,9 @@
   stroke-dashoffset: 1;
   opacity: 0;
   animation: lmBoltStrike var(--lm-bolt-dur, 620ms) var(--lm-ease) both;
+  filter:
+    drop-shadow(0 0 4px color-mix(in srgb, var(--lm-tier-accent, #b7ff4d) 90%, white))
+    drop-shadow(0 0 9px color-mix(in srgb, var(--lm-tier-accent-2, #35f6ff) 60%, transparent));
 }
 
 .lm-bolt-layer path.lm-bolt-branch {
@@ -251,16 +255,33 @@
 }
 
 .lm-bolt-layer.tier-3 {
-  filter:
-    drop-shadow(0 0 5px color-mix(in srgb, var(--lm-tier-accent, #ffe66d) 92%, white))
-    drop-shadow(0 0 12px color-mix(in srgb, var(--lm-tier-accent-2, #35f6ff) 60%, transparent));
+  filter: none;
 }
 
 .lm-bolt-layer.tier-4 {
+  filter: none;
+}
+
+.lm-bolt-layer.tier-3 path {
   filter:
-    drop-shadow(0 0 6px rgba(255, 255, 255, 0.92))
-    drop-shadow(0 0 13px rgba(165, 108, 255, 0.85))
-    drop-shadow(0 0 22px rgba(53, 246, 255, 0.5));
+    drop-shadow(0 0 5px color-mix(in srgb, var(--lm-tier-accent, #ffe66d) 92%, white))
+    drop-shadow(0 0 12px color-mix(in srgb, var(--lm-tier-accent-2, #35f6ff) 56%, transparent));
+}
+
+.lm-bolt-layer.tier-4 path {
+  filter:
+    drop-shadow(0 0 5px rgba(255, 255, 255, 0.88))
+    drop-shadow(0 0 11px rgba(165, 108, 255, 0.78))
+    drop-shadow(0 0 18px rgba(53, 246, 255, 0.44));
+}
+
+.amount-button .lm-button-flash,
+.amount-button .lm-bolt-layer {
+  inset: 1px;
+  width: auto;
+  height: auto;
+  border-radius: 9px;
+  clip-path: inset(0 round 9px);
 }
 
 .lm-stake-shockwave {

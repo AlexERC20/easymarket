@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260630-03" />
-    <link rel="stylesheet" href="/lightning-motion.css?v=20260629-18" />
+    <link rel="stylesheet" href="/styles.css?v=20260630-04" />
+    <link rel="stylesheet" href="/lightning-motion.css?v=20260630-04" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -106,19 +106,25 @@
             <button id="tasksTabTasks" class="active" type="button" data-task-tab="tasks">Задания</button>
             <button id="tasksTabStats" type="button" data-task-tab="stats">Моя статистика</button>
           </div>
-          <div class="task-row sound-toggle-row">
-            <div>
-              <strong>Звук эффектов</strong>
-              <small>Energy-saber клики, победы и важные отклики.</small>
+          <button id="taskSettingsToggleBtn" class="task-settings-toggle" type="button" aria-expanded="false">
+            <span>Настройки</span>
+            <b aria-hidden="true">⚙</b>
+          </button>
+          <div id="taskSettingsPanel" class="task-settings-panel hidden">
+            <div class="task-row sound-toggle-row">
+              <div>
+                <strong>Звук эффектов</strong>
+                <small>Energy-saber клики, победы и важные отклики.</small>
+              </div>
+              <button id="motionSoundToggleBtn" class="task-button sound-toggle-button" type="button" aria-pressed="false">Выкл</button>
             </div>
-            <button id="motionSoundToggleBtn" class="task-button sound-toggle-button" type="button" aria-pressed="false">Выкл</button>
-          </div>
-          <div class="task-row sound-toggle-row">
-            <div>
-              <strong>Аквариум на графике</strong>
-              <small>Кружочки ставок опадают кормом, рыбки плавают и едят их.</small>
+            <div class="task-row sound-toggle-row">
+              <div>
+                <strong>Аквариум на BTC 5m</strong>
+                <small>Корм и рыбки только на 5-минутном BTC-графике.</small>
+              </div>
+              <button id="aquariumToggleBtn" class="task-button sound-toggle-button" type="button" aria-pressed="false">Выкл</button>
             </div>
-            <button id="aquariumToggleBtn" class="task-button sound-toggle-button" type="button" aria-pressed="false">Выкл</button>
           </div>
           <div class="task-list">
             <details class="task-group" open>
@@ -640,6 +646,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260630-03" type="module"></script>
+    <script src="/app.js?v=20260630-04" type="module"></script>
   </body>
 </html>

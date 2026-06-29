@@ -12,7 +12,7 @@ const MAX_FOOD = 80;
 const FISH_MIN = 4;
 const FISH_MAX = 5;
 const FOOD_ARM_MS = 3200; // crumbs settle before any fish will hunt them
-const EAT_MS = 1640; // a bite is gradual, never instant
+const EAT_MS = 3280; // a bite is gradual, never instant
 const FRAME_MS = 33; // ~30fps simulation cap to stay light on the phone
 
 const FISH_PALETTES = [
@@ -43,8 +43,12 @@ let lastTs = 0;
 
 let tilt = 0; // smoothed -1..1, from device orientation
 let tiltTarget = 0;
+let tiltImpulse = 0;
 let tiltListening = false;
 let tiltPermissionAsked = false;
+let motionListening = false;
+let motionPermissionAsked = false;
+let lastMotionX = null;
 
 const foodImages = new Map();
 
@@ -330,7 +334,7 @@ function nearestDomFoodFor(fishItem) {
 }
 
 function updateDomFood(dt, width, height) {
-  const drift = tilt * 58;
+  const drift = tilt * 210 + tiltImpulse * 260;
   const now = Date.now();
   for (const crumb of domFood) {
     if (now < crumb.bornAt) {
@@ -474,6 +478,7 @@ function stepDomAquarium(ts) {
   domLastTs = ts;
   domLastFrameAt = Date.now();
   tilt += (tiltTarget - tilt) * Math.min(1, dt * 4);
+  tiltImpulse *= Math.max(0, 1 - dt * 2.1);
   updateDomFood(dt, measured.width, measured.height);
   updateDomFish(dt, measured.width, measured.height);
   renderDomAquarium();
@@ -752,38 +757,72 @@ function tiltHandler(event) {
   tiltTarget = Math.max(-1, Math.min(1, gamma / 34));
 }
 
-function requestTiltAccess() {
-  if (tiltListening || typeof window.DeviceOrientationEvent === "undefined") {
+function motionHandler(event) {
+  const acceleration = event.accelerationIncludingGravity || event.acceleration || {};
+  const x = Number(acceleration.x);
+  if (!Number.isFinite(x)) {
     return;
   }
-  const add = () => {
+  const delta = lastMotionX === null ? 0 : x - lastMotionX;
+  lastMotionX = x;
+  tiltTarget = Math.max(-1, Math.min(1, tiltTarget + x * 0.012));
+  tiltImpulse = Math.max(-2.4, Math.min(2.4, tiltImpulse + x * 0.035 + delta * 0.12));
+}
+
+function requestTiltAccess() {
+  const addOrientation = () => {
     if (tiltListening) {
       return;
     }
     tiltListening = true;
     window.addEventListener("deviceorientation", tiltHandler, { passive: true });
   };
-  const req = window.DeviceOrientationEvent?.requestPermission;
-  if (typeof req === "function") {
-    if (tiltPermissionAsked) {
+  const addMotion = () => {
+    if (motionListening || typeof window.DeviceMotionEvent === "undefined") {
       return;
     }
-    tiltPermissionAsked = true;
-    // iOS 13+: needs a user gesture; setAquariumEnabled is called from a tap.
-    req.call(window.DeviceOrientationEvent)
-      .then((state) => {
-        if (state === "granted") {
-          add();
-        }
-      })
-      .catch(() => undefined);
+    motionListening = true;
+    window.addEventListener("devicemotion", motionHandler, { passive: true });
+  };
+
+  if (typeof window.DeviceOrientationEvent !== "undefined") {
+    const req = window.DeviceOrientationEvent?.requestPermission;
+    if (typeof req === "function") {
+      if (!tiltPermissionAsked) {
+        tiltPermissionAsked = true;
+        // iOS 13+: needs a user gesture; setAquariumEnabled is called from a tap.
+        req.call(window.DeviceOrientationEvent)
+          .then((state) => {
+            if (state === "granted") {
+              addOrientation();
+            }
+          })
+          .catch(() => undefined);
+      }
+    } else {
+      addOrientation();
+    }
+  }
+
+  const motionReq = window.DeviceMotionEvent?.requestPermission;
+  if (typeof motionReq === "function") {
+    if (!motionPermissionAsked) {
+      motionPermissionAsked = true;
+      motionReq.call(window.DeviceMotionEvent)
+        .then((state) => {
+          if (state === "granted") {
+            addMotion();
+          }
+        })
+        .catch(() => undefined);
+    }
   } else {
-    add();
+    addMotion();
   }
 }
 
 function updateFood(dt) {
-  const drift = tilt * 58; // px/s sideways pull from phone tilt
+  const drift = tilt * 210 + tiltImpulse * 260; // px/s sideways pull from phone tilt/shake
   for (const f of food) {
     if (f.eat > 0) {
       f.eat += dt / (EAT_MS / 1000);
@@ -1105,6 +1144,7 @@ function frame(ts) {
   lastTs = ts;
 
   tilt += (tiltTarget - tilt) * Math.min(1, dt * 4);
+  tiltImpulse *= Math.max(0, 1 - dt * 2.1);
 
   updateFood(dt);
   updateFish(dt);

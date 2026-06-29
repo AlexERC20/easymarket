@@ -16,7 +16,7 @@ import {
   setAquariumEnabled,
   setAquariumRuntimeAllowed,
   spillAquariumFood,
-} from "./aquarium.js?v=20260630-03";
+} from "./aquarium.js?v=20260630-04";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -143,6 +143,7 @@ const state = {
   lossRefundOffers: [],
   referralNudgeShown: false,
   taskTab: "tasks",
+  taskSettingsOpen: false,
   dailyTasks: {},
   expanded: {
     positions: false,
@@ -1605,6 +1606,7 @@ function renderTaskRewards() {
   if ($("dailyBetTaskReward")) $("dailyBetTaskReward").textContent = formatFire(dailyBet);
   renderSoundToggle();
   renderAquariumToggle();
+  renderTaskSettings();
   renderTaskButtonStates();
 }
 
@@ -1624,6 +1626,16 @@ function renderAquariumToggle() {
   button.classList.toggle("active", enabled);
   button.setAttribute("aria-pressed", enabled ? "true" : "false");
   button.textContent = enabled ? "Вкл" : "Выкл";
+}
+
+function renderTaskSettings() {
+  const button = $("taskSettingsToggleBtn");
+  const panel = $("taskSettingsPanel");
+  const open = state.taskTab === "tasks" && Boolean(state.taskSettingsOpen);
+  button?.classList.toggle("active", open);
+  button?.classList.toggle("hidden", state.taskTab !== "tasks");
+  button?.setAttribute("aria-expanded", open ? "true" : "false");
+  panel?.classList.toggle("hidden", !open);
 }
 
 function getDailyTaskStatus(taskKey) {
@@ -1688,6 +1700,10 @@ function renderTaskTabs() {
     $("tasksTabStats")?.classList.toggle("active", isStats);
     document.querySelector(".task-list")?.classList.toggle("hidden", isStats);
     $("taskStatsPanel")?.classList.toggle("hidden", !isStats);
+    if (isStats) {
+      state.taskSettingsOpen = false;
+    }
+    renderTaskSettings();
   });
 }
 
@@ -5291,6 +5307,12 @@ document.querySelectorAll("[data-task-tab]").forEach((button) => {
 $("tasksCloseBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   setTasksSheetOpen(false);
+});
+
+$("taskSettingsToggleBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  state.taskSettingsOpen = !state.taskSettingsOpen;
+  renderTaskSettings();
 });
 
 $("motionSoundToggleBtn")?.addEventListener("click", async () => {
