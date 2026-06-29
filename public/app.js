@@ -15,8 +15,9 @@ import {
   primeAquarium,
   setAquariumEnabled,
   setAquariumRuntimeAllowed,
+  setAquariumShakeFeeder,
   spillAquariumFood,
-} from "./aquarium.js?v=20260630-06";
+} from "./aquarium.js?v=20260630-07";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -214,6 +215,14 @@ const $ = (id) => document.getElementById(id);
 
 initLightningMotion();
 initAquarium();
+// Let a phone shake feed the fish on demand, mid-round, from the current chart.
+setAquariumShakeFeeder(() => {
+  const market = getDisplayMarket();
+  if (!market || !shouldRunAquariumForMarket(market)) {
+    return [];
+  }
+  return buildAquariumFoodForMarket(market);
+});
 
 const formatFire = (value) => Math.floor(Number(value || 0)).toLocaleString("ru-RU");
 const formatFireDecimal = (value) => Number(value || 0).toLocaleString("ru-RU", {

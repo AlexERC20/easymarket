@@ -853,7 +853,7 @@ h2 {
   background: #ff8a3c;
   clip-path: polygon(100% 50%, 0 0, 0 100%);
   transform-origin: right center;
-  animation: aquariumDomTail 620ms ease-in-out infinite alternate;
+  animation: aquariumDomTail var(--tail-ms, 620ms) ease-in-out infinite alternate;
 }
 
 .aquarium-dom-fish::after {

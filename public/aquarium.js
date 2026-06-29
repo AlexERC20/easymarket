@@ -14,6 +14,8 @@ const FISH_MAX = 5;
 const FOOD_ARM_MS = 3200; // crumbs settle before any fish will hunt them
 const EAT_MS = 3280; // a bite is gradual, never instant
 const FRAME_MS = 33; // ~30fps simulation cap to stay light on the phone
+const SHAKE_JERK = 26; // summed |Δacceleration| that counts as a deliberate shake
+const SHAKE_FEED_COOLDOWN_MS = 1400; // min gap between shake-triggered food spills
 
 const FISH_PALETTES = [
   { body: "#ffb347", belly: "#ffe2a8", fin: "#ff8a3c" }, // goldfish
@@ -49,8 +51,19 @@ let tiltPermissionAsked = false;
 let motionListening = false;
 let motionPermissionAsked = false;
 let lastMotionX = null;
+let lastAccX = null;
+let lastAccY = null;
+let lastAccZ = null;
+let lastShakeFeedAt = 0;
+let feedProvider = null;
 
 const foodImages = new Map();
+
+// app.js registers a provider that returns the current chart avatars so a shake
+// can feed the fish on demand, before the round even ends.
+export function setAquariumShakeFeeder(fn) {
+  feedProvider = typeof fn === "function" ? fn : null;
+}
 
 let waterGrad = null;
 let waterGradH = 0;
@@ -409,25 +422,46 @@ function updateDomFish(dt, width, height) {
         f.satietyUntil = now + rand(1400, 3300);
       }
     } else {
-      if (now > f.wanderUntil) {
-        f.wanderUntil = now + rand(800, 2100);
-        f.wanderVx = rand(-1, 1);
-        f.wanderVy = rand(-0.55, 0.55);
+      // Smoothly drifting heading gives natural curved cruising, not jerky turns.
+      if (f.heading === undefined) {
+        f.heading = Math.atan2(f.vy, f.vx || f.dir || 1);
       }
-      ax = f.wanderVx * f.speed * 0.78 + tilt * 12;
-      ay = f.wanderVy * f.speed * 0.78;
+      f.heading += (Math.random() - 0.5) * 1.6 * dt;
+      if (now > f.wanderUntil) {
+        f.wanderUntil = now + rand(1500, 3400);
+        f.heading += (Math.random() - 0.5) * 1.1; // occasional sharper turn
+      }
+      const cruise = f.speed * 0.82;
+      ax = Math.cos(f.heading) * cruise + tilt * 12;
+      ay = Math.sin(f.heading) * cruise * 0.55;
     }
 
+    // Gentle separation so the school does not collapse into one blob.
+    for (const other of domFish) {
+      if (other === f) {
+        continue;
+      }
+      const sx = f.x - other.x;
+      const sy = f.y - other.y;
+      const d2 = sx * sx + sy * sy;
+      if (d2 > 0.01 && d2 < 34 * 34) {
+        const d = Math.sqrt(d2);
+        ax += (sx / d) * f.speed * 0.9;
+        ay += (sy / d) * f.speed * 0.9;
+      }
+    }
+
+    const startled = now < (f.startleUntil || 0);
     f.vx += ax * dt;
     f.vy += ay * dt;
     const sp = Math.hypot(f.vx, f.vy);
-    const maxSp = f.speed * (f.target ? 2.1 : 1.2);
+    const maxSp = f.speed * (startled ? 3 : f.target ? 2.1 : 1.25);
     if (sp > maxSp) {
       f.vx = (f.vx / sp) * maxSp;
       f.vy = (f.vy / sp) * maxSp;
     }
-    f.vx *= 0.96;
-    f.vy *= 0.94;
+    f.vx *= startled ? 0.99 : 0.96;
+    f.vy *= startled ? 0.985 : 0.94;
     f.x += f.vx * dt;
     f.y += f.vy * dt;
 
@@ -453,9 +487,19 @@ function updateDomFish(dt, width, height) {
 }
 
 function renderDomAquarium() {
+  const tNow = Date.now();
   for (const f of domFish) {
-    const angle = Math.max(-0.18, Math.min(0.18, f.vy * 0.018));
-    f.el.style.transform = `translate3d(${f.x.toFixed(1)}px, ${f.y.toFixed(1)}px, 0) translate(-50%, -50%) scaleX(${f.dir}) scale(${f.scale}) rotate(${angle.toFixed(3)}rad)`;
+    if (f.bobPhase === undefined) {
+      f.bobPhase = Math.random() * Math.PI * 2;
+      f.bobRate = rand(1.6, 2.6);
+    }
+    const sp = Math.hypot(f.vx, f.vy);
+    const bob = Math.sin((tNow / 1000) * f.bobRate + f.bobPhase) * 1.4;
+    const angle = Math.max(-0.2, Math.min(0.2, f.vy * 0.018));
+    f.el.style.transform = `translate3d(${f.x.toFixed(1)}px, ${(f.y + bob).toFixed(1)}px, 0) translate(-50%, -50%) scaleX(${f.dir}) scale(${f.scale}) rotate(${angle.toFixed(3)}rad)`;
+    // Tail beats faster as the fish speeds up / darts.
+    const tailMs = Math.max(250, 720 - sp * 9);
+    f.el.style.setProperty("--tail-ms", `${tailMs.toFixed(0)}ms`);
   }
   const now = Date.now();
   for (const crumb of domFood) {
@@ -762,6 +806,8 @@ function tiltHandler(event) {
 function motionHandler(event) {
   const acceleration = event.accelerationIncludingGravity || event.acceleration || {};
   const x = Number(acceleration.x);
+  const y = Number(acceleration.y);
+  const z = Number(acceleration.z);
   if (!Number.isFinite(x)) {
     return;
   }
@@ -769,6 +815,78 @@ function motionHandler(event) {
   lastMotionX = x;
   tiltTarget = Math.max(-1, Math.min(1, tiltTarget + x * 0.012));
   tiltImpulse = Math.max(-2.4, Math.min(2.4, tiltImpulse + x * 0.035 + delta * 0.12));
+
+  // Shake = a sharp jerk across the axes. A deliberate shake feeds the fish and
+  // scatters whatever crumbs are already in the tank, even mid-round.
+  if (Number.isFinite(y) && Number.isFinite(z) && lastAccX !== null) {
+    const jerk = Math.abs(x - lastAccX) + Math.abs(y - lastAccY) + Math.abs(z - lastAccZ);
+    if (jerk > SHAKE_JERK) {
+      onShake(Math.min(3, jerk / SHAKE_JERK));
+    }
+  }
+  lastAccX = x;
+  lastAccY = y;
+  lastAccZ = z;
+}
+
+function onShake(strength = 1) {
+  if (!enabled || !runtimeAllowed) {
+    return;
+  }
+  // Kick the existing crumbs and spook the fish on every shake...
+  scatterFood(strength);
+  startleFish(strength);
+  tiltImpulse = Math.max(-2.6, Math.min(2.6, tiltImpulse + (Math.random() - 0.5) * strength * 1.8));
+  // ...but only drop a fresh handful of food on a cooldown so a long shake does
+  // not bury the tank.
+  const now = Date.now();
+  if (now - lastShakeFeedAt < SHAKE_FEED_COOLDOWN_MS) {
+    return;
+  }
+  lastShakeFeedAt = now;
+  const avatars = feedProvider ? feedProvider() : null;
+  if (Array.isArray(avatars) && avatars.length) {
+    spillAquariumFood(avatars);
+  }
+}
+
+function scatterFood(strength = 1) {
+  // SET (not accumulate) bounded velocities: devicemotion can fire ~60x/s during
+  // a shake, so accumulating would fling crumbs off-screen.
+  const spread = 80 + strength * 60;
+  for (const crumb of food) {
+    if (crumb.eat > 0) {
+      continue;
+    }
+    crumb.settled = false;
+    crumb.vx = (Math.random() - 0.5) * spread;
+    crumb.vy = -rand(20, 70); // pop upward, then re-sink under gravity
+    crumb.restY = rand(cssH * 0.34, bandBottom() - 3);
+  }
+  for (const crumb of domFood) {
+    if (crumb.eat > 0) {
+      continue;
+    }
+    crumb.settled = false;
+    crumb.vx = (Math.random() - 0.5) * spread;
+    crumb.vy = -rand(20, 70);
+  }
+}
+
+function startleFish(strength = 1) {
+  const burst = 1 + strength * 0.8;
+  for (const f of fish) {
+    f.startleUntil = Date.now() + 520 + strength * 220;
+    f.vx += (f.vx >= 0 ? 1 : -1) * f.speed * burst + (Math.random() - 0.5) * 30;
+    f.vy += (Math.random() - 0.5) * f.speed * burst;
+    f.target = null;
+  }
+  for (const f of domFish) {
+    f.startleUntil = Date.now() + 520 + strength * 220;
+    f.vx += (f.vx >= 0 ? 1 : -1) * f.speed * burst + (Math.random() - 0.5) * 30;
+    f.vy += (Math.random() - 0.5) * f.speed * burst;
+    f.target = null;
+  }
 }
 
 function requestTiltAccess() {
@@ -917,28 +1035,48 @@ function updateFish(dt) {
         f.satietyUntil = now + rand(1400, 3200); // wander a bit before next bite
       }
     } else {
-      // Lazy wander.
-      if (now > f.wanderUntil) {
-        f.wanderUntil = now + rand(900, 2200);
-        f.wanderVx = rand(-1, 1);
-        f.wanderVy = rand(-0.5, 0.5);
+      // Smoothly drifting heading -> natural curved cruising instead of jerks.
+      if (f.heading === undefined) {
+        f.heading = Math.atan2(f.vy, f.vx || f.dir || 1);
       }
-      ax = f.wanderVx * f.speed * 0.7;
-      ay = f.wanderVy * f.speed * 0.7;
-      ax += tilt * 10; // lean with the current
+      f.heading += (Math.random() - 0.5) * 1.6 * dt;
+      if (now > f.wanderUntil) {
+        f.wanderUntil = now + rand(1500, 3400);
+        f.heading += (Math.random() - 0.5) * 1.1;
+      }
+      const cruise = f.speed * 0.74;
+      ax = Math.cos(f.heading) * cruise + tilt * 10;
+      ay = Math.sin(f.heading) * cruise * 0.55;
     }
 
+    // Gentle separation between schoolmates.
+    for (const other of fish) {
+      if (other === f) {
+        continue;
+      }
+      const sx = f.x - other.x;
+      const sy = f.y - other.y;
+      const d2 = sx * sx + sy * sy;
+      const near = (f.size + other.size) * 1.4;
+      if (d2 > 0.01 && d2 < near * near) {
+        const d = Math.sqrt(d2);
+        ax += (sx / d) * f.speed * 0.9;
+        ay += (sy / d) * f.speed * 0.9;
+      }
+    }
+
+    const startled = now < (f.startleUntil || 0);
     f.vx += ax * dt;
     f.vy += ay * dt;
     // Speed clamp.
     const sp = Math.hypot(f.vx, f.vy);
-    const maxSp = f.speed * (f.target ? 2 : 1.2);
+    const maxSp = f.speed * (startled ? 3 : f.target ? 2 : 1.25);
     if (sp > maxSp) {
       f.vx = (f.vx / sp) * maxSp;
       f.vy = (f.vy / sp) * maxSp;
     }
-    f.vx *= 0.96;
-    f.vy *= 0.94;
+    f.vx *= startled ? 0.99 : 0.96;
+    f.vy *= startled ? 0.985 : 0.94;
 
     f.x += f.vx * dt;
     f.y += f.vy * dt;
@@ -1051,35 +1189,44 @@ function drawFood() {
 
 function drawFish(f) {
   const s = f.size;
-  const wag = Math.sin(f.tailPhase) * s * 0.4;
-  const tiltAngle = Math.max(-0.32, Math.min(0.32, f.vy * 0.02));
+  const wag = Math.sin(f.tailPhase) * s * 0.45;
+  const tiltAngle = Math.max(-0.34, Math.min(0.34, f.vy * 0.02));
   ctx.save();
   ctx.translate(f.x, f.y);
   ctx.rotate(tiltAngle);
   ctx.scale(f.dir, 1);
 
-  // tail
+  // forked, curved tail that sweeps as it swims
   ctx.beginPath();
-  ctx.moveTo(-s * 0.78, 0);
-  ctx.lineTo(-s * 1.5, -s * 0.5 + wag);
-  ctx.lineTo(-s * 1.5, s * 0.5 + wag);
+  ctx.moveTo(-s * 0.72, 0);
+  ctx.quadraticCurveTo(-s * 1.22, -s * 0.16 + wag * 0.6, -s * 1.55, -s * 0.55 + wag);
+  ctx.quadraticCurveTo(-s * 1.16, wag * 0.5, -s * 1.55, s * 0.55 + wag);
+  ctx.quadraticCurveTo(-s * 1.22, s * 0.16 + wag * 0.6, -s * 0.72, 0);
   ctx.closePath();
   ctx.fillStyle = f.palette.fin;
   ctx.globalAlpha = 0.9;
   ctx.fill();
 
-  // top fin
+  // dorsal fin
   ctx.beginPath();
-  ctx.moveTo(-s * 0.1, -s * 0.42);
-  ctx.lineTo(s * 0.3, -s * 0.78);
-  ctx.lineTo(s * 0.45, -s * 0.36);
+  ctx.moveTo(-s * 0.12, -s * 0.44);
+  ctx.quadraticCurveTo(s * 0.14, -s * 0.96, s * 0.44, -s * 0.34);
   ctx.closePath();
   ctx.fillStyle = f.palette.fin;
-  ctx.globalAlpha = 0.8;
+  ctx.globalAlpha = 0.82;
+  ctx.fill();
+
+  // pectoral fin (small belly fin, gives a sense of paddling)
+  ctx.beginPath();
+  ctx.moveTo(s * 0.2, s * 0.18);
+  ctx.quadraticCurveTo(0, s * 0.72, s * 0.44, s * 0.42);
+  ctx.closePath();
+  ctx.fillStyle = f.palette.fin;
+  ctx.globalAlpha = 0.55;
   ctx.fill();
 
   // body (gradient is constant in local space, so build it once per fish)
-  ctx.globalAlpha = 0.95;
+  ctx.globalAlpha = 0.96;
   if (!f.bodyGrad) {
     f.bodyGrad = ctx.createLinearGradient(0, -s * 0.5, 0, s * 0.5);
     f.bodyGrad.addColorStop(0, f.palette.body);
@@ -1090,15 +1237,27 @@ function drawFish(f) {
   ctx.ellipse(0, 0, s, s * 0.54, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // eye
+  // gill arc
+  ctx.globalAlpha = 0.22;
+  ctx.strokeStyle = "rgba(10,16,24,0.85)";
+  ctx.lineWidth = Math.max(0.6, s * 0.05);
+  ctx.beginPath();
+  ctx.arc(s * 0.18, 0, s * 0.5, -0.85, 0.85);
+  ctx.stroke();
+
+  // eye with catch-light
   ctx.globalAlpha = 1;
   ctx.fillStyle = "#ffffff";
   ctx.beginPath();
-  ctx.arc(s * 0.5, -s * 0.12, s * 0.17, 0, Math.PI * 2);
+  ctx.arc(s * 0.52, -s * 0.12, s * 0.18, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = "#0b1018";
   ctx.beginPath();
-  ctx.arc(s * 0.55, -s * 0.12, s * 0.09, 0, Math.PI * 2);
+  ctx.arc(s * 0.56, -s * 0.12, s * 0.095, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.beginPath();
+  ctx.arc(s * 0.6, -s * 0.17, s * 0.035, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
