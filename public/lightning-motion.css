@@ -220,6 +220,65 @@
   animation-duration: 1.18s;
 }
 
+.lm-bolt-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: var(--lm-radius, inherit);
+  clip-path: inset(0 round var(--lm-radius, 12px));
+  mix-blend-mode: screen;
+  filter:
+    drop-shadow(0 0 4px color-mix(in srgb, var(--lm-tier-accent, #b7ff4d) 90%, white))
+    drop-shadow(0 0 9px color-mix(in srgb, var(--lm-tier-accent-2, #35f6ff) 66%, transparent));
+}
+
+.lm-bolt-layer path {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.96);
+  stroke-width: var(--lm-bolt-width, 2);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  opacity: 0;
+  animation: lmBoltStrike var(--lm-bolt-dur, 620ms) var(--lm-ease) both;
+}
+
+.lm-bolt-layer path.lm-bolt-branch {
+  stroke-width: calc(var(--lm-bolt-width, 2) * 0.66);
+  stroke: rgba(255, 255, 255, 0.82);
+}
+
+.lm-bolt-layer.tier-3 {
+  filter:
+    drop-shadow(0 0 5px color-mix(in srgb, var(--lm-tier-accent, #ffe66d) 92%, white))
+    drop-shadow(0 0 12px color-mix(in srgb, var(--lm-tier-accent-2, #35f6ff) 60%, transparent));
+}
+
+.lm-bolt-layer.tier-4 {
+  filter:
+    drop-shadow(0 0 6px rgba(255, 255, 255, 0.92))
+    drop-shadow(0 0 13px rgba(165, 108, 255, 0.85))
+    drop-shadow(0 0 22px rgba(53, 246, 255, 0.5));
+}
+
+.lm-stake-shockwave {
+  position: fixed;
+  z-index: 60;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  pointer-events: none;
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  mix-blend-mode: screen;
+  animation: lmStakeShockwave 720ms var(--lm-ease) both;
+}
+
 .lm-lightning-tap {
   animation: lmTapSpring 460ms var(--lm-ease) both;
 }
@@ -439,6 +498,34 @@
   100% { transform: scale(1); }
 }
 
+@keyframes lmBoltStrike {
+  0% { stroke-dashoffset: 1; opacity: 0; }
+  8% { opacity: 1; }
+  16% { stroke-dashoffset: 0; opacity: 1; }
+  26% { opacity: 0.4; }
+  36% { opacity: 1; }
+  62% { opacity: 0.78; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+@keyframes lmStakeShockwave {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.9), 0 0 22px rgba(165, 108, 255, 0.8);
+  }
+  20% { opacity: 1; }
+  60% {
+    box-shadow: 0 0 16px rgba(53, 246, 255, 0.7), 0 0 30px rgba(165, 108, 255, 0.5);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(6.4);
+    border-color: rgba(53, 246, 255, 0);
+    box-shadow: 0 0 0 transparent;
+  }
+}
+
 @keyframes lmCardEdgeRun {
   0% { background-position: 220% 0, 100% 220%, -120% 100%; }
   100% { background-position: -120% 0, 100% -120%, 220% 100%; }
@@ -488,6 +575,14 @@
 
   .lm-button-flash {
     animation-duration: 720ms !important;
+  }
+
+  .lm-bolt-layer path {
+    animation-duration: 480ms !important;
+  }
+
+  .lm-stake-shockwave {
+    display: none !important;
   }
 
   .lm-success-burst,

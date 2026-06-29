@@ -210,6 +210,12 @@ export function playMotionSound(kind = "tap") {
     return;
   }
 
+  if (normalizedKind === "tap-strong") {
+    playSweep({ duration: 0.16, start: 150, peak: 740, end: 210, volume: 0.1 });
+    playSweep({ delay: 0.05, duration: 0.22, start: 320, peak: 1080, end: 180, volume: 0.075 });
+    return;
+  }
+
   playSweep({ duration: 0.15, start: 135, peak: 610, end: 190, volume: 0.09 });
 }
 
@@ -298,6 +304,110 @@ function getStakeTier(button) {
   return 1;
 }
 
+function hasStakeTier(button) {
+  return Number(button?.dataset?.stakeTier || 0) > 0;
+}
+
+// Per-tier lightning escalation. Higher stake -> more bolts, longer reach,
+// thicker strokes, longer life. Tier 4 also fires a radial shockwave.
+const BOLT_SPEC = {
+  1: { count: 1, segs: 5, reach: 0.62, width: 1.6, dur: 560, branches: 0 },
+  2: { count: 2, segs: 6, reach: 0.78, width: 1.8, dur: 660, branches: 0 },
+  3: { count: 3, segs: 7, reach: 0.96, width: 2.1, dur: 780, branches: 1 },
+  4: { count: 5, segs: 8, reach: 1.12, width: 2.4, dur: 940, branches: 2 },
+};
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// Jagged polyline from (sx, sy) heading along `angle`, jittered perpendicular
+// to the travel direction so it reads like a crackling bolt rather than a line.
+function buildBoltPath(sx, sy, angle, length, segments, jitter) {
+  const dirX = Math.cos(angle);
+  const dirY = Math.sin(angle);
+  const perpX = -dirY;
+  const perpY = dirX;
+  const step = length / segments;
+  let d = `M ${sx.toFixed(1)} ${sy.toFixed(1)}`;
+  for (let i = 1; i <= segments; i += 1) {
+    const along = step * i;
+    // Taper the jitter toward the tip so the strike converges to a point.
+    const taper = 1 - (i - 1) / (segments + 1);
+    const offset = (Math.random() - 0.5) * jitter * taper;
+    const px = sx + dirX * along + perpX * offset;
+    const py = sy + dirY * along + perpY * offset;
+    d += ` L ${px.toFixed(1)} ${py.toFixed(1)}`;
+  }
+  return d;
+}
+
+function makeBoltPath(d, delayMs) {
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", d);
+  path.setAttribute("pathLength", "1");
+  if (delayMs) {
+    path.style.animationDelay = `${delayMs}ms`;
+  }
+  return path;
+}
+
+// Draws tier-scaled lightning bolts radiating from the tap point, masked to the
+// button so they never leak square glow outside the rounded shape.
+function appendLightningBolts(button, x, y, tier, rect) {
+  const spec = BOLT_SPEC[tier] || BOLT_SPEC[1];
+  const reduced = reducedMotion();
+  const count = reduced ? 1 : spec.count;
+  const width = Math.max(8, rect.width);
+  const height = Math.max(8, rect.height);
+  const reach = Math.max(width, height) * spec.reach;
+  const jitter = Math.min(width, height) * 0.34;
+
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${width.toFixed(1)} ${height.toFixed(1)}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("lm-bolt-layer", `tier-${tier}`);
+  svg.style.setProperty("--lm-bolt-width", String(spec.width));
+  svg.style.setProperty("--lm-bolt-dur", `${spec.dur}ms`);
+
+  for (let i = 0; i < count; i += 1) {
+    const baseAngle =
+      (Math.PI * 2 * i) / count - Math.PI / 2 + (Math.random() - 0.5) * 0.7;
+    const length = reach * (0.72 + Math.random() * 0.5);
+    const d = buildBoltPath(x, y, baseAngle, length, spec.segs, jitter);
+    svg.appendChild(makeBoltPath(d, i * 28));
+
+    if (!reduced && spec.branches > 0 && Math.random() > 0.35) {
+      const forkAlong = length * (0.42 + Math.random() * 0.28);
+      const fx = x + Math.cos(baseAngle) * forkAlong;
+      const fy = y + Math.sin(baseAngle) * forkAlong;
+      const forkAngle = baseAngle + (Math.random() > 0.5 ? 1 : -1) * (0.5 + Math.random() * 0.4);
+      const forkD = buildBoltPath(fx, fy, forkAngle, length * 0.5, spec.segs - 2, jitter * 0.7);
+      const forkPath = makeBoltPath(forkD, i * 28 + 36);
+      forkPath.classList.add("lm-bolt-branch");
+      svg.appendChild(forkPath);
+    }
+  }
+
+  button.appendChild(svg);
+  window.setTimeout(() => svg.remove(), spec.dur + count * 28 + 160);
+  return svg;
+}
+
+// A single circular shockwave centered on the button. Circular + fixed + short
+// lived, so it gives the top-stake "wow" without any square shadow on buttons.
+function emitStakeShockwave(button, rect) {
+  if (reducedMotion()) {
+    return;
+  }
+  const ring = document.createElement("div");
+  ring.className = "lm-stake-shockwave";
+  ring.setAttribute("aria-hidden", "true");
+  ring.style.left = `${rect.left + rect.width / 2}px`;
+  ring.style.top = `${rect.top + rect.height / 2}px`;
+  document.body.appendChild(ring);
+  window.setTimeout(() => ring.remove(), 760);
+}
+
 export function triggerButtonLightning(button, event = null) {
   if (!button || button.disabled) {
     return;
@@ -321,12 +431,22 @@ export function triggerButtonLightning(button, event = null) {
 
   const flash = document.createElement("span");
   const tier = getStakeTier(button);
+  const stakeButton = hasStakeTier(button);
   flash.className = `lm-button-flash tier-${tier}`;
   flash.style.setProperty("--lm-x", `${x}px`);
   flash.style.setProperty("--lm-y", `${y}px`);
   button.appendChild(flash);
   appendSparks(button, x, y, 5 + tier * 3, tier);
-  playMotionSound("tap");
+
+  // Real jagged bolts only on stake buttons, so the rest of the app stays calm.
+  if (stakeButton) {
+    appendLightningBolts(button, x, y, tier, rect);
+    if (tier >= 4) {
+      emitStakeShockwave(button, rect);
+    }
+  }
+
+  playMotionSound(stakeButton && tier >= 3 ? "tap-strong" : "tap");
 
   window.setTimeout(() => {
     button.classList.remove("lm-lightning-tap");
