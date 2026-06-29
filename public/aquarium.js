@@ -7,11 +7,11 @@
 // falling onto the next round's fresh screen where the fish are already living.
 
 const STORAGE_KEY = "easymarket_aquarium";
-const MAX_FOOD = 16;
+const MAX_FOOD = 80;
 const FISH_MIN = 2;
 const FISH_MAX = 3;
 const FOOD_ARM_MS = 3200; // crumbs settle before any fish will hunt them
-const EAT_MS = 820; // a bite is gradual, never instant
+const EAT_MS = 1640; // a bite is gradual, never instant
 const FRAME_MS = 33; // ~30fps simulation cap to stay light on the phone
 
 const FISH_PALETTES = [
@@ -78,8 +78,7 @@ export function setAquariumEnabled(next) {
 
   if (enabled) {
     requestTiltAccess();
-    ensureFish();
-    startLoop();
+    primeAquarium();
   } else {
     stopLoop();
     fish = [];
@@ -163,10 +162,10 @@ function bandBottom() {
 function ensureFish() {
   if (!measure()) {
     // Defer until the canvas has a real size.
-    return;
+    return false;
   }
   if (fish.length) {
-    return;
+    return true;
   }
   const count = Math.round(rand(FISH_MIN, FISH_MAX));
   for (let i = 0; i < count; i += 1) {
@@ -194,6 +193,23 @@ function ensureFish() {
       bubbles.push(resetBubble({}, true));
     }
   }
+  return fish.length > 0;
+}
+
+export function primeAquarium(retries = 10) {
+  if (!enabled || reducedMotion() || document.hidden) {
+    return false;
+  }
+  if (ensureFish()) {
+    startLoop();
+    return true;
+  }
+  if (retries > 0) {
+    window.setTimeout(() => {
+      primeAquarium(retries - 1);
+    }, 180);
+  }
+  return false;
 }
 
 function resetBubble(b, seed) {
@@ -660,12 +676,13 @@ export function initAquarium() {
     if (document.hidden) {
       stopLoop();
     } else if (enabled) {
-      startLoop();
+      primeAquarium();
     }
   });
   window.addEventListener("resize", () => {
     if (enabled) {
       measure();
+      primeAquarium(4);
     }
   });
   const motionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
@@ -674,13 +691,11 @@ export function initAquarium() {
       stopLoop();
       clearCanvas();
     } else if (enabled) {
-      ensureFish();
-      startLoop();
+      primeAquarium();
     }
   });
 
   if (enabled && !reducedMotion()) {
-    ensureFish();
-    startLoop();
+    primeAquarium(18);
   }
 }

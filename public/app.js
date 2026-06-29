@@ -12,9 +12,10 @@ import {
 import {
   initAquarium,
   isAquariumEnabled,
+  primeAquarium,
   setAquariumEnabled,
   spillAquariumFood,
-} from "./aquarium.js?v=20260629-20";
+} from "./aquarium.js?v=20260629-22";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -1144,6 +1145,7 @@ function drawMarketChartFrame() {
 }
 
 function renderMarketChart() {
+  primeAquarium();
   if (state.chartRaf) {
     return;
   }
@@ -1184,9 +1186,7 @@ function showRoundTransition(market) {
   showToast("Раунд завершён. Готовлю следующий...");
   // Spill this round's avatar dots into the aquarium as falling food. The layer
   // persists across the data refresh, so the crumbs land on the next screen.
-  if (state.aquariumSnapshot?.marketId === String(market.id)) {
-    spillAquariumFood(state.aquariumSnapshot.avatars || []);
-  }
+  spillAquariumFood(buildAquariumFoodForMarket(market));
 }
 
 function showTopupSuccessAnimation(label = "TOP UP") {
@@ -1904,6 +1904,50 @@ function getChartTradesForMarket(market, windowStart, windowEnd) {
   return trades
     .filter((trade) => Number.isFinite(trade.at) && trade.at >= windowStart && trade.at <= windowEnd)
     .slice(-80);
+}
+
+function stableTradeJitter(value) {
+  const source = String(value || "");
+  let hash = 0;
+  for (let i = 0; i < source.length; i += 1) {
+    hash = (hash * 31 + source.charCodeAt(i)) % 9973;
+  }
+  return hash / 9973;
+}
+
+function buildAquariumFoodForMarket(market) {
+  const marketId = String(market?.id || "");
+  if (!marketId) {
+    return [];
+  }
+  const trades = (state.chartTradesByMarket.get(marketId) || [])
+    .filter((trade) => trade?.action !== "SELL" && Number.isFinite(Number(trade.at)));
+  if (!trades.length) {
+    return state.aquariumSnapshot?.marketId === marketId ? (state.aquariumSnapshot.avatars || []) : [];
+  }
+
+  const marketStart = new Date(market.start_time || 0).getTime();
+  const marketEnd = new Date(market.end_time || 0).getTime();
+  const firstTradeAt = Math.min(...trades.map((trade) => Number(trade.at)));
+  const lastTradeAt = Math.max(...trades.map((trade) => Number(trade.at)));
+  const start = Number.isFinite(marketStart) && marketStart > 0 ? marketStart : firstTradeAt;
+  const end = Number.isFinite(marketEnd) && marketEnd > start ? marketEnd : Math.max(start + 1, lastTradeAt);
+  const duration = Math.max(1, end - start);
+
+  return trades.slice(-80).map((trade, index) => {
+    const jitter = stableTradeJitter(trade.id || `${trade.telegram_id}:${index}`);
+    const rawX = (Number(trade.at) - start) / duration;
+    const xFrac = Math.max(0.07, Math.min(0.93, 0.07 + rawX * 0.86 + (jitter - 0.5) * 0.05));
+    const yFrac = Math.max(0.42, Math.min(0.69, 0.5 + jitter * 0.18));
+    return {
+      xFrac,
+      yFrac,
+      url: getTradeAvatarUrl(trade),
+      color: getTradeAvatarColor(trade),
+      initial: getTradeAvatarInitial(trade),
+      side: trade.side === "YES" ? "YES" : "NO",
+    };
+  });
 }
 
 function handleActivity(activity) {
