@@ -9,8 +9,8 @@
 const STORAGE_KEY = "easymarket_aquarium";
 const USER_CHOICE_KEY = "easymarket_aquarium_choice_v2";
 const MAX_FOOD = 80;
-const FISH_MIN = 2;
-const FISH_MAX = 3;
+const FISH_MIN = 4;
+const FISH_MAX = 5;
 const FOOD_ARM_MS = 3200; // crumbs settle before any fish will hunt them
 const EAT_MS = 1640; // a bite is gradual, never instant
 const FRAME_MS = 33; // ~30fps simulation cap to stay light on the phone
@@ -43,6 +43,7 @@ let lastTs = 0;
 let tilt = 0; // smoothed -1..1, from device orientation
 let tiltTarget = 0;
 let tiltListening = false;
+let tiltPermissionAsked = false;
 
 const foodImages = new Map();
 
@@ -182,21 +183,21 @@ function primeDomAquarium() {
     return true;
   }
   layer.querySelectorAll(".aquarium-dom-fish").forEach((node) => node.remove());
-  const fishCount = 3;
-  const palettes = ["gold", "cyan", "violet"];
+  const fishCount = 5;
+  const palettes = ["gold", "cyan", "violet", "mint", "coral"];
   for (let i = 0; i < fishCount; i += 1) {
     const el = document.createElement("span");
-    const scale = 0.84 + i * 0.08;
+    const scale = 0.76 + i * 0.07;
     el.className = `aquarium-dom-fish fish-${i + 1} ${palettes[i] || "gold"}`;
     layer.appendChild(el);
     domFish.push({
       el,
-      x: rand(width * 0.16, width * 0.82),
-      y: rand(height * 0.72, height * 0.92),
-      vx: rand(-1, 1) * 12 || 8,
-      vy: rand(-3, 3),
+      x: rand(width * 0.1, width * 0.9),
+      y: rand(height * 0.18, height * 0.9),
+      vx: rand(-1, 1) * 14 || 8,
+      vy: rand(-5, 5),
       scale,
-      speed: rand(15, 26),
+      speed: rand(13, 25),
       dir: Math.random() > 0.5 ? 1 : -1,
       target: null,
       satietyUntil: 0,
@@ -237,19 +238,26 @@ function appendDomFood(avatars) {
     }
     const crumb = document.createElement("span");
     const side = avatar.side === "NO" ? "NO" : "YES";
-    const x = Math.max(7, Math.min(93, Number(avatar.xFrac || 0.5) * 100)) / 100 * measured.width;
-    const y = Math.max(9, Math.min(66, Number(avatar.yFrac || 0.45) * 100)) / 100 * measured.height;
-    crumb.className = `aquarium-dom-food ${side === "NO" ? "no" : "yes"}`;
-    crumb.textContent = String(avatar.initial || "•").slice(0, 1);
+    const baseX = Math.max(7, Math.min(93, Number(avatar.xFrac || 0.5) * 100)) / 100 * measured.width;
+    const baseY = Math.max(9, Math.min(66, Number(avatar.yFrac || 0.45) * 100)) / 100 * measured.height;
+    const x = Math.max(8, Math.min(measured.width - 8, baseX + rand(-18, 18)));
+    const y = Math.max(8, Math.min(measured.height - 8, baseY + rand(-12, 10)));
+    const url = String(avatar.url || "").trim();
+    crumb.className = `aquarium-dom-food ${side === "NO" ? "no" : "yes"} ${url ? "avatar" : ""}`;
+    if (url) {
+      crumb.style.backgroundImage = `url("${url.replace(/"/g, "%22")}")`;
+      crumb.style.backgroundSize = "cover";
+      crumb.style.backgroundPosition = "center";
+    }
     layer.appendChild(crumb);
     domFood.push({
       el: crumb,
       x,
       y,
-      vx: rand(-7, 7),
-      vy: rand(5, 15),
-      r: rand(3.6, 5.4),
-      restY: rand(measured.height * 0.76, measured.height * 0.95),
+      vx: rand(-34, 34),
+      vy: rand(-12, 24),
+      r: rand(url ? 4.2 : 3.2, url ? 6.2 : 4.8),
+      restY: rand(measured.height * 0.34, measured.height * 0.95),
       settled: false,
       bornAt: Date.now() + Math.min(900, index * 24),
       wobble: Math.random() * Math.PI * 2,
@@ -265,7 +273,7 @@ function appendDomFood(avatars) {
 }
 
 function domBandTop(height) {
-  return height * 0.7;
+  return height * 0.14;
 }
 
 function domBandBottom(height) {
@@ -275,7 +283,7 @@ function domBandBottom(height) {
 function nearestDomFoodFor(fishItem) {
   const now = Date.now();
   let best = null;
-  let bestDist = 130 * 130;
+  let bestDist = 190 * 190;
   for (const crumb of domFood) {
     if (crumb.eat > 0 || now < crumb.bornAt + FOOD_ARM_MS) {
       continue;
@@ -295,7 +303,7 @@ function nearestDomFoodFor(fishItem) {
 }
 
 function updateDomFood(dt, width, height) {
-  const drift = tilt * 28;
+  const drift = tilt * 58;
   const now = Date.now();
   for (const crumb of domFood) {
     if (now < crumb.bornAt) {
@@ -306,21 +314,21 @@ function updateDomFood(dt, width, height) {
       continue;
     }
     if (!crumb.settled) {
-      crumb.vy += 42 * dt;
-      crumb.vy = Math.min(crumb.vy, 60);
+      crumb.vy += 30 * dt;
+      crumb.vy = Math.min(crumb.vy, 44);
       crumb.x += crumb.vx * dt;
       crumb.y += crumb.vy * dt;
-      crumb.vx *= 0.985;
+      crumb.vx *= 0.992;
       if (crumb.y >= crumb.restY) {
         crumb.y = crumb.restY;
         crumb.vy = 0;
         crumb.settled = true;
       }
     } else {
-      crumb.wobble += dt * 1.5;
-      crumb.x += (drift + Math.sin(crumb.wobble) * 5) * dt;
-      crumb.y += Math.cos(crumb.wobble * 0.8) * 3 * dt;
-      crumb.y += (crumb.restY - crumb.y) * 0.6 * dt;
+      crumb.wobble += dt * 1.8;
+      crumb.x += (drift + Math.sin(crumb.wobble) * 8) * dt;
+      crumb.y += Math.cos(crumb.wobble * 0.85) * 4.5 * dt;
+      crumb.y += (crumb.restY - crumb.y) * 0.42 * dt;
     }
     crumb.x = Math.max(6, Math.min(width - 6, crumb.x));
     crumb.y = Math.max(4, Math.min(height - 4, crumb.y));
@@ -373,8 +381,8 @@ function updateDomFish(dt, width, height) {
         f.wanderVx = rand(-1, 1);
         f.wanderVy = rand(-0.55, 0.55);
       }
-      ax = f.wanderVx * f.speed * 0.75 + tilt * 10;
-      ay = f.wanderVy * f.speed * 0.75;
+      ax = f.wanderVx * f.speed * 0.78 + tilt * 12;
+      ay = f.wanderVy * f.speed * 0.78;
     }
 
     f.vx += ax * dt;
@@ -414,7 +422,7 @@ function updateDomFish(dt, width, height) {
 function renderDomAquarium() {
   for (const f of domFish) {
     const angle = Math.max(-0.18, Math.min(0.18, f.vy * 0.018));
-    f.el.style.transform = `translate3d(${(f.x - 9).toFixed(1)}px, ${(f.y - 5).toFixed(1)}px, 0) scaleX(${f.dir}) scale(${f.scale}) rotate(${angle.toFixed(3)}rad)`;
+    f.el.style.transform = `translate3d(${f.x.toFixed(1)}px, ${f.y.toFixed(1)}px, 0) translate(-50%, -50%) scaleX(${f.dir}) scale(${f.scale}) rotate(${angle.toFixed(3)}rad)`;
   }
   const now = Date.now();
   for (const crumb of domFood) {
@@ -567,7 +575,7 @@ function measure() {
 }
 
 function bandTop() {
-  return cssH * 0.72;
+  return cssH * 0.16;
 }
 
 function bandBottom() {
@@ -652,10 +660,10 @@ function appendFood(avatars) {
     food.push({
       x,
       y,
-      vx: rand(-6, 6),
-      vy: rand(4, 16),
-      r: rand(4.4, 6),
-      restY: rand(bandTop() + cssH * 0.06, bandBottom() - 3),
+      vx: rand(-28, 28),
+      vy: rand(-10, 24),
+      r: rand(a.url ? 4.4 : 3.4, a.url ? 6.2 : 5),
+      restY: rand(cssH * 0.34, bandBottom() - 3),
       settled: false,
       bornAt: now,
       wobble: Math.random() * Math.PI * 2,
@@ -730,6 +738,10 @@ function requestTiltAccess() {
   };
   const req = window.DeviceOrientationEvent?.requestPermission;
   if (typeof req === "function") {
+    if (tiltPermissionAsked) {
+      return;
+    }
+    tiltPermissionAsked = true;
     // iOS 13+: needs a user gesture; setAquariumEnabled is called from a tap.
     req.call(window.DeviceOrientationEvent)
       .then((state) => {
@@ -744,18 +756,18 @@ function requestTiltAccess() {
 }
 
 function updateFood(dt) {
-  const drift = tilt * 26; // px/s sideways pull from phone tilt
+  const drift = tilt * 58; // px/s sideways pull from phone tilt
   for (const f of food) {
     if (f.eat > 0) {
       f.eat += dt / (EAT_MS / 1000);
       continue;
     }
     if (!f.settled) {
-      f.vy += 42 * dt; // gentle gravity
-      f.vy = Math.min(f.vy, 60);
+      f.vy += 30 * dt; // gentle gravity
+      f.vy = Math.min(f.vy, 44);
       f.x += f.vx * dt;
       f.y += f.vy * dt;
-      f.vx *= 0.985;
+      f.vx *= 0.992;
       if (f.y >= f.restY) {
         f.y = f.restY;
         f.vy = 0;
@@ -764,9 +776,9 @@ function updateFood(dt) {
     } else {
       // Drift like a crumb in water: tilt + slow personal wobble.
       f.wobble += dt * 1.5;
-      f.x += (drift + Math.sin(f.wobble) * 5) * dt;
-      f.y += Math.cos(f.wobble * 0.8) * 3 * dt;
-      f.y += (f.restY - f.y) * 0.6 * dt;
+      f.x += (drift + Math.sin(f.wobble) * 8) * dt;
+      f.y += Math.cos(f.wobble * 0.8) * 4.5 * dt;
+      f.y += (f.restY - f.y) * 0.42 * dt;
     }
     f.x = Math.max(5, Math.min(cssW - 5, f.x));
   }
@@ -777,7 +789,7 @@ function updateFood(dt) {
 function nearestFoodFor(f) {
   const now = Date.now();
   let best = null;
-  let bestDist = 120 * 120; // perception radius squared
+  let bestDist = 190 * 190; // perception radius squared
   for (const crumb of food) {
     if (crumb.eat > 0) {
       continue;
@@ -1123,6 +1135,11 @@ export function initAquarium() {
       primeAquarium(retries);
     }
   };
+  const unlockTilt = () => {
+    if (enabled) {
+      requestTiltAccess();
+    }
+  };
 
   document.addEventListener("visibilitychange", () => {
     if (document.hidden && !isTelegramMiniApp()) {
@@ -1133,6 +1150,8 @@ export function initAquarium() {
   });
   window.addEventListener("pageshow", () => resume(12));
   window.addEventListener("focus", () => resume(8));
+  window.addEventListener("pointerdown", unlockTilt, { passive: true });
+  window.addEventListener("touchstart", unlockTilt, { passive: true });
   window.addEventListener("resize", () => {
     if (enabled) {
       measure();
