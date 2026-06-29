@@ -7,7 +7,7 @@ import {
   showSuccessLightningBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260629-05";
+} from "./lightning-motion.js?v=20260629-06";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -181,6 +181,11 @@ const formatFireDecimal = (value) => Number(value || 0).toLocaleString("ru-RU", 
 });
 const normalizeCurrency = (value) => (String(value || "STAR").toUpperCase() === "USDT" ? "USDT" : "STAR");
 const getAmountsForCurrency = (currency = state.currency) => (normalizeCurrency(currency) === "USDT" ? USDT_AMOUNTS : STAR_AMOUNTS);
+const getTierForAmount = (amount, currency = state.currency) => {
+  const numeric = Math.abs(Number(amount || 0));
+  const amounts = getAmountsForCurrency(currency);
+  return amounts.reduce((tier, value, index) => (numeric >= Number(value) ? index + 1 : tier), 1);
+};
 const formatCurrencyAmount = (value, currency = state.currency) => {
   const safeCurrency = normalizeCurrency(currency);
   const formatted = Number(value || 0).toLocaleString("ru-RU", {
@@ -991,12 +996,18 @@ function showToast(message) {
   setTimeout(() => toast.classList.add("hidden"), 2600);
 }
 
-function triggerLightningFlash(kind = "success") {
-  showSuccessLightningBurst(kind === "success" ? "Success" : "Energy");
+function triggerLightningFlash(kind = "success", tier = 1, options = {}) {
+  showSuccessLightningBurst(kind === "success" ? "Success" : "Energy", {
+    tier,
+    epic: options.epic,
+  });
 }
 
-function triggerRewardBurst(label = "⚡") {
-  showSuccessLightningBurst(label === "⚡" ? "Success" : label);
+function triggerRewardBurst(label = "⚡", tier = 1, options = {}) {
+  showSuccessLightningBurst(label === "⚡" ? "Success" : label, {
+    tier,
+    epic: options.epic,
+  });
 }
 
 function showRoundTransition(market) {
@@ -1011,20 +1022,18 @@ function showRoundTransition(market) {
 
 function showTopupSuccessAnimation(label = "TOP UP") {
   triggerHaptic("win");
-  showSuccessLightningBurst(label);
-  triggerLightningFlash("success");
-  triggerRewardBurst("⚡");
+  showSuccessLightningBurst(label, { tier: 4, epic: true });
 }
 
-function showWinOverlay(label, value = 0) {
+function showWinOverlay(label, value = 0, tier = 1) {
   const overlay = $("winOverlay");
   const amount = $("winOverlayAmount");
   if (!overlay || !amount || !label) {
     return;
   }
-  const epic = Math.abs(Number(value || 0)) >= 100;
-  triggerLightningFlash("success");
-  triggerRewardBurst("⚡");
+  const safeTier = Math.max(1, Math.min(4, Number(tier || 1)));
+  const epic = Math.abs(Number(value || 0)) >= 100 || safeTier >= 4;
+  showSuccessLightningBurst("YOU WON", { tier: safeTier, epic });
   amount.textContent = label;
   overlay.classList.toggle("epic", epic);
   overlay.classList.remove("hidden");
@@ -1633,11 +1642,16 @@ function handleSettlements(positions) {
         return map;
       }, new Map());
       const largestWin = Math.max(...newWins.map((item) => Math.abs(Number(item.pnl || item.payout || 0))));
+      const winTier = newWins.reduce((tier, item) => {
+        const currency = normalizeCurrency(item.currency);
+        const value = Math.abs(Number(item.pnl || item.payout || 0));
+        return Math.max(tier, getTierForAmount(value, currency));
+      }, 1);
       const label = Array.from(winsByCurrency.entries())
         .map(([currency, value]) => formatSignedCurrencyAmount(value, currency))
         .join(" · ");
       showToast(`Есть выигрыш: ${label}`);
-      showWinOverlay(label, largestWin);
+      showWinOverlay(label, largestWin, winTier);
     }
   }
 
@@ -3679,7 +3693,7 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
     triggerHaptic("success");
-    triggerLightningFlash("success");
+    triggerLightningFlash("success", getTierForAmount(buyAmount, currency));
     renderMarket();
     renderMe();
     renderActivity();
@@ -3741,7 +3755,7 @@ async function sellPosition({ side, positionId, marketId, shares }) {
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
     triggerHaptic("success");
-    triggerLightningFlash("success");
+    triggerLightningFlash("success", getTierForAmount(result.trade?.amount || result.sale?.exit_value || 0, result.currency || state.currency));
     const pnl = Number(result.sale?.pnl || 0);
     showToast(`Продано ${sideLabel(side)}: ${formatSignedCurrencyAmount(pnl, result.currency || state.currency)}`);
     renderMarket();

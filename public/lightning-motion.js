@@ -349,23 +349,25 @@ export function triggerCardLightning(card) {
   window.setTimeout(() => card.classList.remove("lm-card-active"), 820);
 }
 
-export function showSuccessLightningBurst(label = "Success") {
+export function showSuccessLightningBurst(label = "Success", options = {}) {
   const now = Date.now();
   if (now - lastSuccessAt < 260) {
     return;
   }
   lastSuccessAt = now;
 
+  const tier = Math.max(1, Math.min(4, Number(options.tier || 1)));
+  const epic = Boolean(options.epic || tier >= 4);
   const burst = document.createElement("div");
-  burst.className = "lm-success-burst";
+  burst.className = `lm-success-burst tier-${tier}${epic ? " epic" : ""}`;
   burst.innerHTML = `
     ${boltSvg("lm-burst-bolt")}
     <strong>${String(label || "Success").replace(/[<>&]/g, "")}</strong>
   `;
   document.body.appendChild(burst);
-  appendSparks(burst, 110, 92, 12);
-  playMotionSound("success");
-  window.setTimeout(() => burst.remove(), 1900);
+  appendSparks(burst, 110, 92, epic ? 24 : 10 + tier * 3, tier);
+  playMotionSound(epic ? "win" : "success");
+  window.setTimeout(() => burst.remove(), epic ? 2600 : 1900);
 }
 
 export function triggerBalancePulse(element) {

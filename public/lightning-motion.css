@@ -97,7 +97,7 @@
 
 .lm-loader-bolt path,
 .lm-burst-bolt path {
-  fill: url(#lmBoltGradient);
+  fill: var(--lm-bolt-fill, url(#lmBoltGradient));
   stroke: rgba(255, 255, 255, 0.64);
   stroke-width: 0.75;
 }
@@ -287,6 +287,10 @@
   pointer-events: none;
   transform: translate(-50%, -50%);
   animation: lmBurstOut 1.72s var(--lm-ease) both;
+  --lm-burst-main: #b7ff4d;
+  --lm-burst-second: #35f6ff;
+  --lm-burst-third: #a56cff;
+  --lm-bolt-fill: url(#lmBoltGradient);
 }
 
 .lm-success-burst::before {
@@ -295,9 +299,39 @@
   inset: 18px;
   border-radius: 50%;
   background:
-    radial-gradient(circle, rgba(183, 255, 77, 0.58), rgba(53, 246, 255, 0.2) 48%, rgba(165, 108, 255, 0.1) 62%, transparent 76%);
+    radial-gradient(circle, color-mix(in srgb, var(--lm-burst-main) 58%, transparent), color-mix(in srgb, var(--lm-burst-second) 22%, transparent) 48%, color-mix(in srgb, var(--lm-burst-third) 13%, transparent) 62%, transparent 76%);
   filter: blur(2px);
   animation: lmBurstCore 1.72s var(--lm-ease) both;
+}
+
+.lm-success-burst.tier-2 {
+  --lm-burst-main: #35f6ff;
+  --lm-burst-second: #b7ff4d;
+  --lm-burst-third: #67a7ff;
+  --lm-bolt-fill: #35f6ff;
+}
+
+.lm-success-burst.tier-3 {
+  --lm-burst-main: #ffe66d;
+  --lm-burst-second: #35f6ff;
+  --lm-burst-third: #b7ff4d;
+  --lm-bolt-fill: #ffe66d;
+}
+
+.lm-success-burst.tier-4 {
+  --lm-burst-main: #a56cff;
+  --lm-burst-second: #35f6ff;
+  --lm-burst-third: #ff2dcf;
+  --lm-bolt-fill: #a56cff;
+}
+
+.lm-success-burst.epic {
+  animation-duration: 2.44s;
+}
+
+.lm-success-burst.epic::before {
+  inset: 6px;
+  animation-duration: 2.44s;
 }
 
 .lm-success-burst strong {
@@ -306,7 +340,10 @@
   color: #fff;
   font-size: 20px;
   font-weight: 950;
-  text-shadow: 0 0 16px rgba(255, 255, 255, 0.72), 0 0 30px rgba(183, 255, 77, 0.95), 0 0 46px rgba(53, 246, 255, 0.55);
+  text-shadow:
+    0 0 16px rgba(255, 255, 255, 0.72),
+    0 0 30px color-mix(in srgb, var(--lm-burst-main) 84%, transparent),
+    0 0 46px color-mix(in srgb, var(--lm-burst-second) 58%, transparent);
 }
 
 .lm-burst-bolt {
@@ -314,12 +351,22 @@
   z-index: 2;
   width: 78px;
   height: 78px;
-  filter: drop-shadow(0 0 18px rgba(183, 255, 77, 0.92)) drop-shadow(0 0 30px rgba(53, 246, 255, 0.44));
+  filter:
+    drop-shadow(0 0 18px color-mix(in srgb, var(--lm-burst-main) 92%, transparent))
+    drop-shadow(0 0 30px color-mix(in srgb, var(--lm-burst-second) 48%, transparent));
   animation: lmBurstBolt 1.56s var(--lm-ease) both;
+}
+
+.lm-success-burst.tier-4 .lm-burst-bolt {
+  animation: lmBurstBolt 1.8s var(--lm-ease) both, lmChameleonFlash 1.8s linear both;
 }
 
 .lm-success-burst .lm-spark {
   animation-duration: 1.2s;
+}
+
+.lm-success-burst.epic .lm-spark {
+  animation-duration: 1.55s;
 }
 
 .lm-balance-pulse {
