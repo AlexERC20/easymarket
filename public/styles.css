@@ -1142,6 +1142,73 @@ h2 {
   color: var(--text);
 }
 
+.quick-bet-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 82px;
+  min-width: 82px;
+  min-height: 34px;
+  border: 1px solid rgba(25, 195, 125, 0.34);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 16% 50%, rgba(183, 255, 77, 0.18), transparent 34%),
+    rgba(25, 195, 125, 0.1);
+  color: rgba(221, 255, 229, 0.94);
+  padding: 4px 8px 4px 5px;
+  font-size: 10px;
+  font-weight: 950;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.quick-bet-toggle span {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 38% 34%, #fff, rgba(183, 255, 77, 0.92) 24%, rgba(25, 195, 125, 0.95) 68%);
+  box-shadow: 0 0 14px rgba(183, 255, 77, 0.42);
+  transform: translateX(0);
+  transition:
+    transform var(--motion-normal) var(--spring-soft),
+    background var(--motion-normal) var(--ease-default),
+    box-shadow var(--motion-normal) var(--ease-default);
+}
+
+.quick-bet-toggle b {
+  position: relative;
+  z-index: 1;
+  min-width: 40px;
+  text-align: center;
+  transition: transform var(--motion-normal) var(--spring-soft);
+}
+
+.quick-bet-toggle.confirm-mode {
+  border-color: rgba(94, 161, 255, 0.38);
+  background:
+    radial-gradient(circle at 82% 50%, rgba(94, 161, 255, 0.18), transparent 36%),
+    rgba(94, 161, 255, 0.1);
+  color: rgba(222, 235, 255, 0.94);
+}
+
+.quick-bet-toggle.confirm-mode span {
+  transform: translateX(45px);
+  background:
+    radial-gradient(circle at 38% 34%, #fff, rgba(94, 161, 255, 0.92) 24%, rgba(53, 246, 255, 0.72) 68%);
+  box-shadow: 0 0 14px rgba(94, 161, 255, 0.42);
+}
+
+.quick-bet-toggle.confirm-mode b {
+  transform: translateX(-24px);
+}
+
 .amount-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

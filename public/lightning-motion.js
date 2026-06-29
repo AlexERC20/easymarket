@@ -20,6 +20,7 @@ const BUTTON_SELECTOR = [
   ".withdraw-network-toggle button",
   ".referral-nudge button",
   ".top-more-item",
+  ".quick-bet-toggle",
 ].join(",");
 
 const CARD_SELECTOR = [

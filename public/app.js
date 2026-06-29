@@ -8,7 +8,7 @@ import {
   showWalletFlowBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260629-15";
+} from "./lightning-motion.js?v=20260629-16";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -33,6 +33,23 @@ const COLLAPSE_LIMIT = 3;
 const MARKET_BUY_CLOSE_BUFFER_MS = 400;
 const MARKET_SELL_FREEZE_SECONDS = 7;
 const chartAvatarImages = new Map();
+const QUICK_BET_MODE_KEY = "easymarket_quick_bet_mode";
+
+function loadQuickBetMode() {
+  try {
+    return window.localStorage?.getItem(QUICK_BET_MODE_KEY) === "confirm" ? "confirm" : "one_click";
+  } catch {
+    return "one_click";
+  }
+}
+
+function saveQuickBetMode(mode) {
+  try {
+    window.localStorage?.setItem(QUICK_BET_MODE_KEY, mode);
+  } catch {
+    // Ignore storage failures inside restricted webviews.
+  }
+}
 
 const state = {
   user: null,
@@ -126,6 +143,7 @@ const state = {
   },
   selectedSide: "YES",
   selectedAmount: 50,
+  quickBetMode: loadQuickBetMode(),
   activityLoaded: false,
   settlementsLoaded: false,
   seenActivityIds: new Set(),
@@ -2719,10 +2737,41 @@ function renderTradeTicket() {
   });
 
   $("ticketTitle").textContent = canBuyMarket
-    ? `Нажми сумму для ${marketSideLabel(market, side)}`
+    ? (state.quickBetMode === "confirm"
+      ? `Сумма для ${marketSideLabel(market, side)}`
+      : `Нажми сумму для ${marketSideLabel(market, side)}`)
     : "Рынок завершён, обновляю...";
   $("ticketPrice").textContent = "";
   $("ticketPrice").classList.add("hidden");
+  renderQuickBetToggle();
+}
+
+function renderQuickBetToggle() {
+  const button = $("quickBetToggle");
+  if (!button) return;
+  const confirmMode = state.quickBetMode === "confirm";
+  button.classList.toggle("confirm-mode", confirmMode);
+  button.setAttribute("aria-pressed", confirmMode ? "false" : "true");
+  button.setAttribute(
+    "aria-label",
+    confirmMode ? "Режим подтверждения ставки" : "Режим ставки в один клик",
+  );
+  const label = button.querySelector("b");
+  if (label) {
+    label.textContent = confirmMode ? "Confirm" : "1 tap";
+  }
+}
+
+function setQuickBetMode(mode) {
+  state.quickBetMode = mode === "confirm" ? "confirm" : "one_click";
+  saveQuickBetMode(state.quickBetMode);
+  renderTradeTicket();
+}
+
+function toggleQuickBetMode() {
+  setQuickBetMode(state.quickBetMode === "confirm" ? "one_click" : "confirm");
+  triggerHaptic("selection");
+  showToast(state.quickBetMode === "confirm" ? "Ставка с подтверждением." : "Ставка в один клик.");
 }
 
 function renderActivity() {
@@ -3256,11 +3305,11 @@ function renderBetSheet() {
   }
 }
 
-function openBetSheet(market, side = "YES") {
+function openBetSheet(market, side = "YES", initialAmount = 0) {
   state.betSheet = {
     market,
     side,
-    amount: 0,
+    amount: Number(initialAmount || 0),
     currency: state.currency,
   };
   renderBetSheet();
@@ -3269,6 +3318,25 @@ function openBetSheet(market, side = "YES") {
 
 function closeBetSheet() {
   closeSheet("betSheet");
+}
+
+function requestMarketBuy(market, side = "YES", amount = state.selectedAmount) {
+  if (!market) {
+    triggerHaptic("warning");
+    return;
+  }
+  const buyAmount = Number(amount || state.selectedAmount || getAmountsForCurrency(state.currency)[0]);
+  if (state.quickBetMode === "confirm") {
+    triggerHaptic("selection");
+    openBetSheet(market, side, buyAmount);
+    return;
+  }
+  void buy(buyAmount, {
+    marketId: market.id,
+    side,
+    amount: buyAmount,
+    currency: state.currency,
+  });
 }
 
 function walletStatusLabel(status) {
@@ -4161,8 +4229,12 @@ document.querySelectorAll(".amount-button").forEach((button) => {
     button.blur();
     state.selectedAmount = Number(button.dataset.amount);
     renderTradeTicket();
-    void buy(state.selectedAmount);
+    requestMarketBuy(getDisplayMarket(), state.selectedSide, state.selectedAmount);
   });
+});
+
+$("quickBetToggle")?.addEventListener("click", () => {
+  toggleQuickBetMode();
 });
 
 const placeBetButton = $("placeBetBtn");
@@ -5204,8 +5276,7 @@ $("btcMarketsList")?.addEventListener("click", (event) => {
     event.stopPropagation();
     const market = state.btcMarkets.find((item) => item.id === Number(buyButton.dataset.btcBuy));
     if (market) {
-      triggerHaptic("selection");
-      openBetSheet(market, buyButton.dataset.side || "YES");
+      requestMarketBuy(market, buyButton.dataset.side || "YES", state.selectedAmount);
     }
     return;
   }
@@ -5242,8 +5313,7 @@ $("worldCupList")?.addEventListener("click", (event) => {
     event.stopPropagation();
     const market = state.worldCupMarkets.find((item) => item.id === Number(buyButton.dataset.worldCupBuy));
     if (market) {
-      triggerHaptic("selection");
-      openBetSheet(market, buyButton.dataset.side || "YES");
+      requestMarketBuy(market, buyButton.dataset.side || "YES", state.selectedAmount);
     }
     return;
   }
