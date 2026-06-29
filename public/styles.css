@@ -1892,8 +1892,96 @@ code {
 }
 
 .usdt-deposit-panel .usdt-deposit-intent {
+  position: relative;
+  overflow: hidden;
   border-color: rgba(34, 197, 94, 0.24);
   background: rgba(34, 197, 94, 0.08);
+}
+
+.usdt-wait-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+  color: rgba(186, 247, 255, 0.92);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+.usdt-wait-text {
+  color: rgba(186, 247, 255, 0.92);
+}
+
+/* Tap-to-copy chips for the exact amount and deposit address */
+.wallet-copyable {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 0;
+  text-align: left;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 9px 11px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.usdt-deposit-panel button.wallet-copyable {
+  min-height: 0;
+  border: 1px dashed rgba(34, 197, 94, 0.4);
+  border-radius: 11px;
+  background: rgba(34, 197, 94, 0.07);
+  color: var(--text);
+}
+
+.usdt-deposit-panel button.usdt-address-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 0;
+  border: 1px dashed rgba(94, 161, 255, 0.4);
+  border-radius: 13px;
+  background: rgba(94, 161, 255, 0.08);
+  color: var(--text);
+  padding: 10px 11px;
+}
+
+.usdt-address-card small,
+.wallet-copyable small {
+  display: block;
+  margin-bottom: 3px;
+}
+
+.usdt-address-card code {
+  display: block;
+}
+
+.wallet-copyable > div,
+.usdt-address-card > div {
+  min-width: 0;
+}
+
+.wallet-copy-ic {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.62;
+}
+
+.wallet-copyable:active .wallet-copy-ic {
+  opacity: 1;
 }
 
 .usdt-deposit-intent.hidden {

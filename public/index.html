@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260629-09" />
-    <link rel="stylesheet" href="/lightning-motion.css?v=20260629-10" />
+    <link rel="stylesheet" href="/styles.css?v=20260629-12" />
+    <link rel="stylesheet" href="/lightning-motion.css?v=20260629-12" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -242,16 +242,32 @@
               </label>
               <p id="topupReason">Зачислим в баланс после оплаты.</p>
               <div id="usdtDepositPanel" class="usdt-deposit-panel hidden">
+                <button class="usdt-address-card wallet-copyable hidden" data-usdt-address-card="evm" id="usdtAddressCopy" type="button" aria-label="Скопировать адрес">
+                  <div>
+                    <small id="usdtEvmAddressLabel">Шаг 1 · кошелёк для пополнения</small>
+                    <code id="usdtEvmAddress"></code>
+                  </div>
+                  <svg class="wallet-copy-ic" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="9" y="9" width="11" height="11" rx="2.4" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                </button>
                 <div id="usdtDepositIntentBox" class="usdt-deposit-intent hidden">
-                  <small>Отправить ровно</small>
-                  <strong id="usdtDepositExactAmount">100.00 USDT</strong>
+                  <div class="usdt-wait-status" aria-hidden="true">
+                    <span class="usdt-scan-orb"></span>
+                    <span class="usdt-wait-text">Сканируем сеть, ждём перевод</span>
+                  </div>
+                  <small>Шаг 2 · отправь ровно</small>
+                  <button id="usdtDepositAmountCopy" class="wallet-copyable" type="button" aria-label="Скопировать сумму">
+                    <strong id="usdtDepositExactAmount">100.00 USDT</strong>
+                    <svg class="wallet-copy-ic" viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="9" y="9" width="11" height="11" rx="2.4" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  </button>
                   <span id="usdtDepositNetworkHint">в BEP20 или ERC20. Баланс после зачисления обновится автоматически.</span>
                   <button id="usdtCheckIntentBtn" class="usdt-check-intent" type="button">Проверить зачисление</button>
                   <button id="usdtCancelIntentBtn" class="usdt-cancel-intent" type="button">Отменить заявку</button>
-                </div>
-                <div class="usdt-address-card hidden" data-usdt-address-card="evm">
-                  <small id="usdtEvmAddressLabel">Кошелек для пополнения</small>
-                  <code id="usdtEvmAddress"></code>
                 </div>
               </div>
               <button id="topupBuyBtn" class="trade-confirm" type="button">Купить</button>
@@ -601,6 +617,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260629-11" type="module"></script>
+    <script src="/app.js?v=20260629-12" type="module"></script>
   </body>
 </html>

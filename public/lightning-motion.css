@@ -561,10 +561,251 @@
   to { filter: brightness(1.3); }
 }
 
+/* ---- Wallet (deposit / withdraw) thematic motion ---- */
+
+/* Directional money-flow burst */
+.lm-wallet-flow {
+  position: fixed;
+  left: 50%;
+  top: 46%;
+  width: 0;
+  height: 0;
+  z-index: 998;
+  pointer-events: none;
+}
+
+.lm-wallet-core {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+}
+
+.lm-wallet-flow.is-in .lm-wallet-core {
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.96), rgba(25, 195, 125, 0.7) 46%, transparent 72%);
+  animation: lmWalletCore 1.6s var(--lm-ease) both;
+}
+
+.lm-wallet-flow.is-out .lm-wallet-core {
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.96), rgba(255, 184, 77, 0.7) 46%, transparent 72%);
+  animation: lmWalletCore 1.4s var(--lm-ease) both;
+}
+
+.lm-wallet-streak {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 28px;
+  margin: -14px 0 0 -1.5px;
+  border-radius: 999px;
+  transform-origin: 50% 50%;
+  mix-blend-mode: screen;
+}
+
+.lm-wallet-flow.is-in .lm-wallet-streak {
+  background: linear-gradient(180deg, rgba(53, 246, 255, 0), rgba(53, 246, 255, 0.92), rgba(25, 195, 125, 1));
+  box-shadow: 0 0 11px rgba(25, 195, 125, 0.6);
+  animation: lmWalletIn 1.5s var(--lm-ease) both;
+}
+
+.lm-wallet-flow.is-out .lm-wallet-streak {
+  background: linear-gradient(180deg, rgba(255, 230, 109, 1), rgba(255, 138, 76, 0.92), rgba(239, 70, 111, 0));
+  box-shadow: 0 0 11px rgba(255, 138, 76, 0.6);
+  animation: lmWalletOut 1.3s var(--lm-ease) both;
+}
+
+.lm-wallet-flow strong {
+  position: absolute;
+  left: 50%;
+  top: 86px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 14px rgba(255, 255, 255, 0.6), 0 0 26px rgba(53, 246, 255, 0.5);
+  animation: lmWalletLabel 1.5s var(--lm-ease) both;
+}
+
+@keyframes lmWalletIn {
+  0% { transform: rotate(var(--lm-ang)) translateY(-134px) scaleY(1.5); opacity: 0; }
+  28% { opacity: 1; }
+  100% { transform: rotate(var(--lm-ang)) translateY(-24px) scaleY(0.6); opacity: 0; }
+}
+
+@keyframes lmWalletOut {
+  0% { transform: rotate(var(--lm-ang)) translateY(-22px) scaleY(0.6); opacity: 0; }
+  26% { opacity: 1; }
+  100% { transform: rotate(var(--lm-ang)) translateY(-138px) scaleY(1.6); opacity: 0; }
+}
+
+@keyframes lmWalletCore {
+  0% { transform: scale(0.4); opacity: 0; }
+  30% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(0.82); opacity: 0; }
+}
+
+@keyframes lmWalletLabel {
+  0% { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  30% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  78% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+}
+
+/* Deposit intent: charge-in entrance + scanning "waiting" state */
+.usdt-deposit-intent:not(.hidden) {
+  animation: lmChargeIn 540ms var(--lm-ease) both;
+}
+
+@keyframes lmChargeIn {
+  0% { opacity: 0; transform: translateY(8px) scale(0.975); }
+  40% { box-shadow: 0 0 22px rgba(25, 195, 125, 0.32); }
+  100% { opacity: 1; transform: translateY(0) scale(1); box-shadow: none; }
+}
+
+.usdt-deposit-intent.is-waiting::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -42%;
+  height: 42%;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(53, 246, 255, 0.13), rgba(25, 195, 125, 0.18), transparent);
+  animation: lmScanSweep 2.8s var(--lm-ease) infinite;
+}
+
+.usdt-deposit-intent > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes lmScanSweep {
+  0% { transform: translateY(0); opacity: 0; }
+  14% { opacity: 1; }
+  86% { opacity: 1; }
+  100% { transform: translateY(360%); opacity: 0; }
+}
+
+.usdt-scan-orb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--lm-cyan);
+  box-shadow: 0 0 10px rgba(53, 246, 255, 0.9);
+}
+
+.usdt-scan-orb::before,
+.usdt-scan-orb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid rgba(53, 246, 255, 0.7);
+  animation: lmScanRing 1.9s var(--lm-ease) infinite;
+}
+
+.usdt-scan-orb::after {
+  animation-delay: -0.95s;
+}
+
+@keyframes lmScanRing {
+  0% { transform: scale(1); opacity: 0.85; }
+  100% { transform: scale(3.6); opacity: 0; }
+}
+
+.usdt-wait-text::after {
+  content: "";
+  animation: lmWaitDots 1.5s steps(1, end) infinite;
+}
+
+@keyframes lmWaitDots {
+  0% { content: ""; }
+  25% { content: "."; }
+  50% { content: ".."; }
+  75% { content: "..."; }
+  100% { content: ""; }
+}
+
+/* Tap-to-copy confirmation */
+.wallet-copyable.is-copied {
+  animation: lmCopied 640ms var(--lm-ease);
+}
+
+@keyframes lmCopied {
+  0% { box-shadow: inset 0 0 0 0 rgba(25, 195, 125, 0); }
+  30% { box-shadow: inset 0 0 0 2px rgba(25, 195, 125, 0.65), inset 0 0 18px rgba(25, 195, 125, 0.4); }
+  100% { box-shadow: inset 0 0 0 0 rgba(25, 195, 125, 0); }
+}
+
+/* Withdrawal "in transit" waiting (pending history rows) */
+.wallet-history-row.is-pending {
+  position: relative;
+  overflow: hidden;
+}
+
+.wallet-history-row.is-pending::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 32%, rgba(255, 184, 77, 0.14) 50%, transparent 68%);
+  background-size: 220% 100%;
+  animation: lmTransit 2.3s linear infinite;
+}
+
+.wallet-pending-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--fire);
+  box-shadow: 0 0 8px rgba(255, 184, 77, 0.85);
+  animation: lmPendingPulse 1.3s var(--lm-ease) infinite;
+  vertical-align: middle;
+}
+
+@keyframes lmTransit {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
+
+@keyframes lmPendingPulse {
+  0%, 100% { transform: scale(0.8); opacity: 0.55; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .lm-energy-bg,
   .lm-loader {
     display: none !important;
+  }
+
+  .usdt-deposit-intent.is-waiting::after,
+  .usdt-scan-orb::before,
+  .usdt-scan-orb::after,
+  .usdt-wait-text::after,
+  .wallet-history-row.is-pending::after,
+  .wallet-pending-dot,
+  .wallet-copyable.is-copied,
+  .lm-wallet-core,
+  .lm-wallet-streak,
+  .lm-wallet-flow strong {
+    animation: none !important;
+  }
+
+  .usdt-deposit-intent:not(.hidden) {
+    animation-duration: 320ms !important;
   }
 
   .lm-lightning-card,

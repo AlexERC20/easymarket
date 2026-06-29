@@ -5,9 +5,10 @@ import {
   playMotionSound,
   setMotionSoundEnabled,
   showSuccessLightningBurst,
+  showWalletFlowBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260629-10";
+} from "./lightning-motion.js?v=20260629-12";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -1136,6 +1137,7 @@ function showRoundTransition(market) {
 
 function showTopupSuccessAnimation(label = "TOP UP") {
   triggerHaptic("win");
+  showWalletFlowBurst("in", label);
   showSuccessLightningBurst(label, { tier: 4, epic: true });
 }
 
@@ -3199,15 +3201,16 @@ function renderWalletHistory() {
     const address = item.address
       ? `${String(item.address).slice(0, 7)}...${String(item.address).slice(-5)}`
       : "";
+    const isPending = String(item.status || "").toLowerCase() === "pending";
     return `
-      <div class="wallet-history-row ${item.type === "withdrawal" ? "withdrawal" : "deposit"}">
+      <div class="wallet-history-row ${item.type === "withdrawal" ? "withdrawal" : "deposit"}${isPending ? " is-pending" : ""}">
         <div>
           <strong>${walletTypeLabel(item.type)}</strong>
           <small>${escapeHtml(network)}${address ? ` · ${escapeHtml(address)}` : ""}</small>
         </div>
         <div>
           <b>${item.type === "withdrawal" ? "-" : "+"}${amount}</b>
-          <span>${walletStatusLabel(item.status)} · ${formatRelativeTime(item.created_at)}</span>
+          <span>${isPending ? '<span class="wallet-pending-dot"></span>' : ""}${walletStatusLabel(item.status)} · ${formatRelativeTime(item.created_at)}</span>
         </div>
       </div>
     `;
@@ -3258,10 +3261,16 @@ function renderTopupSheet() {
   });
   $("usdtDepositPanel")?.classList.toggle("hidden", !isUsdt || !isTopupMode || !hasPendingIntent);
   $("usdtDepositIntentBox")?.classList.toggle("hidden", !hasPendingIntent);
+  $("usdtDepositIntentBox")?.classList.toggle("is-waiting", hasPendingIntent);
   if ($("usdtDepositExactAmount")) {
-    $("usdtDepositExactAmount").textContent = hasPendingIntent
+    const exactAmountText = hasPendingIntent
       ? `${Number(intent.deposit_amount || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`
       : "";
+    $("usdtDepositExactAmount").textContent = exactAmountText;
+    $("usdtDepositAmountCopy")?.setAttribute(
+      "aria-label",
+      exactAmountText ? `Скопировать точную сумму ${exactAmountText}` : "Скопировать сумму"
+    );
   }
   if ($("usdtDepositNetworkHint")) {
     $("usdtDepositNetworkHint").textContent = hasPendingIntent ? "в BEP20 или ERC20. Баланс после зачисления обновится автоматически." : "";
@@ -3279,9 +3288,13 @@ function renderTopupSheet() {
     const cardType = card.dataset.usdtAddressCard;
     card.classList.toggle("hidden", !(hasPendingIntent && cardType === "evm" && intent?.to_address));
   });
-  if ($("usdtEvmAddressLabel")) $("usdtEvmAddressLabel").textContent = "Кошелек для пополнения";
+  if ($("usdtEvmAddressLabel")) $("usdtEvmAddressLabel").textContent = "Шаг 1 · кошелёк для пополнения";
   const depositAddress = hasPendingIntent ? (intent?.to_address || "") : "";
   if ($("usdtEvmAddress")) $("usdtEvmAddress").textContent = depositAddress;
+  $("usdtAddressCopy")?.setAttribute(
+    "aria-label",
+    depositAddress ? `Скопировать адрес для пополнения ${depositAddress}` : "Скопировать адрес"
+  );
   if ($("walletSheetTitle")) {
     $("walletSheetTitle").textContent = isHistoryOpen
       ? "История кошелька"
@@ -3476,6 +3489,23 @@ async function copyToClipboard(value) {
   }
 }
 
+async function copyWalletField(button, value, successMessage) {
+  if (!value) {
+    triggerHaptic("warning");
+    showToast("Пока нечего копировать.");
+    return;
+  }
+  const copied = await copyToClipboard(value);
+  if (copied && button) {
+    button.classList.remove("is-copied");
+    void button.offsetWidth;
+    button.classList.add("is-copied");
+    window.setTimeout(() => button.classList.remove("is-copied"), 720);
+  }
+  triggerHaptic(copied ? "success" : "warning");
+  showToast(copied ? successMessage : "Не получилось скопировать. Скопируй вручную.");
+}
+
 async function createUsdtDepositIntent() {
   if (!state.user?.telegram_id) {
     triggerHaptic("warning");
@@ -3633,7 +3663,7 @@ async function createUsdtWithdrawalRequest() {
     state.withdrawal.reason = "Заявка создана и отправлена админу. Статус будет в истории.";
     state.topup.historyOpen = true;
     triggerHaptic("success");
-    triggerLightningFlash("success");
+    showWalletFlowBurst("out", "ЗАЯВКА СОЗДАНА");
     showToast("Заявка на вывод создана.");
     await loadWalletHistory();
     await loadMe().catch(() => undefined);
@@ -4236,6 +4266,19 @@ $("usdtCancelIntentBtn")?.addEventListener("click", () => {
 $("usdtCheckIntentBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   void checkUsdtDepositIntent();
+});
+
+$("usdtDepositAmountCopy")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  const intent = state.topup.intent;
+  const value = intent?.deposit_amount != null ? Number(intent.deposit_amount).toFixed(2) : "";
+  void copyWalletField($("usdtDepositAmountCopy"), value, "Точная сумма скопирована.");
+});
+
+$("usdtAddressCopy")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  const value = state.topup.intent?.to_address || $("usdtEvmAddress")?.textContent || "";
+  void copyWalletField($("usdtAddressCopy"), value, "Адрес для пополнения скопирован.");
 });
 
 $("walletModeTopupBtn")?.addEventListener("click", () => {
