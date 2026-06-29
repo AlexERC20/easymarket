@@ -144,55 +144,42 @@
 
 .lm-button-flash {
   position: absolute;
-  left: var(--lm-x, 50%);
-  top: var(--lm-y, 50%);
+  inset: 0;
   z-index: 4;
-  width: 74px;
-  height: 74px;
-  margin: -37px 0 0 -37px;
   pointer-events: none;
-  border-radius: 50%;
-  clip-path: circle(50% at 50% 50%);
+  border-radius: var(--lm-radius, inherit);
+  clip-path: inset(0 round var(--lm-radius, 12px));
   overflow: hidden;
-  --lm-soft-mask: radial-gradient(circle at 50% 50%, #000 0 44%, rgba(0, 0, 0, 0.72) 60%, transparent 74%);
-  -webkit-mask: var(--lm-soft-mask);
-  mask: var(--lm-soft-mask);
+  --lm-soft-mask: radial-gradient(ellipse 86% 76% at 50% 50%, #000 0 42%, rgba(0, 0, 0, 0.72) 62%, transparent 100%);
+  -webkit-mask-image: var(--lm-soft-mask);
+  mask-image: var(--lm-soft-mask);
   background:
-    radial-gradient(circle at 44% 42%, rgba(255, 255, 255, 0.9) 0 7%, color-mix(in srgb, var(--lm-tier-accent, #b7ff4d) 88%, white 12%) 8% 18%, rgba(53, 246, 255, 0.28) 34%, transparent 68%),
-    conic-gradient(from 25deg, transparent 0 12%, color-mix(in srgb, var(--lm-tier-accent, #b7ff4d) 78%, transparent) 17%, transparent 24% 45%, color-mix(in srgb, var(--lm-tier-accent-2, #35f6ff) 68%, transparent) 51%, transparent 60% 100%);
+    linear-gradient(115deg, transparent 0 34%, rgba(255, 230, 109, 0.82) 42%, color-mix(in srgb, var(--lm-tier-accent, #b7ff4d) 88%, white 12%) 48%, rgba(183, 255, 77, 0.42) 52%, transparent 62%),
+    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), color-mix(in srgb, var(--lm-tier-accent, #b7ff4d) 82%, white 18%), rgba(53, 246, 255, 0.2) 28%, transparent 48%);
   mix-blend-mode: screen;
   opacity: 0;
   animation: lmButtonFlash 860ms var(--lm-ease) both;
-  transform-origin: 50% 50%;
 }
 
 .lm-button-flash.tier-2 {
-  width: 82px;
-  height: 82px;
-  margin: -41px 0 0 -41px;
   background:
-    radial-gradient(circle at 44% 42%, rgba(255, 255, 255, 0.92) 0 7%, rgba(53, 246, 255, 0.96) 8% 20%, rgba(183, 255, 77, 0.34) 38%, transparent 70%),
-    conic-gradient(from 35deg, transparent 0 10%, rgba(53, 246, 255, 0.94) 16%, transparent 24% 44%, rgba(183, 255, 77, 0.7) 52%, transparent 62% 100%);
+    linear-gradient(115deg, transparent 0 28%, rgba(53, 246, 255, 0.25) 35%, rgba(53, 246, 255, 1) 44%, rgba(183, 255, 77, 0.94) 51%, rgba(53, 246, 255, 0.56) 60%, transparent 70%),
+    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(53, 246, 255, 0.96), rgba(183, 255, 77, 0.32) 32%, transparent 56%);
   animation-duration: 980ms;
 }
 
 .lm-button-flash.tier-3 {
-  width: 90px;
-  height: 90px;
-  margin: -45px 0 0 -45px;
   background:
-    radial-gradient(circle at 44% 42%, rgba(255, 255, 255, 0.95) 0 7%, rgba(255, 230, 109, 1) 8% 18%, rgba(183, 255, 77, 0.52) 34%, rgba(53, 246, 255, 0.2) 52%, transparent 72%),
-    conic-gradient(from 40deg, transparent 0 8%, rgba(255, 230, 109, 0.98) 14%, transparent 22% 39%, rgba(53, 246, 255, 0.86) 47%, transparent 58% 72%, rgba(165, 108, 255, 0.58) 78%, transparent 88% 100%);
+    linear-gradient(118deg, transparent 0 24%, rgba(255, 230, 109, 0.32) 32%, rgba(255, 230, 109, 1) 40%, rgba(183, 255, 77, 1) 48%, rgba(53, 246, 255, 0.98) 58%, rgba(165, 108, 255, 0.62) 66%, transparent 76%),
+    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(255, 230, 109, 1), rgba(183, 255, 77, 0.48) 30%, rgba(53, 246, 255, 0.24) 50%, transparent 66%);
   animation-duration: 1060ms;
 }
 
 .lm-button-flash.tier-4 {
-  width: 106px;
-  height: 106px;
-  margin: -53px 0 0 -53px;
   background:
-    radial-gradient(circle at 44% 42%, rgba(255, 255, 255, 0.98) 0 6%, rgba(165, 108, 255, 0.9) 8% 18%, rgba(53, 246, 255, 0.42) 34%, rgba(255, 45, 207, 0.24) 50%, transparent 72%),
-    conic-gradient(from 0deg, rgba(183, 255, 77, 0), rgba(183, 255, 77, 1), rgba(53, 246, 255, 1), rgba(165, 108, 255, 1), rgba(255, 230, 109, 1), rgba(255, 45, 207, 0.86), rgba(183, 255, 77, 0));
+    conic-gradient(from 0deg at var(--lm-x, 50%) var(--lm-y, 50%), rgba(183, 255, 77, 0), rgba(183, 255, 77, 1), rgba(53, 246, 255, 1), rgba(165, 108, 255, 1), rgba(255, 230, 109, 1), rgba(255, 45, 207, 0.86), rgba(183, 255, 77, 0)),
+    linear-gradient(105deg, transparent 0 18%, rgba(255, 255, 255, 0.5) 31%, rgba(165, 108, 255, 0.95) 43%, rgba(53, 246, 255, 0.98) 55%, rgba(183, 255, 77, 0.74) 66%, transparent 82%),
+    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(255, 255, 255, 1), rgba(165, 108, 255, 0.5) 26%, rgba(53, 246, 255, 0.28) 44%, transparent 64%);
   animation: lmButtonFlash 1320ms var(--lm-ease) both, lmChameleonFlash 1320ms linear both;
 }
 
@@ -290,50 +277,12 @@
 
 .amount-button .lm-button-flash,
 .amount-button .lm-bolt-layer {
-  border-radius: 999px;
-}
-
-.amount-button .lm-button-flash {
-  display: block !important;
-  width: 58px;
-  height: 58px;
-  margin: -29px 0 0 -29px;
-  border-radius: 50%;
-  clip-path: circle(48% at 50% 50%);
-  --lm-soft-mask: radial-gradient(circle at 50% 50%, #000 0 34%, rgba(0, 0, 0, 0.62) 52%, transparent 70%);
-  -webkit-mask: var(--lm-soft-mask);
-  mask: var(--lm-soft-mask);
-  filter: none;
-}
-
-.amount-button .lm-button-flash.tier-2 {
-  width: 64px;
-  height: 64px;
-  margin: -32px 0 0 -32px;
-}
-
-.amount-button .lm-button-flash.tier-3 {
-  width: 70px;
-  height: 70px;
-  margin: -35px 0 0 -35px;
-}
-
-.amount-button .lm-button-flash.tier-4 {
-  width: 78px;
-  height: 78px;
-  margin: -39px 0 0 -39px;
-}
-
-.amount-button .lm-bolt-layer {
   inset: 1px;
   width: auto;
   height: auto;
   border-radius: 9px;
   clip-path: inset(0 round 9px);
-}
-
-.amount-button .lm-bolt-layer path {
-  filter: none;
+  -webkit-clip-path: inset(0 round 9px);
 }
 
 .lm-stake-shockwave {
