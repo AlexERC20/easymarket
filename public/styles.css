@@ -1070,6 +1070,7 @@ h2 {
 }
 
 .amount-button {
+  position: relative;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
@@ -1082,6 +1083,8 @@ h2 {
   color: var(--text);
   padding: 7px 4px;
   transform: translateZ(0);
+  overflow: hidden;
+  isolation: isolate;
   transition:
     transform var(--motion-fast) var(--spring-soft),
     border-color var(--motion-fast) var(--ease-default),
@@ -1127,12 +1130,16 @@ h2 {
 .amount-button:active,
 .amount-button.is-pressed {
   transform: scale(0.96) translateZ(0);
-  box-shadow: 0 0 0 3px rgba(183, 255, 77, 0.08), inset 0 0 0 1px rgba(183, 255, 77, 0.16);
+  box-shadow:
+    inset 0 0 0 1px rgba(183, 255, 77, 0.22),
+    inset 0 0 18px rgba(183, 255, 77, 0.08);
 }
 
 .amount-button.loading {
   border-color: rgba(25, 195, 125, 0.72);
-  box-shadow: inset 0 0 0 1px rgba(25, 195, 125, 0.16);
+  box-shadow:
+    inset 0 0 0 1px rgba(25, 195, 125, 0.18),
+    inset 0 0 18px rgba(25, 195, 125, 0.08);
   filter: brightness(1.06);
 }
 
@@ -2325,6 +2332,7 @@ code {
 }
 
 .bet-side-toggle button {
+  position: relative;
   border: 0;
   border-radius: 14px;
   background: transparent;
@@ -2332,6 +2340,9 @@ code {
   padding: 10px 20px;
   font-size: 16px;
   font-weight: 950;
+  overflow: hidden;
+  isolation: isolate;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .bet-side-toggle button.active {
@@ -2347,6 +2358,7 @@ code {
 }
 
 .bet-add-grid button {
+  position: relative;
   min-height: 44px;
   border: 0;
   border-radius: 12px;
@@ -2354,9 +2366,13 @@ code {
   color: #aeb8ca;
   font-size: 14px;
   font-weight: 950;
+  overflow: hidden;
+  isolation: isolate;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .trade-confirm {
+  position: relative;
   width: 100%;
   min-height: 62px;
   border: 0;
@@ -2368,13 +2384,19 @@ code {
   box-shadow: inset 0 -5px 0 rgba(0, 0, 0, 0.2);
   transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease;
   will-change: transform, filter;
+  overflow: hidden;
+  isolation: isolate;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .trade-confirm:active,
 .trade-confirm.is-pressed {
   filter: brightness(1.1);
   transform: translateY(2px) scale(0.985);
-  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.24), 0 0 0 3px rgba(18, 153, 243, 0.16);
+  box-shadow:
+    inset 0 -2px 0 rgba(0, 0, 0, 0.24),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    inset 0 0 22px rgba(255, 255, 255, 0.08);
 }
 
 .trade-confirm:disabled {
