@@ -725,6 +725,8 @@ h2 {
     linear-gradient(116deg, transparent 0 42%, rgba(183, 255, 77, 0.28) 45%, rgba(53, 246, 255, 0.24) 48%, transparent 53%),
     linear-gradient(72deg, transparent 0 48%, rgba(165, 108, 255, 0.18) 51%, transparent 56%);
   mix-blend-mode: screen;
+  -webkit-mask-image: radial-gradient(ellipse 86% 78% at 50% 50%, #000 0 44%, rgba(0, 0, 0, 0.64) 66%, transparent 100%);
+  mask-image: radial-gradient(ellipse 86% 78% at 50% 50%, #000 0 44%, rgba(0, 0, 0, 0.64) 66%, transparent 100%);
   opacity: 0;
 }
 
@@ -747,6 +749,12 @@ h2 {
 
 .win-overlay.show::after {
   animation: winGlowPulse 4.4s var(--ease-default) both;
+}
+
+.win-overlay.epic.show,
+.win-overlay.epic.show::before,
+.win-overlay.epic.show::after {
+  animation-duration: 6.6s;
 }
 
 .win-overlay small,
@@ -772,6 +780,53 @@ h2 {
     0 0 14px rgba(255, 255, 255, 0.55),
     0 0 30px rgba(183, 255, 77, 0.58),
     0 0 48px rgba(53, 246, 255, 0.36);
+}
+
+.price-board strong,
+#currentPrice,
+#openPrice,
+#priceMove,
+#fireBalance,
+#betAmountValue,
+#betWinValue {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.price-board strong {
+  font-size: clamp(30px, 10vw, 48px);
+}
+
+.feed-section.active {
+  animation: softRise 220ms var(--ease-default) both;
+}
+
+.loss-refund-card {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(53, 246, 255, 0.28);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(53, 246, 255, 0.12), transparent 42%),
+    rgba(255, 255, 255, 0.045);
+  padding: 12px;
+}
+
+.loss-refund-card strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.loss-refund-card small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.35;
 }
 
 @keyframes winReveal {
@@ -3096,6 +3151,8 @@ code {
     linear-gradient(112deg, transparent 0 42%, rgba(183, 255, 77, 0.28) 45%, rgba(53, 246, 255, 0.18) 48%, transparent 52%),
     radial-gradient(circle at 50% 38%, rgba(183, 255, 77, 0.18), transparent 34%);
   mix-blend-mode: screen;
+  -webkit-mask-image: radial-gradient(ellipse 92% 82% at 50% 45%, #000 0 46%, rgba(0, 0, 0, 0.56) 68%, transparent 100%);
+  mask-image: radial-gradient(ellipse 92% 82% at 50% 45%, #000 0 46%, rgba(0, 0, 0, 0.56) 68%, transparent 100%);
   animation: lightningFlash 520ms var(--ease-default) both;
 }
 
@@ -3123,6 +3180,8 @@ code {
   font-weight: 950;
   text-shadow: 0 0 24px rgba(183, 255, 77, 0.6);
   transform: translate(-50%, -50%);
+  -webkit-mask-image: radial-gradient(circle, #000 0 42%, rgba(0, 0, 0, 0.68) 64%, transparent 100%);
+  mask-image: radial-gradient(circle, #000 0 42%, rgba(0, 0, 0, 0.68) 64%, transparent 100%);
   animation: rewardBurst 980ms var(--ease-default) both;
 }
 

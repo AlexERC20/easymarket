@@ -289,6 +289,14 @@ function syncMotionRadius(element, fallback = "14px") {
   element.style.setProperty("--lm-radius", radius);
 }
 
+function getStakeTier(button) {
+  const tier = Number(button?.dataset?.stakeTier || 0);
+  if (Number.isFinite(tier) && tier > 0) {
+    return Math.max(1, Math.min(4, Math.round(tier)));
+  }
+  return 1;
+}
+
 export function triggerButtonLightning(button, event = null) {
   if (!button || button.disabled) {
     return;
@@ -311,17 +319,18 @@ export function triggerButtonLightning(button, event = null) {
   button.classList.add("lm-lightning-tap");
 
   const flash = document.createElement("span");
-  flash.className = "lm-button-flash";
+  const tier = getStakeTier(button);
+  flash.className = `lm-button-flash tier-${tier}`;
   flash.style.setProperty("--lm-x", `${x}px`);
   flash.style.setProperty("--lm-y", `${y}px`);
   button.appendChild(flash);
-  appendSparks(button, x, y, 6);
+  appendSparks(button, x, y, 5 + tier * 2);
   playMotionSound("tap");
 
   window.setTimeout(() => {
     button.classList.remove("lm-lightning-tap");
     flash.remove();
-  }, 940);
+  }, tier >= 4 ? 1280 : 940);
 }
 
 export function triggerCardLightning(card) {

@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260626-11" />
-    <link rel="stylesheet" href="/lightning-motion.css?v=20260626-07" />
+    <link rel="stylesheet" href="/styles.css?v=20260629-01" />
+    <link rel="stylesheet" href="/lightning-motion.css?v=20260629-01" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -502,7 +502,7 @@
       <section class="trade-card card">
         <div class="ticket-head">
           <div>
-            <p class="label">Ставка</p>
+            <p class="label hidden"></p>
             <h2 id="ticketTitle">Выбери сумму</h2>
           </div>
           <span id="ticketPrice" class="price-chip">UP 50¢</span>
@@ -544,7 +544,7 @@
         </form>
       </section>
 
-      <section class="card">
+      <section id="activitySection" class="card feed-section active">
         <div class="section-title">
           <h2>Моя позиция</h2>
           <div class="section-actions">
@@ -557,7 +557,7 @@
         </div>
       </section>
 
-      <section class="card">
+      <section id="recentSection" class="card feed-section hidden">
         <div class="section-title">
           <h2>Live сделки</h2>
           <div class="section-actions">
@@ -595,6 +595,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260626-13" type="module"></script>
+    <script src="/app.js?v=20260629-01" type="module"></script>
   </body>
 </html>

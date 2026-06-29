@@ -137,6 +137,25 @@
   animation: lmButtonFlash 860ms var(--lm-ease) both;
 }
 
+.lm-button-flash.tier-2 {
+  background:
+    linear-gradient(115deg, transparent 0 30%, rgba(183, 255, 77, 1) 40%, rgba(53, 246, 255, 0.94) 48%, rgba(255, 230, 109, 0.52) 56%, transparent 66%),
+    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(183, 255, 77, 0.88), rgba(53, 246, 255, 0.32) 32%, transparent 54%);
+}
+
+.lm-button-flash.tier-3 {
+  background:
+    linear-gradient(118deg, transparent 0 27%, rgba(255, 230, 109, 1) 37%, rgba(183, 255, 77, 1) 45%, rgba(53, 246, 255, 0.98) 54%, rgba(165, 108, 255, 0.56) 62%, transparent 72%),
+    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(255, 230, 109, 0.94), rgba(183, 255, 77, 0.42) 30%, rgba(53, 246, 255, 0.18) 48%, transparent 62%);
+}
+
+.lm-button-flash.tier-4 {
+  background:
+    conic-gradient(from 0deg at var(--lm-x, 50%) var(--lm-y, 50%), rgba(183, 255, 77, 0), rgba(183, 255, 77, 1), rgba(53, 246, 255, 1), rgba(165, 108, 255, 0.94), rgba(255, 230, 109, 1), rgba(183, 255, 77, 0)),
+    radial-gradient(circle at var(--lm-x, 50%) var(--lm-y, 50%), rgba(255, 255, 255, 0.92), rgba(53, 246, 255, 0.3) 30%, transparent 58%);
+  animation: lmButtonFlash 1180ms var(--lm-ease) both, lmChameleonFlash 1180ms linear both;
+}
+
 .lm-spark {
   position: absolute;
   left: var(--lm-x, 50%);
@@ -300,6 +319,16 @@
   18% { opacity: 1; }
   54% { opacity: 0.78; }
   100% { opacity: 0; transform: translateX(20%) scale(1.05); }
+}
+
+@keyframes lmChameleonFlash {
+  from {
+    filter: hue-rotate(0deg) saturate(1.25);
+  }
+
+  to {
+    filter: hue-rotate(180deg) saturate(1.6);
+  }
 }
 
 @keyframes lmSpark {

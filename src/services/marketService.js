@@ -11,10 +11,10 @@ const BTC_MIN_PRICE = 0.001;
 const DEFAULT_FEE_BPS = 200;
 const DEFAULT_PROFIT_FEE_BPS = 500;
 const DEFAULT_MARKET_MAKER_SPREAD_BPS = 300;
-const BUY_IMPACT_MULTIPLIER = 0.85;
-const SELL_IMPACT_MULTIPLIER = 1.1;
-const MAX_SINGLE_TRADE_SHIFT = 0.42;
-const MIN_TAIL_DEPTH_FACTOR = 0.012;
+const BUY_IMPACT_MULTIPLIER = 1.08;
+const SELL_IMPACT_MULTIPLIER = 1.42;
+const MAX_SINGLE_TRADE_SHIFT = 0.46;
+const MIN_TAIL_DEPTH_FACTOR = 0.004;
 const REFERRAL_SIGNUP_BONUS = 100;
 const CURRENCIES = new Set(["STAR", "USDT"]);
 const WORLD_CUP_SYNC_INTERVAL_MS = 90_000;
@@ -48,11 +48,52 @@ const WORLD_CUP_FALLBACK_MARKETS = [
   { polymarketId: "fallback-argentina", team: "Argentina", icon: "🇦🇷", yesPrice: 0.084, volume: 43_700_000 },
   { polymarketId: "fallback-germany", team: "Germany", icon: "🇩🇪", yesPrice: 0.061, volume: 38_200_000 },
   { polymarketId: "fallback-netherlands", team: "Netherlands", icon: "🇳🇱", yesPrice: 0.049, volume: 31_900_000 },
-  { polymarketId: "fallback-italy", team: "Italy", icon: "🇮🇹", yesPrice: 0.035, volume: 24_700_000 },
+  { polymarketId: "fallback-belgium", team: "Belgium", icon: "🇧🇪", yesPrice: 0.035, volume: 24_700_000 },
   { polymarketId: "fallback-usa", team: "USA", icon: "🇺🇸", yesPrice: 0.026, volume: 21_000_000 },
   { polymarketId: "fallback-mexico", team: "Mexico", icon: "🇲🇽", yesPrice: 0.018, volume: 16_600_000 },
   { polymarketId: "fallback-canada", team: "Canada", icon: "🇨🇦", yesPrice: 0.012, volume: 12_300_000 },
 ];
+
+const ACTIVE_WORLD_CUP_TEAM_KEYS = new Set([
+  "south-africa",
+  "canada",
+  "brazil",
+  "japan",
+  "germany",
+  "paraguay",
+  "netherlands",
+  "morocco",
+  "cote-d-ivoire",
+  "ivory-coast",
+  "norway",
+  "france",
+  "sweden",
+  "mexico",
+  "ecuador",
+  "england",
+  "dr-congo",
+  "congo-dr",
+  "democratic-republic-of-congo",
+  "belgium",
+  "senegal",
+  "usa",
+  "united-states",
+  "united-states-of-america",
+  "bosnia-and-herzegovina",
+  "spain",
+  "austria",
+  "portugal",
+  "croatia",
+  "switzerland",
+  "algeria",
+  "australia",
+  "egypt",
+  "argentina",
+  "cabo-verde",
+  "cape-verde",
+  "colombia",
+  "ghana",
+]);
 
 let worldCupSyncPromise = null;
 let worldCupLastSyncAt = 0;
@@ -606,9 +647,16 @@ function normalizeWorldCupTeamKey(team) {
   return String(team || "")
     .trim()
     .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[’']/g, "-")
     .replace(/&/g, "and")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function isActiveWorldCupTeam(team) {
+  return ACTIVE_WORLD_CUP_TEAM_KEYS.has(normalizeWorldCupTeamKey(team));
 }
 
 function isImageIcon(icon) {
@@ -698,6 +746,7 @@ async function fetchWorldCupMarketsFromPolymarket() {
     return (event.markets || [])
       .map(normalizeWorldCupFeedMarket)
       .filter(Boolean)
+      .filter((market) => isActiveWorldCupTeam(market.team))
       .sort((a, b) => b.yesPrice - a.yesPrice)
       .slice(0, 60);
   } finally {
@@ -724,7 +773,7 @@ async function getWorldCupFeedMarkets() {
 
   return {
     source: "fallback",
-    markets: WORLD_CUP_FALLBACK_MARKETS,
+    markets: WORLD_CUP_FALLBACK_MARKETS.filter((market) => isActiveWorldCupTeam(market.team)),
   };
 }
 
@@ -815,6 +864,179 @@ async function awardBonusWithDailyCap(client, userId, amount, reason, source) {
     daily_remaining: Math.max(0, Math.round((remaining - awarded) * 100) / 100),
     cap_reached: awarded < requestedAmount,
   };
+}
+
+async function createUsdtLossRefundOffer(client, position, pnl) {
+  if (normalizeCurrency(position.currency) !== "USDT" || Number(pnl || 0) >= 0) {
+    return null;
+  }
+
+  const refundAmount = Math.min(30, Math.max(0, Math.round(toNumber(position.spent) * 100) / 100));
+  if (refundAmount <= 0) {
+    return null;
+  }
+
+  const dayKey = getDayKey();
+  const existingToday = await client.query(
+    `
+      SELECT COUNT(*)::int AS count
+      FROM usdt_loss_refund_offers
+      WHERE user_id = $1
+        AND day_key = $2
+    `,
+    [position.user_id, dayKey],
+  );
+  const offerIndex = Number(existingToday.rows[0]?.count || 0);
+  if (offerIndex >= 2) {
+    return null;
+  }
+  const offerType = offerIndex === 0 ? "referral" : (refundAmount <= 10 ? "stars_100" : "stars_500");
+
+  const result = await client.query(
+    `
+      INSERT INTO usdt_loss_refund_offers (
+        user_id,
+        position_id,
+        market_id,
+        offer_type,
+        amount,
+        day_key
+      )
+      VALUES ($1, $2, $3, $4, $5::numeric, $6)
+      ON CONFLICT DO NOTHING
+      RETURNING *
+    `,
+    [position.user_id, position.id, position.market_id, offerType, refundAmount, dayKey],
+  );
+  return result.rows[0] || null;
+}
+
+async function claimReferralLossRefundIfAny(client, inviterUserId, referredUserId) {
+  const offerResult = await client.query(
+    `
+      SELECT *
+      FROM usdt_loss_refund_offers
+      WHERE user_id = $1
+        AND status = 'pending'
+        AND offer_type = 'referral'
+        AND day_key = $2
+      ORDER BY created_at ASC
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [inviterUserId, getDayKey()],
+  );
+  const offer = offerResult.rows[0];
+  if (!offer) {
+    return null;
+  }
+
+  await adjustUsdtBonusBalance(
+    client,
+    inviterUserId,
+    toNumber(offer.amount),
+    "loss_refund_referral",
+    `loss_refund:${offer.id}:referral:${referredUserId}`,
+  );
+  await client.query(
+    `
+      UPDATE usdt_loss_refund_offers
+      SET status = 'claimed',
+          referred_user_id = $2,
+          claimed_at = now()
+      WHERE id = $1
+    `,
+    [offer.id, referredUserId],
+  );
+
+  return {
+    id: Number(offer.id),
+    amount: toNumber(offer.amount),
+    offer_type: offer.offer_type,
+  };
+}
+
+export async function claimLossRefundWithStars(input) {
+  const offerId = Number(input.offer_id ?? input.offerId);
+  if (!Number.isSafeInteger(offerId) || offerId <= 0) {
+    throw new Error("invalid_loss_refund_offer");
+  }
+  const user = await getUserByTelegramId(input.telegram_id);
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+
+  return withTransaction(async (client) => {
+    const offerResult = await client.query(
+      `
+        SELECT *
+        FROM usdt_loss_refund_offers
+        WHERE id = $1
+          AND user_id = $2
+          AND status = 'pending'
+        FOR UPDATE
+      `,
+      [offerId, user.id],
+    );
+    const offer = offerResult.rows[0];
+    if (!offer) {
+      throw new Error("loss_refund_offer_not_found");
+    }
+    const cost = offer.offer_type === "stars_100"
+      ? 100
+      : offer.offer_type === "stars_500"
+        ? 500
+        : 0;
+    if (cost <= 0) {
+      throw new Error("loss_refund_offer_requires_referral");
+    }
+
+    await debitCurrencyBalance(
+      client,
+      user.id,
+      "STAR",
+      cost,
+      "loss_refund_star_fee",
+      `loss_refund:${offer.id}`,
+    );
+    await adjustUsdtBonusBalance(
+      client,
+      user.id,
+      toNumber(offer.amount),
+      "loss_refund_stars",
+      `loss_refund:${offer.id}`,
+    );
+    await client.query(
+      `
+        UPDATE usdt_loss_refund_offers
+        SET status = 'claimed',
+            claimed_at = now()
+        WHERE id = $1
+      `,
+      [offer.id],
+    );
+    const [starBalance, usdtTotal, usdtCash, usdtBonus] = await Promise.all([
+      getBalanceByUserId(user.id),
+      getUsdtTotalBalanceByUserId(user.id),
+      getUsdtBalanceByUserId(user.id),
+      getUsdtBonusBalanceByUserId(user.id),
+    ]);
+
+    return {
+      ok: true,
+      user,
+      balance: starBalance,
+      usdt_balance: usdtTotal,
+      usdt_cash_balance: usdtCash,
+      usdt_bonus_balance: usdtBonus,
+      offer: {
+        id: Number(offer.id),
+        amount: toNumber(offer.amount),
+        offer_type: offer.offer_type,
+        status: "claimed",
+      },
+    };
+  });
 }
 
 function slugifyClanName(name) {
@@ -1489,7 +1711,16 @@ export async function getUserSnapshot(telegramId) {
     return null;
   }
 
-  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, dailyTasks] = await Promise.all([
+  await query(
+    `
+      UPDATE users
+      SET updated_at = now()
+      WHERE id = $1
+    `,
+    [user.id],
+  );
+
+  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, dailyTasks, lossRefundOffersResult] = await Promise.all([
     getBalanceByUserId(user.id),
     getUsdtBalanceByUserId(user.id),
     getUsdtBonusBalanceByUserId(user.id),
@@ -1544,6 +1775,17 @@ export async function getUserSnapshot(telegramId) {
     ),
     getUserMarketStats(user.id),
     getUserDailyTaskStatus(user.id),
+    query(
+      `
+        SELECT *
+        FROM usdt_loss_refund_offers
+        WHERE user_id = $1
+          AND status = 'pending'
+        ORDER BY created_at DESC
+        LIMIT 3
+      `,
+      [user.id],
+    ),
   ]);
   const usdtTotalBalance = Math.round((usdtCashBalance + usdtBonusBalance) * 100) / 100;
 
@@ -1557,6 +1799,15 @@ export async function getUserSnapshot(telegramId) {
     recent_trades: tradesResult.rows.map(mapTrade),
     market_stats: marketStats,
     daily_tasks: dailyTasks,
+    loss_refund_offers: lossRefundOffersResult.rows.map((row) => ({
+      id: Number(row.id),
+      position_id: Number(row.position_id),
+      market_id: Number(row.market_id),
+      offer_type: row.offer_type,
+      amount: toNumber(row.amount),
+      status: row.status,
+      created_at: row.created_at,
+    })),
   };
 }
 
@@ -1643,6 +1894,7 @@ export async function syncFireBalance(input) {
   const balance = ensureNonNegativeAmount(input.amount ?? input.balance);
   const reason = input.reason || "admin_adjustment";
   const source = input.source || "bridge_sync";
+  const allowDecrease = input.allow_decrease === true || input.allowDecrease === true;
   const user = await upsertUser({
     telegram_id: input.telegram_id,
     username: input.username,
@@ -1660,7 +1912,10 @@ export async function syncFireBalance(input) {
       [user.id],
     );
     const previousBalance = toNumber(balanceResult.rows[0]?.balance);
-    const delta = Math.round((balance - previousBalance) * 100) / 100;
+    const nextBalance = !allowDecrease && source === "bridge_sync" && balance < previousBalance
+      ? previousBalance
+      : balance;
+    const delta = Math.round((nextBalance - previousBalance) * 100) / 100;
 
     await client.query(
       `
@@ -1669,7 +1924,7 @@ export async function syncFireBalance(input) {
             updated_at = now()
         WHERE user_id = $1
       `,
-      [user.id, balance],
+      [user.id, nextBalance],
     );
 
     if (Math.abs(delta) >= 0.01) {
@@ -1683,9 +1938,10 @@ export async function syncFireBalance(input) {
     }
 
     return {
-      balance,
+      balance: nextBalance,
       previous_balance: previousBalance,
       delta,
+      ignored_decrease: nextBalance === previousBalance && balance < previousBalance,
     };
   });
 
@@ -1703,6 +1959,7 @@ export async function syncFireBalanceByUsername(input) {
   const balance = ensureNonNegativeAmount(input.amount ?? input.balance);
   const reason = input.reason || "admin_adjustment";
   const source = input.source || "bridge_sync";
+  const allowDecrease = input.allow_decrease === true || input.allowDecrease === true;
 
   return withTransaction(async (client) => {
     const userResult = await client.query(
@@ -1731,7 +1988,10 @@ export async function syncFireBalanceByUsername(input) {
       [user.id],
     );
     const previousBalance = toNumber(balanceResult.rows[0]?.balance);
-    const delta = Math.round((balance - previousBalance) * 100) / 100;
+    const nextBalance = !allowDecrease && source === "bridge_sync_username" && balance < previousBalance
+      ? previousBalance
+      : balance;
+    const delta = Math.round((nextBalance - previousBalance) * 100) / 100;
 
     await client.query(
       `
@@ -1740,7 +2000,7 @@ export async function syncFireBalanceByUsername(input) {
             updated_at = now()
         WHERE user_id = $1
       `,
-      [user.id, balance],
+      [user.id, nextBalance],
     );
 
     if (Math.abs(delta) >= 0.01) {
@@ -1755,9 +2015,10 @@ export async function syncFireBalanceByUsername(input) {
 
     return {
       user: mapUser(user),
-      balance,
+      balance: nextBalance,
       previous_balance: previousBalance,
       delta,
+      ignored_decrease: nextBalance === previousBalance && balance < previousBalance,
     };
   });
 }
@@ -2906,6 +3167,29 @@ export async function getMarketOnlineCount(marketId) {
   return Number(result.rows[0]?.online_count || 0);
 }
 
+export async function getAppActivityStats() {
+  const result = await query(
+    `
+      SELECT
+        (
+          SELECT COUNT(*)::int
+          FROM users
+          WHERE updated_at > now() - interval '5 minutes'
+        ) AS online_count,
+        (
+          SELECT COUNT(*)::int
+          FROM trades
+          WHERE action = 'BUY'
+        ) AS total_bets
+    `,
+  );
+
+  return {
+    online_count: Number(result.rows[0]?.online_count || 0),
+    total_bets: Number(result.rows[0]?.total_bets || 0),
+  };
+}
+
 export async function addMarketComment(input) {
   const marketId = Number(input.marketId);
   const message = String(input.message || "").trim().slice(0, 240);
@@ -3161,7 +3445,8 @@ export async function getWorldCupMarkets() {
     `,
     [`${WORLD_CUP_SYMBOL_PREFIX}%`],
   );
-  const rows = dedupeWorldCupRows(result.rows);
+  const rows = dedupeWorldCupRows(result.rows)
+    .filter((row) => isActiveWorldCupTeam(row.team));
   const symbols = rows.map((row) => row.symbol);
   let chartBySymbol = new Map();
   if (symbols.length) {
@@ -3288,11 +3573,14 @@ async function awardReferralBetBonus(client, buyerUser, marketId) {
     }
   }
 
+  const lossRefund = await claimReferralLossRefundIfAny(client, inviter.id, buyerUser.id);
+
   return {
     inviter: mapUser(inviter),
     referred: mapUser(buyerUser),
     amount: bonus.awarded,
     usdt_bonus: usdtBonus,
+    loss_refund: lossRefund,
     daily_remaining: bonus.daily_remaining,
     cap_reached: bonus.cap_reached,
     day_key: dayKey,
@@ -3858,6 +4146,10 @@ export async function resolveExpiredMarkets() {
             `market:${currentMarket.id}`,
             getBonusRatioForAmount(position.bonus_spent, position.spent),
           );
+        }
+
+        if (currency === "USDT" && pnl < 0) {
+          await createUsdtLossRefundOffer(client, position, pnl);
         }
 
         if (currency === "USDT") {

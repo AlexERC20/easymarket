@@ -7,12 +7,14 @@ import {
   showSuccessLightningBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260626-07";
+} from "./lightning-motion.js?v=20260629-01";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
-const SELL_IMPACT_MULTIPLIER = 1.1;
-const MIN_TAIL_DEPTH_FACTOR = 0.012;
+const BUY_IMPACT_MULTIPLIER = 1.08;
+const SELL_IMPACT_MULTIPLIER = 1.42;
+const MAX_SINGLE_TRADE_SHIFT = 0.46;
+const MIN_TAIL_DEPTH_FACTOR = 0.004;
 const STAR_AMOUNTS = [50, 100, 500, 1000];
 const USDT_AMOUNTS = [5, 10, 25, 100];
 const MIN_OUTCOME_PRICE = 0.001;
@@ -62,6 +64,7 @@ const state = {
   comments: [],
   commentsMarketId: null,
   commentsOnlineCount: 0,
+  appTotalBets: 0,
   commentsLoaded: false,
   seenCommentIds: new Set(),
   freshCommentIds: new Set(),
@@ -103,7 +106,9 @@ const state = {
   selectedClanId: null,
   clanView: "leaderboard",
   marketPanel: "chat",
+  feedPanel: "activity",
   orderbookSide: "YES",
+  lossRefundOffers: [],
   referralNudgeShown: false,
   taskTab: "tasks",
   dailyTasks: {},
@@ -127,6 +132,7 @@ const state = {
   refreshTimer: null,
   lastCommentsLoadAt: 0,
   expiryRefreshMarketId: null,
+  lastRoundTransitionMarketId: null,
   lastClosedMarketToastAt: 0,
   pendingSellSide: null,
   pendingSellPositionId: null,
@@ -517,6 +523,12 @@ function triggerHaptic(type = "light") {
         light: ["light"],
         medium: ["medium", "light"],
         success: ["success", "light"],
+        round: [
+          { pulse: "light", delay: 0 },
+          { pulse: "medium", delay: 110 },
+          { pulse: "light", delay: 260 },
+          { pulse: "warning", delay: 460 },
+        ],
         win: [
           { pulse: "success", delay: 0 },
           { pulse: "light", delay: 130 },
@@ -550,6 +562,8 @@ function triggerHaptic(type = "light") {
       ? [18, 32, 24]
       : type === "win"
         ? [70, 55, 105, 70, 55, 55, 135, 90, 180, 110, 75, 70, 160, 95, 240, 130, 85, 75, 330]
+      : type === "round"
+        ? [24, 35, 46, 65, 22]
       : type === "error"
         ? [55, 35, 42]
         : type === "warning"
@@ -564,6 +578,8 @@ function triggerHaptic(type = "light") {
 
   if (type === "win") {
     playMotionSound("win");
+  } else if (type === "round") {
+    playMotionSound("warning");
   } else if (type === "success" || type === "warning" || type === "error") {
     playMotionSound(type);
   } else {
@@ -891,6 +907,37 @@ function drawMarketChartFrame() {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     drawSmoothPath(ctx, pathPoints);
+
+    const chartTrades = (state.activity || [])
+      .filter((trade) => Number(trade.market_id) === Number(market.id))
+      .filter((trade) => trade.action !== "SELL")
+      .map((trade) => ({
+        ...trade,
+        at: new Date(trade.created_at).getTime(),
+      }))
+      .filter((trade) => Number.isFinite(trade.at) && trade.at >= windowStart && trade.at <= windowEnd)
+      .slice(0, 40);
+    chartTrades.forEach((trade) => {
+      const x = scaleX(trade.at);
+      const nearest = pathPoints.reduce((best, point) => (
+        Math.abs(point.x - x) < Math.abs(best.x - x) ? point : best
+      ), pathPoints[0]);
+      const own = String(trade.telegram_id || "") === String(state.user?.telegram_id || "");
+      const dotSize = own ? 4.6 : 2.5;
+      ctx.save();
+      ctx.fillStyle = trade.side === "YES" ? "rgba(25,195,125,0.95)" : "rgba(239,70,111,0.92)";
+      ctx.shadowColor = trade.side === "YES" ? "rgba(25,195,125,0.75)" : "rgba(239,70,111,0.72)";
+      ctx.shadowBlur = own ? 16 : 9;
+      ctx.beginPath();
+      ctx.arc(x, nearest.y + (own ? -7 : 7), dotSize, 0, Math.PI * 2);
+      ctx.fill();
+      if (own) {
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = "rgba(255,255,255,0.78)";
+        ctx.stroke();
+      }
+      ctx.restore();
+    });
   }
 
   const latest = pathPoints[pathPoints.length - 1];
@@ -918,7 +965,7 @@ function drawMarketChartFrame() {
     ctx.shadowBlur = 0;
   }
 
-  if (Math.abs((state.smoothedPrice || 0) - currentPrice) > 0.04) {
+  if ((market.status === "open" && btc) || Math.abs((state.smoothedPrice || 0) - currentPrice) > 0.04) {
     state.chartRaf = requestAnimationFrame(drawMarketChartFrame);
     return;
   }
@@ -951,15 +998,34 @@ function triggerRewardBurst(label = "⚡") {
   showSuccessLightningBurst(label === "⚡" ? "Success" : label);
 }
 
-function showWinOverlay(label) {
+function showRoundTransition(market) {
+  if (!market?.id || state.lastRoundTransitionMarketId === market.id) {
+    return;
+  }
+  state.lastRoundTransitionMarketId = market.id;
+  triggerHaptic("round");
+  showSuccessLightningBurst("NEXT ROUND");
+  showToast("Раунд завершён. Готовлю следующий...");
+}
+
+function showTopupSuccessAnimation(label = "TOP UP") {
+  triggerHaptic("win");
+  showSuccessLightningBurst(label);
+  triggerLightningFlash("success");
+  triggerRewardBurst("⚡");
+}
+
+function showWinOverlay(label, value = 0) {
   const overlay = $("winOverlay");
   const amount = $("winOverlayAmount");
   if (!overlay || !amount || !label) {
     return;
   }
+  const epic = Math.abs(Number(value || 0)) >= 100;
   triggerLightningFlash("success");
   triggerRewardBurst("⚡");
   amount.textContent = label;
+  overlay.classList.toggle("epic", epic);
   overlay.classList.remove("hidden");
   overlay.classList.remove("show");
   void overlay.offsetWidth;
@@ -971,7 +1037,7 @@ function showWinOverlay(label) {
     overlay.classList.remove("show");
     overlay.classList.add("hidden");
     state.winOverlayTimer = null;
-  }, 4400);
+  }, epic ? 6600 : 4400);
 }
 
 function setConnection(status, type = "") {
@@ -1485,6 +1551,7 @@ async function upsertMe() {
   state.positions = data.positions || [];
   state.marketStats = data.market_stats || [];
   state.dailyTasks = data.daily_tasks || {};
+  state.lossRefundOffers = data.loss_refund_offers || [];
   state.presence.startedAt = Date.now();
   document.body.classList.remove("auth-only");
   $("authCard").classList.add("hidden");
@@ -1564,11 +1631,12 @@ function handleSettlements(positions) {
         map.set(currency, (map.get(currency) || 0) + Number(item.pnl || item.payout || 0));
         return map;
       }, new Map());
+      const largestWin = Math.max(...newWins.map((item) => Math.abs(Number(item.pnl || item.payout || 0))));
       const label = Array.from(winsByCurrency.entries())
         .map(([currency, value]) => formatSignedCurrencyAmount(value, currency))
         .join(" · ");
       showToast(`Есть выигрыш: ${label}`);
-      showWinOverlay(label);
+      showWinOverlay(label, largestWin);
     }
   }
 
@@ -1609,6 +1677,7 @@ async function loadMe() {
   state.recentTrades = data.recent_trades || [];
   state.marketStats = data.market_stats || [];
   state.dailyTasks = data.daily_tasks || {};
+  state.lossRefundOffers = data.loss_refund_offers || [];
   handleSettlements(state.positions);
   renderMe();
   renderTaskStats();
@@ -1701,6 +1770,24 @@ function formatRelativeTime(value) {
   return `${Math.floor(hours / 24)}d`;
 }
 
+function formatDurationShort(secondsInput) {
+  const seconds = Math.max(0, Math.floor(Number(secondsInput || 0)));
+  if (seconds >= 86_400) {
+    const days = Math.floor(seconds / 86_400);
+    const hours = Math.floor((seconds % 86_400) / 3_600);
+    return `${days}d ${hours}h`;
+  }
+  if (seconds >= 3_600) {
+    const hours = Math.floor(seconds / 3_600);
+    const minutes = Math.floor((seconds % 3_600) / 60);
+    return `${hours}h ${minutes}m`;
+  }
+  if (seconds >= 60) {
+    return `${Math.floor(seconds / 60)}m`;
+  }
+  return `${seconds}s`;
+}
+
 async function loadComments() {
   const market = getDisplayMarket();
   if (!market?.id) {
@@ -1727,6 +1814,7 @@ async function loadComments() {
   nextComments.forEach((comment) => state.seenCommentIds.add(`${market.id}:${comment.id}`));
   state.comments = nextComments;
   state.commentsOnlineCount = Number(data.online_count || 0);
+  state.appTotalBets = Number(data.total_bets || state.appTotalBets || 0);
   state.commentsMarketId = market.id;
   state.commentsLoaded = true;
   renderComments();
@@ -1740,7 +1828,9 @@ function renderComments() {
 
   const market = getDisplayMarket();
   if ($("marketChatOnline")) {
-    $("marketChatOnline").textContent = Math.max(0, Math.round(Number(state.commentsOnlineCount || 0))).toLocaleString("ru-RU");
+    const online = Math.max(0, Math.round(Number(state.commentsOnlineCount || 0))).toLocaleString("ru-RU");
+    const bets = Math.max(0, Math.round(Number(state.appTotalBets || 0))).toLocaleString("ru-RU");
+    $("marketChatOnline").textContent = `${online} · Ставки: ${bets}`;
   }
   if (!market?.id) {
     setInnerHtmlIfChanged(container, '<p class="muted">Сначала выбери рынок.</p>');
@@ -1904,7 +1994,14 @@ function mergeBtcChartPoint(market) {
 
 async function loadBtcMarkets() {
   const data = await api("/api/btc/markets");
-  const incomingMarkets = data.markets || [];
+  const incomingMarkets = [];
+  const seenSymbols = new Set();
+  for (const market of data.markets || []) {
+    const symbol = String(market.symbol || market.id);
+    if (seenSymbols.has(symbol)) continue;
+    seenSymbols.add(symbol);
+    incomingMarkets.push(market);
+  }
   state.btcMarkets = incomingMarkets;
   state.btcMarkets.forEach(mergeBtcChartPoint);
   if (
@@ -1991,7 +2088,7 @@ function estimateBuyQuote({ market, side, amount }) {
   const distanceFromCenter = Math.min(1, Math.abs(price - 0.5) / 0.5);
   const depthFactor = MIN_TAIL_DEPTH_FACTOR + (1 - MIN_TAIL_DEPTH_FACTOR) * Math.pow(1 - distanceFromCenter, 2.35);
   const liquidity = Math.max(35, baseLiquidity * depthFactor);
-  const impact = Math.min(0.42, (Number(amount || 0) / liquidity) * 0.85);
+  const impact = Math.min(MAX_SINGLE_TRADE_SHIFT, (Number(amount || 0) / liquidity) * BUY_IMPACT_MULTIPLIER);
   const nextPrice = Math.max(minPrice, Math.min(1 - minPrice, price + impact));
   const executionPrice = Math.max(minPrice, Math.min(1 - minPrice, Math.max(price, nextPrice) * (1 + MARKET_MAKER_SPREAD_RATE)));
   return {
@@ -2113,6 +2210,7 @@ function updateTimer() {
   if (remainingMs <= 0 && market.status === "open" && state.expiryRefreshMarketId !== market.id) {
     state.expiryRefreshMarketId = market.id;
     state.buyQueue = [];
+    showRoundTransition(market);
     if ($("marketStatus")) {
       $("marketStatus").textContent = marketStatusLabel("closed");
       $("marketStatus").classList.remove("live");
@@ -2251,16 +2349,37 @@ function renderMe() {
   const positions = state.positions.filter((position) => (
     position.status === "open" && normalizeCurrency(position.currency) === state.currency
   ));
+  const pendingLossOffer = (state.lossRefundOffers || [])
+    .find((offer) => normalizeCurrency(state.currency) === "USDT" && offer.status === "pending");
+  const lossOfferCost = pendingLossOffer?.offer_type === "stars_100"
+    ? 100
+    : pendingLossOffer?.offer_type === "stars_500"
+      ? 500
+      : 0;
+  const lossOfferHtml = pendingLossOffer
+    ? `
+      <div class="loss-refund-card">
+        <strong>Можно вернуть проигрыш</strong>
+        <small>${lossOfferCost
+          ? `Вернём до ${formatCurrencyAmount(pendingLossOffer.amount, "USDT")} на бонусный баланс.`
+          : `Позови друга в EasyMarket. После его первой ставки вернём до ${formatCurrencyAmount(pendingLossOffer.amount, "USDT")} на бонусный баланс.`
+        }</small>
+        <button class="task-button claimable" ${lossOfferCost ? `data-loss-refund-stars="${pendingLossOffer.id}"` : "data-loss-refund-share"} type="button">
+          ${lossOfferCost ? `Вернуть за ${lossOfferCost}` : "Позвать"}
+        </button>
+      </div>
+    `
+    : "";
   setSectionToggle("positionToggle", positions.length, "positions");
 
   const container = $("positionList");
   if (!positions.length) {
-    container.innerHTML = '<p class="muted">Позиции пока нет.</p>';
+    container.innerHTML = `${lossOfferHtml}<p class="muted">Позиции пока нет.</p>`;
     return;
   }
 
   const visiblePositions = state.expanded.positions ? positions : positions.slice(0, COLLAPSE_LIMIT);
-  container.innerHTML = visiblePositions.map((position) => {
+  container.innerHTML = lossOfferHtml + visiblePositions.map((position) => {
     const payout = Number(position.shares || 0);
     const spent = Number(position.spent || 0);
     const currency = normalizeCurrency(position.currency);
@@ -2290,7 +2409,7 @@ function renderMe() {
     const marketBadge = secondsLeft === null
       ? ""
       : secondsLeft > 0
-        ? ` · ${secondsLeft}с`
+        ? ` · ${formatDurationShort(secondsLeft)}`
         : " · закрывается";
     const marketLabel = getPositionMarketLabel(position, activeMarket);
     return `
@@ -2298,7 +2417,7 @@ function renderMe() {
         <div>
           <strong class="side-${position.side}">${escapeHtml(marketLabel)} · ${marketSideLabel(activeMarket, position.side)}</strong>
           <br />
-          <small>${payout.toFixed(2)} shares · Avg ${formatCents(position.avg_price)} · Sell ${formatCents(exitQuote.bidPrice)} · Spent ${formatCurrencyAmount(spent, currency)}${marketBadge}</small>
+          <small>${payout.toFixed(2)} shares · Avg ${formatCents(position.avg_price)} · Spent ${formatCurrencyAmount(spent, currency)}${marketBadge}</small>
         </div>
         <div class="position-actions">
           <strong class="${pnl >= 0 ? "positive" : "negative"}">${formatSignedCurrencyAmount(pnl, currency)}</strong>
@@ -2337,6 +2456,7 @@ function renderTradeTicket() {
   document.querySelectorAll(".amount-button").forEach((button, index) => {
     const amount = amounts[index] || amounts[0];
     button.dataset.amount = String(amount);
+    button.dataset.stakeTier = String(index + 1);
     const amountPreview = getPreview(amount, side);
     const pendingKey = market ? getBuyIntentKey(market.id, side, amount, state.currency) : null;
     const nextLabel = formatWholeCurrencyAmount(amount, state.currency);
@@ -2357,10 +2477,12 @@ function renderTradeTicket() {
   $("ticketTitle").textContent = canBuyMarket
     ? `Нажми сумму для ${marketSideLabel(market, side)}`
     : "Рынок завершён, обновляю...";
-  $("ticketPrice").textContent = `${marketSideLabel(market, side)} ${formatCents(price)}`;
+  $("ticketPrice").textContent = "";
+  $("ticketPrice").classList.add("hidden");
 }
 
 function renderActivity() {
+  renderFeedPanel();
   const container = $("activityTape");
   setSectionToggle("activityToggle", state.activity.length, "activity");
   if (!state.activity.length) {
@@ -2389,6 +2511,7 @@ function renderActivity() {
 }
 
 function renderRecentMarkets() {
+  renderFeedPanel();
   const container = $("recentMarkets");
   setSectionToggle("recentToggle", state.recentMarkets.length, "recent");
   if (!state.recentMarkets.length) {
@@ -2411,6 +2534,14 @@ function renderRecentMarkets() {
     `;
   }).join("");
   setInnerHtmlIfChanged(container, html);
+}
+
+function renderFeedPanel() {
+  const showActivity = state.feedPanel !== "recent";
+  $("activitySection")?.classList.toggle("hidden", !showActivity);
+  $("activitySection")?.classList.toggle("active", showActivity);
+  $("recentSection")?.classList.toggle("hidden", showActivity);
+  $("recentSection")?.classList.toggle("active", !showActivity);
 }
 
 function renderLeaderboard() {
@@ -2857,6 +2988,7 @@ function renderBetSheet() {
   document.querySelectorAll("[data-bet-add]").forEach((button, index) => {
     const addAmount = amounts[index] || amounts[0];
     button.dataset.betAdd = String(addAmount);
+    button.dataset.stakeTier = String(index + 1);
     button.textContent = `+${formatCurrencyAmount(addAmount, state.currency)}`;
   });
   if ($("betConfirmBtn")) {
@@ -3126,8 +3258,7 @@ async function refreshDepositIntent() {
     renderTopupSheet();
     if (data.intent?.status === "credited") {
       stopDepositPolling();
-      triggerHaptic("success");
-      triggerLightningFlash("success");
+      showTopupSuccessAnimation("TOP UP");
       showToast("USDT зачислены на баланс.");
       await loadMe();
       return;
@@ -3267,8 +3398,7 @@ async function checkUsdtDepositIntent() {
     await loadMe().catch(() => undefined);
     if (state.topup.intent?.status === "credited") {
       stopDepositPolling();
-      triggerHaptic("success");
-      triggerLightningFlash("success");
+      showTopupSuccessAnimation("TOP UP");
       showToast("USDT зачислены.");
     } else {
       triggerHaptic("warning");
@@ -3388,8 +3518,7 @@ async function startStarsTopup() {
     if (tg?.openInvoice) {
       tg.openInvoice(invoiceUrl, (status) => {
         if (status === "paid") {
-          triggerHaptic("success");
-          triggerLightningFlash("success");
+          showTopupSuccessAnimation("TOP UP");
           showToast("Оплата прошла. Обновляю баланс...");
           closeTopupSheet();
           void refreshBalanceAfterInvoice();
@@ -3629,6 +3758,39 @@ async function sellPosition({ side, positionId, marketId, shares }) {
     state.pendingSellPositionId = null;
     renderMe();
     renderTradeTicket();
+  }
+}
+
+async function claimLossRefundWithStars(offerId) {
+  if (!state.user?.telegram_id || !offerId) {
+    triggerHaptic("warning");
+    return;
+  }
+  try {
+    const result = await api(`/api/loss-refund/${offerId}/claim-stars`, {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+      }),
+    });
+    state.balance = result.balance ?? state.balance;
+    state.usdtBalance = result.usdt_balance ?? state.usdtBalance;
+    state.usdtCashBalance = result.usdt_cash_balance ?? state.usdtCashBalance;
+    state.usdtBonusBalance = result.usdt_bonus_balance ?? state.usdtBonusBalance;
+    state.lossRefundOffers = state.lossRefundOffers.filter((offer) => Number(offer.id) !== Number(offerId));
+    triggerHaptic("success");
+    triggerLightningFlash("success");
+    showToast(`Возврат начислен: ${formatCurrencyAmount(result.offer?.amount || 0, "USDT")}`);
+    renderMe();
+  } catch (error) {
+    triggerHaptic("error");
+    const messages = {
+      insufficient_fire: "Не хватает звёзд.",
+      loss_refund_offer_not_found: "Предложение уже недоступно.",
+      loss_refund_offer_requires_referral: "Этот возврат доступен через друга.",
+    };
+    showToast(messages[error.message] || "Не получилось вернуть ставку.");
+    void loadMe().catch(() => undefined);
   }
 }
 
@@ -3961,6 +4123,36 @@ document.addEventListener("pointerdown", (event) => {
   });
 });
 
+let feedTouchStartX = null;
+let feedTouchStartY = null;
+document.addEventListener("touchstart", (event) => {
+  if (!event.target.closest("#activitySection, #recentSection")) {
+    return;
+  }
+  const touch = event.touches?.[0];
+  if (!touch) return;
+  feedTouchStartX = touch.clientX;
+  feedTouchStartY = touch.clientY;
+}, { passive: true });
+
+document.addEventListener("touchend", (event) => {
+  if (feedTouchStartX === null || feedTouchStartY === null) {
+    return;
+  }
+  const touch = event.changedTouches?.[0];
+  const startX = feedTouchStartX;
+  const startY = feedTouchStartY;
+  feedTouchStartX = null;
+  feedTouchStartY = null;
+  if (!touch) return;
+  const dx = touch.clientX - startX;
+  const dy = touch.clientY - startY;
+  if (Math.abs(dx) < 44 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+  state.feedPanel = dx < 0 ? "recent" : "activity";
+  triggerHaptic("selection");
+  renderFeedPanel();
+}, { passive: true });
+
 document.querySelectorAll("[data-currency-toggle]").forEach((button) => {
   button.addEventListener("click", () => {
     const nextCurrency = normalizeCurrency(button.dataset.currencyToggle);
@@ -4267,7 +4459,7 @@ async function shareInvite({ awardShareTask = false } = {}) {
   if (awardShareTask) {
     await claimShareTask();
   } else {
-    showToast(`+${formatFire(bonus)} после первой ставки друга.`);
+    showToast(`+${formatFire(usdtBonus)} USDT после первой ставки друга.`);
   }
 }
 
@@ -4530,6 +4722,26 @@ document.querySelector(".market-chat-card")?.addEventListener("touchend", (event
   triggerHaptic("selection");
   renderOrderbookPanel();
 }, { passive: true });
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-loss-refund-share]");
+  if (!button) {
+    return;
+  }
+  event.preventDefault();
+  triggerHaptic("selection");
+  void shareInvite({ awardShareTask: false });
+});
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-loss-refund-stars]");
+  if (!button) {
+    return;
+  }
+  event.preventDefault();
+  triggerHaptic("selection");
+  void claimLossRefundWithStars(button.dataset.lossRefundStars);
+});
 
 $("btcMarketsBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");

@@ -11,6 +11,7 @@ import {
   addMarketComment,
   buyOutcome,
   claimDailyTask,
+  claimLossRefundWithStars,
   claimShareTask,
   completeVerifiedTask,
   createClan,
@@ -18,6 +19,7 @@ import {
   deleteClan,
   ensureActiveMarket,
   getActiveMarket,
+  getAppActivityStats,
   getBtcMarkets,
   getBridgeClans,
   getClans,
@@ -25,7 +27,6 @@ import {
   getLeaderboard,
   getMarketActivity,
   getMarketComments,
-  getMarketOnlineCount,
   getMarketChart,
   getRecentActivity,
   getRecentMarkets,
@@ -674,14 +675,15 @@ app.post("/api/clans/create", async (req, res) => {
 
 app.get("/api/market/:marketId/comments", async (req, res) => {
   try {
-    const [comments, onlineCount] = await Promise.all([
+    const [comments, appStats] = await Promise.all([
       getMarketComments(req.params.marketId, req.query.limit),
-      getMarketOnlineCount(req.params.marketId),
+      getAppActivityStats(),
     ]);
     res.status(200).json({
       ok: true,
       comments,
-      online_count: onlineCount,
+      online_count: appStats.online_count,
+      total_bets: appStats.total_bets,
     });
   } catch (error) {
     sendApiError(res, error);
@@ -863,6 +865,18 @@ app.post("/api/tasks/claim", async (req, res) => {
   }
 });
 
+app.post("/api/loss-refund/:offerId/claim-stars", async (req, res) => {
+  try {
+    const result = await claimLossRefundWithStars({
+      offer_id: req.params.offerId,
+      telegram_id: req.body?.telegram_id,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
 app.post("/api/dev/fire/add", requireDevTools, async (req, res) => {
   try {
     const result = await addFireToUser({
@@ -998,6 +1012,7 @@ app.post("/api/bridge/fire/sync", requireBridgeSecret, async (req, res) => {
       amount: req.body?.amount ?? req.body?.balance,
       reason: req.body?.reason || "admin_adjustment",
       source: "bridge_sync",
+      allow_decrease: req.body?.allow_decrease === true || req.body?.allowDecrease === true,
     });
     res.status(200).json({
       ok: true,
@@ -1015,6 +1030,7 @@ app.post("/api/bridge/fire/sync-username", requireBridgeSecret, async (req, res)
       amount: req.body?.amount ?? req.body?.balance,
       reason: req.body?.reason || "admin_adjustment",
       source: "bridge_sync_username",
+      allow_decrease: req.body?.allow_decrease === true || req.body?.allowDecrease === true,
     });
     res.status(200).json({
       ok: true,

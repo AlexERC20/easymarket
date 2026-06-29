@@ -150,6 +150,24 @@ export async function runMigrations() {
       UNIQUE(referred_user_id)
     );
 
+    CREATE TABLE IF NOT EXISTS usdt_loss_refund_offers (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      position_id BIGINT REFERENCES positions(id) ON DELETE CASCADE,
+      market_id BIGINT REFERENCES markets(id) ON DELETE SET NULL,
+      offer_type TEXT NOT NULL,
+      amount NUMERIC(20, 8) NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      referred_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      day_key TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      claimed_at TIMESTAMPTZ,
+      UNIQUE(user_id, position_id, offer_type)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_loss_refund_offers_user_status
+      ON usdt_loss_refund_offers(user_id, status, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS usdt_deposit_intents (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -67,11 +67,11 @@ async function deleteOldPriceTicks() {
   return btcDeleted + otherDeleted;
 }
 
-async function truncatePriceTicksIfTooLarge() {
+async function trimPriceTicksIfTooLarge() {
   const maxMb = Number(config.cleanupPriceTicksTruncateAboveMb || 0);
   if (!Number.isFinite(maxMb) || maxMb <= 0) {
     return {
-      truncated: false,
+      trimmed: false,
       bytes_before: 0,
       threshold_mb: maxMb,
     };
@@ -82,15 +82,29 @@ async function truncatePriceTicksIfTooLarge() {
   const thresholdBytes = maxMb * 1024 * 1024;
   if (bytesBefore < thresholdBytes) {
     return {
-      truncated: false,
+      trimmed: false,
       bytes_before: bytesBefore,
       threshold_mb: maxMb,
     };
   }
 
-  await query("TRUNCATE TABLE price_ticks RESTART IDENTITY");
+  await deleteOldPriceTicks();
+  await deleteInBatches(
+    `
+      WITH doomed AS (
+        SELECT id
+        FROM price_ticks
+        WHERE symbol <> 'BTCUSDT'
+        ORDER BY id ASC
+        LIMIT $1
+      )
+      DELETE FROM price_ticks ticks
+      USING doomed
+      WHERE ticks.id = doomed.id
+    `,
+  );
   return {
-    truncated: true,
+    trimmed: true,
     bytes_before: bytesBefore,
     threshold_mb: maxMb,
   };
@@ -118,6 +132,7 @@ export async function runStartupDatabaseRescue() {
   const summary = {
     enabled: Boolean(config.startupDatabaseRescueEnabled),
     price_ticks_dropped: false,
+    price_ticks_trimmed: false,
     price_ticks_exists: false,
     price_ticks_bytes_before: 0,
     threshold_mb: maxMb,
@@ -134,8 +149,16 @@ export async function runStartupDatabaseRescue() {
   summary.price_ticks_bytes_before = size.bytes;
 
   if (size.exists && size.bytes >= maxMb * 1024 * 1024) {
-    await query("DROP TABLE IF EXISTS price_ticks CASCADE");
-    summary.price_ticks_dropped = true;
+    await query(
+      `
+        DELETE FROM price_ticks
+        WHERE symbol <> 'BTCUSDT'
+           OR created_at < now() - ($1::int * interval '1 day')
+      `,
+      [Math.round(config.cleanupBtcPriceTicksDays)],
+    );
+    summary.price_ticks_dropped = false;
+    summary.price_ticks_trimmed = true;
   }
 
   summary.elapsed_ms = Date.now() - startedAt;
@@ -283,9 +306,9 @@ async function vacuumTouchedTables(summary) {
 
 export async function runDatabaseCleanup() {
   const startedAt = Date.now();
-  const priceTickEmergency = await truncatePriceTicksIfTooLarge();
+  const priceTickEmergency = await trimPriceTicksIfTooLarge();
   const summary = {
-    price_ticks: priceTickEmergency.truncated ? 0 : await deleteOldPriceTicks(),
+    price_ticks: priceTickEmergency.trimmed ? 0 : await deleteOldPriceTicks(),
     price_ticks_emergency: priceTickEmergency,
     market_comments: await deleteOldMarketComments(),
     usdt_deposit_events: await deleteOldDepositEvents(),

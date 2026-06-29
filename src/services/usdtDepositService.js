@@ -175,15 +175,9 @@ async function sendAdminDepositIntentNotification(user, intent) {
 }
 
 export async function expirePendingDepositIntents() {
-  await query(
-    `
-      UPDATE usdt_deposit_intents
-      SET status = 'expired',
-          updated_at = now()
-      WHERE status = 'pending'
-        AND expires_at < now()
-    `,
-  );
+  // Pending deposits must stay visible until the user cancels them or the scanner credits them.
+  // Expiring them automatically made real late transfers hard to match and confused users.
+  return 0;
 }
 
 export async function createUsdtDepositIntent(input) {
@@ -200,18 +194,6 @@ export async function createUsdtDepositIntent(input) {
   });
 
   const intent = await withTransaction(async (client) => {
-    await client.query(
-      `
-        UPDATE usdt_deposit_intents
-        SET status = 'expired',
-            updated_at = now()
-        WHERE user_id = $1
-          AND status = 'pending'
-          AND expires_at < now()
-      `,
-      [user.id],
-    );
-
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const cents = attempt === 0 ? 0 : randomInt(1, 99) / 100;
       const depositAmount = roundMoney(requestedAmount + cents, 2);
