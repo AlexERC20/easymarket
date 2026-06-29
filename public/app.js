@@ -815,6 +815,60 @@ function isMarketOpenForBuy(market, bufferMs = MARKET_BUY_CLOSE_BUFFER_MS) {
   return new Date(market.end_time).getTime() > Date.now() + bufferMs;
 }
 
+function isMarketClosedForCarousel(market) {
+  if (!market || market.status !== "open" || !market.end_time) {
+    return true;
+  }
+  const endAt = new Date(market.end_time).getTime();
+  return Number.isFinite(endAt) && endAt <= Date.now();
+}
+
+function openCarouselMarkets(markets) {
+  return (markets || []).filter((market) => !isMarketClosedForCarousel(market));
+}
+
+function pruneClosedLocalMarkets({ renderLists = false } = {}) {
+  const beforeBtc = state.btcMarkets.map((market) => market.id).join(",");
+  const beforeWorld = state.worldCupMarkets.map((market) => market.id).join(",");
+
+  state.btcMarkets = openCarouselMarkets(state.btcMarkets);
+  state.worldCupMarkets = openCarouselMarkets(state.worldCupMarkets);
+
+  const afterBtc = state.btcMarkets.map((market) => market.id).join(",");
+  const afterWorld = state.worldCupMarkets.map((market) => market.id).join(",");
+  const btcChanged = beforeBtc !== afterBtc;
+  const worldChanged = beforeWorld !== afterWorld;
+  let selectionChanged = false;
+
+  if (
+    state.selectedBtcMarketId
+    && !state.btcMarkets.some((market) => market.id === state.selectedBtcMarketId)
+  ) {
+    state.selectedBtcMarketId = null;
+    selectionChanged = true;
+  }
+  if (
+    state.selectedWorldCupMarketId
+    && !state.worldCupMarkets.some((market) => market.id === state.selectedWorldCupMarketId)
+  ) {
+    state.selectedWorldCupMarketId = null;
+    selectionChanged = true;
+  }
+
+  if (btcChanged) {
+    state.btcMarketsListRenderedOrder = "";
+  }
+  if (worldChanged) {
+    state.worldCupListRenderedOrder = "";
+  }
+  if (renderLists) {
+    if (btcChanged) renderBtcMarketsList();
+    if (worldChanged) renderWorldCupList();
+  }
+
+  return { changed: btcChanged || worldChanged, selectionChanged };
+}
+
 function getMarketMinOutcomePrice(market = getDisplayMarket()) {
   return isBtcMarket(market) ? BTC_MIN_OUTCOME_PRICE : MIN_OUTCOME_PRICE;
 }
@@ -2030,12 +2084,20 @@ function handleSettlements(positions) {
 
 async function loadMarket() {
   const data = await api("/api/market/active");
+  const previousMarketId = state.market?.id || null;
   state.market = data.market;
+  const activeMarketChanged = previousMarketId && data.market?.id && previousMarketId !== data.market.id;
+  const pruned = pruneClosedLocalMarkets({ renderLists: true });
   state.chartPoints = mergeChartPoints(data.chart, data.market);
   handleMarketActivity(data.activity || []);
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
+  if (activeMarketChanged || pruned.changed) {
+    const listLoader = isWorldCupMarket(data.market) ? loadWorldCupMarkets : loadBtcMarkets;
+    void runSingleFlight(isWorldCupMarket(data.market) ? "worldCupMarkets" : "btcMarkets", listLoader)
+      .catch(() => undefined);
+  }
   if (!state.commentsMarketId || state.commentsMarketId === getDisplayMarket()?.id) {
     maybeLoadComments();
   }
@@ -2381,6 +2443,7 @@ async function loadBtcMarkets() {
   const incomingMarkets = [];
   const seenSymbols = new Set();
   for (const market of data.markets || []) {
+    if (isMarketClosedForCarousel(market)) continue;
     const symbol = String(market.symbol || market.id);
     if (seenSymbols.has(symbol)) continue;
     seenSymbols.add(symbol);
@@ -2404,7 +2467,7 @@ async function loadBtcMarkets() {
 
 async function loadWorldCupMarkets() {
   const data = await api("/api/world-cup/markets");
-  const incomingMarkets = data.markets || [];
+  const incomingMarkets = openCarouselMarkets(data.markets || []);
   state.worldCupMarkets = incomingMarkets;
   state.worldCupMarkets.forEach(mergeWorldCupChartPoint);
   if (
@@ -2595,6 +2658,7 @@ function updateTimer() {
     state.expiryRefreshMarketId = market.id;
     state.buyQueue = [];
     showRoundTransition(market);
+    const pruned = pruneClosedLocalMarkets({ renderLists: true });
     if ($("marketStatus")) {
       $("marketStatus").textContent = marketStatusLabel("closed");
       $("marketStatus").classList.remove("live");
@@ -2602,8 +2666,12 @@ function updateTimer() {
     document.querySelectorAll(".outcome-button, .amount-button").forEach((button) => {
       button.disabled = true;
     });
+    if (pruned.selectionChanged) {
+      renderMarket();
+      renderMarketChart();
+    }
     renderTradeTicket();
-    scheduleCoreRefresh({ delay: 80 });
+    scheduleCoreRefresh({ delay: 80, includeLists: true });
   }
   if ((isWorldCupMarket(market) || isBtcMarket(market)) && seconds >= 86_400) {
     const days = Math.floor(seconds / 86_400);
@@ -5507,7 +5575,13 @@ document.querySelector(".market-card")?.addEventListener("touchstart", (event) =
 }, { passive: true });
 
 document.querySelector(".market-card")?.addEventListener("touchend", (event) => {
-  if (touchStartX === null || touchStartY === null || (!state.worldCupMarkets.length && !state.btcMarkets.length)) {
+  pruneClosedLocalMarkets({ renderLists: true });
+  if (touchStartX === null || touchStartY === null) {
+    return;
+  }
+  if (!state.worldCupMarkets.length && !state.btcMarkets.length) {
+    touchStartX = null;
+    touchStartY = null;
     return;
   }
   const touch = event.changedTouches[0];
@@ -5522,10 +5596,16 @@ document.querySelector(".market-card")?.addEventListener("touchend", (event) => 
   const markets = [
     { type: "home", id: null },
     ...state.btcMarkets
+      .filter((market) => !isMarketClosedForCarousel(market))
       .filter((market) => market.id !== state.market?.id)
       .map((market) => ({ type: "btc", id: market.id })),
-    ...state.worldCupMarkets.map((market) => ({ type: "world", id: market.id })),
+    ...state.worldCupMarkets
+      .filter((market) => !isMarketClosedForCarousel(market))
+      .map((market) => ({ type: "world", id: market.id })),
   ];
+  if (markets.length <= 1) {
+    return;
+  }
   const currentKey = state.selectedWorldCupMarketId
     ? `world:${state.selectedWorldCupMarketId}`
     : state.selectedBtcMarketId
