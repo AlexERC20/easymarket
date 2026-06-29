@@ -34,6 +34,7 @@ let dpr = 1;
 let fish = [];
 let food = [];
 let bubbles = [];
+let pendingFoodAvatars = [];
 
 let rafId = 0;
 let lastTs = 0;
@@ -58,6 +59,16 @@ function readEnabledFlag() {
 
 function reducedMotion() {
   return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+}
+
+function isTelegramMiniApp() {
+  return Boolean(window.Telegram?.WebApp);
+}
+
+function canAnimateAquarium() {
+  // Telegram on iOS runs inside WKWebView. Some builds can report the document
+  // as hidden while the Mini App is visibly active, which killed the fish loop.
+  return enabled && !reducedMotion() && (!document.hidden || isTelegramMiniApp());
 }
 
 function rand(min, max) {
@@ -136,12 +147,22 @@ function measure() {
     return false;
   }
   const rect = canvas.getBoundingClientRect();
-  if (rect.width < 2 || rect.height < 2) {
+  let width = rect.width;
+  let height = rect.height;
+
+  if (width < 2 || height < 2) {
+    const host = canvas.closest?.(".chart-frame") || canvas.parentElement;
+    const hostRect = host?.getBoundingClientRect?.();
+    width = hostRect?.width || canvas.offsetWidth || width;
+    height = hostRect?.height || canvas.offsetHeight || height;
+  }
+
+  if (width < 2 || height < 2) {
     return false;
   }
   dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-  cssW = rect.width;
-  cssH = rect.height;
+  cssW = width;
+  cssH = height;
   const pw = Math.round(cssW * dpr);
   const ph = Math.round(cssH * dpr);
   if (canvas.width !== pw || canvas.height !== ph) {
@@ -197,10 +218,11 @@ function ensureFish() {
 }
 
 export function primeAquarium(retries = 10) {
-  if (!enabled || reducedMotion() || document.hidden) {
+  if (!canAnimateAquarium()) {
     return false;
   }
   if (ensureFish()) {
+    flushPendingFood();
     startLoop();
     return true;
   }
@@ -222,16 +244,10 @@ function resetBubble(b, seed) {
   return b;
 }
 
-// Convert a snapshot of on-chart avatars into falling food crumbs.
-// avatars: [{ xFrac, yFrac, url, color, initial, side }]
-export function spillAquariumFood(avatars) {
-  if (!enabled || !Array.isArray(avatars) || !avatars.length) {
+function appendFood(avatars) {
+  if (!Array.isArray(avatars) || !avatars.length) {
     return;
   }
-  if (!measure()) {
-    return;
-  }
-  ensureFish();
   // Keep the most recent crumbs if a round had a huge crowd.
   const picked = avatars.slice(-MAX_FOOD);
   const now = Date.now();
@@ -259,6 +275,38 @@ export function spillAquariumFood(avatars) {
   while (food.length > MAX_FOOD) {
     food.shift();
   }
+}
+
+function queuePendingFood(avatars) {
+  pendingFoodAvatars.push(...avatars);
+  if (pendingFoodAvatars.length > MAX_FOOD) {
+    pendingFoodAvatars = pendingFoodAvatars.slice(-MAX_FOOD);
+  }
+}
+
+function flushPendingFood() {
+  if (!pendingFoodAvatars.length || !measure()) {
+    return false;
+  }
+  const queued = pendingFoodAvatars;
+  pendingFoodAvatars = [];
+  appendFood(queued);
+  return true;
+}
+
+// Convert a snapshot of on-chart avatars into falling food crumbs.
+// avatars: [{ xFrac, yFrac, url, color, initial, side }]
+export function spillAquariumFood(avatars) {
+  if (!enabled || !Array.isArray(avatars) || !avatars.length) {
+    return;
+  }
+  if (!measure()) {
+    queuePendingFood(avatars);
+    primeAquarium(16);
+    return;
+  }
+  ensureFish();
+  appendFood(avatars);
   if (enabled) {
     startLoop();
   }
@@ -587,7 +635,7 @@ function clearCanvas() {
 
 function frame(ts) {
   rafId = 0;
-  if (!enabled || reducedMotion() || document.hidden) {
+  if (!canAnimateAquarium()) {
     // Leave nothing frozen on screen if motion just got turned off mid-session.
     if (reducedMotion()) {
       clearCanvas();
@@ -598,7 +646,7 @@ function frame(ts) {
     // Canvas not laid out yet: retry on a slow timer instead of busy-spinning rAF.
     lastTs = 0;
     window.setTimeout(() => {
-      if (enabled && !reducedMotion() && !document.hidden) {
+      if (canAnimateAquarium()) {
         startLoop();
       }
     }, 300);
@@ -610,6 +658,7 @@ function frame(ts) {
   if (!fish.length) {
     ensureFish();
   }
+  flushPendingFood();
 
   // Cap the simulation to ~30fps. Ambient fish do not need 60fps, and halving
   // the canvas work keeps the phone cool next to the chart's own render loop.
@@ -643,7 +692,7 @@ function frame(ts) {
 }
 
 function startLoop() {
-  if (rafId || !enabled || reducedMotion()) {
+  if (rafId || !canAnimateAquarium()) {
     return;
   }
   lastTs = 0;
@@ -672,19 +721,29 @@ export function initAquarium() {
   initialized = true;
   enabled = readEnabledFlag();
 
+  const resume = (retries = 10) => {
+    if (enabled) {
+      measure();
+      primeAquarium(retries);
+    }
+  };
+
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
+    if (document.hidden && !isTelegramMiniApp()) {
       stopLoop();
     } else if (enabled) {
-      primeAquarium();
+      resume(12);
     }
   });
+  window.addEventListener("pageshow", () => resume(12));
+  window.addEventListener("focus", () => resume(8));
   window.addEventListener("resize", () => {
     if (enabled) {
       measure();
       primeAquarium(4);
     }
   });
+  window.Telegram?.WebApp?.onEvent?.("viewportChanged", () => resume(10));
   const motionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
   motionQuery?.addEventListener?.("change", (event) => {
     if (event.matches) {
