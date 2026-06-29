@@ -321,7 +321,6 @@ export function triggerButtonLightning(button, event = null) {
 
   const flash = document.createElement("span");
   const tier = getStakeTier(button);
-  button.dataset.lmActiveTier = String(tier);
   flash.className = `lm-button-flash tier-${tier}`;
   flash.style.setProperty("--lm-x", `${x}px`);
   flash.style.setProperty("--lm-y", `${y}px`);
@@ -331,7 +330,6 @@ export function triggerButtonLightning(button, event = null) {
 
   window.setTimeout(() => {
     button.classList.remove("lm-lightning-tap");
-    delete button.dataset.lmActiveTier;
     flash.remove();
   }, tier >= 4 ? 1280 : 940);
 }

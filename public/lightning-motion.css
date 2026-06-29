@@ -142,22 +142,6 @@
   --lm-tier-glow: 0 0 24px rgba(165, 108, 255, 0.62), 0 0 42px rgba(53, 246, 255, 0.38), 0 0 58px rgba(183, 255, 77, 0.22);
 }
 
-.lm-clickable[data-lm-active-tier="1"] {
-  box-shadow: var(--lm-tier-glow), inset 0 0 0 1px rgba(183, 255, 77, 0.2) !important;
-}
-
-.lm-clickable[data-lm-active-tier="2"] {
-  box-shadow: var(--lm-tier-glow), inset 0 0 0 1px rgba(53, 246, 255, 0.24) !important;
-}
-
-.lm-clickable[data-lm-active-tier="3"] {
-  box-shadow: var(--lm-tier-glow), inset 0 0 0 1px rgba(255, 230, 109, 0.3) !important;
-}
-
-.lm-clickable[data-lm-active-tier="4"] {
-  box-shadow: var(--lm-tier-glow), inset 0 0 0 1px rgba(165, 108, 255, 0.34) !important;
-}
-
 .lm-button-flash {
   position: absolute;
   inset: 0;

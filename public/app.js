@@ -7,7 +7,7 @@ import {
   showSuccessLightningBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260629-06";
+} from "./lightning-motion.js?v=20260629-08";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -20,6 +20,7 @@ const USDT_AMOUNTS = [5, 10, 25, 100];
 const MIN_OUTCOME_PRICE = 0.001;
 const BTC_MIN_OUTCOME_PRICE = 0.001;
 const CHART_WINDOW_MS = 10_000;
+const BTC_5M_CHART_HISTORY_RATIO = 0.5;
 const ACTIVE_MARKET_POLL_MS = 1_500;
 const MARKET_LIST_POLL_MS = 10_000;
 const COMMENTS_POLL_MS = 10_000;
@@ -124,6 +125,7 @@ const state = {
   settlementsLoaded: false,
   seenActivityIds: new Set(),
   bubbledActivityIds: new Set(),
+  chartTradesByMarket: new Map(),
   freshActivityIds: new Set(),
   seenSettledPositionIds: new Set(),
   pendingBuy: false,
@@ -669,6 +671,10 @@ function isBtcMarket(market = getDisplayMarket()) {
   return market?.market_type === "BTC_UPDOWN" || String(market?.symbol || "").startsWith("BTCUSDT");
 }
 
+function isBtcFiveMinuteMarket(market = getDisplayMarket()) {
+  return isBtcMarket(market) && String(market?.symbol || "") === "BTCUSDT";
+}
+
 function isMarketOpenForBuy(market, bufferMs = MARKET_BUY_CLOSE_BUFFER_MS) {
   if (!market || market.status !== "open" || !market.end_time) {
     return false;
@@ -803,18 +809,23 @@ function drawMarketChartFrame() {
   const historyStart = sourcePoints[0]?.at;
   const historyEnd = sourcePoints[sourcePoints.length - 1]?.at;
   const btc = isBtcMarket(market);
+  const btcFiveMinute = isBtcFiveMinuteMarket(market);
+  const fullHistoryChart = (worldCup || (btc && !btcFiveMinute)) && sourcePoints.length > 1;
+  const marketStartTime = new Date(market.start_time).getTime();
+  const marketDurationMs = Math.max(CHART_WINDOW_MS, endTime - marketStartTime);
+  const btcFiveMinuteWindowMs = Math.max(CHART_WINDOW_MS, marketDurationMs * BTC_5M_CHART_HISTORY_RATIO);
   const windowEnd = (worldCup || btc) && sourcePoints.length > 1
     ? Math.max(nowMs, historyEnd || nowMs)
     : Math.min(endTime, nowMs);
-  const startTime = (worldCup || btc) && sourcePoints.length > 1
+  const startTime = fullHistoryChart
     ? historyStart
-    : (worldCup ? windowEnd - CHART_WINDOW_MS : new Date(market.start_time).getTime());
-  const windowStart = (worldCup || btc) && sourcePoints.length > 1
+    : (worldCup ? windowEnd - CHART_WINDOW_MS : marketStartTime);
+  const windowStart = fullHistoryChart
     ? startTime
-    : Math.max(startTime, windowEnd - CHART_WINDOW_MS);
+    : Math.max(startTime, windowEnd - (btcFiveMinute ? btcFiveMinuteWindowMs : CHART_WINDOW_MS));
   const duration = Math.max(1, windowEnd - windowStart);
   const rawPoints = sourcePoints
-    .filter((point) => worldCup || btc || (point.at >= windowStart - 1_500 && point.at <= windowEnd + 1_500));
+    .filter((point) => fullHistoryChart || (point.at >= windowStart - 1_500 && point.at <= windowEnd + 1_500));
 
   if (rawPoints.length === 0 && currentPrice > 0) {
     rawPoints.push({ price: currentPrice, at: Date.now() });
@@ -914,15 +925,7 @@ function drawMarketChartFrame() {
     ctx.lineJoin = "round";
     drawSmoothPath(ctx, pathPoints);
 
-    const chartTrades = (state.activity || [])
-      .filter((trade) => Number(trade.market_id) === Number(market.id))
-      .filter((trade) => trade.action !== "SELL")
-      .map((trade) => ({
-        ...trade,
-        at: new Date(trade.created_at).getTime(),
-      }))
-      .filter((trade) => Number.isFinite(trade.at) && trade.at >= windowStart && trade.at <= windowEnd)
-      .slice(0, 40);
+    const chartTrades = getChartTradesForMarket(market, windowStart, windowEnd);
     chartTrades.forEach((trade) => {
       const x = scaleX(trade.at);
       const nearest = pathPoints.reduce((best, point) => (
@@ -1597,8 +1600,41 @@ function mergeChartPoints(points, market) {
   return deduped.slice(-260);
 }
 
+function rememberChartTrades(trades) {
+  const now = Date.now();
+  (trades || []).forEach((trade) => {
+    if (!trade?.id || !trade.market_id || trade.action === "SELL") {
+      return;
+    }
+    const at = new Date(trade.created_at).getTime();
+    if (!Number.isFinite(at)) {
+      return;
+    }
+    const marketId = String(trade.market_id);
+    const existing = state.chartTradesByMarket.get(marketId) || [];
+    const nextTrade = { ...trade, at };
+    const next = [nextTrade, ...existing.filter((item) => item.id !== trade.id)]
+      .filter((item) => now - Number(item.at || 0) < 8 * 24 * 60 * 60 * 1000)
+      .sort((a, b) => a.at - b.at)
+      .slice(-260);
+    state.chartTradesByMarket.set(marketId, next);
+  });
+}
+
+function getChartTradesForMarket(market, windowStart, windowEnd) {
+  const marketId = String(market?.id || "");
+  if (!marketId) {
+    return [];
+  }
+  const trades = state.chartTradesByMarket.get(marketId) || [];
+  return trades
+    .filter((trade) => Number.isFinite(trade.at) && trade.at >= windowStart && trade.at <= windowEnd)
+    .slice(-80);
+}
+
 function handleActivity(activity) {
   const nextActivity = activity || [];
+  rememberChartTrades(nextActivity);
   state.freshActivityIds = new Set();
   if (state.activityLoaded) {
     const freshTrades = nextActivity
@@ -1617,6 +1653,7 @@ function handleActivity(activity) {
 
 function handleMarketActivity(activity) {
   const marketActivity = activity || [];
+  rememberChartTrades(marketActivity);
   if (state.activityLoaded) {
     marketActivity
       .filter((trade) => !state.seenActivityIds.has(trade.id))
@@ -3627,6 +3664,7 @@ function addLocalActivity(trade) {
     first_name: state.user?.first_name,
   };
   state.activity = [enriched, ...state.activity].slice(0, 24);
+  rememberChartTrades([enriched]);
   state.seenActivityIds.add(enriched.id);
   showTradeBubble(enriched);
 }
@@ -3695,6 +3733,7 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
     triggerHaptic("success");
     triggerLightningFlash("success", getTierForAmount(buyAmount, currency));
     renderMarket();
+    renderMarketChart();
     renderMe();
     renderActivity();
     renderTradeTicket();
