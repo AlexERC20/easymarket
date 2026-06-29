@@ -16,7 +16,7 @@ import {
   setAquariumEnabled,
   setAquariumRuntimeAllowed,
   spillAquariumFood,
-} from "./aquarium.js?v=20260630-04";
+} from "./aquarium.js?v=20260630-06";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;

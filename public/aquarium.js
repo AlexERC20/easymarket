@@ -334,7 +334,7 @@ function nearestDomFoodFor(fishItem) {
 }
 
 function updateDomFood(dt, width, height) {
-  const drift = tilt * 210 + tiltImpulse * 260;
+  const drift = tilt * 360 + tiltImpulse * 430;
   const now = Date.now();
   for (const crumb of domFood) {
     if (now < crumb.bornAt) {
@@ -347,9 +347,11 @@ function updateDomFood(dt, width, height) {
     if (!crumb.settled) {
       crumb.vy += 30 * dt;
       crumb.vy = Math.min(crumb.vy, 44);
-      crumb.x += crumb.vx * dt;
+      crumb.vx += drift * 0.26 * dt;
+      crumb.vx = Math.max(-120, Math.min(120, crumb.vx));
+      crumb.x += (crumb.vx + drift * 0.35) * dt;
       crumb.y += crumb.vy * dt;
-      crumb.vx *= 0.992;
+      crumb.vx *= 0.986;
       if (crumb.y >= crumb.restY) {
         crumb.y = crumb.restY;
         crumb.vy = 0;
@@ -357,7 +359,7 @@ function updateDomFood(dt, width, height) {
       }
     } else {
       crumb.wobble += dt * 1.8;
-      crumb.x += (drift + Math.sin(crumb.wobble) * 8) * dt;
+      crumb.x += (drift + Math.sin(crumb.wobble) * 9) * dt;
       crumb.y += Math.cos(crumb.wobble * 0.85) * 4.5 * dt;
       crumb.y += (crumb.restY - crumb.y) * 0.42 * dt;
     }
@@ -822,7 +824,7 @@ function requestTiltAccess() {
 }
 
 function updateFood(dt) {
-  const drift = tilt * 210 + tiltImpulse * 260; // px/s sideways pull from phone tilt/shake
+  const drift = tilt * 360 + tiltImpulse * 430; // px/s sideways pull from phone tilt/shake
   for (const f of food) {
     if (f.eat > 0) {
       f.eat += dt / (EAT_MS / 1000);
@@ -831,9 +833,11 @@ function updateFood(dt) {
     if (!f.settled) {
       f.vy += 30 * dt; // gentle gravity
       f.vy = Math.min(f.vy, 44);
-      f.x += f.vx * dt;
+      f.vx += drift * 0.26 * dt;
+      f.vx = Math.max(-120, Math.min(120, f.vx));
+      f.x += (f.vx + drift * 0.35) * dt;
       f.y += f.vy * dt;
-      f.vx *= 0.992;
+      f.vx *= 0.986;
       if (f.y >= f.restY) {
         f.y = f.restY;
         f.vy = 0;
@@ -842,7 +846,7 @@ function updateFood(dt) {
     } else {
       // Drift like a crumb in water: tilt + slow personal wobble.
       f.wobble += dt * 1.5;
-      f.x += (drift + Math.sin(f.wobble) * 8) * dt;
+      f.x += (drift + Math.sin(f.wobble) * 9) * dt;
       f.y += Math.cos(f.wobble * 0.8) * 4.5 * dt;
       f.y += (f.restY - f.y) * 0.42 * dt;
     }

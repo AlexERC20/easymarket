@@ -294,7 +294,34 @@
 }
 
 .amount-button .lm-button-flash {
-  display: none !important;
+  display: block !important;
+  width: 58px;
+  height: 58px;
+  margin: -29px 0 0 -29px;
+  border-radius: 50%;
+  clip-path: circle(48% at 50% 50%);
+  --lm-soft-mask: radial-gradient(circle at 50% 50%, #000 0 34%, rgba(0, 0, 0, 0.62) 52%, transparent 70%);
+  -webkit-mask: var(--lm-soft-mask);
+  mask: var(--lm-soft-mask);
+  filter: none;
+}
+
+.amount-button .lm-button-flash.tier-2 {
+  width: 64px;
+  height: 64px;
+  margin: -32px 0 0 -32px;
+}
+
+.amount-button .lm-button-flash.tier-3 {
+  width: 70px;
+  height: 70px;
+  margin: -35px 0 0 -35px;
+}
+
+.amount-button .lm-button-flash.tier-4 {
+  width: 78px;
+  height: 78px;
+  margin: -39px 0 0 -39px;
 }
 
 .amount-button .lm-bolt-layer {
