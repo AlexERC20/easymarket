@@ -8,7 +8,7 @@ import {
   showWalletFlowBurst,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260629-12";
+} from "./lightning-motion.js?v=20260629-13";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;

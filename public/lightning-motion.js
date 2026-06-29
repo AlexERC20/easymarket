@@ -488,6 +488,40 @@ export function showSuccessLightningBurst(label = "Success", options = {}) {
   window.setTimeout(() => burst.remove(), epic ? 2600 : 1900);
 }
 
+// Directional money-flow burst for wallet actions.
+// direction "in"  -> streaks converge to center (deposit credited).
+// direction "out" -> streaks shoot outward (withdrawal sent).
+export function showWalletFlowBurst(direction = "in", label = "") {
+  const isOut = direction === "out";
+  // Respect reduced motion: skip the directional sweep entirely. The action is
+  // still confirmed via toast/haptic (and, for deposits, the reduced success burst).
+  if (reducedMotion()) {
+    playMotionSound(isOut ? "success" : "win");
+    return;
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = `lm-wallet-flow ${isOut ? "is-out" : "is-in"}`;
+  wrap.setAttribute("aria-hidden", "true");
+
+  const count = 11;
+  const parts = [];
+  for (let index = 0; index < count; index += 1) {
+    const angle = (360 / count) * index + (isOut ? 0 : 16);
+    const delay = Math.round(Math.random() * 120);
+    parts.push(
+      `<span class="lm-wallet-streak" style="--lm-ang:${angle}deg;animation-delay:${delay}ms"></span>`
+    );
+  }
+  const safeLabel = String(label || "").replace(/[<>&]/g, "");
+  wrap.innerHTML = `<span class="lm-wallet-core"></span>${parts.join("")}${
+    safeLabel ? `<strong>${safeLabel}</strong>` : ""
+  }`;
+  document.body.appendChild(wrap);
+  playMotionSound(isOut ? "success" : "win");
+  window.setTimeout(() => wrap.remove(), isOut ? 1500 : 1700);
+}
+
 export function triggerBalancePulse(element) {
   if (!element) {
     return;
