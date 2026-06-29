@@ -800,6 +800,23 @@ h2 {
   animation: softRise 220ms var(--ease-default) both;
 }
 
+.feed-section {
+  display: flex;
+  flex-direction: column;
+  height: clamp(218px, 30dvh, 286px);
+  min-height: 218px;
+  overflow: hidden;
+}
+
+.feed-section.hidden {
+  display: none;
+}
+
+.feed-section .section-title {
+  flex: 0 0 auto;
+  min-height: 34px;
+}
+
 .feed-tabs {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1148,8 +1165,15 @@ h2 {
 .recent-list,
 .activity-tape {
   display: grid;
+  align-content: start;
   gap: 9px;
+  flex: 1 1 auto;
   margin-top: 11px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+  scrollbar-width: thin;
 }
 
 .mini-row,
