@@ -2350,37 +2350,16 @@ function renderMe() {
   const positions = state.positions.filter((position) => (
     position.status === "open" && normalizeCurrency(position.currency) === state.currency
   ));
-  const pendingLossOffer = (state.lossRefundOffers || [])
-    .find((offer) => normalizeCurrency(state.currency) === "USDT" && offer.status === "pending");
-  const lossOfferCost = pendingLossOffer?.offer_type === "stars_100"
-    ? 100
-    : pendingLossOffer?.offer_type === "stars_500"
-      ? 500
-      : 0;
-  const lossOfferHtml = pendingLossOffer
-    ? `
-      <div class="loss-refund-card">
-        <strong>Можно вернуть проигрыш</strong>
-        <small>${lossOfferCost
-          ? `Вернём до ${formatCurrencyAmount(pendingLossOffer.amount, "USDT")} на бонусный баланс.`
-          : `Позови друга в EasyMarket. После его первой ставки вернём до ${formatCurrencyAmount(pendingLossOffer.amount, "USDT")} на бонусный баланс.`
-        }</small>
-        <button class="task-button claimable" ${lossOfferCost ? `data-loss-refund-stars="${pendingLossOffer.id}" data-loss-refund-cost="${lossOfferCost}"` : "data-loss-refund-share"} type="button">
-          ${lossOfferCost ? `Пополнить за ${lossOfferCost}` : "Позвать"}
-        </button>
-      </div>
-    `
-    : "";
   setSectionToggle("positionToggle", positions.length, "positions");
 
   const container = $("positionList");
   if (!positions.length) {
-    container.innerHTML = `${lossOfferHtml}<p class="muted">Позиции пока нет.</p>`;
+    container.innerHTML = '<p class="muted">Позиции пока нет.</p>';
     return;
   }
 
   const visiblePositions = state.expanded.positions ? positions : positions.slice(0, COLLAPSE_LIMIT);
-  container.innerHTML = lossOfferHtml + visiblePositions.map((position) => {
+  container.innerHTML = visiblePositions.map((position) => {
     const payout = Number(position.shares || 0);
     const spent = Number(position.spent || 0);
     const currency = normalizeCurrency(position.currency);
