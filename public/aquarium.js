@@ -12,6 +12,7 @@ const FISH_MIN = 2;
 const FISH_MAX = 3;
 const FOOD_ARM_MS = 3200; // crumbs settle before any fish will hunt them
 const EAT_MS = 820; // a bite is gradual, never instant
+const FRAME_MS = 33; // ~30fps simulation cap to stay light on the phone
 
 const FISH_PALETTES = [
   { body: "#ffb347", belly: "#ffe2a8", fin: "#ff8a3c" }, // goldfish
@@ -42,6 +43,9 @@ let tiltTarget = 0;
 let tiltListening = false;
 
 const foodImages = new Map();
+
+let waterGrad = null;
+let waterGradH = 0;
 
 function readEnabledFlag() {
   try {
@@ -422,11 +426,14 @@ function updateBubbles(dt) {
 
 function drawWater() {
   const top = bandTop();
-  const grad = ctx.createLinearGradient(0, top, 0, cssH);
-  grad.addColorStop(0, "rgba(53,246,255,0)");
-  grad.addColorStop(0.55, "rgba(45,167,255,0.05)");
-  grad.addColorStop(1, "rgba(45,120,200,0.12)");
-  ctx.fillStyle = grad;
+  if (!waterGrad || waterGradH !== cssH) {
+    waterGrad = ctx.createLinearGradient(0, top, 0, cssH);
+    waterGrad.addColorStop(0, "rgba(53,246,255,0)");
+    waterGrad.addColorStop(0.55, "rgba(45,167,255,0.05)");
+    waterGrad.addColorStop(1, "rgba(45,120,200,0.12)");
+    waterGradH = cssH;
+  }
+  ctx.fillStyle = waterGrad;
   ctx.fillRect(0, top, cssW, cssH - top);
 
   // faint floor line
@@ -519,12 +526,14 @@ function drawFish(f) {
   ctx.globalAlpha = 0.8;
   ctx.fill();
 
-  // body
+  // body (gradient is constant in local space, so build it once per fish)
   ctx.globalAlpha = 0.95;
-  const grad = ctx.createLinearGradient(0, -s * 0.5, 0, s * 0.5);
-  grad.addColorStop(0, f.palette.body);
-  grad.addColorStop(1, f.palette.belly);
-  ctx.fillStyle = grad;
+  if (!f.bodyGrad) {
+    f.bodyGrad = ctx.createLinearGradient(0, -s * 0.5, 0, s * 0.5);
+    f.bodyGrad.addColorStop(0, f.palette.body);
+    f.bodyGrad.addColorStop(1, f.palette.belly);
+  }
+  ctx.fillStyle = f.bodyGrad;
   ctx.beginPath();
   ctx.ellipse(0, 0, s, s * 0.54, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -570,7 +579,19 @@ function frame(ts) {
     return;
   }
 
-  const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0.016;
+  // Spawn the fish as soon as the canvas is actually measurable, regardless of
+  // whether it was sized at init (loader/auth/layout can delay the first size).
+  if (!fish.length) {
+    ensureFish();
+  }
+
+  // Cap the simulation to ~30fps. Ambient fish do not need 60fps, and halving
+  // the canvas work keeps the phone cool next to the chart's own render loop.
+  if (lastTs && ts - lastTs < FRAME_MS) {
+    rafId = requestAnimationFrame(frame);
+    return;
+  }
+  const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0.033;
   lastTs = ts;
 
   tilt += (tiltTarget - tilt) * Math.min(1, dt * 4);

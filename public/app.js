@@ -14,7 +14,7 @@ import {
   isAquariumEnabled,
   setAquariumEnabled,
   spillAquariumFood,
-} from "./aquarium.js?v=20260629-18";
+} from "./aquarium.js?v=20260629-19";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -156,6 +156,7 @@ const state = {
   bubbledActivityIds: new Set(),
   chartTradesByMarket: new Map(),
   aquariumSnapshot: null,
+  aquariumSnapAt: 0,
   freshActivityIds: new Set(),
   seenSettledPositionIds: new Set(),
   pendingBuy: false,
@@ -1057,7 +1058,9 @@ function drawMarketChartFrame() {
     drawSmoothPath(ctx, pathPoints);
 
     const chartTrades = getChartTradesForMarket(market, windowStart, windowEnd);
-    const captureAvatars = isAquariumEnabled();
+    // Only snapshot avatars when the aquarium is on, and at most ~3x/sec, so the
+    // chart's hot render loop is not allocating a fresh snapshot every frame.
+    const captureAvatars = isAquariumEnabled() && nowMs - (state.aquariumSnapAt || 0) > 300;
     const frameAvatars = captureAvatars ? [] : null;
     chartTrades.forEach((trade) => {
       const x = scaleX(trade.at);
@@ -1103,6 +1106,7 @@ function drawMarketChartFrame() {
     });
     if (captureAvatars) {
       state.aquariumSnapshot = { marketId: String(market.id || ""), avatars: frameAvatars };
+      state.aquariumSnapAt = nowMs;
     }
   }
 
