@@ -1598,7 +1598,7 @@ h2 {
 
 .loss-refund-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   border: 1px solid rgba(183, 255, 77, 0.28);
@@ -1607,7 +1607,29 @@ h2 {
     radial-gradient(circle at 14% 0%, rgba(183, 255, 77, 0.14), transparent 42%),
     rgba(12, 17, 25, 0.86);
   padding: 10px;
-  animation: softRise 180ms ease both;
+  animation: softRise 260ms var(--ease-default, ease) both;
+}
+
+.loss-refund-close {
+  align-self: start;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.loss-refund-close:active {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--text);
+  transform: scale(0.92);
 }
 
 .loss-refund-card strong,

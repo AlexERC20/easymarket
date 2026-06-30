@@ -142,6 +142,7 @@ const state = {
   feedPanel: "positions",
   orderbookSide: "YES",
   lossRefundOffers: [],
+  lossRefundRenderedKey: null,
   referralNudgeShown: false,
   taskTab: "tasks",
   taskSettingsOpen: false,
@@ -2927,44 +2928,79 @@ function getLossRefundCost(offer) {
   return 0;
 }
 
+const LOSS_REFUND_DISMISS_KEY = "easymarket_loss_refund_dismissed_until";
+
+function lossRefundDismissedUntil() {
+  try {
+    return Number(window.localStorage?.getItem(LOSS_REFUND_DISMISS_KEY) || 0);
+  } catch {
+    return 0;
+  }
+}
+
+// Once the user closes/shares/claims the offer, hold it back for a day so it
+// only re-surfaces ~once daily instead of nagging after every loss.
+function dismissLossRefundForToday() {
+  try {
+    window.localStorage?.setItem(LOSS_REFUND_DISMISS_KEY, String(Date.now() + 24 * 60 * 60 * 1000));
+  } catch {
+    // storage can be unavailable in hardened webviews
+  }
+  state.lossRefundRenderedKey = null;
+}
+
 function renderLossRefundOffers() {
   const container = $("lossRefundList");
   if (!container) return;
 
-  const offers = (state.lossRefundOffers || [])
-    .filter((offer) => Number(offer?.amount || 0) > 0)
-    .slice(0, 2);
-  container.classList.toggle("hidden", !offers.length);
-  if (!offers.length) {
-    container.innerHTML = "";
+  const dismissed = Date.now() < lossRefundDismissedUntil();
+  const offer = dismissed
+    ? null
+    : (state.lossRefundOffers || []).find((item) => Number(item?.amount || 0) > 0) || null;
+
+  if (!offer) {
+    if (state.lossRefundRenderedKey !== null) {
+      state.lossRefundRenderedKey = null;
+      container.innerHTML = "";
+    }
+    container.classList.add("hidden");
     return;
   }
 
-  container.innerHTML = offers.map((offer) => {
-    const amount = Number(offer.amount || 0);
-    const cost = getLossRefundCost(offer);
-    const isReferral = offer.offer_type === "referral";
-    const title = isReferral ? "Вернуть проигрыш" : "Вернуть проигрыш за звезды";
-    const text = isReferral
-      ? "Позови друга. После его первой ставки вернем сумму на бонусный баланс."
-      : `Нужно пополнить ${formatFire(cost)} новых звезд. Старые звезды не списываем.`;
-    const action = isReferral
-      ? `<button class="loss-refund-action" data-loss-refund-share="${offer.id}" type="button">Позвать друга</button>`
-      : `<button class="loss-refund-action" data-loss-refund-stars="${offer.id}" data-loss-refund-cost="${cost}" type="button">Пополнить ${formatFire(cost)}</button>`;
+  // Only rebuild the DOM (and replay the entrance animation) when the offer
+  // actually changes. renderMe runs on every poll, so rebuilding every time made
+  // the card re-pop/flicker constantly.
+  const key = `${offer.id}:${offer.offer_type}:${offer.amount}`;
+  if (state.lossRefundRenderedKey === key && !container.classList.contains("hidden")) {
+    return;
+  }
+  state.lossRefundRenderedKey = key;
+  container.classList.remove("hidden");
 
-    return `
-      <div class="loss-refund-card">
-        <div>
-          <strong>${escapeHtml(title)}</strong>
-          <small>${escapeHtml(text)}</small>
-        </div>
-        <div class="loss-refund-side">
-          <b>${formatCurrencyAmount(amount, "USDT")}</b>
-          ${action}
-        </div>
+  const amount = Number(offer.amount || 0);
+  const cost = getLossRefundCost(offer);
+  const isReferral = offer.offer_type === "referral";
+  const title = isReferral ? "Вернуть проигрыш" : "Вернуть проигрыш за звезды";
+  const text = isReferral
+    ? "Позови друга. После его первой ставки вернем сумму на бонусный баланс."
+    : `Нужно пополнить ${formatFire(cost)} новых звезд. Старые звезды не списываем.`;
+  const action = isReferral
+    ? `<button class="loss-refund-action" data-loss-refund-share="${offer.id}" type="button">Позвать друга</button>`
+    : `<button class="loss-refund-action" data-loss-refund-stars="${offer.id}" data-loss-refund-cost="${cost}" type="button">Пополнить ${formatFire(cost)}</button>`;
+
+  container.innerHTML = `
+    <div class="loss-refund-card">
+      <div>
+        <strong>${escapeHtml(title)}</strong>
+        <small>${escapeHtml(text)}</small>
       </div>
-    `;
-  }).join("");
+      <div class="loss-refund-side">
+        <b>${formatCurrencyAmount(amount, "USDT")}</b>
+        ${action}
+      </div>
+      <button class="loss-refund-close" data-loss-refund-dismiss="1" type="button" aria-label="Закрыть">×</button>
+    </div>
+  `;
 }
 
 function renderTradeTicket() {
@@ -4445,6 +4481,7 @@ async function claimLossRefundWithStars(offerId) {
     state.usdtCashBalance = result.usdt_cash_balance ?? state.usdtCashBalance;
     state.usdtBonusBalance = result.usdt_bonus_balance ?? state.usdtBonusBalance;
     state.lossRefundOffers = state.lossRefundOffers.filter((offer) => Number(offer.id) !== Number(offerId));
+    dismissLossRefundForToday();
     triggerHaptic("success");
     triggerLightningFlash("success");
     showToast(`Возврат начислен: ${formatCurrencyAmount(result.offer?.amount || 0, "USDT")}`);
@@ -5504,6 +5541,20 @@ document.addEventListener("click", (event) => {
   event.preventDefault();
   triggerHaptic("selection");
   void shareInvite({ awardShareTask: false });
+  // Hide the offer after sharing and hold it back for the day.
+  dismissLossRefundForToday();
+  renderLossRefundOffers();
+});
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-loss-refund-dismiss]");
+  if (!button) {
+    return;
+  }
+  event.preventDefault();
+  triggerHaptic("selection");
+  dismissLossRefundForToday();
+  renderLossRefundOffers();
 });
 
 document.addEventListener("click", (event) => {
