@@ -360,6 +360,10 @@ function appendDomFood(avatars) {
     // photo is missing or fails, the lettered disc stays — never a blank bubble.
     crumb.textContent = initial;
     crumb.style.fontSize = `${Math.max(5, r * 1.15).toFixed(1)}px`;
+    // Set the size once; the loop only animates transform/opacity (no per-frame
+    // width/height writes, which would force a layout reflow every frame).
+    crumb.style.width = `${(r * 2).toFixed(1)}px`;
+    crumb.style.height = `${(r * 2).toFixed(1)}px`;
     if (url) {
       const img = document.createElement("img");
       img.alt = "";
@@ -650,8 +654,7 @@ function renderDomAquarium() {
     const shrink = crumb.eat > 0 ? Math.max(0, 1 - crumb.eat) : 1;
     const fade = crumb.fade ?? 1;
     crumb.el.style.opacity = String(Math.min(1, bornAlpha * (0.9 + shrink * 0.1) * fade));
-    crumb.el.style.width = `${(crumb.r * 2 * shrink).toFixed(1)}px`;
-    crumb.el.style.height = `${(crumb.r * 2 * shrink).toFixed(1)}px`;
+    // Size is fixed; shrink via transform scale only (no width/height -> no reflow).
     crumb.el.style.transform = `translate3d(${(crumb.x - crumb.r).toFixed(1)}px, ${(crumb.y - crumb.r).toFixed(1)}px, 0) scale(${Math.max(0.2, shrink).toFixed(3)})`;
   }
 }

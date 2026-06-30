@@ -17,7 +17,7 @@ import {
   setAquariumRuntimeAllowed,
   setAquariumShakeFeeder,
   spillAquariumFood,
-} from "./aquarium.js?v=20260701-04";
+} from "./aquarium.js?v=20260701-05";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -33,7 +33,10 @@ const CHART_WINDOW_MS = 10_000;
 const BTC_5M_CHART_HISTORY_RATIO = 0.5;
 const CHART_AVATAR_RADIUS_CSS = 3.8;
 const CHART_INTRO_MS = 720; // crossfade window when the chart switches markets
+const CHART_FRAME_MS = 33; // ~30fps cap for the chart loop (was uncapped 60fps)
+let lastChartDrawTs = 0;
 let chartSnapshotCanvas = null; // offscreen copy of the previous market's frame
+let chartBetLabelCache = null; // cached measureText widths for the "your bet" pill
 const ACTIVE_MARKET_POLL_MS = 1_500;
 const MARKET_LIST_POLL_MS = 10_000;
 const COMMENTS_POLL_MS = 10_000;
@@ -1040,7 +1043,7 @@ function getMyChartBet(market) {
   };
 }
 
-function drawMarketChartFrame() {
+function drawMarketChartFrame(ts) {
   const canvas = $("marketChart");
   const market = getDisplayMarket();
   if (!(canvas instanceof HTMLCanvasElement) || !market) {
@@ -1053,6 +1056,16 @@ function drawMarketChartFrame() {
     state.chartRaf = null;
     return;
   }
+
+  // ~30fps cap: the per-frame work (up to ~80 avatar draws with shadows/clips,
+  // the path, gradients and labels) is the app's heaviest loop; halving its rate
+  // roughly halves that cost with no visible difference on a price chart.
+  const nowTs = typeof ts === "number" ? ts : performance.now();
+  if (lastChartDrawTs && nowTs - lastChartDrawTs < CHART_FRAME_MS) {
+    state.chartRaf = requestAnimationFrame(drawMarketChartFrame);
+    return;
+  }
+  lastChartDrawTs = nowTs;
 
   const { dpr, width, height } = resizeCanvas(canvas);
   const appBg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#080d16";
@@ -1288,13 +1301,23 @@ function drawMarketChartFrame() {
     const seg1 = "Твоя ставка: ";
     const seg2 = `${marketSideLabel(market, myBet.side)} ${formatCurrencyAmount(myBet.spent, myBet.currency)}`;
     const seg3 = ` Win ${formatCurrencyAmount(myBet.shares, myBet.currency)}`;
-    ctx.font = `${Math.max(11, width * 0.024)}px Inter, system-ui, sans-serif`;
+    const fontPx = Math.max(11, width * 0.024);
+    ctx.font = `${fontPx}px Inter, system-ui, sans-serif`;
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
     const padX = Math.max(8, width * 0.018);
-    const w1 = ctx.measureText(seg1).width;
-    const w2 = ctx.measureText(seg2).width;
-    const w3 = ctx.measureText(seg3).width;
+    // Cache the text widths: measureText x3 per frame on a 30-60fps loop is
+    // wasteful when the bet text doesn't change between frames.
+    const labelKey = `${seg1}|${seg2}|${seg3}|${fontPx.toFixed(1)}`;
+    if (!chartBetLabelCache || chartBetLabelCache.key !== labelKey) {
+      chartBetLabelCache = {
+        key: labelKey,
+        w1: ctx.measureText(seg1).width,
+        w2: ctx.measureText(seg2).width,
+        w3: ctx.measureText(seg3).width,
+      };
+    }
+    const { w1, w2, w3 } = chartBetLabelCache;
     const pillH = Math.max(22, height * 0.105);
     const pillW = w1 + w2 + w3 + padX * 2;
     const pillX = left;
