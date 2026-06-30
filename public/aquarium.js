@@ -350,11 +350,22 @@ function appendDomFood(avatars) {
     const x = Math.max(8, Math.min(measured.width - 8, baseX + rand(-18, 18)));
     const y = Math.max(8, Math.min(measured.height - 8, baseY + rand(-12, 10)));
     const url = String(avatar.url || "").trim();
-    crumb.className = `aquarium-dom-food ${side === "NO" ? "no" : "yes"} ${url ? "avatar" : ""}`;
+    const initial = String(avatar.initial || "•").slice(0, 1).toUpperCase();
+    const r = rand(url ? 4.2 : 3.2, url ? 6.2 : 4.8);
+    crumb.className = `aquarium-dom-food ${side === "NO" ? "no" : "yes"}`;
+    // Show the bettor's initial as a fallback (like the chart dots); the avatar
+    // photo is layered on top and hides the letter once it actually loads. If the
+    // photo is missing or fails, the lettered disc stays — never a blank bubble.
+    crumb.textContent = initial;
+    crumb.style.fontSize = `${Math.max(5, r * 1.15).toFixed(1)}px`;
     if (url) {
-      crumb.style.backgroundImage = `url("${url.replace(/"/g, "%22")}")`;
-      crumb.style.backgroundSize = "cover";
-      crumb.style.backgroundPosition = "center";
+      const img = document.createElement("img");
+      img.alt = "";
+      img.decoding = "async";
+      img.onload = () => crumb.classList.add("avatar");
+      img.onerror = () => img.remove();
+      img.src = url;
+      crumb.appendChild(img);
     }
     layer.appendChild(crumb);
     const bornAt = Date.now() + Math.min(900, index * 24);
@@ -364,7 +375,7 @@ function appendDomFood(avatars) {
       y,
       vx: rand(-34, 34),
       vy: rand(-12, 24),
-      r: rand(url ? 4.2 : 3.2, url ? 6.2 : 4.8),
+      r,
       restY: rand(measured.height * 0.34, measured.height * 0.95),
       settled: false,
       bornAt,

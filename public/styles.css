@@ -908,6 +908,8 @@ h2 {
   left: 0;
   width: 8px;
   height: 8px;
+  display: grid;
+  place-items: center;
   border-radius: 50%;
   background: radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.95), rgba(25, 195, 125, 0.84) 44%, rgba(14, 20, 32, 0.92));
   border: 1px solid rgba(255, 255, 255, 0.32);
@@ -916,8 +918,19 @@ h2 {
   -webkit-transform: translate3d(-40px, -40px, 0);
   will-change: transform, opacity, width, height;
   overflow: hidden;
-  color: transparent;
-  font-size: 0;
+  color: rgba(255, 255, 255, 0.96);
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+}
+
+.aquarium-dom-food img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
 }
 
 .aquarium-dom-food.no {
