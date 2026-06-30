@@ -2853,6 +2853,7 @@ function renderMe() {
   setSectionToggle("positionToggle", positions.length, "positions");
 
   const container = $("positionList");
+  renderLossRefundOffers();
   if (!positions.length) {
     container.innerHTML = '<p class="muted">Позиции пока нет.</p>';
     return;
@@ -2914,6 +2915,52 @@ function renderMe() {
           >
             ${isSelling ? "Продаю..." : canSell ? `Продать ${formatCurrencyAmount(exitValue, currency)}` : "Ждём итог"}
           </button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function getLossRefundCost(offer) {
+  if (offer?.offer_type === "stars_100") return 100;
+  if (offer?.offer_type === "stars_500") return 500;
+  return 0;
+}
+
+function renderLossRefundOffers() {
+  const container = $("lossRefundList");
+  if (!container) return;
+
+  const offers = (state.lossRefundOffers || [])
+    .filter((offer) => Number(offer?.amount || 0) > 0)
+    .slice(0, 2);
+  container.classList.toggle("hidden", !offers.length);
+  if (!offers.length) {
+    container.innerHTML = "";
+    return;
+  }
+
+  container.innerHTML = offers.map((offer) => {
+    const amount = Number(offer.amount || 0);
+    const cost = getLossRefundCost(offer);
+    const isReferral = offer.offer_type === "referral";
+    const title = isReferral ? "Вернуть проигрыш" : "Вернуть проигрыш за звезды";
+    const text = isReferral
+      ? "Позови друга. После его первой ставки вернем сумму на бонусный баланс."
+      : `Нужно пополнить ${formatFire(cost)} новых звезд. Старые звезды не списываем.`;
+    const action = isReferral
+      ? `<button class="loss-refund-action" data-loss-refund-share="${offer.id}" type="button">Позвать друга</button>`
+      : `<button class="loss-refund-action" data-loss-refund-stars="${offer.id}" data-loss-refund-cost="${cost}" type="button">Пополнить ${formatFire(cost)}</button>`;
+
+    return `
+      <div class="loss-refund-card">
+        <div>
+          <strong>${escapeHtml(title)}</strong>
+          <small>${escapeHtml(text)}</small>
+        </div>
+        <div class="loss-refund-side">
+          <b>${formatCurrencyAmount(amount, "USDT")}</b>
+          ${action}
         </div>
       </div>
     `;
@@ -5470,7 +5517,7 @@ document.addEventListener("click", (event) => {
   const offerId = Number(button.dataset.lossRefundStars || 0);
   openTopupSheet(
     amount,
-    "Пополните звёзды, чтобы вернуть проигрыш.",
+    "Пополните новые звезды. После пополнения возврат начислится автоматически, старый баланс не списываем.",
     "topup",
     "STAR",
     {

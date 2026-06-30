@@ -1584,6 +1584,73 @@ h2 {
   gap: 7px;
 }
 
+.loss-refund-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.loss-refund-list.hidden {
+  display: none;
+}
+
+.loss-refund-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(183, 255, 77, 0.28);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 14% 0%, rgba(183, 255, 77, 0.14), transparent 42%),
+    rgba(12, 17, 25, 0.86);
+  padding: 10px;
+  animation: softRise 180ms ease both;
+}
+
+.loss-refund-card strong,
+.loss-refund-card small,
+.loss-refund-side b {
+  display: block;
+}
+
+.loss-refund-card strong {
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.loss-refund-card small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.22;
+}
+
+.loss-refund-side {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  text-align: right;
+}
+
+.loss-refund-side b {
+  color: var(--yes);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.loss-refund-action {
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(183, 255, 77, 0.96), rgba(53, 246, 255, 0.88));
+  color: #061016;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
+  box-shadow: 0 10px 20px rgba(53, 246, 255, 0.14);
+}
+
 .sell-button {
   min-height: 34px;
   border: 1px solid rgba(255, 255, 255, 0.12);

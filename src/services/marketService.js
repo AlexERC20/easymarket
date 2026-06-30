@@ -1782,10 +1782,11 @@ export async function getUserSnapshot(telegramId) {
         FROM usdt_loss_refund_offers
         WHERE user_id = $1
           AND status = 'pending'
+          AND day_key = $2
         ORDER BY created_at DESC
         LIMIT 3
       `,
-      [user.id],
+      [user.id, getDayKey()],
     ),
   ]);
   const usdtTotalBalance = Math.round((usdtCashBalance + usdtBonusBalance) * 100) / 100;
