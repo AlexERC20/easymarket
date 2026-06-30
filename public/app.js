@@ -988,6 +988,27 @@ function normalizeChartPrice(value) {
   return numeric <= 1.5 ? numeric * 100 : numeric;
 }
 
+// The user's own open bet on a market (largest by stake), for the chart label.
+function getMyChartBet(market) {
+  if (!market?.id || !state.user) {
+    return null;
+  }
+  const mine = (state.positions || []).filter(
+    (p) => p.market_id === market.id && p.status === "open" && Number(p.shares || 0) > 0,
+  );
+  if (!mine.length) {
+    return null;
+  }
+  mine.sort((a, b) => Number(b.spent || 0) - Number(a.spent || 0));
+  const p = mine[0];
+  return {
+    side: p.side === "YES" ? "YES" : "NO",
+    spent: Number(p.spent || 0),
+    shares: Number(p.shares || 0),
+    currency: normalizeCurrency(p.currency),
+  };
+}
+
 function drawMarketChartFrame() {
   const canvas = $("marketChart");
   const market = getDisplayMarket();
@@ -1219,6 +1240,43 @@ function drawMarketChartFrame() {
     ctx.textBaseline = "middle";
     ctx.fillText(currentLabel, labelX + 9, labelY + 14);
     ctx.shadowBlur = 0;
+  }
+
+  // "Your bet" pill in the bottom-left corner when the user holds a position.
+  const myBet = getMyChartBet(market);
+  if (myBet) {
+    const sideColor = myBet.side === "YES" ? "#19c37d" : "#ef466f";
+    const seg1 = "Твоя ставка: ";
+    const seg2 = `${marketSideLabel(market, myBet.side)} ${formatCurrencyAmount(myBet.spent, myBet.currency)}`;
+    const seg3 = ` Win ${formatCurrencyAmount(myBet.shares, myBet.currency)}`;
+    ctx.font = `${Math.max(11, width * 0.024)}px Inter, system-ui, sans-serif`;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    const padX = Math.max(8, width * 0.018);
+    const w1 = ctx.measureText(seg1).width;
+    const w2 = ctx.measureText(seg2).width;
+    const w3 = ctx.measureText(seg3).width;
+    const pillH = Math.max(22, height * 0.105);
+    const pillW = w1 + w2 + w3 + padX * 2;
+    const pillX = left;
+    const pillY = height - pillH - Math.max(4, height * 0.02);
+    ctx.fillStyle = "rgba(8, 13, 22, 0.74)";
+    ctx.beginPath();
+    roundedRectPath(ctx, pillX, pillY, pillW, pillH, Math.max(8, height * 0.05));
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    const cy = pillY + pillH / 2;
+    let tx = pillX + padX;
+    ctx.fillStyle = "rgba(141, 152, 170, 0.95)";
+    ctx.fillText(seg1, tx, cy);
+    tx += w1;
+    ctx.fillStyle = sideColor;
+    ctx.fillText(seg2, tx, cy);
+    tx += w2;
+    ctx.fillStyle = "rgba(243, 246, 251, 0.96)";
+    ctx.fillText(seg3, tx, cy);
   }
 
   if ((market.status === "open" && btc) || Math.abs((state.smoothedPrice || 0) - currentPrice) > 0.04) {
