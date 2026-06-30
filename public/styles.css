@@ -826,17 +826,18 @@ h2 {
   position: absolute;
   top: 0;
   left: 0;
-  width: 25px;
-  height: 14px;
-  border-radius: 68% 48% 48% 68%;
+  width: 27px;
+  height: 15px;
+  /* teardrop body: rounder head (right), tapered toward the tail (left) */
+  border-radius: 58% 42% 42% 58% / 56% 56% 44% 44%;
   background:
-    radial-gradient(circle at 74% 35%, #ffffff 0 5%, #10151f 6% 10%, transparent 11%),
-    radial-gradient(ellipse at 42% 24%, rgba(255, 255, 255, 0.58), transparent 36%),
-    linear-gradient(90deg, #ff8a3c 0%, #ffb347 46%, #ffe2a8 100%);
+    radial-gradient(circle at 76% 34%, #ffffff 0 5%, #10151f 6% 10%, transparent 11%),
+    radial-gradient(ellipse at 44% 22%, rgba(255, 255, 255, 0.6), transparent 40%),
+    linear-gradient(96deg, #ff7a2c 0%, #ffb347 50%, #ffe2a8 100%);
   box-shadow:
-    0 0 10px rgba(255, 179, 71, 0.28),
+    0 0 10px rgba(255, 179, 71, 0.3),
     0 0 20px rgba(53, 246, 255, 0.1);
-  opacity: 0.94;
+  opacity: 0.96;
   transform: translate3d(-40px, 160px, 0);
   -webkit-transform: translate3d(-40px, 160px, 0);
   transform-origin: 50% 50%;
@@ -846,12 +847,13 @@ h2 {
 .aquarium-dom-fish::before {
   content: "";
   position: absolute;
-  left: -9px;
-  top: 2px;
-  width: 11px;
-  height: 10px;
-  background: #ff8a3c;
-  clip-path: polygon(100% 50%, 0 0, 0 100%);
+  left: -11px;
+  top: 1px;
+  width: 13px;
+  height: 13px;
+  background: #ff7a2c;
+  /* forked tail fan */
+  clip-path: polygon(100% 50%, 0 0, 22% 50%, 0 100%);
   transform-origin: right center;
   animation: aquariumDomTail var(--tail-ms, 620ms) ease-in-out infinite alternate;
 }
@@ -859,13 +861,13 @@ h2 {
 .aquarium-dom-fish::after {
   content: "";
   position: absolute;
-  left: 8px;
-  top: -4px;
-  width: 8px;
-  height: 7px;
+  left: 9px;
+  top: -5px;
+  width: 9px;
+  height: 8px;
   border-radius: 70% 70% 20% 20%;
-  background: rgba(255, 138, 60, 0.78);
-  clip-path: polygon(10% 100%, 55% 0, 100% 100%);
+  background: rgba(255, 138, 60, 0.8);
+  clip-path: polygon(12% 100%, 52% 0, 100% 100%);
   opacity: 0.82;
 }
 
@@ -967,11 +969,11 @@ h2 {
 
 @keyframes aquariumDomTail {
   from {
-    transform: rotate(-14deg);
+    transform: rotate(-13deg) scaleX(0.9);
   }
 
   to {
-    transform: rotate(18deg);
+    transform: rotate(16deg) scaleX(1.08);
   }
 }
 

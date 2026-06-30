@@ -11,7 +11,7 @@ const USER_CHOICE_KEY = "easymarket_aquarium_choice_v2";
 const MAX_FOOD = 80;
 const FISH_MIN = 4;
 const FISH_MAX = 5;
-const FOOD_ARM_MS = 3200; // crumbs settle before any fish will hunt them
+const FOOD_ARM_MS = 1500; // brief settle before the hungry fish start hunting
 const EAT_MS = 3280; // a bite is gradual, never instant
 const FRAME_MS = 33; // ~30fps simulation cap to stay light on the phone
 const SHAKE_JERK = 26; // summed |Δacceleration| that counts as a deliberate shake
@@ -55,6 +55,7 @@ let lastAccX = null;
 let lastAccY = null;
 let lastAccZ = null;
 let lastShakeFeedAt = 0;
+let lastScatterAt = 0;
 let feedProvider = null;
 // Telegram Mini App sensor API (Bot API 8.0+). iOS Telegram blocks the W3C
 // devicemotion/deviceorientation events, so we drive tilt/shake from these.
@@ -334,7 +335,7 @@ function domBandBottom(height) {
 function nearestDomFoodFor(fishItem) {
   const now = Date.now();
   let best = null;
-  let bestDist = 190 * 190;
+  let bestDist = 240 * 240;
   for (const crumb of domFood) {
     if (crumb.eat > 0 || now < crumb.bornAt + FOOD_ARM_MS) {
       continue;
@@ -354,7 +355,10 @@ function nearestDomFoodFor(fishItem) {
 }
 
 function updateDomFood(dt, width, height) {
-  const drift = tilt * 360 + tiltImpulse * 430;
+  // A *weak* steady current from holding the phone tilted, so crumbs don't all
+  // stream off in one direction. Per-crumb jitter + drag + wall bounce make each
+  // crumb drift independently and chaotically.
+  const current = tilt * 18;
   const now = Date.now();
   for (const crumb of domFood) {
     if (now < crumb.bornAt) {
@@ -362,29 +366,49 @@ function updateDomFood(dt, width, height) {
     }
     if (crumb.eat > 0) {
       crumb.eat += dt / (EAT_MS / 1000);
+      // Gulp: ease the crumb toward the mouth that is eating it.
+      if (Number.isFinite(crumb.biteX)) {
+        crumb.x += (crumb.biteX - crumb.x) * Math.min(1, dt * 5);
+        crumb.y += (crumb.biteY - crumb.y) * Math.min(1, dt * 5);
+      }
       continue;
     }
     if (!crumb.settled) {
-      crumb.vy += 30 * dt;
-      crumb.vy = Math.min(crumb.vy, 44);
-      crumb.vx += drift * 0.26 * dt;
-      crumb.vx = Math.max(-120, Math.min(120, crumb.vx));
-      crumb.x += (crumb.vx + drift * 0.35) * dt;
+      crumb.vy += 24 * dt; // slow sink
+      crumb.vy = Math.min(crumb.vy, 36);
+      crumb.vx += (current + (Math.random() - 0.5) * 40) * dt;
+      crumb.vx *= 0.92;
+      crumb.x += crumb.vx * dt;
       crumb.y += crumb.vy * dt;
-      crumb.vx *= 0.986;
-      if (crumb.y >= crumb.restY) {
-        crumb.y = crumb.restY;
+      if (crumb.y >= crumb.restY && Math.abs(crumb.vy) < 14) {
         crumb.vy = 0;
         crumb.settled = true;
       }
     } else {
-      crumb.wobble += dt * 1.8;
-      crumb.x += (drift + Math.sin(crumb.wobble) * 9) * dt;
-      crumb.y += Math.cos(crumb.wobble * 0.85) * 4.5 * dt;
-      crumb.y += (crumb.restY - crumb.y) * 0.42 * dt;
+      // Floating: weak current + independent brownian jitter + gentle buoyancy,
+      // heavily damped so it drifts slowly like a crumb suspended in water.
+      crumb.vx += (current + (Math.random() - 0.5) * 26) * dt;
+      crumb.vy += ((crumb.restY - crumb.y) * 0.9 + (Math.random() - 0.5) * 22) * dt;
+      crumb.vx *= 0.9;
+      crumb.vy *= 0.9;
+      crumb.x += crumb.vx * dt;
+      crumb.y += crumb.vy * dt;
     }
-    crumb.x = Math.max(6, Math.min(width - 6, crumb.x));
-    crumb.y = Math.max(4, Math.min(height - 4, crumb.y));
+    // Bounce off the walls (don't stick), so a shake disperses crumbs around.
+    if (crumb.x < 6) {
+      crumb.x = 6;
+      crumb.vx = Math.abs(crumb.vx) * 0.6;
+    } else if (crumb.x > width - 6) {
+      crumb.x = width - 6;
+      crumb.vx = -Math.abs(crumb.vx) * 0.6;
+    }
+    if (crumb.y < 6) {
+      crumb.y = 6;
+      crumb.vy = Math.abs(crumb.vy) * 0.5;
+    } else if (crumb.y > height - 4) {
+      crumb.y = height - 4;
+      crumb.vy = -Math.abs(crumb.vy) * 0.5;
+    }
   }
   domFood = domFood.filter((crumb) => {
     const keep = crumb.eat < 1;
@@ -420,13 +444,16 @@ function updateDomFish(dt, width, height) {
       const dx = f.target.x - f.x;
       const dy = f.target.y - f.y;
       const dist = Math.hypot(dx, dy) || 1;
-      ax = (dx / dist) * f.speed * 1.7;
-      ay = (dy / dist) * f.speed * 1.7;
+      // Hungry, eager dash toward the crumb.
+      ax = (dx / dist) * f.speed * 2.6;
+      ay = (dy / dist) * f.speed * 2.6;
       if (dist < 12 + f.target.r) {
+        f.target.biteX = f.x; // crumb gets gulped toward the mouth
+        f.target.biteY = f.y;
         f.target.eat = Math.max(f.target.eat, 0.0001);
         f.target.claimedBy = null;
         f.target = null;
-        f.satietyUntil = now + rand(1400, 3300);
+        f.satietyUntil = now + rand(450, 1500);
       }
     } else {
       // Smoothly drifting heading gives natural curved cruising, not jerky turns.
@@ -462,7 +489,7 @@ function updateDomFish(dt, width, height) {
     f.vx += ax * dt;
     f.vy += ay * dt;
     const sp = Math.hypot(f.vx, f.vy);
-    const maxSp = f.speed * (startled ? 3 : f.target ? 2.1 : 1.25);
+    const maxSp = f.speed * (startled ? 3 : f.target ? 2.7 : 1.25);
     if (sp > maxSp) {
       f.vx = (f.vx / sp) * maxSp;
       f.vy = (f.vy / sp) * maxSp;
@@ -906,13 +933,15 @@ function onShake(strength = 1) {
   if (!enabled || !runtimeAllowed) {
     return;
   }
-  // Kick the existing crumbs and spook the fish on every shake...
-  scatterFood(strength);
-  startleFish(strength);
-  tiltImpulse = Math.max(-2.6, Math.min(2.6, tiltImpulse + (Math.random() - 0.5) * strength * 1.8));
-  // ...but only drop a fresh handful of food on a cooldown so a long shake does
-  // not bury the tank.
   const now = Date.now();
+  // Kick the crumbs / spook the fish, but throttle so a sustained shake (the
+  // sensor fires many times a second) doesn't re-fling everything every frame.
+  if (now - lastScatterAt > 220) {
+    lastScatterAt = now;
+    scatterFood(strength);
+    startleFish(strength);
+  }
+  // ...and only drop a fresh handful of food on a longer cooldown.
   if (now - lastShakeFeedAt < SHAKE_FEED_COOLDOWN_MS) {
     return;
   }
@@ -924,25 +953,28 @@ function onShake(strength = 1) {
 }
 
 function scatterFood(strength = 1) {
-  // SET (not accumulate) bounded velocities: devicemotion can fire ~60x/s during
-  // a shake, so accumulating would fling crumbs off-screen.
-  const spread = 80 + strength * 60;
+  // SET (not accumulate) bounded velocities, in a RANDOM direction per crumb, so
+  // a shake bursts them apart every which way instead of all in one direction.
+  const spread = 70 + strength * 45;
+  const kick = (crumb) => {
+    crumb.settled = false;
+    const angle = Math.random() * Math.PI * 2;
+    const mag = spread * (0.5 + Math.random() * 0.6);
+    crumb.vx = Math.cos(angle) * mag;
+    crumb.vy = Math.sin(angle) * mag - 18; // slight upward bias, then re-sinks
+  };
   for (const crumb of food) {
     if (crumb.eat > 0) {
       continue;
     }
-    crumb.settled = false;
-    crumb.vx = (Math.random() - 0.5) * spread;
-    crumb.vy = -rand(20, 70); // pop upward, then re-sink under gravity
+    kick(crumb);
     crumb.restY = rand(cssH * 0.34, bandBottom() - 3);
   }
   for (const crumb of domFood) {
     if (crumb.eat > 0) {
       continue;
     }
-    crumb.settled = false;
-    crumb.vx = (Math.random() - 0.5) * spread;
-    crumb.vy = -rand(20, 70);
+    kick(crumb);
   }
 }
 
@@ -1018,33 +1050,52 @@ function requestTiltAccess() {
 }
 
 function updateFood(dt) {
-  const drift = tilt * 360 + tiltImpulse * 430; // px/s sideways pull from phone tilt/shake
+  // Weak steady current (tilt) + per-crumb jitter + drag + wall bounce, so crumbs
+  // drift slowly and chaotically instead of streaming together in one direction.
+  const current = tilt * 18;
+  const bottom = bandBottom();
   for (const f of food) {
     if (f.eat > 0) {
       f.eat += dt / (EAT_MS / 1000);
+      if (Number.isFinite(f.biteX)) {
+        f.x += (f.biteX - f.x) * Math.min(1, dt * 5);
+        f.y += (f.biteY - f.y) * Math.min(1, dt * 5);
+      }
       continue;
     }
     if (!f.settled) {
-      f.vy += 30 * dt; // gentle gravity
-      f.vy = Math.min(f.vy, 44);
-      f.vx += drift * 0.26 * dt;
-      f.vx = Math.max(-120, Math.min(120, f.vx));
-      f.x += (f.vx + drift * 0.35) * dt;
+      f.vy += 24 * dt; // slow sink
+      f.vy = Math.min(f.vy, 36);
+      f.vx += (current + (Math.random() - 0.5) * 40) * dt;
+      f.vx *= 0.92;
+      f.x += f.vx * dt;
       f.y += f.vy * dt;
-      f.vx *= 0.986;
-      if (f.y >= f.restY) {
-        f.y = f.restY;
+      if (f.y >= f.restY && Math.abs(f.vy) < 14) {
         f.vy = 0;
         f.settled = true;
       }
     } else {
-      // Drift like a crumb in water: tilt + slow personal wobble.
-      f.wobble += dt * 1.5;
-      f.x += (drift + Math.sin(f.wobble) * 9) * dt;
-      f.y += Math.cos(f.wobble * 0.8) * 4.5 * dt;
-      f.y += (f.restY - f.y) * 0.42 * dt;
+      f.vx += (current + (Math.random() - 0.5) * 26) * dt;
+      f.vy += ((f.restY - f.y) * 0.9 + (Math.random() - 0.5) * 22) * dt;
+      f.vx *= 0.9;
+      f.vy *= 0.9;
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
     }
-    f.x = Math.max(5, Math.min(cssW - 5, f.x));
+    if (f.x < 5) {
+      f.x = 5;
+      f.vx = Math.abs(f.vx) * 0.6;
+    } else if (f.x > cssW - 5) {
+      f.x = cssW - 5;
+      f.vx = -Math.abs(f.vx) * 0.6;
+    }
+    if (f.y < bandTop()) {
+      f.y = bandTop();
+      f.vy = Math.abs(f.vy) * 0.5;
+    } else if (f.y > bottom) {
+      f.y = bottom;
+      f.vy = -Math.abs(f.vy) * 0.5;
+    }
   }
   // Remove fully eaten crumbs.
   food = food.filter((f) => f.eat < 1);
@@ -1053,7 +1104,7 @@ function updateFood(dt) {
 function nearestFoodFor(f) {
   const now = Date.now();
   let best = null;
-  let bestDist = 190 * 190; // perception radius squared
+  let bestDist = 240 * 240; // perception radius squared
   for (const crumb of food) {
     if (crumb.eat > 0) {
       continue;
@@ -1102,13 +1153,16 @@ function updateFish(dt) {
       const dx = f.target.x - f.x;
       const dy = f.target.y - f.y;
       const dist = Math.hypot(dx, dy) || 1;
-      ax = (dx / dist) * f.speed * 1.6;
-      ay = (dy / dist) * f.speed * 1.6;
+      // Hungry, eager dash toward the crumb.
+      ax = (dx / dist) * f.speed * 2.6;
+      ay = (dy / dist) * f.speed * 2.6;
       if (dist < f.size * 0.9 + f.target.r) {
+        f.target.biteX = f.x; // crumb gets gulped toward the mouth
+        f.target.biteY = f.y;
         f.target.eat = Math.max(f.target.eat, 0.0001); // begin the bite
         f.target.claimedBy = null;
         f.target = null;
-        f.satietyUntil = now + rand(1400, 3200); // wander a bit before next bite
+        f.satietyUntil = now + rand(450, 1500); // brief pause, then hunt again
       }
     } else {
       // Smoothly drifting heading -> natural curved cruising instead of jerks.
@@ -1146,7 +1200,7 @@ function updateFish(dt) {
     f.vy += ay * dt;
     // Speed clamp.
     const sp = Math.hypot(f.vx, f.vy);
-    const maxSp = f.speed * (startled ? 3 : f.target ? 2 : 1.25);
+    const maxSp = f.speed * (startled ? 3 : f.target ? 2.7 : 1.25);
     if (sp > maxSp) {
       f.vx = (f.vx / sp) * maxSp;
       f.vy = (f.vy / sp) * maxSp;
