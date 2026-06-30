@@ -17,7 +17,7 @@ import {
   setAquariumRuntimeAllowed,
   setAquariumShakeFeeder,
   spillAquariumFood,
-} from "./aquarium.js?v=20260701-03";
+} from "./aquarium.js?v=20260701-04";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -2147,10 +2147,17 @@ function buildAquariumFoodForMarket(market) {
   if (!marketId) {
     return [];
   }
+  // Prefer the real on-chart avatar positions (captured each frame) so crumbs
+  // fall from where the bets actually sit, not from synthetic time-based spots
+  // spread across the edges of the chart.
+  if (state.aquariumSnapshot?.marketId === marketId && (state.aquariumSnapshot.avatars || []).length) {
+    return state.aquariumSnapshot.avatars;
+  }
+  // Fallback when no fresh snapshot exists: approximate positions from trade times.
   const trades = (state.chartTradesByMarket.get(marketId) || [])
     .filter((trade) => trade?.action !== "SELL" && Number.isFinite(Number(trade.at)));
   if (!trades.length) {
-    return state.aquariumSnapshot?.marketId === marketId ? (state.aquariumSnapshot.avatars || []) : [];
+    return [];
   }
 
   const marketStart = new Date(market.start_time || 0).getTime();

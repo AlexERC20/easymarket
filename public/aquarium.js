@@ -345,10 +345,12 @@ function appendDomFood(avatars) {
     }
     const crumb = document.createElement("span");
     const side = avatar.side === "NO" ? "NO" : "YES";
-    const baseX = Math.max(7, Math.min(93, Number(avatar.xFrac || 0.5) * 100)) / 100 * measured.width;
-    const baseY = Math.max(9, Math.min(66, Number(avatar.yFrac || 0.45) * 100)) / 100 * measured.height;
-    const x = Math.max(8, Math.min(measured.width - 8, baseX + rand(-18, 18)));
-    const y = Math.max(8, Math.min(measured.height - 8, baseY + rand(-12, 10)));
+    // Spawn at the real avatar-dot position (only a tiny scatter so several bets
+    // on the same spot don't perfectly overlap).
+    const baseX = Math.max(4, Math.min(94, Number(avatar.xFrac || 0.5) * 100)) / 100 * measured.width;
+    const baseY = Math.max(6, Math.min(86, Number(avatar.yFrac || 0.45) * 100)) / 100 * measured.height;
+    const x = Math.max(6, Math.min(measured.width - 6, baseX + rand(-7, 7)));
+    const y = Math.max(6, Math.min(measured.height - 6, baseY + rand(-6, 6)));
     const url = String(avatar.url || "").trim();
     const initial = String(avatar.initial || "•").slice(0, 1).toUpperCase();
     const r = rand(url ? 4.2 : 3.2, url ? 6.2 : 4.8);
@@ -373,10 +375,12 @@ function appendDomFood(avatars) {
       el: crumb,
       x,
       y,
-      vx: rand(-34, 34),
-      vy: rand(-12, 24),
+      vx: rand(-10, 10), // small scatter; it should drop near the dot, not fly off
+      vy: rand(2, 14), // gentle downward drift
       r,
-      restY: rand(measured.height * 0.34, measured.height * 0.95),
+      // Sink to a resting band that's at or below the spawn, so crumbs fall from
+      // the bet downward (never drift upward off the dot).
+      restY: Math.max(y + 6, rand(measured.height * 0.52, measured.height * 0.92)),
       settled: false,
       bornAt,
       expireAt: bornAt + FOOD_LIFE_MS,
@@ -888,15 +892,15 @@ function appendFood(avatars) {
   const picked = avatars.slice(-MAX_FOOD);
   const now = Date.now();
   for (const a of picked) {
-    const x = Math.max(6, Math.min(cssW - 6, Number(a.xFrac) * cssW));
-    const y = Math.max(2, Math.min(cssH - 6, Number(a.yFrac) * cssH));
+    const x = Math.max(6, Math.min(cssW - 6, Number(a.xFrac) * cssW + rand(-6, 6)));
+    const y = Math.max(4, Math.min(cssH - 6, Number(a.yFrac) * cssH + rand(-5, 5)));
     food.push({
       x,
       y,
-      vx: rand(-28, 28),
-      vy: rand(-10, 24),
+      vx: rand(-9, 9), // small scatter; drop near the dot
+      vy: rand(2, 14), // gentle downward drift
       r: rand(a.url ? 4.4 : 3.4, a.url ? 6.2 : 5),
-      restY: rand(cssH * 0.34, bandBottom() - 3),
+      restY: Math.max(y + 6, rand(cssH * 0.52, bandBottom() - 3)),
       settled: false,
       bornAt: now,
       expireAt: now + FOOD_LIFE_MS,
