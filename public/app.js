@@ -32,6 +32,8 @@ const BTC_MIN_OUTCOME_PRICE = 0.001;
 const CHART_WINDOW_MS = 10_000;
 const BTC_5M_CHART_HISTORY_RATIO = 0.5;
 const CHART_AVATAR_RADIUS_CSS = 3.8;
+const CHART_INTRO_MS = 720; // crossfade window when the chart switches markets
+let chartSnapshotCanvas = null; // offscreen copy of the previous market's frame
 const ACTIVE_MARKET_POLL_MS = 1_500;
 const MARKET_LIST_POLL_MS = 10_000;
 const COMMENTS_POLL_MS = 10_000;
@@ -207,6 +209,8 @@ const state = {
   smoothedPrice: null,
   chartYMin: null,
   chartYMax: null,
+  chartLastMarketId: null,
+  chartIntroStart: 0,
 };
 
 const textAnimations = new WeakMap();
@@ -988,6 +992,33 @@ function normalizeChartPrice(value) {
   return numeric <= 1.5 ? numeric * 100 : numeric;
 }
 
+// Copy the current chart frame into an offscreen canvas so the next frame can
+// dissolve it into the new market (used for the market-switch crossfade).
+function captureChartSnapshot(canvas) {
+  if (!canvas || canvas.width < 2 || canvas.height < 2) {
+    chartSnapshotCanvas = null;
+    return;
+  }
+  if (!chartSnapshotCanvas) {
+    chartSnapshotCanvas = document.createElement("canvas");
+  }
+  if (chartSnapshotCanvas.width !== canvas.width || chartSnapshotCanvas.height !== canvas.height) {
+    chartSnapshotCanvas.width = canvas.width;
+    chartSnapshotCanvas.height = canvas.height;
+  }
+  const sctx = chartSnapshotCanvas.getContext("2d");
+  if (!sctx) {
+    chartSnapshotCanvas = null;
+    return;
+  }
+  sctx.clearRect(0, 0, chartSnapshotCanvas.width, chartSnapshotCanvas.height);
+  try {
+    sctx.drawImage(canvas, 0, 0);
+  } catch {
+    chartSnapshotCanvas = null;
+  }
+}
+
 // The user's own open bet on a market (largest by stake), for the chart label.
 function getMyChartBet(market) {
   if (!market?.id || !state.user) {
@@ -1095,6 +1126,14 @@ function drawMarketChartFrame() {
   const plotHeight = Math.max(1, bottom - top);
   const scaleY = (price) => bottom - ((price - state.chartYMin) / Math.max(1, state.chartYMax - state.chartYMin)) * plotHeight;
   const scaleX = (at) => left + ((Math.min(windowEnd, Math.max(windowStart, at)) - windowStart) / duration) * plotWidth;
+
+  // Market switched -> snapshot the previous frame (still on the canvas) so we can
+  // dissolve it into the new chart below. Purely visual; data is untouched.
+  if (state.chartLastMarketId !== null && state.chartLastMarketId !== market.id) {
+    captureChartSnapshot(canvas);
+    state.chartIntroStart = performance.now();
+  }
+  state.chartLastMarketId = market.id;
 
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = appBg;
@@ -1279,7 +1318,19 @@ function drawMarketChartFrame() {
     ctx.fillText(seg3, tx, cy);
   }
 
-  if ((market.status === "open" && btc) || Math.abs((state.smoothedPrice || 0) - currentPrice) > 0.04) {
+  // Dissolve the previous market's snapshot on top of the new chart so the switch
+  // reads as a smooth crossfade instead of an abrupt cut + ragged redraw.
+  const introElapsed = state.chartIntroStart ? performance.now() - state.chartIntroStart : CHART_INTRO_MS;
+  const intro = Math.min(1, Math.max(0, introElapsed / CHART_INTRO_MS));
+  if (intro < 1 && chartSnapshotCanvas) {
+    const ease = 1 - Math.pow(1 - intro, 3); // ease-out cubic
+    ctx.save();
+    ctx.globalAlpha = 1 - ease;
+    ctx.drawImage(chartSnapshotCanvas, 0, 0, width, height);
+    ctx.restore();
+  }
+
+  if ((market.status === "open" && btc) || Math.abs((state.smoothedPrice || 0) - currentPrice) > 0.04 || intro < 1) {
     state.chartRaf = requestAnimationFrame(drawMarketChartFrame);
     return;
   }
