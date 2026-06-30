@@ -31,6 +31,9 @@ const FISH_MAX = 5;
 const FOOD_ARM_MS = 1500; // brief settle before the hungry fish start hunting
 const EAT_MS = 3280; // a bite is gradual, never instant
 const FRAME_MS = 33; // ~30fps simulation cap to stay light on the phone
+const FOOD_LIFE_MS = 16000; // uneaten food slowly fades out and vanishes
+const FOOD_FADE_MS = 2800; // fade window at the end of a crumb's life
+const FISH_LEAVE_GRACE_MS = 1600; // after the food is gone, fish linger then leave
 const SHAKE_JERK = 26; // summed |Δacceleration| that counts as a deliberate shake
 const SHAKE_FEED_COOLDOWN_MS = 1400; // min gap between shake-triggered food spills
 
@@ -56,6 +59,7 @@ let fish = [];
 let food = [];
 let bubbles = [];
 let pendingFoodAvatars = [];
+let pendingSummon = false; // remember to summon canvas fish once the canvas is ready
 
 let rafId = 0;
 let lastTs = 0;
@@ -254,13 +258,36 @@ function primeDomAquarium() {
   if (!measured) {
     return false;
   }
+  // Fish are no longer spawned at idle — only summoned by a shake (summonDomFish).
+  // Just keep the loop alive while there is something to animate.
+  if (domFish.length || domFood.length) {
+    startDomLoop();
+  }
+  return true;
+}
+
+// Summon fish to swim IN from off-screen to chase freshly shaken-in food.
+function summonDomFish() {
+  if (!enabled) {
+    return false;
+  }
+  const measured = measureDomLayer();
+  if (!measured) {
+    return false;
+  }
   const { layer, width, height } = measured;
+  // Wake any fish that were heading out of frame.
+  domFish.forEach((f) => {
+    f.leaving = false;
+    f.leaveAt = 0;
+  });
   if (domFish.length && layer.querySelector(".aquarium-dom-fish")) {
     startDomLoop();
     return true;
   }
   layer.querySelectorAll(".aquarium-dom-fish").forEach((node) => node.remove());
-  const fishCount = 5;
+  domFish = [];
+  const fishCount = Math.round(rand(FISH_MIN, FISH_MAX));
   const palettes = ["gold", "cyan", "violet", "mint", "coral"];
   for (let i = 0; i < fishCount; i += 1) {
     const el = document.createElement("span");
@@ -268,20 +295,23 @@ function primeDomAquarium() {
     el.className = `aquarium-dom-fish fish-${i + 1} ${palettes[i] || "gold"}`;
     el.innerHTML = DOM_FISH_SVG;
     layer.appendChild(el);
+    const fromLeft = Math.random() > 0.5;
     domFish.push({
       el,
-      x: rand(width * 0.1, width * 0.9),
-      y: rand(height * 0.18, height * 0.9),
-      vx: rand(-1, 1) * 14 || 8,
+      x: fromLeft ? -34 : width + 34, // enter from off-screen
+      y: rand(domBandTop(height) + 6, domBandBottom(height) - 6),
+      vx: (fromLeft ? 1 : -1) * rand(36, 60), // swim inward
       vy: rand(-5, 5),
       scale,
       speed: rand(13, 25),
-      dir: Math.random() > 0.5 ? 1 : -1,
+      dir: fromLeft ? 1 : -1,
       target: null,
       satietyUntil: 0,
       wanderUntil: 0,
       wanderVx: rand(-1, 1),
       wanderVy: rand(-0.45, 0.45),
+      leaving: false,
+      leaveAt: 0,
     });
   }
   startDomLoop();
@@ -308,7 +338,6 @@ function appendDomFood(avatars) {
   if (!layer) {
     return;
   }
-  primeDomAquarium();
   avatars.slice(-36).forEach((avatar, index) => {
     const measured = measureDomLayer();
     if (!measured) {
@@ -328,6 +357,7 @@ function appendDomFood(avatars) {
       crumb.style.backgroundPosition = "center";
     }
     layer.appendChild(crumb);
+    const bornAt = Date.now() + Math.min(900, index * 24);
     domFood.push({
       el: crumb,
       x,
@@ -337,7 +367,9 @@ function appendDomFood(avatars) {
       r: rand(url ? 4.2 : 3.2, url ? 6.2 : 4.8),
       restY: rand(measured.height * 0.34, measured.height * 0.95),
       settled: false,
-      bornAt: Date.now() + Math.min(900, index * 24),
+      bornAt,
+      expireAt: bornAt + FOOD_LIFE_MS,
+      fade: 1,
       wobble: Math.random() * Math.PI * 2,
       eat: 0,
       claimedBy: null,
@@ -436,12 +468,16 @@ function updateDomFood(dt, width, height) {
       crumb.vy = -Math.abs(crumb.vy) * 0.5;
     }
   }
+  const tNow = Date.now();
   domFood = domFood.filter((crumb) => {
-    const keep = crumb.eat < 1;
-    if (!keep) {
+    if (crumb.eat >= 1 || tNow >= crumb.expireAt) {
       crumb.el?.remove();
+      return false;
     }
-    return keep;
+    // Uneaten crumbs gently fade out over the last seconds of their life.
+    const life = crumb.expireAt - tNow;
+    crumb.fade = Math.max(0, Math.min(1, life / FOOD_FADE_MS));
+    return true;
   });
 }
 
@@ -450,13 +486,25 @@ function updateDomFish(dt, width, height) {
   const top = domBandTop(height);
   const bottom = domBandBottom(height);
   for (const f of domFish) {
+    // No food left -> linger briefly, then swim out of frame (don't idle on screen).
+    if (!domFood.length) {
+      if (!f.leaveAt) {
+        f.leaveAt = now + FISH_LEAVE_GRACE_MS;
+      }
+    } else {
+      f.leaveAt = 0;
+      f.leaving = false;
+    }
+    if (f.leaveAt && now > f.leaveAt) {
+      f.leaving = true;
+    }
     if (f.target && (f.target.eat > 0 || !domFood.includes(f.target))) {
       if (f.target?.claimedBy === f) {
         f.target.claimedBy = null;
       }
       f.target = null;
     }
-    if (!f.target && now > f.satietyUntil) {
+    if (!f.leaving && !f.target && now > f.satietyUntil) {
       const prey = nearestDomFoodFor(f);
       if (prey) {
         prey.claimedBy = f;
@@ -466,7 +514,12 @@ function updateDomFish(dt, width, height) {
 
     let ax = 0;
     let ay = 0;
-    if (f.target) {
+    if (f.leaving) {
+      // Swim toward the nearest side and leave the frame.
+      const exitLeft = f.x < width / 2;
+      ax = (exitLeft ? -1 : 1) * f.speed * 2.4;
+      ay = ((top + bottom) / 2 - f.y) * 0.6;
+    } else if (f.target) {
       const dx = f.target.x - f.x;
       const dy = f.target.y - f.y;
       const dist = Math.hypot(dx, dy) || 1;
@@ -498,17 +551,19 @@ function updateDomFish(dt, width, height) {
     }
 
     // Gentle separation so the school does not collapse into one blob.
-    for (const other of domFish) {
-      if (other === f) {
-        continue;
-      }
-      const sx = f.x - other.x;
-      const sy = f.y - other.y;
-      const d2 = sx * sx + sy * sy;
-      if (d2 > 0.01 && d2 < 34 * 34) {
-        const d = Math.sqrt(d2);
-        ax += (sx / d) * f.speed * 0.9;
-        ay += (sy / d) * f.speed * 0.9;
+    if (!f.leaving) {
+      for (const other of domFish) {
+        if (other === f) {
+          continue;
+        }
+        const sx = f.x - other.x;
+        const sy = f.y - other.y;
+        const d2 = sx * sx + sy * sy;
+        if (d2 > 0.01 && d2 < 34 * 34) {
+          const d = Math.sqrt(d2);
+          ax += (sx / d) * f.speed * 0.9;
+          ay += (sy / d) * f.speed * 0.9;
+        }
       }
     }
 
@@ -516,7 +571,7 @@ function updateDomFish(dt, width, height) {
     f.vx += ax * dt;
     f.vy += ay * dt;
     const sp = Math.hypot(f.vx, f.vy);
-    const maxSp = f.speed * (startled ? 3 : f.target ? 2.7 : 1.25);
+    const maxSp = f.speed * (startled ? 3 : (f.target || f.leaving) ? 2.7 : 1.25);
     if (sp > maxSp) {
       f.vx = (f.vx / sp) * maxSp;
       f.vy = (f.vy / sp) * maxSp;
@@ -526,13 +581,16 @@ function updateDomFish(dt, width, height) {
     f.x += f.vx * dt;
     f.y += f.vy * dt;
 
-    const margin = 16;
-    if (f.x < margin) {
-      f.x = margin;
-      f.vx = Math.abs(f.vx);
-    } else if (f.x > width - margin) {
-      f.x = width - margin;
-      f.vx = -Math.abs(f.vx);
+    // Leaving fish are allowed to cross the side walls and exit; others bounce.
+    if (!f.leaving) {
+      const margin = 16;
+      if (f.x < margin) {
+        f.x = margin;
+        f.vx = Math.abs(f.vx);
+      } else if (f.x > width - margin) {
+        f.x = width - margin;
+        f.vx = -Math.abs(f.vx);
+      }
     }
     if (f.y < top) {
       f.y = top;
@@ -545,6 +603,15 @@ function updateDomFish(dt, width, height) {
       f.dir = f.vx >= 0 ? 1 : -1;
     }
   }
+
+  // Remove fish that have fully left the frame so the loop can wind down.
+  domFish = domFish.filter((f) => {
+    if (f.leaving && (f.x < -50 || f.x > width + 50)) {
+      f.el?.remove();
+      return false;
+    }
+    return true;
+  });
 }
 
 function renderDomAquarium() {
@@ -566,7 +633,8 @@ function renderDomAquarium() {
   for (const crumb of domFood) {
     const bornAlpha = now < crumb.bornAt ? 0 : 1;
     const shrink = crumb.eat > 0 ? Math.max(0, 1 - crumb.eat) : 1;
-    crumb.el.style.opacity = String(Math.min(1, bornAlpha * (0.9 + shrink * 0.1)));
+    const fade = crumb.fade ?? 1;
+    crumb.el.style.opacity = String(Math.min(1, bornAlpha * (0.9 + shrink * 0.1) * fade));
     crumb.el.style.width = `${(crumb.r * 2 * shrink).toFixed(1)}px`;
     crumb.el.style.height = `${(crumb.r * 2 * shrink).toFixed(1)}px`;
     crumb.el.style.transform = `translate3d(${(crumb.x - crumb.r).toFixed(1)}px, ${(crumb.y - crumb.r).toFixed(1)}px, 0) scale(${Math.max(0.2, shrink).toFixed(3)})`;
@@ -603,6 +671,8 @@ function domFrame(ts) {
   }
   if (enabled && (domFish.length || domFood.length)) {
     domRafId = requestAnimationFrame(domFrame);
+  } else {
+    stopDomLoop(); // nothing left to animate -> wind the loop fully down
   }
 }
 
@@ -616,7 +686,8 @@ function startDomLoop() {
   }
   if (!domIntervalId) {
     domIntervalId = window.setInterval(() => {
-      if (!canAnimateDomAquarium()) {
+      if (!canAnimateDomAquarium() || (!domFish.length && !domFood.length)) {
+        stopDomLoop(); // idle -> don't keep ticking for nothing
         return;
       }
       const now = Date.now();
@@ -721,11 +792,16 @@ function bandBottom() {
   return cssH * 0.985;
 }
 
-function ensureFish() {
+// Summon fish to swim IN from off-screen (only on a shake). Wakes any that were
+// swimming away.
+function summonFish() {
   if (!measure()) {
-    // Defer until the canvas has a real size.
     return false;
   }
+  fish.forEach((f) => {
+    f.leaving = false;
+    f.leaveAt = 0;
+  });
   if (fish.length) {
     return true;
   }
@@ -733,21 +809,24 @@ function ensureFish() {
   for (let i = 0; i < count; i += 1) {
     const palette = FISH_PALETTES[Math.floor(Math.random() * FISH_PALETTES.length)];
     const size = rand(11, 16);
+    const fromLeft = Math.random() > 0.5;
     fish.push({
-      x: rand(cssW * 0.2, cssW * 0.8),
+      x: fromLeft ? -size * 2 : cssW + size * 2, // enter from off-screen
       y: rand(bandTop() + size, bandBottom() - size),
-      vx: rand(-1, 1) * 14 || 10,
+      vx: (fromLeft ? 1 : -1) * rand(34, 56), // swim inward
       vy: rand(-4, 4),
       size,
       palette,
       speed: rand(16, 26),
       tailPhase: Math.random() * Math.PI * 2,
-      dir: Math.random() > 0.5 ? 1 : -1,
+      dir: fromLeft ? 1 : -1,
       target: null,
       satietyUntil: 0,
       wanderUntil: 0,
       wanderVx: rand(-1, 1),
       wanderVy: rand(-0.4, 0.4),
+      leaving: false,
+      leaveAt: 0,
     });
   }
   if (!bubbles.length) {
@@ -763,9 +842,13 @@ export function primeAquarium(retries = 10) {
   if (!canAnimateAquarium()) {
     return false;
   }
-  if (ensureFish()) {
+  // Don't spawn fish at idle anymore — only keep the loop alive for existing
+  // food/fish. Fish are summoned by a shake (see spillAquariumFood/summonFish).
+  if (measure()) {
     flushPendingFood();
-    startLoop();
+    if (food.length || fish.length) {
+      startLoop();
+    }
     return true;
   }
   if (retries > 0) {
@@ -805,6 +888,8 @@ function appendFood(avatars) {
       restY: rand(cssH * 0.34, bandBottom() - 3),
       settled: false,
       bornAt: now,
+      expireAt: now + FOOD_LIFE_MS,
+      fade: 1,
       wobble: Math.random() * Math.PI * 2,
       eat: 0,
       claimedBy: null,
@@ -833,27 +918,38 @@ function flushPendingFood() {
   const queued = pendingFoodAvatars;
   pendingFoodAvatars = [];
   appendFood(queued);
+  if (pendingSummon) {
+    pendingSummon = false;
+    summonFish();
+  }
   return true;
 }
 
 // Convert a snapshot of on-chart avatars into falling food crumbs.
 // avatars: [{ xFrac, yFrac, url, color, initial, side }]
-export function spillAquariumFood(avatars) {
+export function spillAquariumFood(avatars, summon = false) {
   if (!enabled || !Array.isArray(avatars) || !avatars.length) {
     return;
   }
   playAquariumFood(); // soft sprinkle as the crumbs hit the water
   appendDomFood(avatars);
+  if (summon) {
+    summonDomFish(); // fish swim in from off-screen only on a shake
+  }
   if (!measure()) {
     queuePendingFood(avatars);
+    if (summon) {
+      pendingSummon = true;
+    }
     primeAquarium(16);
     return;
   }
-  ensureFish();
   appendFood(avatars);
-  if (enabled) {
-    startLoop();
+  if (summon) {
+    summonFish();
   }
+  startLoop();
+  startDomLoop();
 }
 
 // Tilt drift, fed from W3C deviceorientation (degrees) or Telegram (converted).
@@ -977,7 +1073,7 @@ function onShake(strength = 1) {
   const avatars = feedProvider ? feedProvider() : null;
   if (Array.isArray(avatars) && avatars.length) {
     aquariumHaptic("medium"); // buzz as the food drops in
-    spillAquariumFood(avatars);
+    spillAquariumFood(avatars, true); // shake summons the fish
   }
 }
 
@@ -1126,8 +1222,16 @@ function updateFood(dt) {
       f.vy = -Math.abs(f.vy) * 0.5;
     }
   }
-  // Remove fully eaten crumbs.
-  food = food.filter((f) => f.eat < 1);
+  // Fade out + remove crumbs that were eaten or have lived out their life.
+  const tNow = Date.now();
+  food = food.filter((f) => {
+    if (f.eat >= 1 || tNow >= f.expireAt) {
+      return false;
+    }
+    const life = f.expireAt - tNow;
+    f.fade = Math.max(0, Math.min(1, life / FOOD_FADE_MS));
+    return true;
+  });
 }
 
 function nearestFoodFor(f) {
@@ -1160,6 +1264,18 @@ function updateFish(dt) {
   const top = bandTop();
   const bottom = bandBottom();
   for (const f of fish) {
+    // No food left -> linger briefly, then swim out (don't idle on screen).
+    if (!food.length) {
+      if (!f.leaveAt) {
+        f.leaveAt = now + FISH_LEAVE_GRACE_MS;
+      }
+    } else {
+      f.leaveAt = 0;
+      f.leaving = false;
+    }
+    if (f.leaveAt && now > f.leaveAt) {
+      f.leaving = true;
+    }
     // Drop a stale/eaten target.
     if (f.target && (f.target.eat > 0 || !food.includes(f.target))) {
       if (f.target?.claimedBy === f) {
@@ -1168,7 +1284,7 @@ function updateFish(dt) {
       f.target = null;
     }
     // Hunt only when not recently fed.
-    if (!f.target && now > f.satietyUntil) {
+    if (!f.leaving && !f.target && now > f.satietyUntil) {
       const prey = nearestFoodFor(f);
       if (prey) {
         prey.claimedBy = f;
@@ -1178,7 +1294,12 @@ function updateFish(dt) {
 
     let ax = 0;
     let ay = 0;
-    if (f.target) {
+    if (f.leaving) {
+      // Swim toward the nearest side and exit.
+      const exitLeft = f.x < cssW / 2;
+      ax = (exitLeft ? -1 : 1) * f.speed * 2.4;
+      ay = ((top + bottom) / 2 - f.y) * 0.6;
+    } else if (f.target) {
       const dx = f.target.x - f.x;
       const dy = f.target.y - f.y;
       const dist = Math.hypot(dx, dy) || 1;
@@ -1210,18 +1331,20 @@ function updateFish(dt) {
     }
 
     // Gentle separation between schoolmates.
-    for (const other of fish) {
-      if (other === f) {
-        continue;
-      }
-      const sx = f.x - other.x;
-      const sy = f.y - other.y;
-      const d2 = sx * sx + sy * sy;
-      const near = (f.size + other.size) * 1.4;
-      if (d2 > 0.01 && d2 < near * near) {
-        const d = Math.sqrt(d2);
-        ax += (sx / d) * f.speed * 0.9;
-        ay += (sy / d) * f.speed * 0.9;
+    if (!f.leaving) {
+      for (const other of fish) {
+        if (other === f) {
+          continue;
+        }
+        const sx = f.x - other.x;
+        const sy = f.y - other.y;
+        const d2 = sx * sx + sy * sy;
+        const near = (f.size + other.size) * 1.4;
+        if (d2 > 0.01 && d2 < near * near) {
+          const d = Math.sqrt(d2);
+          ax += (sx / d) * f.speed * 0.9;
+          ay += (sy / d) * f.speed * 0.9;
+        }
       }
     }
 
@@ -1230,7 +1353,7 @@ function updateFish(dt) {
     f.vy += ay * dt;
     // Speed clamp.
     const sp = Math.hypot(f.vx, f.vy);
-    const maxSp = f.speed * (startled ? 3 : f.target ? 2.7 : 1.25);
+    const maxSp = f.speed * (startled ? 3 : (f.target || f.leaving) ? 2.7 : 1.25);
     if (sp > maxSp) {
       f.vx = (f.vx / sp) * maxSp;
       f.vy = (f.vy / sp) * maxSp;
@@ -1241,13 +1364,16 @@ function updateFish(dt) {
     f.x += f.vx * dt;
     f.y += f.vy * dt;
 
-    // Keep fish inside the aquarium band; bounce softly off walls.
-    if (f.x < f.size) {
-      f.x = f.size;
-      f.vx = Math.abs(f.vx);
-    } else if (f.x > cssW - f.size) {
-      f.x = cssW - f.size;
-      f.vx = -Math.abs(f.vx);
+    // Keep fish inside the band; bounce off side walls — except leaving fish,
+    // which are allowed to cross a side wall and exit the frame.
+    if (!f.leaving) {
+      if (f.x < f.size) {
+        f.x = f.size;
+        f.vx = Math.abs(f.vx);
+      } else if (f.x > cssW - f.size) {
+        f.x = cssW - f.size;
+        f.vx = -Math.abs(f.vx);
+      }
     }
     if (f.y < top + f.size * 0.5) {
       f.y = top + f.size * 0.5;
@@ -1262,6 +1388,9 @@ function updateFish(dt) {
     }
     f.tailPhase += dt * (5 + Math.min(12, sp * 0.25));
   }
+
+  // Remove fish that have fully left the frame so the loop can wind down.
+  fish = fish.filter((f) => !(f.leaving && (f.x < -60 || f.x > cssW + 60)));
 }
 
 function updateBubbles(dt) {
@@ -1310,6 +1439,7 @@ function drawFood() {
       continue;
     }
     ctx.save();
+    ctx.globalAlpha = f.fade ?? 1; // fade out near end of life
     ctx.shadowColor = f.side === "YES" ? "rgba(25,195,125,0.5)" : "rgba(239,70,111,0.5)";
     ctx.shadowBlur = 6;
     ctx.beginPath();
@@ -1450,11 +1580,8 @@ function frame(ts) {
     return;
   }
 
-  // Spawn the fish as soon as the canvas is actually measurable, regardless of
-  // whether it was sized at init (loader/auth/layout can delay the first size).
-  if (!fish.length) {
-    ensureFish();
-  }
+  // Fish are no longer auto-spawned here — they only swim in on a shake. Just
+  // flush any food that was queued before the canvas had a size.
   flushPendingFood();
 
   // Cap the simulation to ~30fps. Ambient fish do not need 60fps, and halving
@@ -1483,7 +1610,8 @@ function frame(ts) {
     }
   }
 
-  // Keep swimming while enabled; fish are the always-on ambience.
+  // Animate only while there is food or fish; otherwise wind down so the canvas
+  // stays clear and nothing burns CPU at idle.
   if (enabled && (fish.length || food.length)) {
     rafId = requestAnimationFrame(frame);
   }
