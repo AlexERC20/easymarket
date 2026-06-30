@@ -221,6 +221,53 @@ export function playMotionSound(kind = "tap") {
   playSweep({ duration: 0.15, start: 135, peak: 610, end: 190, volume: 0.09 });
 }
 
+let lastAquariumEatAt = 0;
+
+// Soft sprinkle as fish food drops onto the water. Gated by the sound toggle
+// (getAudioContext returns null when sound is off).
+export function playAquariumFood() {
+  const ctx = getAudioContext();
+  if (!ctx) {
+    return;
+  }
+  [920, 1180, 1480].forEach((freq, index) => {
+    const startAt = ctx.currentTime + index * 0.04;
+    const duration = 0.08;
+    const gain = connectEnvelope(ctx, ctx.destination, startAt, duration, 0.05);
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(freq, startAt);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.68, startAt + duration);
+    osc.connect(gain);
+    osc.start(startAt);
+    safeStop(osc, startAt + duration + 0.04);
+  });
+}
+
+// Soft "blub" gulp when a fish bites a crumb. Throttled so a feeding frenzy
+// doesn't machine-gun the sound.
+export function playAquariumEat() {
+  const now = Date.now();
+  if (now - lastAquariumEatAt < 110) {
+    return;
+  }
+  lastAquariumEatAt = now;
+  const ctx = getAudioContext();
+  if (!ctx) {
+    return;
+  }
+  const startAt = ctx.currentTime;
+  const duration = 0.11;
+  const gain = connectEnvelope(ctx, ctx.destination, startAt, duration, 0.06);
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(210, startAt);
+  osc.frequency.exponentialRampToValueAtTime(85, startAt + duration);
+  osc.connect(gain);
+  osc.start(startAt);
+  safeStop(osc, startAt + duration + 0.04);
+}
+
 function boltSvg(className = "lm-loader-bolt") {
   return `
     <svg class="${className}" viewBox="0 0 64 64" aria-hidden="true">

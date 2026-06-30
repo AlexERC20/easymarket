@@ -826,115 +826,80 @@ h2 {
   position: absolute;
   top: 0;
   left: 0;
-  width: 27px;
-  height: 15px;
-  /* teardrop body: rounder head (right), tapered toward the tail (left) */
-  border-radius: 58% 42% 42% 58% / 56% 56% 44% 44%;
-  background:
-    radial-gradient(circle at 76% 34%, #ffffff 0 5%, #10151f 6% 10%, transparent 11%),
-    radial-gradient(ellipse at 44% 22%, rgba(255, 255, 255, 0.6), transparent 40%),
-    linear-gradient(96deg, #ff7a2c 0%, #ffb347 50%, #ffe2a8 100%);
-  box-shadow:
-    0 0 10px rgba(255, 179, 71, 0.3),
-    0 0 20px rgba(53, 246, 255, 0.1);
-  opacity: 0.96;
-  transform: translate3d(-40px, 160px, 0);
-  -webkit-transform: translate3d(-40px, 160px, 0);
+  width: 32px;
+  height: 18px;
+  transform: translate3d(-60px, 160px, 0);
+  -webkit-transform: translate3d(-60px, 160px, 0);
   transform-origin: 50% 50%;
   will-change: transform;
+  --fish-body: #ffb347;
+  --fish-belly: #ffe2a8;
+  --fish-fin: #ff8a3c;
+  --fish-glow: rgba(255, 179, 71, 0.42);
+  filter: drop-shadow(0 0 5px var(--fish-glow));
 }
 
-.aquarium-dom-fish::before {
-  content: "";
-  position: absolute;
-  left: -11px;
-  top: 1px;
-  width: 13px;
-  height: 13px;
-  background: #ff7a2c;
-  /* forked tail fan */
-  clip-path: polygon(100% 50%, 0 0, 22% 50%, 0 100%);
-  transform-origin: right center;
-  animation: aquariumDomTail var(--tail-ms, 620ms) ease-in-out infinite alternate;
+.aquarium-dom-fish .fish-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
 
-.aquarium-dom-fish::after {
-  content: "";
-  position: absolute;
-  left: 9px;
-  top: -5px;
-  width: 9px;
-  height: 8px;
-  border-radius: 70% 70% 20% 20%;
-  background: rgba(255, 138, 60, 0.8);
-  clip-path: polygon(12% 100%, 52% 0, 100% 100%);
-  opacity: 0.82;
+.aquarium-dom-fish .body {
+  fill: var(--fish-body);
+}
+
+.aquarium-dom-fish .belly {
+  fill: var(--fish-belly);
+  opacity: 0.7;
+}
+
+.aquarium-dom-fish .fin {
+  fill: var(--fish-fin);
+  opacity: 0.9;
+}
+
+.aquarium-dom-fish .tail path {
+  fill: var(--fish-fin);
+}
+
+.aquarium-dom-fish .eye-w { fill: #ffffff; }
+.aquarium-dom-fish .eye-p { fill: #0b1018; }
+.aquarium-dom-fish .eye-h { fill: rgba(255, 255, 255, 0.92); }
+
+.aquarium-dom-fish .tail {
+  transform-box: fill-box;
+  transform-origin: 100% 50%;
+  animation: aquariumDomTail var(--tail-ms, 560ms) ease-in-out infinite alternate;
 }
 
 .aquarium-dom-fish.fish-2 {
-  background:
-    radial-gradient(circle at 74% 35%, #ffffff 0 5%, #10151f 6% 10%, transparent 11%),
-    radial-gradient(ellipse at 42% 24%, rgba(255, 255, 255, 0.58), transparent 36%),
-    linear-gradient(90deg, #2aa7ff 0%, #46d4ff 46%, #bff2ff 100%);
-  box-shadow:
-    0 0 10px rgba(70, 212, 255, 0.34),
-    0 0 18px rgba(183, 255, 77, 0.08);
-}
-
-.aquarium-dom-fish.fish-2::before {
-  background: #2aa7ff;
-}
-
-.aquarium-dom-fish.fish-2::after {
-  background: rgba(42, 167, 255, 0.78);
+  --fish-body: #46d4ff;
+  --fish-belly: #bff2ff;
+  --fish-fin: #2aa7ff;
+  --fish-glow: rgba(70, 212, 255, 0.42);
 }
 
 .aquarium-dom-fish.fish-3 {
-  background:
-    radial-gradient(circle at 74% 35%, #ffffff 0 5%, #10151f 6% 10%, transparent 11%),
-    radial-gradient(ellipse at 42% 24%, rgba(255, 255, 255, 0.58), transparent 36%),
-    linear-gradient(90deg, #8a5cff 0%, #b07bff 46%, #e7d6ff 100%);
-  box-shadow:
-    0 0 10px rgba(176, 123, 255, 0.34),
-    0 0 18px rgba(53, 246, 255, 0.08);
-}
-
-.aquarium-dom-fish.fish-3::before {
-  background: #8a5cff;
-}
-
-.aquarium-dom-fish.fish-3::after {
-  background: rgba(138, 92, 255, 0.78);
+  --fish-body: #b07bff;
+  --fish-belly: #e7d6ff;
+  --fish-fin: #8a5cff;
+  --fish-glow: rgba(176, 123, 255, 0.42);
 }
 
 .aquarium-dom-fish.fish-4 {
-  background:
-    radial-gradient(circle at 74% 35%, #ffffff 0 5%, #10151f 6% 10%, transparent 11%),
-    radial-gradient(ellipse at 42% 24%, rgba(255, 255, 255, 0.58), transparent 36%),
-    linear-gradient(90deg, #2fc985 0%, #5be5a0 46%, #c9ffe6 100%);
-  box-shadow:
-    0 0 10px rgba(91, 229, 160, 0.32),
-    0 0 18px rgba(53, 246, 255, 0.08);
-}
-
-.aquarium-dom-fish.fish-4::before,
-.aquarium-dom-fish.fish-4::after {
-  background: #2fc985;
+  --fish-body: #5be5a0;
+  --fish-belly: #c9ffe6;
+  --fish-fin: #2fc985;
+  --fish-glow: rgba(91, 229, 160, 0.42);
 }
 
 .aquarium-dom-fish.fish-5 {
-  background:
-    radial-gradient(circle at 74% 35%, #ffffff 0 5%, #10151f 6% 10%, transparent 11%),
-    radial-gradient(ellipse at 42% 24%, rgba(255, 255, 255, 0.58), transparent 36%),
-    linear-gradient(90deg, #ff4f86 0%, #ff7aa8 46%, #ffd6e4 100%);
-  box-shadow:
-    0 0 10px rgba(255, 122, 168, 0.32),
-    0 0 18px rgba(176, 123, 255, 0.08);
-}
-
-.aquarium-dom-fish.fish-5::before,
-.aquarium-dom-fish.fish-5::after {
-  background: #ff4f86;
+  --fish-body: #ff7aa8;
+  --fish-belly: #ffd6e4;
+  --fish-fin: #ff4f86;
+  --fish-glow: rgba(255, 122, 168, 0.42);
 }
 
 .aquarium-dom-food {
@@ -969,11 +934,11 @@ h2 {
 
 @keyframes aquariumDomTail {
   from {
-    transform: rotate(-13deg) scaleX(0.9);
+    transform: rotate(-15deg);
   }
 
   to {
-    transform: rotate(16deg) scaleX(1.08);
+    transform: rotate(15deg);
   }
 }
 

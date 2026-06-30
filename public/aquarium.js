@@ -6,6 +6,23 @@
 // from the chart's own render loop and from market data, so the crumbs keep
 // falling onto the next round's fresh screen where the fish are already living.
 
+import { playAquariumFood, playAquariumEat } from "./lightning-motion.js?v=20260630-12";
+
+// Realistic little fish drawn as inline SVG (iOS DOM path). Faces +x; colours
+// come from CSS custom properties set per .fish-N class.
+const DOM_FISH_SVG = `
+  <svg class="fish-svg" viewBox="0 0 46 26" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+    <g class="tail"><path d="M16 13 L2 5 Q7 13 2 21 Z" /></g>
+    <path class="fin fin-d" d="M21 7 Q26 0 32 8 Z" />
+    <path class="fin fin-p" d="M25 16 Q27 22 31 17 Z" />
+    <ellipse class="body" cx="26" cy="13" rx="14" ry="7.5" />
+    <ellipse class="belly" cx="27" cy="16.4" rx="11" ry="3.2" />
+    <circle class="eye-w" cx="35" cy="11" r="2.4" />
+    <circle class="eye-p" cx="35.8" cy="11" r="1.2" />
+    <circle class="eye-h" cx="36.3" cy="10.4" r="0.5" />
+  </svg>
+`;
+
 const STORAGE_KEY = "easymarket_aquarium";
 const USER_CHOICE_KEY = "easymarket_aquarium_choice_v2";
 const MAX_FOOD = 80;
@@ -100,6 +117,14 @@ function reducedMotion() {
 
 function isTelegramMiniApp() {
   return Boolean(window.Telegram?.WebApp);
+}
+
+function aquariumHaptic(style = "light") {
+  try {
+    window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.(style);
+  } catch {
+    // ignore on platforms without haptics
+  }
 }
 
 function canAnimateAquarium() {
@@ -241,6 +266,7 @@ function primeDomAquarium() {
     const el = document.createElement("span");
     const scale = 0.76 + i * 0.07;
     el.className = `aquarium-dom-fish fish-${i + 1} ${palettes[i] || "gold"}`;
+    el.innerHTML = DOM_FISH_SVG;
     layer.appendChild(el);
     domFish.push({
       el,
@@ -454,6 +480,7 @@ function updateDomFish(dt, width, height) {
         f.target.claimedBy = null;
         f.target = null;
         f.satietyUntil = now + rand(450, 1500);
+        playAquariumEat();
       }
     } else {
       // Smoothly drifting heading gives natural curved cruising, not jerky turns.
@@ -815,6 +842,7 @@ export function spillAquariumFood(avatars) {
   if (!enabled || !Array.isArray(avatars) || !avatars.length) {
     return;
   }
+  playAquariumFood(); // soft sprinkle as the crumbs hit the water
   appendDomFood(avatars);
   if (!measure()) {
     queuePendingFood(avatars);
@@ -948,6 +976,7 @@ function onShake(strength = 1) {
   lastShakeFeedAt = now;
   const avatars = feedProvider ? feedProvider() : null;
   if (Array.isArray(avatars) && avatars.length) {
+    aquariumHaptic("medium"); // buzz as the food drops in
     spillAquariumFood(avatars);
   }
 }
@@ -1163,6 +1192,7 @@ function updateFish(dt) {
         f.target.claimedBy = null;
         f.target = null;
         f.satietyUntil = now + rand(450, 1500); // brief pause, then hunt again
+        playAquariumEat();
       }
     } else {
       // Smoothly drifting heading -> natural curved cruising instead of jerks.
