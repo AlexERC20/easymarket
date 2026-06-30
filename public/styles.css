@@ -1552,9 +1552,13 @@ h2 {
 }
 
 .loss-refund-list {
-  display: grid;
-  gap: 8px;
-  margin-top: 10px;
+  position: fixed;
+  left: 50%;
+  top: 40%;
+  z-index: 24; /* above the page content, below the sheets (30) */
+  width: min(92vw, 380px);
+  transform: translate(-50%, -50%);
+  pointer-events: none; /* container is click-through; the card re-enables taps */
 }
 
 .loss-refund-list.hidden {
@@ -1562,17 +1566,26 @@ h2 {
 }
 
 .loss-refund-card {
+  pointer-events: auto;
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
-  border: 1px solid rgba(183, 255, 77, 0.28);
-  border-radius: 14px;
+  border: 1px solid rgba(183, 255, 77, 0.36);
+  border-radius: 16px;
   background:
-    radial-gradient(circle at 14% 0%, rgba(183, 255, 77, 0.14), transparent 42%),
-    rgba(12, 17, 25, 0.86);
-  padding: 10px;
-  animation: softRise 260ms var(--ease-default, ease) both;
+    radial-gradient(circle at 14% 0%, rgba(183, 255, 77, 0.16), transparent 44%),
+    rgba(11, 16, 24, 0.97);
+  padding: 12px;
+  box-shadow: 0 26px 60px rgba(0, 0, 0, 0.55), 0 0 30px rgba(183, 255, 77, 0.16);
+  animation: lossRefundPop 360ms var(--ease-default, ease) both;
+}
+
+@keyframes lossRefundPop {
+  0% { opacity: 0; transform: translateY(16px) scale(0.92); }
+  60% { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .loss-refund-close {
