@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260701-09" />
+    <link rel="stylesheet" href="/styles.css?v=20260701-13" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260701-11" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -106,119 +106,170 @@
             <button id="tasksTabTasks" class="active" type="button" data-task-tab="tasks">Задания</button>
             <button id="tasksTabStats" type="button" data-task-tab="stats">Моя статистика</button>
           </div>
-          <button id="taskSettingsToggleBtn" class="task-settings-toggle" type="button" aria-expanded="false">
-            <span>Настройки</span>
-            <b aria-hidden="true">⚙</b>
-          </button>
-          <div id="taskSettingsPanel" class="task-settings-panel hidden">
-            <div class="task-row sound-toggle-row">
-              <div>
-                <strong>Звук эффектов</strong>
-                <small>Energy-saber клики, победы и важные отклики.</small>
-              </div>
-              <button id="motionSoundToggleBtn" class="task-button sound-toggle-button" type="button" aria-pressed="false">Выкл</button>
-            </div>
-            <div class="task-row sound-toggle-row">
-              <div>
-                <strong>Аквариум на BTC 5m</strong>
-                <small>Корм и рыбки только на 5-минутном BTC-графике.</small>
-              </div>
-              <button id="aquariumToggleBtn" class="task-button sound-toggle-button" type="button" aria-pressed="false">Выкл</button>
-            </div>
-          </div>
           <div class="task-list">
-            <details class="task-group" open>
-              <summary>Ежедневные прогнозы</summary>
-              <div class="task-row">
-                <div>
-                  <strong>Ежедневный вход</strong>
-                  <small>Проведи 5 минут в EasyMarket и забери +<span id="dailyPresenceTaskReward">50</span></small>
-                </div>
+            <div class="daily-progress" id="dailyProgressCard">
+              <div class="daily-progress-top">
+                <span>Дейлики сегодня</span>
+                <b><span id="dailyProgressCount">0/7</span> · +<span id="dailyProgressSum">0</span></b>
+              </div>
+              <div class="daily-progress-track"><span id="dailyProgressBar"></span></div>
+            </div>
+
+            <p class="task-section">Сегодня</p>
+            <div class="task-item">
+              <span class="task-ic" aria-hidden="true">👋</span>
+              <div class="task-body">
+                <strong>Ежедневный вход</strong>
+                <small>5 минут в игре</small>
+              </div>
+              <div class="task-act">
+                <span class="task-reward">+<span id="dailyPresenceTaskReward">50</span></span>
                 <button id="taskDailyPresenceBtn" class="task-button" type="button">Таймер</button>
               </div>
-              <div class="task-row">
-                <div>
-                  <strong>Первая ставка дня</strong>
-                  <small>Поставь 1 ставку и забери +<span id="dailyBetTaskReward">50</span></small>
-                </div>
+            </div>
+            <div class="task-item">
+              <span class="task-ic" aria-hidden="true">🎯</span>
+              <div class="task-body">
+                <strong>Первая ставка дня</strong>
+                <small>Поставь 1 ставку</small>
+              </div>
+              <div class="task-act">
+                <span class="task-reward">+<span id="dailyBetTaskReward">50</span></span>
                 <button class="task-button" data-daily-task="daily_bet" type="button">Забрать</button>
               </div>
-              <div class="task-row">
-                <div>
-                  <strong>1 прогноз по BTC</strong>
-                  <small>Сделай прогноз в BTC-маркете и забери +50</small>
-                </div>
+            </div>
+            <div class="task-item">
+              <span class="task-ic" aria-hidden="true">₿</span>
+              <div class="task-body">
+                <strong>Прогноз по BTC</strong>
+                <small>1 прогноз в BTC-маркете</small>
+              </div>
+              <div class="task-act">
+                <span class="task-reward">+50</span>
                 <button class="task-button" data-daily-task="daily_btc_prediction" type="button">Забрать</button>
               </div>
-              <div class="task-row">
-                <div>
-                  <strong>1 прогноз на футбол</strong>
-                  <small>Сделай футбольный прогноз и забери +50</small>
-                </div>
+            </div>
+            <div class="task-item">
+              <span class="task-ic" aria-hidden="true">⚽</span>
+              <div class="task-body">
+                <strong>Прогноз на футбол</strong>
+                <small>1 футбольный прогноз</small>
+              </div>
+              <div class="task-act">
+                <span class="task-reward">+50</span>
                 <button class="task-button" data-daily-task="daily_football_prediction" type="button">Забрать</button>
               </div>
-              <div class="task-row">
-                <div>
-                  <strong>5 прогнозов по BTC</strong>
-                  <small>Пять BTC-прогнозов за день дают +300</small>
-                </div>
+            </div>
+            <div class="task-item">
+              <span class="task-ic" aria-hidden="true">📈</span>
+              <div class="task-body">
+                <strong>5 прогнозов BTC</strong>
+                <small>Пять BTC-прогнозов за день</small>
+              </div>
+              <div class="task-act">
+                <span class="task-reward">+300</span>
                 <button class="task-button" data-daily-task="daily_btc_5_predictions" type="button">Забрать</button>
               </div>
-              <div class="task-row">
-                <div>
-                  <strong>Выиграй прогноз</strong>
-                  <small>Первая победа дня даёт +50</small>
-                </div>
+            </div>
+            <div class="task-item">
+              <span class="task-ic" aria-hidden="true">🏆</span>
+              <div class="task-body">
+                <strong>Выиграй прогноз</strong>
+                <small>Первая победа дня</small>
+              </div>
+              <div class="task-act">
+                <span class="task-reward">+50</span>
                 <button class="task-button" data-daily-task="daily_win_1" type="button">Забрать</button>
               </div>
-              <div class="task-row">
-                <div>
-                  <strong>5 побед подряд</strong>
-                  <small>Серия из пяти побед даёт +300</small>
-                </div>
+            </div>
+            <div class="task-item">
+              <span class="task-ic" aria-hidden="true">🔥</span>
+              <div class="task-body">
+                <strong>5 побед подряд</strong>
+                <small>Серия из пяти побед</small>
+              </div>
+              <div class="task-act">
+                <span class="task-reward">+300</span>
                 <button class="task-button" data-daily-task="daily_win_streak_5" type="button">Забрать</button>
               </div>
-            </details>
-            <details class="task-group">
-              <summary>Социальные</summary>
-              <div class="task-row info">
-                <div>
-                  <strong>Активность в чате</strong>
-                  <small>За каждое сообщение и реакцию в чате начисляются звезды.</small>
-                </div>
+            </div>
+
+            <p class="task-section">Социальные</p>
+            <div class="task-item info">
+              <span class="task-ic" aria-hidden="true">💬</span>
+              <div class="task-body">
+                <strong>Активность в чате</strong>
+                <small>Звёзды за сообщения и реакции</small>
               </div>
-              <div class="task-row">
-                <div>
-                  <strong>Рассказать друзьям</strong>
-                  <small>+<span id="shareTaskReward">100</span> за share, +<span id="refTaskReward">500</span> и +$<span id="refTaskUsdtReward">30</span> после первой ставки друга</small>
-                </div>
+              <span class="task-reward soft">авто</span>
+            </div>
+            <div class="task-item">
+              <span class="task-ic" aria-hidden="true">📣</span>
+              <div class="task-body">
+                <strong>Рассказать друзьям</strong>
+                <small>Друг после ставки: +<span id="refTaskReward">500</span> / +$<span id="refTaskUsdtReward">30</span></small>
+              </div>
+              <div class="task-act">
+                <span class="task-reward">+<span id="shareTaskReward">100</span></span>
                 <button id="taskShareBtn" class="task-button gold" type="button">Share</button>
               </div>
-            </details>
-            <details class="task-group">
-              <summary>Подписки</summary>
-              <div class="task-row">
-                <div>
-                  <strong>Подписаться на канал AV</strong>
-                  <small>+<span id="channelTaskReward">500</span> после проверки ботом</small>
-                </div>
+            </div>
+
+            <p class="task-section">Подписки</p>
+            <div class="task-item">
+              <span class="task-ic" aria-hidden="true">📢</span>
+              <div class="task-body">
+                <strong>Канал AV</strong>
+                <small>После проверки ботом</small>
+              </div>
+              <div class="task-act">
+                <span class="task-reward">+<span id="channelTaskReward">500</span></span>
                 <button id="taskChannelBtn" class="task-button" type="button">Открыть</button>
               </div>
-              <div class="task-row">
-                <div>
-                  <strong>Вступить в наш чат</strong>
-                  <small>+<span id="chatTaskReward">500</span> после проверки ботом</small>
-                </div>
+            </div>
+            <div class="task-item">
+              <span class="task-ic" aria-hidden="true">👥</span>
+              <div class="task-body">
+                <strong>Наш чат</strong>
+                <small>После проверки ботом</small>
+              </div>
+              <div class="task-act">
+                <span class="task-reward">+<span id="chatTaskReward">500</span></span>
                 <button id="taskChatBtn" class="task-button" type="button">Открыть</button>
               </div>
-              <div class="task-row featured">
-                <div>
-                  <strong>Подписаться на приватку</strong>
-                  <small>+<span id="privateChatTaskReward">15 000</span> авансом после проверки подписки</small>
-                </div>
+            </div>
+            <div class="task-item featured">
+              <span class="task-ic" aria-hidden="true">💎</span>
+              <div class="task-body">
+                <strong>Приватка</strong>
+                <small>Аванс после проверки подписки</small>
+              </div>
+              <div class="task-act">
+                <span class="task-reward">+<span id="privateChatTaskReward">15 000</span></span>
                 <button id="taskPrivateChatBtn" class="task-button gold" type="button">Открыть</button>
               </div>
-            </details>
+            </div>
+
+            <button id="taskSettingsToggleBtn" class="task-settings-toggle" type="button" aria-expanded="false">
+              <span>Настройки</span>
+              <b aria-hidden="true">⚙</b>
+            </button>
+            <div id="taskSettingsPanel" class="task-settings-panel hidden">
+              <div class="task-row sound-toggle-row">
+                <div>
+                  <strong>Звук эффектов</strong>
+                  <small>Energy-saber клики, победы и важные отклики.</small>
+                </div>
+                <button id="motionSoundToggleBtn" class="task-button sound-toggle-button" type="button" aria-pressed="false">Выкл</button>
+              </div>
+              <div class="task-row sound-toggle-row">
+                <div>
+                  <strong>Аквариум на BTC 5m</strong>
+                  <small>Корм и рыбки только на 5-минутном BTC-графике.</small>
+                </div>
+                <button id="aquariumToggleBtn" class="task-button sound-toggle-button" type="button" aria-pressed="false">Выкл</button>
+              </div>
+            </div>
           </div>
           <div id="taskStatsPanel" class="task-stats-panel hidden">
             <div id="taskStatsList" class="task-stats-list stagger-list"></div>
@@ -648,6 +699,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260701-12" type="module"></script>
+    <script src="/app.js?v=20260701-13" type="module"></script>
   </body>
 </html>

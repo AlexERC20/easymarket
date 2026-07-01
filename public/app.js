@@ -1840,11 +1840,60 @@ function markDailyTaskClaimed(taskKey) {
   renderTaskButtonStates();
 }
 
+// Daily tasks that count toward the "дейлики сегодня" progress header, with the
+// reward each one grants (presence/bet come from config, the rest are fixed).
+const DAILY_TASK_KEYS = [
+  "daily_presence",
+  "daily_bet",
+  "daily_btc_prediction",
+  "daily_football_prediction",
+  "daily_btc_5_predictions",
+  "daily_win_1",
+  "daily_win_streak_5",
+];
+const DAILY_TASK_FIXED_REWARD = {
+  daily_btc_prediction: 50,
+  daily_football_prediction: 50,
+  daily_btc_5_predictions: 300,
+  daily_win_1: 50,
+  daily_win_streak_5: 300,
+};
+
+function renderDailyProgress() {
+  const countEl = $("dailyProgressCount");
+  const sumEl = $("dailyProgressSum");
+  const bar = $("dailyProgressBar");
+  if (!countEl && !sumEl && !bar) return;
+
+  const presenceReward = Math.round(Number(state.publicConfig.task_daily_presence_fire || 50));
+  const betReward = Math.round(Number(state.publicConfig.task_daily_bet_fire || 50));
+  const total = DAILY_TASK_KEYS.length;
+  let claimed = 0;
+  let sum = 0;
+  DAILY_TASK_KEYS.forEach((key) => {
+    const status = getDailyTaskStatus(key);
+    const isClaimed = key === "daily_presence"
+      ? Boolean(state.presence?.claimed || status.claimed)
+      : Boolean(status.claimed);
+    if (!isClaimed) return;
+    claimed += 1;
+    sum += key === "daily_presence" ? presenceReward
+      : key === "daily_bet" ? betReward
+      : (DAILY_TASK_FIXED_REWARD[key] || 0);
+  });
+
+  if (countEl) countEl.textContent = `${claimed}/${total}`;
+  if (sumEl) sumEl.textContent = formatFire(sum);
+  if (bar) bar.style.setProperty("--progress", String(total ? claimed / total : 0));
+  $("dailyProgressCard")?.classList.toggle("is-complete", claimed >= total);
+}
+
 function renderTaskButtonStates() {
   document.querySelectorAll("[data-daily-task]").forEach((button) => {
     setTaskButtonVisualState(button, getDailyTaskStatus(button.dataset.dailyTask));
   });
   updatePresenceTaskButton();
+  renderDailyProgress();
 }
 
 function getMarketStatTitle(stat) {
