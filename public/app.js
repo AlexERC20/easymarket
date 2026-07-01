@@ -214,6 +214,7 @@ const state = {
   chartYMax: null,
   chartLastMarketId: null,
   chartIntroStart: 0,
+  lastFlashedPrice: null,
 };
 
 const textAnimations = new WeakMap();
@@ -2807,6 +2808,16 @@ function renderMarket() {
   animateText($("currentPrice"), currentPrice, (value) => (
     worldCup ? `${value.toFixed(1)}%` : `$${formatPrice(value)}`
   ));
+  // Brief green/red glow on the live price when it ticks up or down.
+  const priceEl = $("currentPrice");
+  const prevPrice = state.lastFlashedPrice;
+  if (priceEl && Number.isFinite(prevPrice) && Math.abs(currentPrice - prevPrice) >= Math.max(0.01, Math.abs(prevPrice) * 0.00003)) {
+    const dir = currentPrice > prevPrice ? "price-up" : "price-down";
+    priceEl.classList.remove("price-up", "price-down");
+    void priceEl.offsetWidth; // restart the one-shot animation
+    priceEl.classList.add(dir);
+  }
+  state.lastFlashedPrice = currentPrice;
 
   const moveElement = $("priceMove");
   moveElement.classList.toggle("positive", priceMove >= 0);
@@ -2843,6 +2854,11 @@ function updateTimer() {
 
   const remainingMs = new Date(market.end_time).getTime() - Date.now();
   const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
+  // Build tension in the final seconds of a round (pulse + red on the counter).
+  document.querySelector(".countdown")?.classList.toggle(
+    "is-urgent",
+    market.status === "open" && remainingMs > 0 && seconds <= 10,
+  );
   if (remainingMs <= 0 && market.status === "open" && state.expiryRefreshMarketId !== market.id) {
     state.expiryRefreshMarketId = market.id;
     state.buyQueue = [];
@@ -4661,6 +4677,11 @@ document.querySelectorAll(".outcome-button").forEach((button) => {
     triggerHaptic("selection");
     state.selectedSide = button.dataset.side;
     state.sideSelectedMarketId = getDisplayMarket()?.id || null;
+    // One-shot "charge" pulse in the side colour on the picked outcome.
+    button.classList.remove("side-charge");
+    void button.offsetWidth;
+    button.classList.add("side-charge");
+    window.setTimeout(() => button.classList.remove("side-charge"), 460);
     renderTradeTicket();
   });
 });
