@@ -571,6 +571,128 @@ export function showWalletFlowBurst(direction = "in", label = "") {
   window.setTimeout(() => wrap.remove(), isOut ? 1500 : 1700);
 }
 
+// --- Hybrid thematic effects -----------------------------------------------
+// A domain-specific motion vocabulary so events read differently: coins for a
+// win, a colored arrow for a bet direction, a gold pop for a reward claim, an
+// orange candle sweep for a new round. Lightning is kept only for epic wins.
+
+// Win celebration: a shower of gold coins + confetti. Epic wins also get a
+// single lightning accent (the reserved "big moment" signifier).
+export function showWinCelebration(options = {}) {
+  const tier = Math.max(1, Math.min(4, Number(options.tier || 1)));
+  const epic = Boolean(options.epic || tier >= 4);
+  playMotionSound(epic ? "win" : "success");
+  if (reducedMotion()) {
+    return;
+  }
+
+  const layer = document.createElement("div");
+  layer.className = `lm-win-cele${epic ? " epic" : ""}`;
+  layer.setAttribute("aria-hidden", "true");
+
+  const coinCount = epic ? 22 : 9 + tier * 3;
+  const confettiCount = epic ? 26 : 11 + tier * 3;
+  const confColors = ["var(--yes)", "#f7b955", "#35f6ff", "#ffd65c"];
+  const pieces = [];
+  for (let i = 0; i < coinCount; i += 1) {
+    const left = Math.round(Math.random() * 100);
+    const delay = Math.round(Math.random() * 420);
+    const dur = 900 + Math.round(Math.random() * 700);
+    const drift = Math.round((Math.random() - 0.5) * 70);
+    const spin = Math.round(180 + Math.random() * 540) * (Math.random() > 0.5 ? 1 : -1);
+    pieces.push(
+      `<span class="lm-coin" style="left:${left}%;--lm-drift:${drift}px;--lm-spin:${spin}deg;animation-delay:${delay}ms;animation-duration:${dur}ms"></span>`
+    );
+  }
+  for (let i = 0; i < confettiCount; i += 1) {
+    const left = Math.round(Math.random() * 100);
+    const delay = Math.round(Math.random() * 480);
+    const dur = 1000 + Math.round(Math.random() * 800);
+    const drift = Math.round((Math.random() - 0.5) * 130);
+    const spin = Math.round(240 + Math.random() * 720) * (Math.random() > 0.5 ? 1 : -1);
+    const color = confColors[i % confColors.length];
+    pieces.push(
+      `<span class="lm-confetti" style="left:${left}%;--lm-drift:${drift}px;--lm-spin:${spin}deg;background:${color};animation-delay:${delay}ms;animation-duration:${dur}ms"></span>`
+    );
+  }
+  layer.innerHTML = `${epic ? boltSvg("lm-win-bolt") : ""}${pieces.join("")}`;
+  document.body.appendChild(layer);
+  window.setTimeout(() => layer.remove(), epic ? 2800 : 2200);
+}
+
+// Bet placement: a directional cue by side. YES/UP -> green rise, NO/DOWN -> red fall.
+export function showDirectionalSurge(side = "YES", originRect = null) {
+  const up = side === "YES" || side === "UP" || side === "up";
+  playMotionSound("success");
+  if (reducedMotion()) {
+    return;
+  }
+
+  const layer = document.createElement("div");
+  layer.className = `lm-dir-surge ${up ? "is-up" : "is-down"}`;
+  layer.setAttribute("aria-hidden", "true");
+  if (originRect && Number.isFinite(originRect.left)) {
+    layer.style.left = `${originRect.left + originRect.width / 2}px`;
+    layer.style.top = `${originRect.top + originRect.height / 2}px`;
+    layer.classList.add("has-origin");
+  }
+
+  const count = 7;
+  const streaks = [];
+  for (let i = 0; i < count; i += 1) {
+    const offset = Math.round((i - (count - 1) / 2) * 15);
+    const delay = Math.round(Math.random() * 90);
+    const len = 58 + Math.round(Math.random() * 44);
+    streaks.push(
+      `<span class="lm-surge-streak" style="--lm-off:${offset}px;--lm-len:${len}px;animation-delay:${delay}ms"></span>`
+    );
+  }
+  layer.innerHTML = `<span class="lm-surge-arrow"></span>${streaks.join("")}`;
+  document.body.appendChild(layer);
+  window.setTimeout(() => layer.remove(), 900);
+}
+
+// Reward claim: a gold ring pop + gold sparks at the source (the coin flying to
+// the balance is handled by the caller).
+export function showRewardPop(originEl = null) {
+  playMotionSound("success");
+  if (reducedMotion()) {
+    return;
+  }
+  const rect = originEl?.getBoundingClientRect?.();
+  const cx = rect && rect.width ? rect.left + rect.width / 2 : window.innerWidth / 2;
+  const cy = rect && rect.width ? rect.top + rect.height / 2 : window.innerHeight * 0.4;
+
+  const pop = document.createElement("div");
+  pop.className = "lm-reward-pop";
+  pop.setAttribute("aria-hidden", "true");
+  pop.style.left = `${cx}px`;
+  pop.style.top = `${cy}px`;
+  pop.innerHTML = `<span class="lm-reward-ring"></span><span class="lm-reward-ring lm-reward-ring-2"></span>`;
+  document.body.appendChild(pop);
+  appendSparks(pop, 0, 0, 10, 3);
+  window.setTimeout(() => pop.remove(), 1000);
+}
+
+// New round: an orange candle-flip + horizontal sweep, replacing the bolt burst.
+export function showRoundSweep(label = "NEXT ROUND") {
+  playMotionSound("success");
+  if (reducedMotion()) {
+    return;
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "lm-round-sweep";
+  wrap.setAttribute("aria-hidden", "true");
+  const safeLabel = String(label || "").replace(/[<>&]/g, "");
+  wrap.innerHTML = `
+    <span class="lm-round-band"></span>
+    <span class="lm-round-candle"></span>
+    <strong>${safeLabel}</strong>
+  `;
+  document.body.appendChild(wrap);
+  window.setTimeout(() => wrap.remove(), 1400);
+}
+
 export function triggerBalancePulse(element) {
   if (!element) {
     return;

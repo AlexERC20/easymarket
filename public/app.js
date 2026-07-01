@@ -4,11 +4,15 @@ import {
   isMotionSoundEnabled,
   playMotionSound,
   setMotionSoundEnabled,
+  showDirectionalSurge,
+  showRewardPop,
+  showRoundSweep,
   showSuccessLightningBurst,
   showWalletFlowBurst,
+  showWinCelebration,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260630-12";
+} from "./lightning-motion.js?v=20260701-13";
 import {
   initAquarium,
   isAquariumEnabled,
@@ -17,7 +21,7 @@ import {
   setAquariumRuntimeAllowed,
   setAquariumShakeFeeder,
   spillAquariumFood,
-} from "./aquarium.js?v=20260701-05";
+} from "./aquarium.js?v=20260701-06";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -1390,13 +1394,6 @@ function triggerLightningFlash(kind = "success", tier = 1, options = {}) {
   });
 }
 
-function triggerRewardBurst(label = "⚡", tier = 1, options = {}) {
-  showSuccessLightningBurst(label === "⚡" ? "Success" : label, {
-    tier,
-    epic: options.epic,
-  });
-}
-
 // Fly a small reward token from a source element toward the fire balance.
 function flyRewardToBalance(fromEl, glyph = "⭐") {
   if (prefersReducedMotion()) {
@@ -1430,7 +1427,7 @@ function showRoundTransition(market) {
   }
   state.lastRoundTransitionMarketId = market.id;
   triggerHaptic("round");
-  showSuccessLightningBurst("NEXT ROUND");
+  showRoundSweep("NEXT ROUND");
   showToast("Раунд завершён. Готовлю следующий...");
   if (shouldRunAquariumForMarket(market)) {
     // Spill 5m BTC avatar dots into the aquarium as falling food. Long/sports
@@ -1453,7 +1450,7 @@ function showWinOverlay(label, value = 0, tier = 1) {
   }
   const safeTier = Math.max(1, Math.min(4, Number(tier || 1)));
   const epic = Math.abs(Number(value || 0)) >= 100 || safeTier >= 4;
-  showSuccessLightningBurst("YOU WON", { tier: safeTier, epic });
+  showWinCelebration({ tier: safeTier, epic });
   amount.textContent = label;
   overlay.classList.toggle("epic", epic);
   overlay.classList.remove("hidden");
@@ -4622,7 +4619,9 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
     triggerHaptic("success");
-    triggerLightningFlash("success", getTierForAmount(buyAmount, currency));
+    // Directional confirmation by side (UP green / DOWN red) instead of lightning.
+    const surgeOrigin = document.querySelector(`.outcome-button[data-side="${side}"]`)?.getBoundingClientRect();
+    showDirectionalSurge(side, surgeOrigin);
     renderMarket();
     renderMarketChart();
     renderMe();
@@ -5320,8 +5319,7 @@ async function claimShareTask() {
     }
     if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
-      triggerLightningFlash("success");
-      triggerRewardBurst("⚡");
+      showRewardPop();
       showToast(`+${formatFire(result.awarded)} за share.`);
       return;
     }
@@ -5353,8 +5351,7 @@ async function claimSimpleTask(taskKey) {
     }
     if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
-      triggerLightningFlash("success");
-      triggerRewardBurst("⚡");
+      showRewardPop();
       showToast(`+${formatFire(result.awarded)} за задание.`);
       return;
     }
@@ -5394,8 +5391,7 @@ async function claimDailyPresenceTask() {
       showToast("Ежедневный вход уже забран.");
     } else if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
-      triggerLightningFlash("success");
-      triggerRewardBurst("⚡");
+      showRewardPop();
       showToast(`+${formatFire(result.awarded)} за 5 минут в EasyMarket.`);
     } else {
       showToast("Дневной лимит бонусов уже достигнут.");
@@ -5550,8 +5546,7 @@ async function claimDailyTaskByKey(taskKey, button = null) {
       showToast("Этот дейлик уже забран.");
     } else if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
-      triggerLightningFlash("success");
-      triggerRewardBurst("⚡");
+      showRewardPop(button);
       flyRewardToBalance(button);
       const claimedRow = button?.closest(".task-row");
       if (claimedRow) {
