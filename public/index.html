@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260701-06" />
+    <link rel="stylesheet" href="/styles.css?v=20260701-07" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260630-07" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -221,7 +221,7 @@
             </details>
           </div>
           <div id="taskStatsPanel" class="task-stats-panel hidden">
-            <div id="taskStatsList" class="task-stats-list"></div>
+            <div id="taskStatsList" class="task-stats-list stagger-list"></div>
           </div>
         </div>
       </section>
@@ -311,7 +311,7 @@
               <button id="withdrawSubmitBtn" class="trade-confirm" type="button">Вывести</button>
             </div>
             <div id="walletHistoryPanel" class="wallet-mode-panel wallet-history-panel hidden">
-              <div id="walletHistoryList" class="wallet-history-list">
+              <div id="walletHistoryList" class="wallet-history-list stagger-list">
                 <p class="muted">История пока загружается.</p>
               </div>
             </div>
@@ -332,7 +332,7 @@
             <button class="active" type="button" data-leaderboard-currency="STAR">Звезды</button>
             <button type="button" data-leaderboard-currency="USDT">USDT</button>
           </div>
-          <div id="leaderboardList" class="leaderboard-list">
+          <div id="leaderboardList" class="leaderboard-list stagger-list">
             <p class="muted">Загружаю рейтинг...</p>
           </div>
         </div>
@@ -364,7 +364,7 @@
               </div>
             </div>
             <div id="userClanCard" class="user-clan-card hidden"></div>
-            <div id="clansList" class="clans-list">
+            <div id="clansList" class="clans-list stagger-list">
               <p class="muted">Загружаю кланы...</p>
             </div>
           </div>
@@ -648,6 +648,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260701-06" type="module"></script>
+    <script src="/app.js?v=20260701-07" type="module"></script>
   </body>
 </html>

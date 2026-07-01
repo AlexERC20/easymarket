@@ -1864,12 +1864,29 @@ function renderTaskStats() {
     return;
   }
 
-  list.innerHTML = stats.slice(0, 30).map((stat) => {
+  // At-a-glance summary above the per-market rows.
+  const closed = stats.filter((s) => s.status === "resolved" || Number(s.open_positions_count || 0) === 0);
+  const wins = closed.filter((s) => Number(s.pnl || 0) > 0).length;
+  const winRate = closed.length ? Math.round((wins / closed.length) * 100) : 0;
+  const betsTotal = stats.reduce((sum, s) => sum + Number(s.positions_count || 0), 0);
+  const best = stats.reduce((b, s) => (Number(s.pnl || 0) > Number(b ? b.pnl : -Infinity) ? s : b), null);
+  const bestText = best && Number(best.pnl || 0) > 0
+    ? formatSignedCurrencyAmount(Number(best.pnl), normalizeCurrency(best.currency))
+    : "—";
+  const summary = `
+    <div class="task-stat-summary">
+      <div><b>${winRate}%</b><span>винрейт</span></div>
+      <div><b>${formatFire(betsTotal)}</b><span>ставок</span></div>
+      <div><b class="profit">${escapeHtml(bestText)}</b><span>лучшее</span></div>
+    </div>
+  `;
+
+  const rows = stats.slice(0, 30).map((stat) => {
     const currency = normalizeCurrency(stat.currency);
     const pnl = Number(stat.pnl || 0);
     const status = stat.open_positions_count > 0 ? "LIVE" : (stat.status === "resolved" ? "CLOSED" : String(stat.status || "").toUpperCase());
     return `
-      <div class="task-stat-row">
+      <div class="task-stat-row pnl-${pnl >= 0 ? "up" : "down"}">
         <div class="task-stat-main">
           <strong>${escapeHtml(getMarketStatTitle(stat))}</strong>
           <small>${escapeHtml(status)} · ${stat.positions_count || 0} поз. · ${escapeHtml(currency)}</small>
@@ -1881,6 +1898,7 @@ function renderTaskStats() {
       </div>
     `;
   }).join("");
+  list.innerHTML = summary + rows;
 }
 
 async function api(path, options = {}) {
@@ -1932,7 +1950,9 @@ function openSheet(sheetOrId) {
   }
   sheet.classList.remove("hidden", "sheet-open", "sheet-closing");
   void sheet.offsetWidth;
-  sheet.classList.add("sheet-open");
+  sheet.classList.add("sheet-open", "is-revealing");
+  // One-shot content stagger on open; drop the flag so list polls don't replay it.
+  window.setTimeout(() => sheet.classList.remove("is-revealing"), 950);
 }
 
 function closeSheet(sheetOrId, options = {}) {
@@ -3320,16 +3340,21 @@ function renderLeaderboard() {
     return;
   }
 
+  const medals = ["🥇", "🥈", "🥉"];
   const rows = state.leaderboard.map((player, index) => {
     const name = player.username
       ? `@${player.username}`
       : player.first_name || `user ${player.telegram_id}`;
     const winRate = Number(player.win_rate_pct || 0);
+    const rank = index + 1;
+    const isMe = state.user && String(player.telegram_id) === String(state.user.telegram_id);
+    const rankClass = rank <= 3 ? ` rank-${rank}` : "";
+    const rankMark = rank <= 3 ? medals[rank - 1] : String(rank);
     return `
-      <div class="leaderboard-row">
-        <span class="leaderboard-rank">${index + 1}</span>
+      <div class="leaderboard-row${rankClass}${isMe ? " is-me" : ""}">
+        <span class="leaderboard-rank">${rankMark}</span>
         <div class="leaderboard-player">
-          <strong>${escapeHtml(name)}</strong>
+          <strong>${escapeHtml(name)}${isMe ? " · ты" : ""}</strong>
           <small>${formatFire(player.bet_count)} ставок · WR ${winRate.toFixed(0)}%</small>
         </div>
         <strong class="leaderboard-balance">${formatCurrencyAmount(player.balance, player.currency || state.leaderboardCurrency)}</strong>
