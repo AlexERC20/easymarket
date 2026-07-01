@@ -2615,20 +2615,42 @@ function renderOrderbookPanel() {
   const side = state.orderbookSide;
   const rows = buildSyntheticOrderbook(market, side);
   const maxSize = Math.max(1, ...rows.map((row) => Number(row.size) || 0));
-  const html = `
+  const headPrice = formatCents(getOutcomePrice(market, side));
+  // Depth as a 0..1 scaleX factor so the bar animates on the compositor (no reflow).
+  const depthFor = (row) => Math.round(((Number(row.size) || 0) / maxSize) * 1000) / 1000;
+  const existingRows = list.querySelectorAll(".orderbook-row");
+
+  // Same side and row structure already present: update values in place so the
+  // depth bars glide via their CSS transition instead of being recreated (which
+  // would kill the animation and reset the scroll).
+  if (list.dataset.bookSide === side && existingRows.length === rows.length) {
+    const headEl = list.querySelector(".orderbook-head b");
+    if (headEl) headEl.textContent = headPrice;
+    rows.forEach((row, index) => {
+      const rowEl = existingRows[index];
+      rowEl.style.setProperty("--depth", String(depthFor(row)));
+      const priceEl = rowEl.querySelector("b");
+      const sizeEl = rowEl.querySelector("small");
+      if (priceEl) priceEl.textContent = formatCents(row.price);
+      if (sizeEl) sizeEl.textContent = row.size.toLocaleString("ru-RU");
+    });
+    return;
+  }
+
+  list.innerHTML = `
     <div class="orderbook-head">
       <span>${marketSideLabel(market, side)} book</span>
-      <b>${formatCents(getOutcomePrice(market, side))}</b>
+      <b>${headPrice}</b>
     </div>
     ${rows.map((row) => `
-      <div class="orderbook-row ${row.type}" style="--depth:${Math.round((Number(row.size) || 0) / maxSize * 100)}%">
+      <div class="orderbook-row ${row.type}" style="--depth:${depthFor(row)}">
         <span>${row.type === "bid" ? "Bid" : "Ask"}</span>
         <b>${formatCents(row.price)}</b>
         <small>${row.size.toLocaleString("ru-RU")}</small>
       </div>
     `).join("")}
   `;
-  setInnerHtmlIfChanged(list, html);
+  list.dataset.bookSide = side;
 }
 
 function mergeWorldCupChartPoint(market) {
@@ -3059,6 +3081,13 @@ function renderMe() {
   const positions = state.positions.filter((position) => (
     position.status === "open" && normalizeCurrency(position.currency) === state.currency
   ));
+  // Drop P&L-flash memory for positions that are no longer open (avoid slow growth).
+  const openPositionIds = new Set(positions.map((position) => String(position.id)));
+  for (const id in state.lastPositionPnl) {
+    if (!openPositionIds.has(id)) {
+      delete state.lastPositionPnl[id];
+    }
+  }
   setSectionToggle("positionToggle", positions.length, "positions");
 
   const container = $("positionList");
@@ -3350,6 +3379,10 @@ function renderFeedPanel() {
     state.feedPanel = "positions";
   }
   const currentPanel = state.feedPanel;
+  // Clear the Live new-trade badge here so every switch path (tap AND swipe) covers it.
+  if (currentPanel === "activity") {
+    $("feedActivityBtn")?.classList.remove("has-new");
+  }
   $("activitySection")?.classList.toggle("hidden", currentPanel !== "positions");
   $("activitySection")?.classList.toggle("active", currentPanel === "positions");
   $("recentSection")?.classList.toggle("hidden", currentPanel !== "activity");
@@ -5098,9 +5131,6 @@ document.querySelectorAll("[data-feed-panel]").forEach((button) => {
     }
     triggerHaptic("selection");
     state.feedPanel = panel;
-    if (panel === "activity") {
-      $("feedActivityBtn")?.classList.remove("has-new");
-    }
     renderFeedPanel();
   });
 });
