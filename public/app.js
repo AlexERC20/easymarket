@@ -169,6 +169,7 @@ const state = {
   aquariumSnapAt: 0,
   aquariumRuntimeAllowed: false,
   freshActivityIds: new Set(),
+  lastPositionPnl: {},
   seenSettledPositionIds: new Set(),
   pendingBuy: false,
   pendingBuyKey: null,
@@ -1396,6 +1397,33 @@ function triggerRewardBurst(label = "⚡", tier = 1, options = {}) {
   });
 }
 
+// Fly a small reward token from a source element toward the fire balance.
+function flyRewardToBalance(fromEl, glyph = "⭐") {
+  if (prefersReducedMotion()) {
+    return;
+  }
+  const target = $("fireBalance") || $("balance");
+  if (!fromEl?.getBoundingClientRect || !target) {
+    return;
+  }
+  const from = fromEl.getBoundingClientRect();
+  const to = target.getBoundingClientRect();
+  if (!from.width || !to.width) {
+    return;
+  }
+  const startX = from.left + from.width / 2;
+  const startY = from.top + from.height / 2;
+  const coin = document.createElement("div");
+  coin.className = "reward-coin";
+  coin.textContent = glyph;
+  coin.style.left = `${startX}px`;
+  coin.style.top = `${startY}px`;
+  coin.style.setProperty("--dx", `${to.left + to.width / 2 - startX}px`);
+  coin.style.setProperty("--dy", `${to.top + to.height / 2 - startY}px`);
+  document.body.appendChild(coin);
+  window.setTimeout(() => coin.remove(), 760);
+}
+
 function showRoundTransition(market) {
   if (!market?.id || state.lastRoundTransitionMarketId === market.id) {
     return;
@@ -2240,6 +2268,10 @@ function handleActivity(activity) {
     freshTrades
       .reverse()
       .forEach(showTradeBubble);
+    // Badge the Live tab when new trades land and you're not looking at it.
+    if (freshTrades.length && state.feedPanel !== "activity") {
+      $("feedActivityBtn")?.classList.add("has-new");
+    }
   }
 
   nextActivity.forEach((trade) => state.seenActivityIds.add(trade.id));
@@ -2582,13 +2614,14 @@ function renderOrderbookPanel() {
 
   const side = state.orderbookSide;
   const rows = buildSyntheticOrderbook(market, side);
+  const maxSize = Math.max(1, ...rows.map((row) => Number(row.size) || 0));
   const html = `
     <div class="orderbook-head">
       <span>${marketSideLabel(market, side)} book</span>
       <b>${formatCents(getOutcomePrice(market, side))}</b>
     </div>
     ${rows.map((row) => `
-      <div class="orderbook-row ${row.type}">
+      <div class="orderbook-row ${row.type}" style="--depth:${Math.round((Number(row.size) || 0) / maxSize * 100)}%">
         <span>${row.type === "bid" ? "Bid" : "Ask"}</span>
         <b>${formatCents(row.price)}</b>
         <small>${row.size.toLocaleString("ru-RU")}</small>
@@ -3050,6 +3083,12 @@ function renderMe() {
     const exitQuote = estimateSellQuote({ position, market: activeMarket, outcomePrice: marketPrice });
     const exitValue = exitQuote.exitValue;
     const pnl = exitQuote.pnl;
+    // Flash the P&L green/red when it moves since the last render.
+    const prevPnl = state.lastPositionPnl[position.id];
+    const pnlFlash = Number.isFinite(prevPnl) && Math.abs(pnl - prevPnl) > 0.005
+      ? (pnl > prevPnl ? " pnl-flash-up" : " pnl-flash-down")
+      : "";
+    state.lastPositionPnl[position.id] = pnl;
     const isSelling = state.pendingSellPositionId === position.id;
     const expiresAt = position.market_end_time ? new Date(position.market_end_time).getTime() : 0;
     const secondsLeft = expiresAt > 0 ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 1_000)) : null;
@@ -3077,7 +3116,7 @@ function renderMe() {
           <small>${payout.toFixed(2)} shares · Avg ${formatCents(position.avg_price)} · Spent ${formatCurrencyAmount(spent, currency)}${marketBadge}</small>
         </div>
         <div class="position-actions">
-          <strong class="${pnl >= 0 ? "positive" : "negative"}">${formatSignedCurrencyAmount(pnl, currency)}</strong>
+          <strong class="${pnl >= 0 ? "positive" : "negative"}${pnlFlash}">${formatSignedCurrencyAmount(pnl, currency)}</strong>
           <button
             class="sell-button ${sideClass(position.side)}"
             data-side="${position.side}"
@@ -5059,6 +5098,9 @@ document.querySelectorAll("[data-feed-panel]").forEach((button) => {
     }
     triggerHaptic("selection");
     state.feedPanel = panel;
+    if (panel === "activity") {
+      $("feedActivityBtn")?.classList.remove("has-new");
+    }
     renderFeedPanel();
   });
 });
@@ -5480,6 +5522,14 @@ async function claimDailyTaskByKey(taskKey, button = null) {
       triggerHaptic("success");
       triggerLightningFlash("success");
       triggerRewardBurst("⚡");
+      flyRewardToBalance(button);
+      const claimedRow = button?.closest(".task-row");
+      if (claimedRow) {
+        claimedRow.classList.remove("task-claimed");
+        void claimedRow.offsetWidth;
+        claimedRow.classList.add("task-claimed");
+        window.setTimeout(() => claimedRow.classList.remove("task-claimed"), 900);
+      }
       showToast(`+${formatFire(result.awarded)} за дейлик.`);
     } else {
       showToast("Дневной лимит бонусов уже достигнут.");
