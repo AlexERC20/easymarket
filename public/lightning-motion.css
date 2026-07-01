@@ -826,7 +826,6 @@
   animation-name: lmCoinFall;
   animation-timing-function: cubic-bezier(0.4, 0, 0.7, 1);
   animation-fill-mode: both;
-  will-change: transform, opacity;
 }
 
 .lm-confetti {
@@ -838,7 +837,6 @@
   animation-name: lmConfettiFall;
   animation-timing-function: cubic-bezier(0.35, 0, 0.7, 1);
   animation-fill-mode: both;
-  will-change: transform, opacity;
 }
 
 @keyframes lmCoinFall {

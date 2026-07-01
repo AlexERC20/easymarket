@@ -617,7 +617,8 @@ export function showWinCelebration(options = {}) {
   }
   layer.innerHTML = `${epic ? boltSvg("lm-win-bolt") : ""}${pieces.join("")}`;
   document.body.appendChild(layer);
-  window.setTimeout(() => layer.remove(), epic ? 2800 : 2200);
+  // Removal must outlast the slowest piece: confetti dur(<=1800) + delay(<=480).
+  window.setTimeout(() => layer.remove(), epic ? 2900 : 2400);
 }
 
 // Bet placement: a directional cue by side. YES/UP -> green rise, NO/DOWN -> red fall.
@@ -631,7 +632,9 @@ export function showDirectionalSurge(side = "YES", originRect = null) {
   const layer = document.createElement("div");
   layer.className = `lm-dir-surge ${up ? "is-up" : "is-down"}`;
   layer.setAttribute("aria-hidden", "true");
-  if (originRect && Number.isFinite(originRect.left)) {
+  // Guard on width (not just a finite left): a hidden/collapsed element returns
+  // an all-zero rect, and we want the centered default in that case.
+  if (originRect && originRect.width) {
     layer.style.left = `${originRect.left + originRect.width / 2}px`;
     layer.style.top = `${originRect.top + originRect.height / 2}px`;
     layer.classList.add("has-origin");
