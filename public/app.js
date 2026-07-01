@@ -4619,7 +4619,9 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
     triggerHaptic("success");
-    // Directional confirmation by side (UP green / DOWN red) instead of lightning.
+    // Bet placement keeps its signature lightning (priority), plus the
+    // directional up/down surge by side (UP green / DOWN red).
+    triggerLightningFlash("success", getTierForAmount(buyAmount, currency));
     const surgeOrigin = document.querySelector(`.outcome-button[data-side="${side}"]`)?.getBoundingClientRect();
     showDirectionalSurge(side, surgeOrigin);
     renderMarket();
