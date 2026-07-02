@@ -45,6 +45,8 @@ const ACTIVE_MARKET_POLL_MS = 1_500;
 const MARKET_LIST_POLL_MS = 10_000;
 const COMMENTS_POLL_MS = 10_000;
 const LEADERBOARD_CACHE_MS = 90_000;
+const LEADERBOARD_MODES = ["BEST_24H", "WINS_24H", "BALANCE", "CLANS"];
+const LEADERBOARD_CURRENCIES = ["USDT", "STAR"];
 const SHEET_CLOSE_MS = 360;
 const SHEET_HEIGHT_MORPH_MS = 360;
 const COLLAPSE_LIMIT = 3;
@@ -87,7 +89,7 @@ const state = {
   leaderboardCache: {},
   leaderboardCacheAt: {},
   leaderboardLoading: false,
-  leaderboardRequestId: 0,
+  leaderboardPreloadPromise: null,
   activity: [],
   chartPoints: [],
   btcMarkets: [],
@@ -2480,64 +2482,65 @@ async function loadRecentMarkets() {
   renderRecentMarkets();
 }
 
-async function loadLeaderboard(currency = state.leaderboardCurrency, options = {}) {
+function applyLeaderboardCache(mode = state.leaderboardMode, currency = state.leaderboardCurrency) {
   const normalizedCurrency = normalizeCurrency(currency);
-  const mode = normalizeLeaderboardMode(options.mode || state.leaderboardMode);
-  const cacheKey = getLeaderboardCacheKey(mode, normalizedCurrency);
-  const cached = state.leaderboardCache[cacheKey];
-  const cachedAt = Number(state.leaderboardCacheAt[cacheKey] || 0);
-  const cacheFresh = Boolean(cached && Date.now() - cachedAt < LEADERBOARD_CACHE_MS);
-  if (!options.force && cacheFresh) {
-    if (state.leaderboardCurrency === normalizedCurrency && state.leaderboardMode === mode) {
-      state.leaderboard = cached.players || [];
-      state.leaderboardClans = cached.clans || [];
+  const normalizedMode = normalizeLeaderboardMode(mode);
+  const cached = state.leaderboardCache[getLeaderboardCacheKey(normalizedMode, normalizedCurrency)];
+  state.leaderboard = cached?.players || [];
+  state.leaderboardClans = cached?.clans || [];
+  return Boolean(cached);
+}
+
+async function fetchLeaderboardSnapshot(mode, currency) {
+  const normalizedCurrency = normalizeCurrency(currency);
+  const normalizedMode = normalizeLeaderboardMode(mode);
+  const data = await api(`/api/leaderboard?limit=30&currency=${encodeURIComponent(normalizedCurrency)}&mode=${encodeURIComponent(normalizedMode)}`);
+  const cacheKey = getLeaderboardCacheKey(normalizedMode, normalizedCurrency);
+  state.leaderboardCache[cacheKey] = {
+    players: data.players || [],
+    clans: data.clans || [],
+  };
+  state.leaderboardCacheAt[cacheKey] = Date.now();
+  return state.leaderboardCache[cacheKey];
+}
+
+async function preloadLeaderboards({ force = false } = {}) {
+  if (state.leaderboardPreloadPromise) {
+    return state.leaderboardPreloadPromise;
+  }
+
+  const selectedCached = applyLeaderboardCache();
+  state.leaderboardLoading = !selectedCached;
+  renderLeaderboard();
+
+  const jobs = [];
+  for (const currency of LEADERBOARD_CURRENCIES) {
+    for (const mode of LEADERBOARD_MODES) {
+      const cacheKey = getLeaderboardCacheKey(mode, currency);
+      const cachedAt = Number(state.leaderboardCacheAt[cacheKey] || 0);
+      const cacheFresh = Boolean(state.leaderboardCache[cacheKey] && Date.now() - cachedAt < LEADERBOARD_CACHE_MS);
+      if (!force && cacheFresh) {
+        continue;
+      }
+      jobs.push(fetchLeaderboardSnapshot(mode, currency));
+    }
+  }
+
+  state.leaderboardPreloadPromise = Promise.allSettled(jobs)
+    .then((results) => {
+      const failed = results.some((result) => result.status === "rejected");
+      applyLeaderboardCache();
       state.leaderboardLoading = false;
       renderLeaderboard();
-    }
-    return;
-  }
+      if (failed) {
+        throw new Error("leaderboard_preload_failed");
+      }
+    })
+    .finally(() => {
+      state.leaderboardPreloadPromise = null;
+    });
 
-  const requestId = state.leaderboardRequestId + 1;
-  state.leaderboardRequestId = requestId;
-
-  if (cached && state.leaderboardCurrency === normalizedCurrency && state.leaderboardMode === mode) {
-    state.leaderboard = cached.players || [];
-    state.leaderboardClans = cached.clans || [];
-  }
-  state.leaderboardLoading = !cached || Boolean(options.force);
-
-  if (!options.background || cached) {
-    renderLeaderboard();
-  }
-
-  try {
-    const data = await api(`/api/leaderboard?limit=30&currency=${encodeURIComponent(normalizedCurrency)}&mode=${encodeURIComponent(mode)}`);
-    const players = data.players || [];
-    const clans = data.clans || [];
-    state.leaderboardCache[cacheKey] = {
-      players,
-      clans,
-    };
-    state.leaderboardCacheAt[cacheKey] = Date.now();
-
-    if (state.leaderboardCurrency === normalizedCurrency && state.leaderboardMode === mode && state.leaderboardRequestId === requestId) {
-      state.leaderboard = players;
-      state.leaderboardClans = clans;
-      state.leaderboardLoading = false;
-      renderLeaderboard();
-      return;
-    }
-
-    if (state.leaderboardRequestId === requestId) {
-      state.leaderboardLoading = false;
-    }
-  } catch (error) {
-    if (state.leaderboardRequestId === requestId) {
-      state.leaderboardLoading = false;
-      renderLeaderboard();
-    }
-    throw error;
-  }
+  return state.leaderboardPreloadPromise;
 }
 
 async function loadClans() {
@@ -3728,10 +3731,7 @@ function renderLeaderboard() {
         </div>
       `;
     }).join("");
-    const loadingPill = state.leaderboardLoading
-      ? '<div class="leaderboard-refresh-pill">Обновляю...</div>'
-      : "";
-    container.innerHTML = `${loadingPill}${rows}`;
+    container.innerHTML = rows;
     return;
   }
 
@@ -3774,10 +3774,7 @@ function renderLeaderboard() {
       </div>
     `;
   }).join("");
-  const loadingPill = state.leaderboardLoading
-    ? '<div class="leaderboard-refresh-pill">Обновляю...</div>'
-    : "";
-  container.innerHTML = `${loadingPill}${rows}`;
+  container.innerHTML = rows;
 }
 
 function renderClans() {
@@ -5294,7 +5291,7 @@ $("leaderboardBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   closeTopMoreMenu();
   setLeaderboardSheetOpen(true);
-  void loadLeaderboard().catch(() => showToast("Рейтинг пока не загрузился."));
+  void preloadLeaderboards({ force: true }).catch(() => showToast("Рейтинг пока не загрузился."));
 });
 
 $("leaderboardCloseBtn")?.addEventListener("click", () => {
@@ -5741,21 +5738,12 @@ document.querySelectorAll("[data-leaderboard-currency]").forEach((button) => {
     }
     triggerHaptic("selection");
     state.leaderboardCurrency = nextCurrency;
-    const cacheKey = getLeaderboardCacheKey(state.leaderboardMode, nextCurrency);
-    const cached = state.leaderboardCache[cacheKey];
-    const cachedAt = Number(state.leaderboardCacheAt[cacheKey] || 0);
-    const cacheFresh = Boolean(cached && Date.now() - cachedAt < LEADERBOARD_CACHE_MS);
-    if (cached) {
-      state.leaderboard = cached.players || [];
-      state.leaderboardClans = cached.clans || [];
-    }
-    state.leaderboardLoading = !cacheFresh;
+    const hasCache = applyLeaderboardCache(state.leaderboardMode, nextCurrency);
+    state.leaderboardLoading = !hasCache;
     renderLeaderboard();
-    void loadLeaderboard(nextCurrency).catch(() => {
-      state.leaderboardLoading = false;
-      renderLeaderboard();
-      showToast("Рейтинг пока не загрузился.");
-    });
+    if (!hasCache) {
+      void preloadLeaderboards().catch(() => showToast("Рейтинг пока не загрузился."));
+    }
   });
 });
 
@@ -5767,24 +5755,12 @@ document.querySelectorAll("[data-leaderboard-mode]").forEach((button) => {
     }
     triggerHaptic("selection");
     state.leaderboardMode = nextMode;
-    const cacheKey = getLeaderboardCacheKey(nextMode, state.leaderboardCurrency);
-    const cached = state.leaderboardCache[cacheKey];
-    const cachedAt = Number(state.leaderboardCacheAt[cacheKey] || 0);
-    const cacheFresh = Boolean(cached && Date.now() - cachedAt < LEADERBOARD_CACHE_MS);
-    if (cached) {
-      state.leaderboard = cached.players || [];
-      state.leaderboardClans = cached.clans || [];
-    } else {
-      state.leaderboard = [];
-      state.leaderboardClans = [];
-    }
-    state.leaderboardLoading = !cacheFresh;
+    const hasCache = applyLeaderboardCache(nextMode, state.leaderboardCurrency);
+    state.leaderboardLoading = !hasCache;
     renderLeaderboard();
-    void loadLeaderboard(state.leaderboardCurrency).catch(() => {
-      state.leaderboardLoading = false;
-      renderLeaderboard();
-      showToast("Рейтинг пока не загрузился.");
-    });
+    if (!hasCache) {
+      void preloadLeaderboards().catch(() => showToast("Рейтинг пока не загрузился."));
+    }
   });
 });
 

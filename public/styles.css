@@ -2921,6 +2921,8 @@ code {
   display: grid;
   gap: 8px;
   margin-top: 14px;
+  min-height: min(44dvh, 360px);
+  align-content: start;
   overflow-y: auto;
   padding-right: 2px;
 }
