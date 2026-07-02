@@ -4768,8 +4768,18 @@ export async function getLeaderboard(options = {}) {
             p.payout,
             p.spent,
             p.updated_at,
-            m.title AS market_title,
-            m.label AS market_label,
+            CASE
+              WHEN m.symbol = 'BTCUSDT' THEN 'BTC 5m'
+              WHEN m.symbol LIKE 'BTCUSDT_%' THEN REPLACE(REPLACE(m.symbol, 'BTCUSDT_', 'BTC '), '_', ' ')
+              WHEN m.symbol LIKE '${WORLD_CUP_SYMBOL_PREFIX}%' THEN 'World Cup'
+              ELSE m.symbol
+            END AS market_title,
+            CASE
+              WHEN m.symbol = 'BTCUSDT' THEN '5m'
+              WHEN m.symbol LIKE 'BTCUSDT_%' THEN LOWER(REPLACE(m.symbol, 'BTCUSDT_', ''))
+              WHEN m.symbol LIKE '${WORLD_CUP_SYMBOL_PREFIX}%' THEN 'football'
+              ELSE m.symbol
+            END AS market_label,
             CASE
               WHEN m.symbol LIKE '${WORLD_CUP_SYMBOL_PREFIX}%' THEN 'WORLD_CUP_WINNER'
               WHEN m.symbol LIKE 'BTCUSDT%' THEN 'BTC_UPDOWN'
