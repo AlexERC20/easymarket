@@ -10,12 +10,14 @@ import {
   addUsdtToUser,
   addMarketComment,
   buyOutcome,
+  cancelLimitOrder,
   claimDailyTask,
   claimLossRefundWithStars,
   claimShareTask,
   completeVerifiedTask,
   createClan,
   createBtc5mMarket,
+  createLimitOrder,
   deleteClan,
   ensureActiveMarket,
   getActiveMarket,
@@ -27,6 +29,7 @@ import {
   getLeaderboard,
   getMarketActivity,
   getMarketComments,
+  getMarketOrderBook,
   getMarketChart,
   getRecentActivity,
   getRecentMarkets,
@@ -93,7 +96,11 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "amount_must_be_non_negative",
     "invalid_market_id",
     "invalid_side",
+    "invalid_limit_price",
+    "invalid_limit_order",
+    "invalid_limit_order_id",
     "user_not_found",
+    "market_not_found",
     "market_not_open",
     "market_closed",
     "insufficient_fire",
@@ -120,6 +127,8 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "invoice_not_configured",
     "sell_failed",
     "sell_frozen",
+    "limit_order_not_found",
+    "limit_order_not_open",
     "clan_not_found",
     "clan_name_required",
     "invalid_clan_channel",
@@ -714,6 +723,47 @@ app.post("/api/market/:marketId/buy", async (req, res) => {
       side: req.body?.side,
       amount: req.body?.amount,
       currency: req.body?.currency,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/market/:marketId/orderbook", async (req, res) => {
+  try {
+    const result = await getMarketOrderBook({
+      marketId: req.params.marketId,
+      telegram_id: req.query?.telegram_id,
+      currency: req.query?.currency,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/market/:marketId/limit-orders", async (req, res) => {
+  try {
+    const result = await createLimitOrder({
+      marketId: req.params.marketId,
+      telegram_id: req.body?.telegram_id,
+      side: req.body?.side,
+      amount: req.body?.amount,
+      limit_price: req.body?.limit_price ?? req.body?.price,
+      currency: req.body?.currency,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/limit-orders/:orderId/cancel", async (req, res) => {
+  try {
+    const result = await cancelLimitOrder({
+      orderId: req.params.orderId,
+      telegram_id: req.body?.telegram_id,
     });
     res.status(200).json(result);
   } catch (error) {

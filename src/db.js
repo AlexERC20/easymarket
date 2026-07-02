@@ -440,6 +440,32 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_trades_user_market_created
       ON trades(user_id, market_id, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS limit_orders (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      market_id BIGINT NOT NULL REFERENCES markets(id) ON DELETE CASCADE,
+      side TEXT NOT NULL,
+      order_side TEXT NOT NULL DEFAULT 'BUY',
+      currency TEXT NOT NULL DEFAULT 'STAR',
+      limit_price NUMERIC(10, 8) NOT NULL,
+      shares NUMERIC(20, 8) NOT NULL,
+      remaining_shares NUMERIC(20, 8) NOT NULL,
+      reserved_amount NUMERIC(20, 8) NOT NULL,
+      remaining_reserved NUMERIC(20, 8) NOT NULL,
+      bonus_reserved NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      filled_at TIMESTAMPTZ,
+      cancelled_at TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_limit_orders_market_status
+      ON limit_orders(market_id, status, currency, side, limit_price DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_limit_orders_user_status
+      ON limit_orders(user_id, status, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS market_comments (
       id BIGSERIAL PRIMARY KEY,
       market_id BIGINT NOT NULL REFERENCES markets(id) ON DELETE CASCADE,

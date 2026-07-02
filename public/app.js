@@ -150,6 +150,18 @@ const state = {
   marketPanel: "chat",
   feedPanel: "positions",
   orderbookSide: "YES",
+  orderbook: {
+    marketId: null,
+    currency: "USDT",
+    loading: false,
+    levels: [],
+    myOrders: [],
+    loadedAt: 0,
+    formPrice: "",
+    formAmount: "",
+    pending: false,
+    cancelPendingId: null,
+  },
   lossRefundOffers: [],
   lossRefundRenderedKey: null,
   referralNudgeShown: false,
@@ -2663,6 +2675,133 @@ function buildSyntheticOrderbook(market, side) {
   }).sort((a, b) => b.price - a.price);
 }
 
+function getLimitOrderDefaultPrice(market, side) {
+  const minPrice = getMarketMinOutcomePrice(market);
+  const currentPrice = getOutcomePrice(market, side);
+  return Math.max(minPrice, Math.min(1 - minPrice, currentPrice - 0.01));
+}
+
+function syncLimitOrderDefaults(market, side) {
+  const marketId = Number(market?.id || 0);
+  if (state.orderbook.marketId !== marketId || state.orderbook.currency !== state.currency) {
+    state.orderbook.marketId = marketId || null;
+    state.orderbook.currency = state.currency;
+    state.orderbook.levels = [];
+    state.orderbook.myOrders = [];
+    state.orderbook.loadedAt = 0;
+    state.orderbook.formPrice = "";
+    state.orderbook.formAmount = "";
+  }
+
+  if (!state.orderbook.formPrice && market) {
+    state.orderbook.formPrice = getLimitOrderDefaultPrice(market, side).toFixed(3);
+  }
+  if (!state.orderbook.formAmount) {
+    state.orderbook.formAmount = String(state.selectedAmount || getAmountsForCurrency()[0] || 10);
+  }
+}
+
+function getRealOrderbookRows(side) {
+  return (state.orderbook.levels || [])
+    .filter((row) => row.side === side && normalizeCurrency(row.currency) === state.currency)
+    .map((row) => ({
+      price: Number(row.price || 0),
+      size: Math.max(1, Math.round(Number(row.amount || 0))),
+      shares: Number(row.shares || 0),
+      orders_count: Number(row.orders_count || 0),
+      type: "bid",
+      real: true,
+    }))
+    .filter((row) => Number.isFinite(row.price) && row.price > 0);
+}
+
+function renderLimitOrderControls(market, side) {
+  const priceInput = $("limitOrderPriceInput");
+  const amountInput = $("limitOrderAmountInput");
+  const submitButton = $("limitOrderSubmitBtn");
+  if (!priceInput || !amountInput || !submitButton) {
+    return;
+  }
+
+  syncLimitOrderDefaults(market, side);
+  if (document.activeElement !== priceInput) {
+    priceInput.value = state.orderbook.formPrice || "";
+  }
+  if (document.activeElement !== amountInput) {
+    amountInput.value = state.orderbook.formAmount || "";
+  }
+
+  const price = Number(state.orderbook.formPrice);
+  const amount = Number(state.orderbook.formAmount);
+  const canSubmit = Boolean(
+    market
+    && state.user
+    && isMarketOpenForBuy(market)
+    && Number.isFinite(price)
+    && price > 0
+    && Number.isFinite(amount)
+    && amount > 0
+    && !state.orderbook.pending
+  );
+  submitButton.disabled = !canSubmit;
+  submitButton.textContent = state.orderbook.pending ? "Placing..." : `Limit ${marketSideLabel(market, side)}`;
+}
+
+function renderMyLimitOrders() {
+  const container = $("myLimitOrders");
+  if (!container) {
+    return;
+  }
+
+  const orders = (state.orderbook.myOrders || [])
+    .filter((order) => normalizeCurrency(order.currency) === state.currency);
+  if (!orders.length) {
+    container.innerHTML = `<div class="limit-orders-empty">Нет открытых лимиток</div>`;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="limit-orders-head">Мои лимитки</div>
+    ${orders.map((order) => `
+      <div class="my-limit-order">
+        <span>${escapeHtml(marketSideLabel(getDisplayMarket(), order.side))}</span>
+        <b>${formatCents(order.limit_price)}</b>
+        <small>${formatCurrencyAmount(order.remaining_reserved, order.currency)}</small>
+        <button type="button" data-cancel-limit-order="${order.id}" ${state.orderbook.cancelPendingId === order.id ? "disabled" : ""}>Cancel</button>
+      </div>
+    `).join("")}
+  `;
+}
+
+async function loadOrderbook({ force = false } = {}) {
+  const market = getDisplayMarket();
+  if (!market?.id || !state.user?.telegram_id || state.orderbook.loading) {
+    return;
+  }
+
+  const now = Date.now();
+  const sameBook = state.orderbook.marketId === Number(market.id) && state.orderbook.currency === state.currency;
+  if (!force && sameBook && now - state.orderbook.loadedAt < 4_000) {
+    return;
+  }
+
+  state.orderbook.loading = true;
+  renderOrderbookPanel();
+  try {
+    const data = await api(`/api/market/${market.id}/orderbook?telegram_id=${encodeURIComponent(state.user.telegram_id)}&currency=${encodeURIComponent(state.currency)}`);
+    state.orderbook.marketId = Number(market.id);
+    state.orderbook.currency = normalizeCurrency(data.currency || state.currency);
+    state.orderbook.levels = Array.isArray(data.levels) ? data.levels : [];
+    state.orderbook.myOrders = Array.isArray(data.my_orders) ? data.my_orders : [];
+    state.orderbook.loadedAt = Date.now();
+  } catch {
+    // Keep the synthetic book visible even if the network hiccups.
+  } finally {
+    state.orderbook.loading = false;
+    renderOrderbookPanel();
+  }
+}
+
 function renderOrderbookPanel() {
   const panel = $("marketOrderbookPanel");
   const chatList = $("marketChatList");
@@ -2687,7 +2826,15 @@ function renderOrderbookPanel() {
   }
 
   const side = state.orderbookSide;
-  const rows = buildSyntheticOrderbook(market, side);
+  syncLimitOrderDefaults(market, side);
+  if (!state.orderbook.loading) {
+    void loadOrderbook();
+  }
+  renderLimitOrderControls(market, side);
+
+  const syntheticRows = buildSyntheticOrderbook(market, side);
+  const realRows = getRealOrderbookRows(side);
+  const rows = [...realRows, ...syntheticRows].sort((a, b) => b.price - a.price).slice(0, 8);
   const maxSize = Math.max(1, ...rows.map((row) => Number(row.size) || 0));
   const headPrice = formatCents(getOutcomePrice(market, side));
   // Depth as a 0..1 scaleX factor so the bar animates on the compositor (no reflow).
@@ -2697,17 +2844,26 @@ function renderOrderbookPanel() {
   // Same side and row structure already present: update values in place so the
   // depth bars glide via their CSS transition instead of being recreated (which
   // would kill the animation and reset the scroll).
-  if (list.dataset.bookSide === side && existingRows.length === rows.length) {
+  const bookKey = `${side}:${state.currency}:${realRows.length}`;
+  if (list.dataset.bookSide === bookKey && existingRows.length === rows.length) {
     const headEl = list.querySelector(".orderbook-head b");
     if (headEl) headEl.textContent = headPrice;
+    const statusEl = list.querySelector(".orderbook-head small");
+    if (statusEl) statusEl.textContent = state.orderbook.loading ? "loading" : `${realRows.length} limits`;
     rows.forEach((row, index) => {
       const rowEl = existingRows[index];
+      rowEl.className = `orderbook-row ${row.type} ${row.real ? "real" : ""}`.trim();
       rowEl.style.setProperty("--depth", String(depthFor(row)));
       const priceEl = rowEl.querySelector("b");
       const sizeEl = rowEl.querySelector("small");
+      const labelEl = rowEl.querySelector("span");
       if (priceEl) priceEl.textContent = formatCents(row.price);
-      if (sizeEl) sizeEl.textContent = row.size.toLocaleString("ru-RU");
+      if (labelEl) labelEl.textContent = row.real ? "Limit Bid" : (row.type === "bid" ? "Bid" : "Ask");
+      if (sizeEl) sizeEl.textContent = row.real
+        ? `${row.size.toLocaleString("ru-RU")} / ${row.orders_count}`
+        : row.size.toLocaleString("ru-RU");
     });
+    renderMyLimitOrders();
     return;
   }
 
@@ -2715,16 +2871,18 @@ function renderOrderbookPanel() {
     <div class="orderbook-head">
       <span>${marketSideLabel(market, side)} book</span>
       <b>${headPrice}</b>
+      <small>${state.orderbook.loading ? "loading" : `${realRows.length} limits`}</small>
     </div>
     ${rows.map((row) => `
-      <div class="orderbook-row ${row.type}" style="--depth:${depthFor(row)}">
-        <span>${row.type === "bid" ? "Bid" : "Ask"}</span>
+      <div class="orderbook-row ${row.type} ${row.real ? "real" : ""}" style="--depth:${depthFor(row)}">
+        <span>${row.real ? "Limit Bid" : (row.type === "bid" ? "Bid" : "Ask")}</span>
         <b>${formatCents(row.price)}</b>
-        <small>${row.size.toLocaleString("ru-RU")}</small>
+        <small>${row.real ? `${row.size.toLocaleString("ru-RU")} / ${row.orders_count}` : row.size.toLocaleString("ru-RU")}</small>
       </div>
     `).join("")}
   `;
-  list.dataset.bookSide = side;
+  list.dataset.bookSide = bookKey;
+  renderMyLimitOrders();
 }
 
 function mergeWorldCupChartPoint(market) {
@@ -4650,6 +4808,102 @@ function addLocalActivity(trade) {
   showTradeBubble(enriched);
 }
 
+async function submitLimitOrder() {
+  const market = getDisplayMarket();
+  const side = state.orderbookSide || state.selectedSide || "YES";
+  const amount = Number(state.orderbook.formAmount || 0);
+  const limitPrice = Number(state.orderbook.formPrice || 0);
+  if (!state.user || !market) {
+    triggerHaptic("warning");
+    showToast("Сначала нужен пользователь и активный рынок.");
+    return;
+  }
+  if (!isMarketOpenForBuy(market)) {
+    triggerHaptic("warning");
+    showToast("Этот рынок уже завершился.");
+    return;
+  }
+  if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(limitPrice) || limitPrice <= 0) {
+    triggerHaptic("warning");
+    showToast("Проверь цену и сумму лимитки.");
+    return;
+  }
+  if (amount > Number(getActiveBalance() || 0)) {
+    const missing = Math.max(1, Math.ceil(amount - Number(getActiveBalance() || 0)));
+    triggerHaptic("warning");
+    openTopupSheet(missing, `Для лимитки не хватает ${formatCurrencyAmount(missing, state.currency)}.`);
+    return;
+  }
+
+  state.orderbook.pending = true;
+  renderOrderbookPanel();
+  try {
+    const result = await api(`/api/market/${market.id}/limit-orders`, {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        side,
+        amount,
+        limit_price: limitPrice,
+        currency: state.currency,
+      }),
+    });
+    applyCurrencyBalancePayload(result.currency || state.currency, result);
+    if (result.order?.status === "filled") {
+      const ownFill = (result.filled || []).find((item) => Number(item.order?.id) === Number(result.order.id));
+      upsertLocalPosition(ownFill?.position);
+      addLocalActivity(ownFill?.trade);
+      showToast("Лимитка исполнилась.");
+      triggerLightningFlash("success", getTierForAmount(amount, state.currency));
+    } else {
+      showToast("Лимитка выставлена.");
+      triggerHaptic("success");
+    }
+    await loadOrderbook({ force: true });
+    renderMarket();
+    renderMe();
+  } catch (error) {
+    triggerHaptic("error");
+    if (error.message === "insufficient_fire" || error.message === "insufficient_usdt") {
+      const missing = Math.max(1, Math.ceil(amount - Number(getActiveBalance() || 0)));
+      openTopupSheet(missing, `Для лимитки не хватает ${formatCurrencyAmount(missing, state.currency)}.`);
+    } else {
+      showToast("Лимитка не создана.");
+    }
+  } finally {
+    state.orderbook.pending = false;
+    renderOrderbookPanel();
+  }
+}
+
+async function cancelLimitOrder(orderId) {
+  if (!state.user?.telegram_id || !orderId || state.orderbook.cancelPendingId) {
+    return;
+  }
+
+  state.orderbook.cancelPendingId = Number(orderId);
+  renderOrderbookPanel();
+  try {
+    const result = await api(`/api/limit-orders/${orderId}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+      }),
+    });
+    applyCurrencyBalancePayload(result.currency || state.currency, result);
+    showToast("Лимитка отменена.");
+    triggerHaptic("success");
+    await loadOrderbook({ force: true });
+    renderMe();
+  } catch {
+    triggerHaptic("error");
+    showToast("Не получилось отменить лимитку.");
+  } finally {
+    state.orderbook.cancelPendingId = null;
+    renderOrderbookPanel();
+  }
+}
+
 async function buy(amount = state.selectedAmount, forcedIntent = null) {
   const market = forcedIntent?.marketId ? findMarketById(forcedIntent.marketId) : getDisplayMarket();
   if (!state.user || !market) {
@@ -4722,6 +4976,9 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
     renderMe();
     renderActivity();
     renderTradeTicket();
+    if (state.marketPanel === "book") {
+      void loadOrderbook({ force: true });
+    }
     scheduleCoreRefresh({ delay: 160, includeComments: true });
   } catch (error) {
     triggerHaptic("error");
@@ -4786,6 +5043,9 @@ async function sellPosition({ side, positionId, marketId, shares }) {
     renderMe();
     renderActivity();
     renderTradeTicket();
+    if (state.marketPanel === "book") {
+      void loadOrderbook({ force: true });
+    }
     scheduleCoreRefresh({ delay: 120, includeComments: true });
   } catch (error) {
     triggerHaptic("error");
@@ -5294,8 +5554,18 @@ document.querySelectorAll("[data-currency-toggle]").forEach((button) => {
       state.betSheet.currency = nextCurrency;
     }
     state.buyQueue = [];
+    state.orderbook.currency = nextCurrency;
+    state.orderbook.levels = [];
+    state.orderbook.myOrders = [];
+    state.orderbook.loadedAt = 0;
+    state.orderbook.formAmount = String(getAmountsForCurrency(nextCurrency)[0] || "");
+    state.orderbook.formPrice = "";
     renderMe();
     renderTradeTicket();
+    renderOrderbookPanel();
+    if (state.marketPanel === "book") {
+      void loadOrderbook({ force: true });
+    }
     renderBetSheet();
   });
 });
@@ -5875,18 +6145,44 @@ $("marketPanelBookBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   state.marketPanel = "book";
   renderOrderbookPanel();
+  void loadOrderbook({ force: true });
 });
 
 $("orderbookYesBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   state.orderbookSide = "YES";
+  state.orderbook.formPrice = "";
   renderOrderbookPanel();
 });
 
 $("orderbookNoBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   state.orderbookSide = "NO";
+  state.orderbook.formPrice = "";
   renderOrderbookPanel();
+});
+
+$("limitOrderPriceInput")?.addEventListener("input", (event) => {
+  state.orderbook.formPrice = event.target.value;
+});
+
+$("limitOrderAmountInput")?.addEventListener("input", (event) => {
+  state.orderbook.formAmount = event.target.value;
+});
+
+$("limitOrderForm")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  triggerHaptic("medium");
+  void submitLimitOrder();
+});
+
+$("myLimitOrders")?.addEventListener("click", (event) => {
+  const button = event.target?.closest?.("[data-cancel-limit-order]");
+  if (!button) {
+    return;
+  }
+  triggerHaptic("medium");
+  void cancelLimitOrder(button.dataset.cancelLimitOrder);
 });
 
 let chatPanelTouchStartX = null;

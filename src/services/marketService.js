@@ -224,6 +224,32 @@ function mapTrade(row) {
   };
 }
 
+function mapLimitOrder(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: Number(row.id),
+    user_id: Number(row.user_id),
+    market_id: Number(row.market_id),
+    side: row.side,
+    order_side: row.order_side || "BUY",
+    currency: normalizeCurrency(row.currency),
+    limit_price: toNumber(row.limit_price),
+    shares: toNumber(row.shares),
+    remaining_shares: toNumber(row.remaining_shares),
+    reserved_amount: toNumber(row.reserved_amount),
+    remaining_reserved: toNumber(row.remaining_reserved),
+    bonus_reserved: toNumber(row.bonus_reserved),
+    status: row.status,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    filled_at: row.filled_at,
+    cancelled_at: row.cancelled_at,
+  };
+}
+
 function mapMarketActivity(row) {
   return {
     id: Number(row.id),
@@ -3033,6 +3059,13 @@ export async function updateLiveBtcPrice() {
         [market.id, btc.price, yesPrice, noPrice],
       );
 
+      await processOpenLimitOrdersForMarket(client, {
+        ...market,
+        current_price: btc.price,
+        yes_price: yesPrice,
+        no_price: noPrice,
+      });
+
       if (!isBtcMarketSymbol(market.symbol) && market.symbol !== btc.symbol) {
         await persistPriceTick(client, market.symbol, btc.price, btc.source);
       }
@@ -3401,6 +3434,7 @@ async function performWorldCupSync() {
 
       const market = marketResult.rows[0];
       await persistPriceTick(client, symbol, toNumber(market.yes_price), feed.source);
+      await processOpenLimitOrdersForMarket(client, market);
     }
   });
 
@@ -3589,6 +3623,427 @@ async function awardReferralBetBonus(client, buyerUser, marketId) {
   };
 }
 
+function ensureLimitPrice(price, market) {
+  const value = Number(price);
+  const minPrice = getMarketMinOutcomePrice(market);
+  if (!Number.isFinite(value) || value < minPrice || value > 1 - minPrice) {
+    throw new Error("invalid_limit_price");
+  }
+
+  return roundOutcomePrice(value, minPrice);
+}
+
+function roundShares(value) {
+  return Math.max(0, Math.round(Number(value || 0) * 100_000_000) / 100_000_000);
+}
+
+async function refundLimitOrder(client, order, reason = "limit_order_cancel") {
+  const amount = roundMoney(order.remaining_reserved);
+  const bonusReserved = toNumber(order.bonus_reserved);
+  const reservedAmount = toNumber(order.reserved_amount);
+  if (amount > 0) {
+    await creditCurrencyBalance(
+      client,
+      order.user_id,
+      order.currency,
+      amount,
+      `${reason}${balanceReasonSuffix(order.currency)}`,
+      `limit_order:${order.id}`,
+      getBonusRatioForAmount(bonusReserved, reservedAmount),
+    );
+  }
+
+  const result = await client.query(
+    `
+      UPDATE limit_orders
+      SET status = 'cancelled',
+          remaining_shares = 0,
+          remaining_reserved = 0,
+          updated_at = now(),
+          cancelled_at = now()
+      WHERE id = $1::bigint
+      RETURNING *
+    `,
+    [order.id],
+  );
+
+  return mapLimitOrder(result.rows[0]);
+}
+
+async function cancelOpenLimitOrdersForMarket(client, marketId, reason = "market_closed") {
+  const orders = await client.query(
+    `
+      SELECT *
+      FROM limit_orders
+      WHERE market_id = $1::bigint
+        AND status = 'open'
+      ORDER BY created_at ASC, id ASC
+      FOR UPDATE
+    `,
+    [marketId],
+  );
+
+  const cancelled = [];
+  for (const order of orders.rows) {
+    cancelled.push(await refundLimitOrder(client, order, reason));
+  }
+
+  return cancelled;
+}
+
+async function processOpenLimitOrdersForMarket(client, marketInput) {
+  if (!marketInput || marketInput.status !== "open") {
+    return [];
+  }
+  if (new Date(marketInput.end_time).getTime() <= Date.now()) {
+    return [];
+  }
+
+  const market = { ...marketInput };
+  const orders = await client.query(
+    `
+      SELECT lo.*, u.telegram_id, u.username, u.first_name, u.referred_by_telegram_id
+      FROM limit_orders lo
+      JOIN users u ON u.id = lo.user_id
+      WHERE lo.market_id = $1::bigint
+        AND lo.status = 'open'
+        AND lo.order_side = 'BUY'
+      ORDER BY lo.created_at ASC, lo.id ASC
+      FOR UPDATE OF lo
+    `,
+    [market.id],
+  );
+
+  const filled = [];
+  for (const order of orders.rows) {
+    const side = String(order.side || "").toUpperCase();
+    if (!["YES", "NO"].includes(side)) {
+      continue;
+    }
+
+    const currentOutcomePrice = getMarketOutcomePrice(market, side);
+    const limitPrice = roundOutcomePrice(order.limit_price, getMarketMinOutcomePrice(market));
+    if (currentOutcomePrice > limitPrice + 0.00000001) {
+      continue;
+    }
+
+    const amount = roundMoney(order.remaining_reserved);
+    const shares = roundShares(order.remaining_shares);
+    if (amount <= 0 || shares <= 0) {
+      await refundLimitOrder(client, order, "limit_order_empty");
+      continue;
+    }
+
+    const positionResult = await client.query(
+      `
+        INSERT INTO positions (
+          user_id,
+          market_id,
+          side,
+          shares,
+          spent,
+          avg_price,
+          bonus_spent,
+          currency,
+          status,
+          updated_at
+        )
+        VALUES ($1::bigint, $2::bigint, $3::text, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8::text, 'open', now())
+        ON CONFLICT (user_id, market_id, side, currency) DO UPDATE SET
+          shares = positions.shares + EXCLUDED.shares,
+          spent = positions.spent + EXCLUDED.spent,
+          bonus_spent = positions.bonus_spent + EXCLUDED.bonus_spent,
+          avg_price = (positions.spent + EXCLUDED.spent) / NULLIF(positions.shares + EXCLUDED.shares, 0),
+          status = 'open',
+          updated_at = now()
+        RETURNING *
+      `,
+      [
+        order.user_id,
+        market.id,
+        side,
+        shares,
+        amount,
+        limitPrice,
+        toNumber(order.bonus_reserved),
+        normalizeCurrency(order.currency),
+      ],
+    );
+
+    const tradeResult = await client.query(
+      `
+        INSERT INTO trades (user_id, market_id, action, side, amount, fee, price, shares, currency)
+        VALUES ($1::bigint, $2::bigint, 'BUY', $3::text, $4::numeric, 0, $5::numeric, $6::numeric, $7::text)
+        RETURNING *
+      `,
+      [order.user_id, market.id, side, amount, limitPrice, shares, normalizeCurrency(order.currency)],
+    );
+
+    const orderResult = await client.query(
+      `
+        UPDATE limit_orders
+        SET status = 'filled',
+            remaining_shares = 0,
+            remaining_reserved = 0,
+            updated_at = now(),
+            filled_at = now()
+        WHERE id = $1::bigint
+        RETURNING *
+      `,
+      [order.id],
+    );
+
+    await client.query(
+      `
+        UPDATE markets
+        SET yes_volume = yes_volume + $2::numeric,
+            no_volume = no_volume + $3::numeric
+        WHERE id = $1::bigint
+      `,
+      [
+        market.id,
+        side === "YES" ? amount : 0,
+        side === "NO" ? amount : 0,
+      ],
+    );
+
+    market.yes_volume = toNumber(market.yes_volume) + (side === "YES" ? amount : 0);
+    market.no_volume = toNumber(market.no_volume) + (side === "NO" ? amount : 0);
+
+    await awardReferralBetBonus(
+      client,
+      {
+        id: order.user_id,
+        telegram_id: order.telegram_id,
+        referred_by_telegram_id: order.referred_by_telegram_id,
+      },
+      market.id,
+    );
+
+    filled.push({
+      order: mapLimitOrder(orderResult.rows[0]),
+      position: mapPosition(positionResult.rows[0]),
+      trade: mapTrade(tradeResult.rows[0]),
+    });
+  }
+
+  return filled;
+}
+
+export async function getMarketOrderBook(input) {
+  const marketId = Number(input.marketId);
+  const currency = normalizeCurrency(input.currency);
+  if (!Number.isSafeInteger(marketId) || marketId <= 0) {
+    throw new Error("invalid_market_id");
+  }
+
+  const marketResult = await query("SELECT * FROM markets WHERE id = $1::bigint", [marketId]);
+  const market = marketResult.rows[0];
+  if (!market) {
+    throw new Error("market_not_found");
+  }
+
+  const levelsResult = await query(
+    `
+      SELECT
+        side,
+        currency,
+        limit_price,
+        SUM(remaining_shares) AS shares,
+        SUM(remaining_reserved) AS amount,
+        COUNT(*) AS orders_count
+      FROM limit_orders
+      WHERE market_id = $1::bigint
+        AND status = 'open'
+        AND order_side = 'BUY'
+        AND currency = $2::text
+      GROUP BY side, currency, limit_price
+      ORDER BY side ASC, limit_price DESC
+      LIMIT 80
+    `,
+    [marketId, currency],
+  );
+
+  let myOrders = [];
+  const telegramId = String(input.telegram_id || "").trim();
+  if (telegramId) {
+    const user = await getUserByTelegramId(telegramId);
+    if (user) {
+      const myOrdersResult = await query(
+        `
+          SELECT *
+          FROM limit_orders
+          WHERE user_id = $1::bigint
+            AND market_id = $2::bigint
+            AND status = 'open'
+          ORDER BY created_at DESC, id DESC
+          LIMIT 20
+        `,
+        [user.id, marketId],
+      );
+      myOrders = myOrdersResult.rows.map(mapLimitOrder);
+    }
+  }
+
+  return {
+    ok: true,
+    market_id: marketId,
+    currency,
+    market: mapMarket(market),
+    levels: levelsResult.rows.map((row) => ({
+      side: row.side,
+      currency: normalizeCurrency(row.currency),
+      price: toNumber(row.limit_price),
+      shares: toNumber(row.shares),
+      amount: toNumber(row.amount),
+      orders_count: Number(row.orders_count || 0),
+      order_side: "BUY",
+    })),
+    my_orders: myOrders,
+  };
+}
+
+export async function createLimitOrder(input) {
+  const marketId = Number(input.marketId);
+  const side = String(input.side || "").toUpperCase();
+  const amount = ensurePositiveAmount(input.amount);
+  const currency = normalizeCurrency(input.currency);
+  const reasonSuffix = balanceReasonSuffix(currency);
+
+  if (!Number.isSafeInteger(marketId) || marketId <= 0) {
+    throw new Error("invalid_market_id");
+  }
+  if (!["YES", "NO"].includes(side)) {
+    throw new Error("invalid_side");
+  }
+
+  const user = await getUserByTelegramId(input.telegram_id);
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+
+  return withTransaction(async (client) => {
+    const marketResult = await client.query(
+      `
+        SELECT *
+        FROM markets
+        WHERE id = $1::bigint
+        FOR UPDATE
+      `,
+      [marketId],
+    );
+    const market = marketResult.rows[0];
+    if (!market || market.status !== "open") {
+      throw new Error("market_not_open");
+    }
+    if (new Date(market.end_time).getTime() <= Date.now()) {
+      throw new Error("market_closed");
+    }
+
+    const limitPrice = ensureLimitPrice(input.limit_price ?? input.price, market);
+    const shares = roundShares(amount / limitPrice);
+    if (shares <= 0) {
+      throw new Error("invalid_limit_order");
+    }
+
+    const debit = await debitCurrencyBalance(
+      client,
+      user.id,
+      currency,
+      amount,
+      `limit_buy_${side.toLowerCase()}${reasonSuffix}`,
+      `market:${marketId}:limit_order`,
+    );
+
+    const orderResult = await client.query(
+      `
+        INSERT INTO limit_orders (
+          user_id,
+          market_id,
+          side,
+          order_side,
+          currency,
+          limit_price,
+          shares,
+          remaining_shares,
+          reserved_amount,
+          remaining_reserved,
+          bonus_reserved,
+          status
+        )
+        VALUES ($1::bigint, $2::bigint, $3::text, 'BUY', $4::text, $5::numeric, $6::numeric, $6::numeric, $7::numeric, $7::numeric, $8::numeric, 'open')
+        RETURNING *
+      `,
+      [user.id, marketId, side, currency, limitPrice, shares, amount, debit.bonus_spent],
+    );
+
+    const filled = (await processOpenLimitOrdersForMarket(client, market))
+      .filter((item) => Number(item.order?.user_id) === Number(user.id));
+    const refreshedOrderResult = await client.query(
+      "SELECT * FROM limit_orders WHERE id = $1::bigint",
+      [orderResult.rows[0].id],
+    );
+    const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
+
+    return {
+      ok: true,
+      currency,
+      balance: finalBalance.total,
+      currency_balance: finalBalance.total,
+      currency_cash_balance: finalBalance.cash,
+      currency_bonus_balance: finalBalance.bonus,
+      order: mapLimitOrder(refreshedOrderResult.rows[0]),
+      filled,
+    };
+  });
+}
+
+export async function cancelLimitOrder(input) {
+  const orderId = Number(input.orderId);
+  if (!Number.isSafeInteger(orderId) || orderId <= 0) {
+    throw new Error("invalid_limit_order_id");
+  }
+
+  const user = await getUserByTelegramId(input.telegram_id);
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+
+  return withTransaction(async (client) => {
+    const orderResult = await client.query(
+      `
+        SELECT *
+        FROM limit_orders
+        WHERE id = $1::bigint
+          AND user_id = $2::bigint
+        FOR UPDATE
+      `,
+      [orderId, user.id],
+    );
+    const order = orderResult.rows[0];
+    if (!order) {
+      throw new Error("limit_order_not_found");
+    }
+    if (order.status !== "open") {
+      throw new Error("limit_order_not_open");
+    }
+
+    const cancelled = await refundLimitOrder(client, order, "limit_order_cancel");
+    const currency = normalizeCurrency(order.currency);
+    const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
+
+    return {
+      ok: true,
+      currency,
+      balance: finalBalance.total,
+      currency_balance: finalBalance.total,
+      currency_cash_balance: finalBalance.cash,
+      currency_bonus_balance: finalBalance.bonus,
+      order: cancelled,
+    };
+  });
+}
+
 export async function buyOutcome(input) {
   const marketId = Number(input.marketId);
   const side = String(input.side || "").toUpperCase();
@@ -3703,6 +4158,13 @@ export async function buyOutcome(input) {
     );
 
     const referralBonus = await awardReferralBetBonus(client, user, marketId);
+    await processOpenLimitOrdersForMarket(client, {
+      ...market,
+      yes_price: nextYesPrice,
+      no_price: nextNoPrice,
+      yes_volume: toNumber(market.yes_volume) + (side === "YES" ? netAmount : 0),
+      no_volume: toNumber(market.no_volume) + (side === "NO" ? netAmount : 0),
+    });
 
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
@@ -3964,6 +4426,14 @@ export async function sellOutcome(input) {
       ],
     );
 
+    await processOpenLimitOrdersForMarket(client, {
+      ...market,
+      yes_price: nextYesPrice,
+      no_price: nextNoPrice,
+      yes_volume: quote.nextYesVolume,
+      no_volume: quote.nextNoVolume,
+    });
+
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
     return {
@@ -3996,6 +4466,8 @@ export async function sellOutcome(input) {
 }
 
 async function refundMarket(client, market, message) {
+  await cancelOpenLimitOrdersForMarket(client, market.id, "market_refund");
+
   const positions = await client.query(
     `
       SELECT *
@@ -4090,6 +4562,8 @@ export async function resolveExpiredMarkets() {
         );
         return;
       }
+
+      await cancelOpenLimitOrdersForMarket(client, currentMarket.id, "market_closed");
 
       const winner = closePrice > toNumber(currentMarket.open_price) ? "YES" : "NO";
       await client.query(

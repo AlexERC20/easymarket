@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260701-19" />
+    <link rel="stylesheet" href="/styles.css?v=20260702-01" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260701-12" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -627,7 +627,7 @@
           <span>онлайн:<b id="marketChatOnline">0</b></span>
           <div class="market-panel-tabs" role="tablist" aria-label="Чат и стаканы">
             <button id="marketPanelChatBtn" class="active" type="button">Чат</button>
-            <button id="marketPanelBookBtn" type="button">Стаканы</button>
+            <button id="marketPanelBookBtn" type="button">Order Book</button>
           </div>
         </div>
         <div id="marketChatList" class="market-chat-list">
@@ -637,7 +637,19 @@
             <button id="orderbookYesBtn" class="active" type="button">YES / UP</button>
             <button id="orderbookNoBtn" type="button">NO / DOWN</button>
           </div>
+          <form id="limitOrderForm" class="limit-order-form">
+            <label>
+              <span>Limit</span>
+              <input id="limitOrderPriceInput" type="number" min="0.001" max="0.999" step="0.001" inputmode="decimal" placeholder="0.450" />
+            </label>
+            <label>
+              <span>Amount</span>
+              <input id="limitOrderAmountInput" type="number" min="1" step="1" inputmode="decimal" placeholder="100" />
+            </label>
+            <button id="limitOrderSubmitBtn" type="submit">Limit Buy</button>
+          </form>
           <div id="orderbookList" class="orderbook-list"></div>
+          <div id="myLimitOrders" class="my-limit-orders"></div>
         </div>
         <form id="marketChatForm" class="market-chat-form">
           <input id="marketChatInput" type="text" maxlength="240" placeholder="Написать сообщение..." autocomplete="off" />
@@ -709,6 +721,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260701-18" type="module"></script>
+    <script src="/app.js?v=20260702-01" type="module"></script>
   </body>
 </html>
