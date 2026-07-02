@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260702-07" />
+    <link rel="stylesheet" href="/styles.css?v=20260702-08" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260701-12" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -91,10 +91,47 @@
                 </svg>
                 <span>Кланы</span>
               </button>
+              <button id="settingsBtn" class="top-more-item settings-action" type="button" role="menuitem">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="3.2" />
+                  <path d="M19.4 13c.1-.3.1-.6.1-1s0-.7-.1-1l1.7-1.3-1.8-3.1-2 .8a5.6 5.6 0 0 0-1.7-1l-.3-2.1H9.6l-.3 2.1a5.6 5.6 0 0 0-1.7 1l-2-.8L3.8 9.7 5.5 11c-.1.3-.1.6-.1 1s0 .7.1 1l-1.7 1.3 1.8 3.1 2-.8c.5.4 1.1.8 1.7 1l.3 2.1h4.8l.3-2.1c.6-.2 1.2-.6 1.7-1l2 .8 1.8-3.1L19.4 13Z" />
+                </svg>
+                <span>Настройки</span>
+              </button>
             </div>
           </div>
         </div>
       </header>
+
+      <section id="settingsSheet" class="task-sheet hidden" aria-label="Настройки">
+        <div class="task-panel settings-panel-sheet">
+          <div class="task-head">
+            <div>
+              <p class="eyebrow">Preferences</p>
+              <h2>Настройки</h2>
+            </div>
+            <button id="settingsCloseBtn" class="icon-button" type="button" aria-label="Закрыть настройки">×</button>
+          </div>
+          <div class="settings-list">
+            <div class="settings-row">
+              <div class="settings-row-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3l4-3.5v12l-4-3.5H4z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg></div>
+              <div class="settings-row-body">
+                <strong>Звук эффектов</strong>
+                <small>Energy-saber клики, победы и важные отклики.</small>
+              </div>
+              <button id="motionSoundToggleBtn" class="settings-switch" type="button" aria-pressed="false"><i></i></button>
+            </div>
+            <div class="settings-row">
+              <div class="settings-row-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 8.5c3 .4 5.5 2.2 5.5 3.5s-2.5 3.1-5.5 3.5"/><path d="M14.5 8.5C10.9 5.8 4 6.2 4 12s6.9 6.2 10.5 3.5c2-1.5 2-5.5 0-7z"/><path d="M12 11.8h.01"/></svg></div>
+              <div class="settings-row-body">
+                <strong>Аквариум на BTC 5m</strong>
+                <small>Корм и рыбки только на 5-минутном BTC-графике.</small>
+              </div>
+              <button id="aquariumToggleBtn" class="settings-switch" type="button" aria-pressed="false"><i></i></button>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section id="tasksSheet" class="task-sheet hidden" aria-label="Задания">
         <div class="task-panel">
@@ -250,27 +287,6 @@
               <div class="task-act">
                 <span class="task-reward">+<span id="privateChatTaskReward">15 000</span></span>
                 <button id="taskPrivateChatBtn" class="task-button gold" type="button">Открыть</button>
-              </div>
-            </div>
-
-            <button id="taskSettingsToggleBtn" class="task-settings-toggle" type="button" aria-expanded="false">
-              <span>Настройки</span>
-              <b aria-hidden="true">⚙</b>
-            </button>
-            <div id="taskSettingsPanel" class="task-settings-panel hidden">
-              <div class="task-row sound-toggle-row">
-                <div>
-                  <strong>Звук эффектов</strong>
-                  <small>Energy-saber клики, победы и важные отклики.</small>
-                </div>
-                <button id="motionSoundToggleBtn" class="task-button sound-toggle-button" type="button" aria-pressed="false">Выкл</button>
-              </div>
-              <div class="task-row sound-toggle-row">
-                <div>
-                  <strong>Аквариум на BTC 5m</strong>
-                  <small>Корм и рыбки только на 5-минутном BTC-графике.</small>
-                </div>
-                <button id="aquariumToggleBtn" class="task-button sound-toggle-button" type="button" aria-pressed="false">Выкл</button>
               </div>
             </div>
           </div>
@@ -725,6 +741,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260702-07" type="module"></script>
+    <script src="/app.js?v=20260702-08" type="module"></script>
   </body>
 </html>

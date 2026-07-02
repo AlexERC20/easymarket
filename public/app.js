@@ -1825,7 +1825,6 @@ function renderSoundToggle() {
   const enabled = isMotionSoundEnabled();
   button.classList.toggle("active", enabled);
   button.setAttribute("aria-pressed", enabled ? "true" : "false");
-  button.textContent = enabled ? "Вкл" : "Выкл";
 }
 
 function renderAquariumToggle() {
@@ -1834,7 +1833,6 @@ function renderAquariumToggle() {
   const enabled = isAquariumEnabled();
   button.classList.toggle("active", enabled);
   button.setAttribute("aria-pressed", enabled ? "true" : "false");
-  button.textContent = enabled ? "Вкл" : "Выкл";
 }
 
 function renderTaskSettings() {
@@ -5268,6 +5266,25 @@ $("clansCloseBtn")?.addEventListener("click", () => {
 $("clansSheet")?.addEventListener("click", (event) => {
   if (event.target === $("clansSheet")) {
     setClansSheetOpen(false);
+  }
+});
+
+$("settingsBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  closeTopMoreMenu();
+  renderSoundToggle();
+  renderAquariumToggle();
+  openSheet($("settingsSheet"));
+});
+
+$("settingsCloseBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  closeSheet($("settingsSheet"));
+});
+
+$("settingsSheet")?.addEventListener("click", (event) => {
+  if (event.target === $("settingsSheet")) {
+    closeSheet($("settingsSheet"));
   }
 });
 

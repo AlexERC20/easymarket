@@ -2008,6 +2008,95 @@ code {
   display: none;
 }
 
+/* Settings sheet (moved out of tasks into the ⋯ menu) */
+.settings-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.settings-row-ic {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+}
+
+.settings-row-ic svg {
+  width: 19px;
+  height: 19px;
+}
+
+.settings-row-body {
+  min-width: 0;
+}
+
+.settings-row-body strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 900;
+  color: var(--text);
+}
+
+.settings-row-body small {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.settings-switch {
+  position: relative;
+  width: 46px;
+  height: 27px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  transition: background 200ms var(--ease-default);
+  cursor: pointer;
+}
+
+.settings-switch i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35);
+  transition: transform 220ms var(--spring-soft, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.settings-switch.active {
+  background: linear-gradient(135deg, #2cd37e, #2b9762);
+}
+
+.settings-switch.active i {
+  transform: translateX(19px);
+}
+
+.top-more-item.settings-action {
+  color: rgba(200, 208, 220, 0.92);
+}
+
 .task-row.sound-toggle-row {
   border-color: rgba(53, 246, 255, 0.2);
   background:
