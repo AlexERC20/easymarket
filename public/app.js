@@ -4849,16 +4849,8 @@ async function submitLimitOrder() {
       }),
     });
     applyCurrencyBalancePayload(result.currency || state.currency, result);
-    if (result.order?.status === "filled") {
-      const ownFill = (result.filled || []).find((item) => Number(item.order?.id) === Number(result.order.id));
-      upsertLocalPosition(ownFill?.position);
-      addLocalActivity(ownFill?.trade);
-      showToast("Лимитка исполнилась.");
-      triggerLightningFlash("success", getTierForAmount(amount, state.currency));
-    } else {
-      showToast("Лимитка выставлена.");
-      triggerHaptic("success");
-    }
+    showToast("Лимитка выставлена.");
+    triggerHaptic("success");
     await loadOrderbook({ force: true });
     renderMarket();
     renderMe();

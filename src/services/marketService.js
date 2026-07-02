@@ -3059,13 +3059,6 @@ export async function updateLiveBtcPrice() {
         [market.id, btc.price, yesPrice, noPrice],
       );
 
-      await processOpenLimitOrdersForMarket(client, {
-        ...market,
-        current_price: btc.price,
-        yes_price: yesPrice,
-        no_price: noPrice,
-      });
-
       if (!isBtcMarketSymbol(market.symbol) && market.symbol !== btc.symbol) {
         await persistPriceTick(client, market.symbol, btc.price, btc.source);
       }
@@ -3434,7 +3427,6 @@ async function performWorldCupSync() {
 
       const market = marketResult.rows[0];
       await persistPriceTick(client, symbol, toNumber(market.yes_price), feed.source);
-      await processOpenLimitOrdersForMarket(client, market);
     }
   });
 
@@ -3691,145 +3683,6 @@ async function cancelOpenLimitOrdersForMarket(client, marketId, reason = "market
   return cancelled;
 }
 
-async function processOpenLimitOrdersForMarket(client, marketInput) {
-  if (!marketInput || marketInput.status !== "open") {
-    return [];
-  }
-  if (new Date(marketInput.end_time).getTime() <= Date.now()) {
-    return [];
-  }
-
-  const market = { ...marketInput };
-  const orders = await client.query(
-    `
-      SELECT lo.*, u.telegram_id, u.username, u.first_name, u.referred_by_telegram_id
-      FROM limit_orders lo
-      JOIN users u ON u.id = lo.user_id
-      WHERE lo.market_id = $1::bigint
-        AND lo.status = 'open'
-        AND lo.order_side = 'BUY'
-      ORDER BY lo.created_at ASC, lo.id ASC
-      FOR UPDATE OF lo
-    `,
-    [market.id],
-  );
-
-  const filled = [];
-  for (const order of orders.rows) {
-    const side = String(order.side || "").toUpperCase();
-    if (!["YES", "NO"].includes(side)) {
-      continue;
-    }
-
-    const currentOutcomePrice = getMarketOutcomePrice(market, side);
-    const limitPrice = roundOutcomePrice(order.limit_price, getMarketMinOutcomePrice(market));
-    if (currentOutcomePrice > limitPrice + 0.00000001) {
-      continue;
-    }
-
-    const amount = roundMoney(order.remaining_reserved);
-    const shares = roundShares(order.remaining_shares);
-    if (amount <= 0 || shares <= 0) {
-      await refundLimitOrder(client, order, "limit_order_empty");
-      continue;
-    }
-
-    const positionResult = await client.query(
-      `
-        INSERT INTO positions (
-          user_id,
-          market_id,
-          side,
-          shares,
-          spent,
-          avg_price,
-          bonus_spent,
-          currency,
-          status,
-          updated_at
-        )
-        VALUES ($1::bigint, $2::bigint, $3::text, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8::text, 'open', now())
-        ON CONFLICT (user_id, market_id, side, currency) DO UPDATE SET
-          shares = positions.shares + EXCLUDED.shares,
-          spent = positions.spent + EXCLUDED.spent,
-          bonus_spent = positions.bonus_spent + EXCLUDED.bonus_spent,
-          avg_price = (positions.spent + EXCLUDED.spent) / NULLIF(positions.shares + EXCLUDED.shares, 0),
-          status = 'open',
-          updated_at = now()
-        RETURNING *
-      `,
-      [
-        order.user_id,
-        market.id,
-        side,
-        shares,
-        amount,
-        limitPrice,
-        toNumber(order.bonus_reserved),
-        normalizeCurrency(order.currency),
-      ],
-    );
-
-    const tradeResult = await client.query(
-      `
-        INSERT INTO trades (user_id, market_id, action, side, amount, fee, price, shares, currency)
-        VALUES ($1::bigint, $2::bigint, 'BUY', $3::text, $4::numeric, 0, $5::numeric, $6::numeric, $7::text)
-        RETURNING *
-      `,
-      [order.user_id, market.id, side, amount, limitPrice, shares, normalizeCurrency(order.currency)],
-    );
-
-    const orderResult = await client.query(
-      `
-        UPDATE limit_orders
-        SET status = 'filled',
-            remaining_shares = 0,
-            remaining_reserved = 0,
-            updated_at = now(),
-            filled_at = now()
-        WHERE id = $1::bigint
-        RETURNING *
-      `,
-      [order.id],
-    );
-
-    await client.query(
-      `
-        UPDATE markets
-        SET yes_volume = yes_volume + $2::numeric,
-            no_volume = no_volume + $3::numeric
-        WHERE id = $1::bigint
-      `,
-      [
-        market.id,
-        side === "YES" ? amount : 0,
-        side === "NO" ? amount : 0,
-      ],
-    );
-
-    market.yes_volume = toNumber(market.yes_volume) + (side === "YES" ? amount : 0);
-    market.no_volume = toNumber(market.no_volume) + (side === "NO" ? amount : 0);
-
-    await awardReferralBetBonus(
-      client,
-      {
-        id: order.user_id,
-        telegram_id: order.telegram_id,
-        referred_by_telegram_id: order.referred_by_telegram_id,
-      },
-      market.id,
-    );
-
-    filled.push({
-      order: mapLimitOrder(orderResult.rows[0]),
-      position: mapPosition(positionResult.rows[0]),
-      trade: mapTrade(tradeResult.rows[0]),
-    });
-  }
-
-  return filled;
-}
-
 export async function getMarketOrderBook(input) {
   const marketId = Number(input.marketId);
   const currency = normalizeCurrency(input.currency);
@@ -3977,12 +3830,8 @@ export async function createLimitOrder(input) {
       [user.id, marketId, side, currency, limitPrice, shares, amount, debit.bonus_spent],
     );
 
-    const filled = (await processOpenLimitOrdersForMarket(client, market))
-      .filter((item) => Number(item.order?.user_id) === Number(user.id));
-    const refreshedOrderResult = await client.query(
-      "SELECT * FROM limit_orders WHERE id = $1::bigint",
-      [orderResult.rows[0].id],
-    );
+    // Limit orders are passive. The internal market maker must not fill them;
+    // execution will be added later through a user-to-user matcher.
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
     return {
@@ -3992,8 +3841,7 @@ export async function createLimitOrder(input) {
       currency_balance: finalBalance.total,
       currency_cash_balance: finalBalance.cash,
       currency_bonus_balance: finalBalance.bonus,
-      order: mapLimitOrder(refreshedOrderResult.rows[0]),
-      filled,
+      order: mapLimitOrder(orderResult.rows[0]),
     };
   });
 }
@@ -4158,13 +4006,6 @@ export async function buyOutcome(input) {
     );
 
     const referralBonus = await awardReferralBetBonus(client, user, marketId);
-    await processOpenLimitOrdersForMarket(client, {
-      ...market,
-      yes_price: nextYesPrice,
-      no_price: nextNoPrice,
-      yes_volume: toNumber(market.yes_volume) + (side === "YES" ? netAmount : 0),
-      no_volume: toNumber(market.no_volume) + (side === "NO" ? netAmount : 0),
-    });
 
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
@@ -4425,14 +4266,6 @@ export async function sellOutcome(input) {
         quote.nextNoVolume,
       ],
     );
-
-    await processOpenLimitOrdersForMarket(client, {
-      ...market,
-      yes_price: nextYesPrice,
-      no_price: nextNoPrice,
-      yes_volume: quote.nextYesVolume,
-      no_volume: quote.nextNoVolume,
-    });
 
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
