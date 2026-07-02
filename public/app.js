@@ -558,6 +558,27 @@ function renderClanIconPicker() {
     </button>
   `).join("");
   setInnerHtmlIfChanged(picker, html);
+  updateClanCreatePreview();
+}
+
+// Live preview of the clan-to-be (icon + name) in the create form.
+function updateClanCreatePreview() {
+  const nameEl = $("clanPreviewName");
+  const iconEl = $("clanPreviewIcon");
+  if (!nameEl && !iconEl) {
+    return;
+  }
+  if (nameEl) {
+    const value = ($("clanNameInput")?.value || "").trim();
+    nameEl.textContent = value || "Название клана";
+    nameEl.classList.toggle("placeholder", !value);
+  }
+  if (iconEl) {
+    const theme = CLAN_ICON_THEMES.find((item) => item.key === state.selectedClanIconKey)
+      || CLAN_ICON_THEMES[0];
+    iconEl.className = `clan-create-preview-icon ${theme.className}`;
+    iconEl.innerHTML = theme.svg;
+  }
 }
 
 function setTeamIconElement(element, icon, alt = "team") {
@@ -3523,16 +3544,26 @@ function renderClans() {
   });
 
   if (state.userClan) {
+    const uc = state.userClan;
+    const clanInList = state.clans.find((clan) => clan.id === uc.id);
+    const clanScore = Number(clanInList?.score) || 0;
+    const contribution = Number(uc.user_contribution_score) || 0;
+    const share = clanScore > 0 ? Math.max(0.03, Math.min(1, contribution / clanScore)) : 0;
     userCard.classList.remove("hidden");
+    userCard.classList.add("is-clickable");
+    userCard.dataset.openClan = String(uc.id);
     userCard.innerHTML = `
-      ${clanIconMarkup(state.userClan, "user-clan-icon")}
-      <div>
-        <strong>Твой клан: ${escapeHtml(state.userClan.name)}</strong>
-        <small>Вклад: ${formatFire(state.userClan.user_contribution_score)} очков · место #${state.userClan.rank || "-"}</small>
+      ${clanIconMarkup(uc, "user-clan-icon")}
+      <div class="user-clan-body">
+        <strong>Твой клан: ${escapeHtml(uc.name)}</strong>
+        <small>Вклад ${formatFire(contribution)} · место #${uc.rank || "-"}</small>
+        ${share > 0 ? `<span class="user-clan-bar"><i style="transform:scaleX(${share.toFixed(3)})"></i></span>` : ""}
       </div>
+      <span class="user-clan-go" aria-hidden="true">›</span>
     `;
   } else {
     userCard.classList.add("hidden");
+    userCard.classList.remove("is-clickable");
     userCard.innerHTML = "";
   }
 
@@ -3603,9 +3634,13 @@ function renderClans() {
     detailCard.innerHTML = "";
   }
 
-  const html = state.clans.map((clan) => `
-    <div class="clan-row ${clan.user_is_member ? "active" : ""} ${clan.id === state.selectedClanId ? "selected" : ""}" data-open-clan="${clan.id}">
-      <span class="clan-rank">${clan.rank}</span>
+  const maxClanScore = Math.max(1, ...state.clans.map((clan) => Number(clan.score) || 0));
+  const html = state.clans.map((clan) => {
+    const rank = Number(clan.rank) || 0;
+    const bar = Math.max(0.04, (Number(clan.score) || 0) / maxClanScore);
+    return `
+    <div class="clan-row ${clan.user_is_member ? "active" : ""} ${clan.id === state.selectedClanId ? "selected" : ""}" data-open-clan="${clan.id}" style="--bar:${bar.toFixed(3)}">
+      <span class="clan-rank ${rank >= 1 && rank <= 3 ? `rank-${rank}` : ""}">${rank || "-"}</span>
       ${clanIconMarkup(clan)}
       <div class="clan-info">
         <strong>${escapeHtml(clan.name)}</strong>
@@ -3614,8 +3649,10 @@ function renderClans() {
       <button class="task-button" data-join-clan="${clan.id}" type="button" ${clan.user_is_member ? "disabled" : ""}>
         ${clan.user_is_member ? "Твой" : "Войти"}
       </button>
+      <span class="clan-bar" aria-hidden="true"></span>
     </div>
-  `).join("");
+  `;
+  }).join("");
   setInnerHtmlIfChanged(list, html);
 }
 
@@ -4904,6 +4941,18 @@ $("clansBtn")?.addEventListener("click", () => {
   closeTopMoreMenu();
   setClansSheetOpen(true);
 });
+
+$("userClanCard")?.addEventListener("click", () => {
+  if (!state.userClan) {
+    return;
+  }
+  triggerHaptic("selection");
+  state.selectedClanId = state.userClan.id;
+  state.clanView = "detail";
+  renderClans();
+});
+
+$("clanNameInput")?.addEventListener("input", updateClanCreatePreview);
 
 $("clansCloseBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");

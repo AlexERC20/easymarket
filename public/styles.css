@@ -3359,13 +3359,14 @@ code {
 }
 
 .clan-row {
+  position: relative;
   display: grid;
   grid-template-columns: 28px 42px 1fr auto;
   align-items: center;
   gap: 10px;
   border-radius: 0;
   background: transparent;
-  padding: 11px 0;
+  padding: 11px 0 13px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   animation: softRise 180ms ease both;
 }
@@ -3379,11 +3380,42 @@ code {
   background: rgba(24, 57, 43, 0.5);
 }
 
+/* Score bar relative to the leader, along the row's bottom edge. */
+.clan-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 4px;
+  height: 2px;
+  border-radius: 2px;
+  transform: scaleX(var(--bar, 0));
+  transform-origin: left center;
+  background: linear-gradient(90deg, rgba(53, 246, 255, 0.55), rgba(183, 255, 77, 0.65));
+  opacity: 0.65;
+}
+
 .clan-rank {
   color: var(--muted);
   font-weight: 900;
   text-align: center;
 }
+
+.clan-rank.rank-1,
+.clan-rank.rank-2,
+.clan-rank.rank-3 {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: 0 auto;
+  border-radius: 50%;
+  color: #0a0e16;
+  font-size: 12px;
+}
+
+.clan-rank.rank-1 { background: linear-gradient(145deg, #ffe08a, #f5b400); }
+.clan-rank.rank-2 { background: linear-gradient(145deg, #eef2f8, #aab6c6); }
+.clan-rank.rank-3 { background: linear-gradient(145deg, #e6b183, #c07b45); }
 
 .clan-avatar {
   width: 42px;
@@ -3516,6 +3548,57 @@ code {
   align-content: start;
 }
 
+/* Live preview of the clan-to-be */
+.clan-create-preview {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(53, 246, 255, 0.08), transparent 40%),
+    rgba(255, 255, 255, 0.04);
+}
+
+.clan-create-preview-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13);
+}
+
+.clan-create-preview-icon svg {
+  display: block;
+  width: 26px;
+  height: 26px;
+  fill: currentColor;
+}
+
+.clan-create-preview strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 950;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.clan-create-preview strong.placeholder {
+  color: var(--muted-2, rgba(255, 255, 255, 0.4));
+}
+
+.clan-create-preview small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .clan-icon-picker {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3540,14 +3623,14 @@ code {
   transform: translateY(-1px);
 }
 
-.clan-icon-option.bull { background: linear-gradient(145deg, #33b96f, #125b39); }
-.clan-icon-option.bear { background: linear-gradient(145deg, #ef5757, #61212a); }
-.clan-icon-option.fox { background: linear-gradient(145deg, #f0a44c, #7a3f19); }
-.clan-icon-option.wolf { background: linear-gradient(145deg, #7d96b7, #2e3f59); }
-.clan-icon-option.eagle { background: linear-gradient(145deg, #5ea1ff, #234d92); }
-.clan-icon-option.tiger { background: linear-gradient(145deg, #f7c24d, #95540c); }
-.clan-icon-option.lion { background: linear-gradient(145deg, #d9a43a, #71501d); }
-.clan-icon-option.shark { background: linear-gradient(145deg, #46d5e8, #1d5a79); }
+.clan-icon-option.bull, .clan-create-preview-icon.bull { background: linear-gradient(145deg, #33b96f, #125b39); }
+.clan-icon-option.bear, .clan-create-preview-icon.bear { background: linear-gradient(145deg, #ef5757, #61212a); }
+.clan-icon-option.fox, .clan-create-preview-icon.fox { background: linear-gradient(145deg, #f0a44c, #7a3f19); }
+.clan-icon-option.wolf, .clan-create-preview-icon.wolf { background: linear-gradient(145deg, #7d96b7, #2e3f59); }
+.clan-icon-option.eagle, .clan-create-preview-icon.eagle { background: linear-gradient(145deg, #5ea1ff, #234d92); }
+.clan-icon-option.tiger, .clan-create-preview-icon.tiger { background: linear-gradient(145deg, #f7c24d, #95540c); }
+.clan-icon-option.lion, .clan-create-preview-icon.lion { background: linear-gradient(145deg, #d9a43a, #71501d); }
+.clan-icon-option.shark, .clan-create-preview-icon.shark { background: linear-gradient(145deg, #46d5e8, #1d5a79); }
 
 .clan-create-card input {
   min-height: 44px;
@@ -3579,8 +3662,17 @@ code {
 }
 
 .clan-trophy {
-  font-size: 52px;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  color: #ffd166;
   filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.28));
+}
+
+.clan-trophy svg {
+  width: 40px;
+  height: 40px;
 }
 
 .clan-hero strong {
@@ -3595,49 +3687,86 @@ code {
 .clan-prize-podium {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
-  width: 100%;
-  margin-top: 13px;
-}
-
-.clan-prize-podium {
   align-items: end;
+  gap: 8px;
+  width: 100%;
+  margin-top: 15px;
 }
 
 .clan-prize-podium span {
+  position: relative;
   display: grid;
-  gap: 3px;
-  min-height: 48px;
+  gap: 1px;
   place-items: center;
-  border-radius: 14px;
+  padding: 19px 4px 8px;
+  border-radius: 13px 13px 9px 9px;
   border: 1px solid transparent;
-  background: rgba(6, 12, 22, 0.2);
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 11px;
-  font-weight: 900;
-  line-height: 1.1;
+  background: rgba(6, 12, 22, 0.28);
 }
 
-/* Podium shape: 1st tall in the middle, 2nd left, 3rd right, with medal colours. */
+.clan-prize-podium span::before {
+  position: absolute;
+  top: -10px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: #0a0e16;
+  font-size: 11px;
+  font-weight: 950;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
+}
+
+.clan-prize-podium b {
+  font-size: 15px;
+  font-weight: 950;
+  color: #fff;
+}
+
+.clan-prize-podium small {
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Podium shape: 1st tall in the middle (gold), 2nd left (silver), 3rd right (bronze). */
 .clan-prize-podium span:nth-child(1) {
   order: 2;
-  min-height: 64px;
-  border-color: rgba(255, 209, 102, 0.5);
-  background: rgba(255, 209, 102, 0.1);
+  min-height: 84px;
+  border-color: rgba(255, 209, 102, 0.55);
+  background: linear-gradient(180deg, rgba(255, 209, 102, 0.17), rgba(255, 209, 102, 0.05));
+  box-shadow: 0 0 22px rgba(255, 209, 102, 0.18);
 }
+.clan-prize-podium span:nth-child(1)::before {
+  content: "1";
+  top: -12px;
+  width: 26px;
+  height: 26px;
+  background: linear-gradient(145deg, #ffe08a, #f5b400);
+}
+.clan-prize-podium span:nth-child(1) b { color: #ffe1a0; }
+
 .clan-prize-podium span:nth-child(2) {
   order: 1;
-  min-height: 50px;
-  border-color: rgba(203, 213, 225, 0.4);
+  min-height: 66px;
+  border-color: rgba(203, 213, 225, 0.42);
 }
+.clan-prize-podium span:nth-child(2)::before {
+  content: "2";
+  background: linear-gradient(145deg, #eef2f8, #aab6c6);
+}
+
 .clan-prize-podium span:nth-child(3) {
   order: 3;
-  min-height: 42px;
-  border-color: rgba(214, 158, 110, 0.4);
+  min-height: 56px;
+  border-color: rgba(214, 158, 110, 0.44);
 }
-.clan-prize-podium span:nth-child(1) b { color: #ffd166; }
-.clan-prize-podium span:nth-child(2) b { color: #cbd5e1; }
-.clan-prize-podium span:nth-child(3) b { color: #d69e6e; }
+.clan-prize-podium span:nth-child(3)::before {
+  content: "3";
+  background: linear-gradient(145deg, #e6b183, #c07b45);
+}
 
 /* Sheet content stagger on open */
 @keyframes sheetItemIn {
@@ -3699,16 +3828,6 @@ code {
   }
 }
 
-.clan-prize-podium b {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.22);
-  color: #fff;
-  font-size: 12px;
-}
 
 .clan-rules-card,
 .clan-detail-card {
@@ -3832,9 +3951,55 @@ code {
 
 .user-clan-card {
   display: grid;
-  grid-template-columns: 42px 1fr;
+  grid-template-columns: 42px 1fr auto;
   align-items: center;
   gap: 10px;
+}
+
+.user-clan-card.is-clickable {
+  cursor: pointer;
+  transition: transform 140ms var(--ease-default), border-color 160ms var(--ease-default);
+}
+
+.user-clan-card.is-clickable:active {
+  transform: scale(0.99);
+}
+
+.user-clan-body {
+  min-width: 0;
+}
+
+.user-clan-body strong,
+.user-clan-body small {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-clan-bar {
+  display: block;
+  margin-top: 6px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.user-clan-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  transform-origin: left center;
+  background: linear-gradient(90deg, #35f6ff, #b7ff4d);
+}
+
+.user-clan-go {
+  color: var(--muted);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  padding-right: 2px;
 }
 
 .user-clan-icon {
