@@ -3958,48 +3958,6 @@ code {
   gap: 11px;
 }
 
-.rules-hero > span {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 15px;
-  background: linear-gradient(145deg, rgba(183, 255, 77, 0.2), rgba(53, 246, 255, 0.12));
-  color: var(--neon-lime);
-  box-shadow: 0 0 22px rgba(183, 255, 77, 0.12);
-}
-
-.rules-prize-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.rules-prize-grid div {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.06);
-  padding: 10px 7px;
-  text-align: center;
-}
-
-.rules-prize-grid b,
-.rules-prize-grid span {
-  display: block;
-}
-
-.rules-prize-grid b {
-  color: rgba(243, 246, 251, 0.78);
-  font-size: 11px;
-}
-
-.rules-prize-grid span {
-  margin-top: 4px;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 950;
-}
-
 .rules-note {
   border-radius: 14px;
   background: rgba(183, 255, 77, 0.08);
@@ -4872,11 +4830,11 @@ code {
 
 @keyframes sheetBackdropIn {
   from {
-    background: rgba(0, 0, 0, 0);
+    background: rgba(3, 6, 11, 0);
   }
 
   to {
-    background: rgba(0, 0, 0, 0.44);
+    background: rgba(3, 6, 11, 0.74);
   }
 }
 
@@ -4896,11 +4854,11 @@ code {
 
 @keyframes sheetBackdropOut {
   from {
-    background: rgba(0, 0, 0, 0.44);
+    background: rgba(3, 6, 11, 0.74);
   }
 
   to {
-    background: rgba(0, 0, 0, 0);
+    background: rgba(3, 6, 11, 0);
   }
 }
 
