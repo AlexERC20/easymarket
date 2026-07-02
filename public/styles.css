@@ -1906,7 +1906,7 @@ code {
 
 .task-list {
   display: grid;
-  gap: 9px;
+  gap: 7px;
   margin-top: 13px;
   max-height: 62vh;
   overflow-y: auto;
@@ -2023,40 +2023,6 @@ code {
   padding: 11px;
 }
 
-.task-group {
-  border: 1px solid var(--line-soft);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.035);
-  overflow: hidden;
-}
-
-.task-group summary {
-  cursor: pointer;
-  list-style: none;
-  padding: 12px;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 950;
-}
-
-.task-group summary::-webkit-details-marker {
-  display: none;
-}
-
-.task-group summary::after {
-  content: "+";
-  float: right;
-  color: var(--muted);
-}
-
-.task-group[open] summary::after {
-  content: "−";
-}
-
-.task-group .task-row {
-  margin: 0 9px 9px;
-}
-
 .task-row.featured {
   border-color: rgba(255, 184, 77, 0.44);
   background: linear-gradient(135deg, rgba(255, 184, 77, 0.14), rgba(51, 178, 116, 0.08));
@@ -2165,69 +2131,72 @@ code {
   }
 }
 
-/* Compact task rows: icon · title/desc · reward chip + action */
+/* Compact single-line task rows: icon · title · reward chip · action */
 .task-item {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto auto;
   align-items: center;
-  gap: 11px;
+  gap: 10px;
   border: 1px solid var(--line-soft);
-  border-radius: 13px;
-  background: rgba(255, 255, 255, 0.04);
-  padding: 9px 11px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.032);
+  padding: 6px 10px;
 }
 
 .task-item.featured {
   border-color: rgba(255, 184, 77, 0.44);
-  background: linear-gradient(135deg, rgba(255, 184, 77, 0.13), rgba(51, 178, 116, 0.07));
+  background: linear-gradient(135deg, rgba(255, 184, 77, 0.13), rgba(51, 178, 116, 0.06));
 }
 
 .task-item.info {
-  border-color: rgba(94, 161, 255, 0.26);
-  background: rgba(94, 161, 255, 0.07);
+  border-color: rgba(94, 161, 255, 0.24);
+  background: rgba(94, 161, 255, 0.06);
 }
 
 .task-ic {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
-  font-size: 17px;
-  line-height: 1;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
 }
 
-.task-body {
+.task-ic svg {
+  width: 18px;
+  height: 18px;
+}
+
+.task-item.featured .task-ic {
+  color: var(--fire);
+  background: rgba(255, 184, 77, 0.12);
+}
+
+.task-item.info .task-ic {
+  color: #7fb2ff;
+  background: rgba(94, 161, 255, 0.12);
+}
+
+.task-title {
   min-width: 0;
-}
-
-.task-body strong {
-  display: block;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 800;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.task-body small {
-  display: block;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.task-item.info .task-reward {
+  grid-column: 3 / -1;
+  justify-self: end;
 }
 
-.task-act {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 5px;
-  flex: 0 0 auto;
+.task-item .task-button {
+  min-width: 66px;
+  padding: 6px 12px;
+  font-size: 12px;
 }
 
 .task-reward {
@@ -2258,7 +2227,7 @@ code {
   text-transform: uppercase;
 }
 
-.task-section:first-child {
+.daily-progress + .task-section {
   margin-top: 0;
 }
 

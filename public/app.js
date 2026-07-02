@@ -1772,6 +1772,12 @@ function renderTaskRewards() {
   if ($("refTaskUsdtReward")) $("refTaskUsdtReward").textContent = formatFire(refUsdt);
   if ($("dailyPresenceTaskReward")) $("dailyPresenceTaskReward").textContent = formatFire(dailyPresence);
   if ($("dailyBetTaskReward")) $("dailyBetTaskReward").textContent = formatFire(dailyBet);
+  // Fixed daily rewards come from one source (also drives the progress sum).
+  if ($("btcPredictionTaskReward")) $("btcPredictionTaskReward").textContent = formatFire(DAILY_TASK_FIXED_REWARD.daily_btc_prediction);
+  if ($("footballPredictionTaskReward")) $("footballPredictionTaskReward").textContent = formatFire(DAILY_TASK_FIXED_REWARD.daily_football_prediction);
+  if ($("btc5PredictionsTaskReward")) $("btc5PredictionsTaskReward").textContent = formatFire(DAILY_TASK_FIXED_REWARD.daily_btc_5_predictions);
+  if ($("win1TaskReward")) $("win1TaskReward").textContent = formatFire(DAILY_TASK_FIXED_REWARD.daily_win_1);
+  if ($("winStreak5TaskReward")) $("winStreak5TaskReward").textContent = formatFire(DAILY_TASK_FIXED_REWARD.daily_win_streak_5);
   renderSoundToggle();
   renderAquariumToggle();
   renderTaskSettings();
