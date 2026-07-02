@@ -2746,6 +2746,8 @@ function renderLimitOrderControls(market, side) {
   const orderSide = state.orderbook.orderSide || "BUY";
   buyButton?.classList.toggle("active", orderSide === "BUY");
   sellButton?.classList.toggle("active", orderSide === "SELL");
+  // Drives the submit button colour (green Buy / red Sell).
+  $("limitOrderForm")?.classList.toggle("is-sell", orderSide === "SELL");
   if (document.activeElement !== priceInput) {
     priceInput.value = state.orderbook.formPrice || "";
   }
@@ -2800,7 +2802,7 @@ function renderMyLimitOrders() {
     </button>
     ${state.orderbook.myOrdersOpen ? orders.map((order) => `
         <div class="my-limit-order">
-          <span>${order.order_side === "SELL" ? "Sell" : "Buy"} ${escapeHtml(marketSideLabel(getDisplayMarket(), order.side))}</span>
+          <span class="lo-side ${order.order_side === "SELL" ? "sell" : "buy"}">${order.order_side === "SELL" ? "Sell" : "Buy"} ${escapeHtml(marketSideLabel(getDisplayMarket(), order.side))}</span>
           <b>${formatCents(order.limit_price)}</b>
           <small>${formatCurrencyAmount(order.remaining_reserved, order.currency)}</small>
           <button type="button" data-cancel-limit-order="${order.id}" ${state.orderbook.cancelPendingId === order.id ? "disabled" : ""}>Cancel</button>

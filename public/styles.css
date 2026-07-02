@@ -4282,11 +4282,15 @@ code {
 }
 
 .limit-order-mode-toggle button.active:first-child {
-  color: var(--yes);
+  background: linear-gradient(135deg, rgba(44, 211, 126, 0.96), rgba(43, 151, 98, 0.92));
+  color: #07100b;
+  box-shadow: 0 0 14px rgba(44, 211, 126, 0.22);
 }
 
 .limit-order-mode-toggle button.active:last-child {
-  color: var(--no);
+  background: linear-gradient(135deg, rgba(239, 90, 110, 0.96), rgba(190, 55, 75, 0.92));
+  color: #fff;
+  box-shadow: 0 0 14px rgba(239, 90, 110, 0.22);
 }
 
 .limit-order-form label {
@@ -4326,7 +4330,7 @@ code {
   box-shadow: 0 0 0 3px rgba(76, 211, 194, 0.1);
 }
 
-.limit-order-form button,
+.limit-order-form > button,
 .my-limit-order button {
   border: 0;
   border-radius: 11px;
@@ -4339,13 +4343,20 @@ code {
   transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease;
 }
 
-.limit-order-form button:active,
+/* Submit button follows the selected side: green for Buy, red for Sell. */
+.limit-order-form.is-sell > button[type="submit"] {
+  background: linear-gradient(135deg, rgba(239, 90, 110, 0.96), rgba(190, 55, 75, 0.92));
+  color: #fff;
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.22), 0 0 18px rgba(239, 90, 110, 0.16);
+}
+
+.limit-order-form > button:active,
 .my-limit-order button:active {
   transform: translateY(2px) scale(0.98);
   box-shadow: 0 4px 0 rgba(0, 0, 0, 0.22), 0 0 14px rgba(76, 211, 194, 0.16);
 }
 
-.limit-order-form button:disabled,
+.limit-order-form > button:disabled,
 .my-limit-order button:disabled {
   opacity: 0.5;
   filter: grayscale(0.45);
@@ -4517,6 +4528,9 @@ code {
   font-size: 11px;
   font-weight: 850;
 }
+
+.my-limit-order .lo-side.buy { color: var(--yes); }
+.my-limit-order .lo-side.sell { color: var(--no); }
 
 .my-limit-order b {
   color: var(--text);
