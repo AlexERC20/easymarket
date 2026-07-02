@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260702-05" />
+    <link rel="stylesheet" href="/styles.css?v=20260702-06" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260701-12" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -638,6 +638,10 @@
             <button id="orderbookNoBtn" type="button">NO / DOWN</button>
           </div>
           <form id="limitOrderForm" class="limit-order-form">
+            <div class="limit-order-mode-toggle" role="tablist" aria-label="Тип лимитной заявки">
+              <button id="limitOrderBuyBtn" class="active" type="button">Buy</button>
+              <button id="limitOrderSellBtn" type="button">Sell</button>
+            </div>
             <label>
               <span>Limit</span>
               <input id="limitOrderPriceInput" type="number" min="0.001" max="0.999" step="0.001" inputmode="decimal" placeholder="0.450" />
@@ -721,6 +725,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260702-05" type="module"></script>
+    <script src="/app.js?v=20260702-06" type="module"></script>
   </body>
 </html>

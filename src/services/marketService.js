@@ -233,6 +233,7 @@ function mapLimitOrder(row) {
     id: Number(row.id),
     user_id: Number(row.user_id),
     market_id: Number(row.market_id),
+    position_id: row.position_id === null || row.position_id === undefined ? null : Number(row.position_id),
     side: row.side,
     order_side: row.order_side || "BUY",
     currency: normalizeCurrency(row.currency),
@@ -242,6 +243,10 @@ function mapLimitOrder(row) {
     reserved_amount: toNumber(row.reserved_amount),
     remaining_reserved: toNumber(row.remaining_reserved),
     bonus_reserved: toNumber(row.bonus_reserved),
+    reserved_spent: toNumber(row.reserved_spent),
+    remaining_spent: toNumber(row.remaining_spent),
+    reserved_bonus_spent: toNumber(row.reserved_bonus_spent),
+    remaining_bonus_spent: toNumber(row.remaining_bonus_spent),
     status: row.status,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -3630,6 +3635,50 @@ function roundShares(value) {
 }
 
 async function refundLimitOrder(client, order, reason = "limit_order_cancel") {
+  if (String(order.order_side || "BUY").toUpperCase() === "SELL") {
+    const shares = roundShares(order.remaining_shares);
+    const spent = roundMoney(order.remaining_spent);
+    const bonusSpent = roundMoney(order.remaining_bonus_spent);
+    if (shares > 0) {
+      await client.query(
+        `
+          UPDATE positions
+          SET shares = shares + $2::numeric,
+              spent = spent + $3::numeric,
+              bonus_spent = bonus_spent + $4::numeric,
+              avg_price = CASE
+                WHEN shares + $2::numeric > 0
+                  THEN (spent + $3::numeric) / NULLIF(shares + $2::numeric, 0)
+                ELSE 0::numeric
+              END,
+              status = 'open',
+              updated_at = now()
+          WHERE id = $1::bigint
+            AND user_id = $5::bigint
+        `,
+        [order.position_id, shares, spent, bonusSpent, order.user_id],
+      );
+    }
+
+    const result = await client.query(
+      `
+        UPDATE limit_orders
+        SET status = 'cancelled',
+            remaining_shares = 0,
+            remaining_reserved = 0,
+            remaining_spent = 0,
+            remaining_bonus_spent = 0,
+            updated_at = now(),
+            cancelled_at = now()
+        WHERE id = $1::bigint
+        RETURNING *
+      `,
+      [order.id],
+    );
+
+    return mapLimitOrder(result.rows[0]);
+  }
+
   const amount = roundMoney(order.remaining_reserved);
   const bonusReserved = toNumber(order.bonus_reserved);
   const reservedAmount = toNumber(order.reserved_amount);
@@ -3701,6 +3750,7 @@ export async function getMarketOrderBook(input) {
       SELECT
         side,
         currency,
+        order_side,
         limit_price,
         SUM(remaining_shares) AS shares,
         SUM(remaining_reserved) AS amount,
@@ -3708,10 +3758,9 @@ export async function getMarketOrderBook(input) {
       FROM limit_orders
       WHERE market_id = $1::bigint
         AND status = 'open'
-        AND order_side = 'BUY'
         AND currency = $2::text
-      GROUP BY side, currency, limit_price
-      ORDER BY side ASC, limit_price DESC
+      GROUP BY side, currency, order_side, limit_price
+      ORDER BY side ASC, order_side ASC, limit_price DESC
       LIMIT 80
     `,
     [marketId, currency],
@@ -3750,7 +3799,7 @@ export async function getMarketOrderBook(input) {
       shares: toNumber(row.shares),
       amount: toNumber(row.amount),
       orders_count: Number(row.orders_count || 0),
-      order_side: "BUY",
+      order_side: String(row.order_side || "BUY").toUpperCase(),
     })),
     my_orders: myOrders,
   };
@@ -3759,6 +3808,7 @@ export async function getMarketOrderBook(input) {
 export async function createLimitOrder(input) {
   const marketId = Number(input.marketId);
   const side = String(input.side || "").toUpperCase();
+  const orderSide = String(input.order_side || input.orderSide || "BUY").toUpperCase();
   const amount = ensurePositiveAmount(input.amount);
   const currency = normalizeCurrency(input.currency);
   const reasonSuffix = balanceReasonSuffix(currency);
@@ -3768,6 +3818,9 @@ export async function createLimitOrder(input) {
   }
   if (!["YES", "NO"].includes(side)) {
     throw new Error("invalid_side");
+  }
+  if (!["BUY", "SELL"].includes(orderSide)) {
+    throw new Error("invalid_limit_order_side");
   }
 
   const user = await getUserByTelegramId(input.telegram_id);
@@ -3799,6 +3852,110 @@ export async function createLimitOrder(input) {
       throw new Error("invalid_limit_order");
     }
 
+    if (orderSide === "SELL") {
+      const positionResult = await client.query(
+        `
+          SELECT *
+          FROM positions
+          WHERE user_id = $1::bigint
+            AND market_id = $2::bigint
+            AND side = $3::text
+            AND currency = $4::text
+            AND status = 'open'
+          FOR UPDATE
+        `,
+        [user.id, marketId, side, currency],
+      );
+      const position = positionResult.rows[0];
+      if (!position) {
+        throw new Error("position_not_open");
+      }
+
+      const positionShares = toNumber(position.shares);
+      if (positionShares <= 0) {
+        throw new Error("position_not_open");
+      }
+      if (shares > positionShares + 0.00000001) {
+        throw new Error("insufficient_shares");
+      }
+
+      const reserveRatio = shares / positionShares;
+      const reservedSpent = roundMoney(toNumber(position.spent) * reserveRatio);
+      const reservedBonusSpent = roundMoney(toNumber(position.bonus_spent) * reserveRatio);
+      const remainingShares = roundShares(positionShares - shares);
+      const remainingSpent = roundMoney(toNumber(position.spent) - reservedSpent);
+      const remainingBonusSpent = roundMoney(toNumber(position.bonus_spent) - reservedBonusSpent);
+      const nextPositionStatus = remainingShares <= 0.00000001 ? "reserved" : "open";
+      const positionUpdateResult = await client.query(
+        `
+          UPDATE positions
+          SET shares = $2::numeric,
+              spent = $3::numeric,
+              bonus_spent = $4::numeric,
+              avg_price = CASE
+                WHEN $2::numeric > 0 THEN $3::numeric / NULLIF($2::numeric, 0)
+                ELSE 0::numeric
+              END,
+              status = $5::text,
+              updated_at = now()
+          WHERE id = $1::bigint
+          RETURNING *
+        `,
+        [position.id, remainingShares, remainingSpent, remainingBonusSpent, nextPositionStatus],
+      );
+
+      const orderResult = await client.query(
+        `
+          INSERT INTO limit_orders (
+            user_id,
+            market_id,
+            position_id,
+            side,
+            order_side,
+            currency,
+            limit_price,
+            shares,
+            remaining_shares,
+            reserved_amount,
+            remaining_reserved,
+            bonus_reserved,
+            reserved_spent,
+            remaining_spent,
+            reserved_bonus_spent,
+            remaining_bonus_spent,
+            status
+          )
+          VALUES ($1::bigint, $2::bigint, $3::bigint, $4::text, 'SELL', $5::text, $6::numeric, $7::numeric, $7::numeric, $8::numeric, $8::numeric, 0, $9::numeric, $9::numeric, $10::numeric, $10::numeric, 'open')
+          RETURNING *
+        `,
+        [
+          user.id,
+          marketId,
+          position.id,
+          side,
+          currency,
+          limitPrice,
+          shares,
+          roundMoney(shares * limitPrice),
+          reservedSpent,
+          reservedBonusSpent,
+        ],
+      );
+
+      const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
+
+      return {
+        ok: true,
+        currency,
+        balance: finalBalance.total,
+        currency_balance: finalBalance.total,
+        currency_cash_balance: finalBalance.cash,
+        currency_bonus_balance: finalBalance.bonus,
+        order: mapLimitOrder(orderResult.rows[0]),
+        position: mapPosition(positionUpdateResult.rows[0]),
+      };
+    }
+
     const debit = await debitCurrencyBalance(
       client,
       user.id,
@@ -3813,6 +3970,7 @@ export async function createLimitOrder(input) {
         INSERT INTO limit_orders (
           user_id,
           market_id,
+          position_id,
           side,
           order_side,
           currency,
@@ -3824,7 +3982,7 @@ export async function createLimitOrder(input) {
           bonus_reserved,
           status
         )
-        VALUES ($1::bigint, $2::bigint, $3::text, 'BUY', $4::text, $5::numeric, $6::numeric, $6::numeric, $7::numeric, $7::numeric, $8::numeric, 'open')
+        VALUES ($1::bigint, $2::bigint, NULL, $3::text, 'BUY', $4::text, $5::numeric, $6::numeric, $6::numeric, $7::numeric, $7::numeric, $8::numeric, 'open')
         RETURNING *
       `,
       [user.id, marketId, side, currency, limitPrice, shares, amount, debit.bonus_spent],
@@ -3879,6 +4037,14 @@ export async function cancelLimitOrder(input) {
     const cancelled = await refundLimitOrder(client, order, "limit_order_cancel");
     const currency = normalizeCurrency(order.currency);
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
+    let restoredPosition = null;
+    if (String(order.order_side || "BUY").toUpperCase() === "SELL" && order.position_id) {
+      const positionResult = await client.query(
+        "SELECT * FROM positions WHERE id = $1::bigint AND user_id = $2::bigint",
+        [order.position_id, user.id],
+      );
+      restoredPosition = positionResult.rows[0] ? mapPosition(positionResult.rows[0]) : null;
+    }
 
     return {
       ok: true,
@@ -3888,6 +4054,7 @@ export async function cancelLimitOrder(input) {
       currency_cash_balance: finalBalance.cash,
       currency_bonus_balance: finalBalance.bonus,
       order: cancelled,
+      position: restoredPosition,
     };
   });
 }

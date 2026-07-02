@@ -4218,7 +4218,8 @@ code {
 }
 
 .market-panel-tabs,
-.orderbook-side-toggle {
+.orderbook-side-toggle,
+.limit-order-mode-toggle {
   display: inline-flex;
   gap: 4px;
   padding: 4px;
@@ -4227,7 +4228,8 @@ code {
 }
 
 .market-panel-tabs button,
-.orderbook-side-toggle button {
+.orderbook-side-toggle button,
+.limit-order-mode-toggle button {
   border: 0;
   border-radius: 10px;
   background: transparent;
@@ -4238,7 +4240,8 @@ code {
 }
 
 .market-panel-tabs button.active,
-.orderbook-side-toggle button.active {
+.orderbook-side-toggle button.active,
+.limit-order-mode-toggle button.active {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text);
 }
@@ -4267,6 +4270,23 @@ code {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 15px;
   background: linear-gradient(135deg, rgba(12, 18, 29, 0.9), rgba(7, 10, 15, 0.74));
+}
+
+.limit-order-mode-toggle {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.limit-order-mode-toggle button {
+  flex: 1;
+}
+
+.limit-order-mode-toggle button.active:first-child {
+  color: var(--yes);
+}
+
+.limit-order-mode-toggle button.active:last-child {
+  color: var(--no);
 }
 
 .limit-order-form label {

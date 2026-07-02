@@ -444,6 +444,7 @@ export async function runMigrations() {
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       market_id BIGINT NOT NULL REFERENCES markets(id) ON DELETE CASCADE,
+      position_id BIGINT REFERENCES positions(id) ON DELETE SET NULL,
       side TEXT NOT NULL,
       order_side TEXT NOT NULL DEFAULT 'BUY',
       currency TEXT NOT NULL DEFAULT 'STAR',
@@ -453,6 +454,10 @@ export async function runMigrations() {
       reserved_amount NUMERIC(20, 8) NOT NULL,
       remaining_reserved NUMERIC(20, 8) NOT NULL,
       bonus_reserved NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      reserved_spent NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      remaining_spent NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      reserved_bonus_spent NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      remaining_bonus_spent NUMERIC(20, 8) NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'open',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -465,6 +470,21 @@ export async function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_limit_orders_user_status
       ON limit_orders(user_id, status, created_at DESC);
+
+    ALTER TABLE limit_orders
+      ADD COLUMN IF NOT EXISTS position_id BIGINT REFERENCES positions(id) ON DELETE SET NULL;
+
+    ALTER TABLE limit_orders
+      ADD COLUMN IF NOT EXISTS reserved_spent NUMERIC(20, 8) NOT NULL DEFAULT 0;
+
+    ALTER TABLE limit_orders
+      ADD COLUMN IF NOT EXISTS remaining_spent NUMERIC(20, 8) NOT NULL DEFAULT 0;
+
+    ALTER TABLE limit_orders
+      ADD COLUMN IF NOT EXISTS reserved_bonus_spent NUMERIC(20, 8) NOT NULL DEFAULT 0;
+
+    ALTER TABLE limit_orders
+      ADD COLUMN IF NOT EXISTS remaining_bonus_spent NUMERIC(20, 8) NOT NULL DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS market_comments (
       id BIGSERIAL PRIMARY KEY,

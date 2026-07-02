@@ -159,6 +159,7 @@ const state = {
     loadedAt: 0,
     formPrice: "",
     formAmount: "",
+    orderSide: "BUY",
     pending: false,
     cancelPendingId: null,
     myOrdersOpen: false,
@@ -2676,10 +2677,11 @@ function buildSyntheticOrderbook(market, side) {
   }).sort((a, b) => b.price - a.price);
 }
 
-function getLimitOrderDefaultPrice(market, side) {
+function getLimitOrderDefaultPrice(market, side, orderSide = state.orderbook.orderSide || "BUY") {
   const minPrice = getMarketMinOutcomePrice(market);
   const currentPrice = getOutcomePrice(market, side);
-  return Math.max(minPrice, Math.min(1 - minPrice, currentPrice - 0.01));
+  const offset = orderSide === "SELL" ? 0.01 : -0.01;
+  return Math.max(minPrice, Math.min(1 - minPrice, currentPrice + offset));
 }
 
 function syncLimitOrderDefaults(market, side) {
@@ -2710,21 +2712,40 @@ function getRealOrderbookRows(side) {
       size: Math.max(1, Math.round(Number(row.amount || 0))),
       shares: Number(row.shares || 0),
       orders_count: Number(row.orders_count || 0),
-      type: "bid",
+      order_side: String(row.order_side || "BUY").toUpperCase(),
+      type: String(row.order_side || "BUY").toUpperCase() === "SELL" ? "ask" : "bid",
       real: true,
     }))
     .filter((row) => Number.isFinite(row.price) && row.price > 0);
+}
+
+function getSellableLimitPosition(market, side) {
+  if (!market?.id) {
+    return null;
+  }
+  return state.positions.find((position) => (
+    Number(position.market_id) === Number(market.id)
+    && position.side === side
+    && position.status === "open"
+    && normalizeCurrency(position.currency) === state.currency
+    && Number(position.shares || 0) > 0
+  )) || null;
 }
 
 function renderLimitOrderControls(market, side) {
   const priceInput = $("limitOrderPriceInput");
   const amountInput = $("limitOrderAmountInput");
   const submitButton = $("limitOrderSubmitBtn");
+  const buyButton = $("limitOrderBuyBtn");
+  const sellButton = $("limitOrderSellBtn");
   if (!priceInput || !amountInput || !submitButton) {
     return;
   }
 
   syncLimitOrderDefaults(market, side);
+  const orderSide = state.orderbook.orderSide || "BUY";
+  buyButton?.classList.toggle("active", orderSide === "BUY");
+  sellButton?.classList.toggle("active", orderSide === "SELL");
   if (document.activeElement !== priceInput) {
     priceInput.value = state.orderbook.formPrice || "";
   }
@@ -2734,6 +2755,8 @@ function renderLimitOrderControls(market, side) {
 
   const price = Number(state.orderbook.formPrice);
   const amount = Number(state.orderbook.formAmount);
+  const sellablePosition = getSellableLimitPosition(market, side);
+  const sellableValue = Number(sellablePosition?.shares || 0) * price;
   const canSubmit = Boolean(
     market
     && state.user
@@ -2742,10 +2765,13 @@ function renderLimitOrderControls(market, side) {
     && price > 0
     && Number.isFinite(amount)
     && amount > 0
+    && (orderSide !== "SELL" || (sellablePosition && amount <= sellableValue + 0.00000001))
     && !state.orderbook.pending
   );
   submitButton.disabled = !canSubmit;
-  submitButton.textContent = state.orderbook.pending ? "Placing..." : `Limit ${marketSideLabel(market, side)}`;
+  submitButton.textContent = state.orderbook.pending
+    ? "Placing..."
+    : `${orderSide === "SELL" ? "Sell" : "Buy"} ${marketSideLabel(market, side)}`;
 }
 
 function renderMyLimitOrders() {
@@ -2774,7 +2800,7 @@ function renderMyLimitOrders() {
     </button>
     ${state.orderbook.myOrdersOpen ? orders.map((order) => `
         <div class="my-limit-order">
-          <span>${escapeHtml(marketSideLabel(getDisplayMarket(), order.side))}</span>
+          <span>${order.order_side === "SELL" ? "Sell" : "Buy"} ${escapeHtml(marketSideLabel(getDisplayMarket(), order.side))}</span>
           <b>${formatCents(order.limit_price)}</b>
           <small>${formatCurrencyAmount(order.remaining_reserved, order.currency)}</small>
           <button type="button" data-cancel-limit-order="${order.id}" ${state.orderbook.cancelPendingId === order.id ? "disabled" : ""}>Cancel</button>
@@ -2868,7 +2894,9 @@ function renderOrderbookPanel() {
       const sizeEl = rowEl.querySelector("small");
       const labelEl = rowEl.querySelector("span");
       if (priceEl) priceEl.textContent = formatCents(row.price);
-      if (labelEl) labelEl.textContent = row.real ? "Limit Bid" : (row.type === "bid" ? "Bid" : "Ask");
+      if (labelEl) labelEl.textContent = row.real
+        ? (row.order_side === "SELL" ? "Limit Ask" : "Limit Bid")
+        : (row.type === "bid" ? "Bid" : "Ask");
       if (sizeEl) sizeEl.textContent = row.real
         ? `${row.size.toLocaleString("ru-RU")} / ${row.orders_count}`
         : row.size.toLocaleString("ru-RU");
@@ -2885,7 +2913,7 @@ function renderOrderbookPanel() {
     </div>
     ${rows.map((row) => `
       <div class="orderbook-row ${row.type} ${row.real ? "real" : ""}" style="--depth:${depthFor(row)}">
-        <span>${row.real ? "Limit Bid" : (row.type === "bid" ? "Bid" : "Ask")}</span>
+        <span>${row.real ? (row.order_side === "SELL" ? "Limit Ask" : "Limit Bid") : (row.type === "bid" ? "Bid" : "Ask")}</span>
         <b>${formatCents(row.price)}</b>
         <small>${row.real ? `${row.size.toLocaleString("ru-RU")} / ${row.orders_count}` : row.size.toLocaleString("ru-RU")}</small>
       </div>
@@ -4821,6 +4849,7 @@ function addLocalActivity(trade) {
 async function submitLimitOrder() {
   const market = getDisplayMarket();
   const side = state.orderbookSide || state.selectedSide || "YES";
+  const orderSide = state.orderbook.orderSide || "BUY";
   const amount = Number(state.orderbook.formAmount || 0);
   const limitPrice = Number(state.orderbook.formPrice || 0);
   if (!state.user || !market) {
@@ -4838,7 +4867,15 @@ async function submitLimitOrder() {
     showToast("Проверь цену и сумму лимитки.");
     return;
   }
-  if (amount > Number(getActiveBalance() || 0)) {
+  if (orderSide === "SELL") {
+    const sellablePosition = getSellableLimitPosition(market, side);
+    const sellableValue = Number(sellablePosition?.shares || 0) * limitPrice;
+    if (!sellablePosition || amount > sellableValue + 0.00000001) {
+      triggerHaptic("warning");
+      showToast("Не хватает shares для sell-лимитки.");
+      return;
+    }
+  } else if (amount > Number(getActiveBalance() || 0)) {
     const missing = Math.max(1, Math.ceil(amount - Number(getActiveBalance() || 0)));
     triggerHaptic("warning");
     openTopupSheet(missing, `Для лимитки не хватает ${formatCurrencyAmount(missing, state.currency)}.`);
@@ -4853,12 +4890,14 @@ async function submitLimitOrder() {
       body: JSON.stringify({
         telegram_id: state.user.telegram_id,
         side,
+        order_side: orderSide,
         amount,
         limit_price: limitPrice,
         currency: state.currency,
       }),
     });
     applyCurrencyBalancePayload(result.currency || state.currency, result);
+    upsertLocalPosition(result.position);
     showToast("Лимитка выставлена.");
     triggerHaptic("success");
     await loadOrderbook({ force: true });
@@ -4869,6 +4908,8 @@ async function submitLimitOrder() {
     if (error.message === "insufficient_fire" || error.message === "insufficient_usdt") {
       const missing = Math.max(1, Math.ceil(amount - Number(getActiveBalance() || 0)));
       openTopupSheet(missing, `Для лимитки не хватает ${formatCurrencyAmount(missing, state.currency)}.`);
+    } else if (error.message === "insufficient_shares" || error.message === "position_not_open") {
+      showToast("Не хватает shares для sell-лимитки.");
     } else {
       showToast("Лимитка не создана.");
     }
@@ -4893,6 +4934,7 @@ async function cancelLimitOrder(orderId) {
       }),
     });
     applyCurrencyBalancePayload(result.currency || state.currency, result);
+    upsertLocalPosition(result.position);
     showToast("Лимитка отменена.");
     triggerHaptic("success");
     await loadOrderbook({ force: true });
@@ -6160,6 +6202,20 @@ $("orderbookYesBtn")?.addEventListener("click", () => {
 $("orderbookNoBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   state.orderbookSide = "NO";
+  state.orderbook.formPrice = "";
+  renderOrderbookPanel();
+});
+
+$("limitOrderBuyBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  state.orderbook.orderSide = "BUY";
+  state.orderbook.formPrice = "";
+  renderOrderbookPanel();
+});
+
+$("limitOrderSellBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  state.orderbook.orderSide = "SELL";
   state.orderbook.formPrice = "";
   renderOrderbookPanel();
 });
