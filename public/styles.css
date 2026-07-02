@@ -4947,6 +4947,30 @@ code {
   animation: taskClaimGlow 900ms ease both;
 }
 
+/* iOS zooms the whole Telegram WebApp when focused fields render below 16px. */
+#topupCustomAmount,
+#withdrawAmountInput,
+#withdrawAddressInput,
+#clanNameInput,
+#clanChannelInput,
+#limitOrderPriceInput,
+#limitOrderAmountInput,
+#marketChatInput {
+  font-size: 16px !important;
+  line-height: 1.1;
+}
+
+#topupCustomAmount::placeholder,
+#withdrawAmountInput::placeholder,
+#withdrawAddressInput::placeholder,
+#clanNameInput::placeholder,
+#clanChannelInput::placeholder,
+#limitOrderPriceInput::placeholder,
+#limitOrderAmountInput::placeholder,
+#marketChatInput::placeholder {
+  font-size: 14px;
+}
+
 @keyframes taskClaimGlow {
   0% {
     box-shadow: inset 0 0 0 1px rgba(183, 255, 77, 0);
