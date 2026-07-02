@@ -4772,7 +4772,7 @@ export async function getLeaderboard(options = {}) {
             m.label AS market_label,
             CASE
               WHEN m.symbol LIKE '${WORLD_CUP_SYMBOL_PREFIX}%' THEN 'WORLD_CUP_WINNER'
-              WHEN m.symbol = ANY($3::text[]) THEN 'BTC_UPDOWN'
+              WHEN m.symbol LIKE 'BTCUSDT%' THEN 'BTC_UPDOWN'
               ELSE m.symbol
             END AS market_type,
             COALESCE(m.resolved_at, p.updated_at) AS resolved_at,
@@ -4839,7 +4839,7 @@ export async function getLeaderboard(options = {}) {
         ORDER BY daily_totals.best_pnl_24h DESC, daily_totals.total_pnl_24h DESC, ranked_positions.resolved_at DESC
         LIMIT $1
       `,
-      [safeLimit, currency, BTC_MARKET_SYMBOLS],
+      [safeLimit, currency],
     );
 
     return {
