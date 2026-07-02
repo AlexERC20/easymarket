@@ -655,8 +655,8 @@ export function showDirectionalSurge(side = "YES", originRect = null) {
   window.setTimeout(() => layer.remove(), 900);
 }
 
-// Reward claim: a gold ring pop + gold sparks at the source (the coin flying to
-// the balance is handled by the caller).
+// Reward claim: a bright gold burst — expanding rings + a spray of gold coins +
+// gold sparks (the coin flying to the balance is handled by the caller).
 export function showRewardPop(originEl = null) {
   playMotionSound("success");
   if (reducedMotion()) {
@@ -671,10 +671,20 @@ export function showRewardPop(originEl = null) {
   pop.setAttribute("aria-hidden", "true");
   pop.style.left = `${cx}px`;
   pop.style.top = `${cy}px`;
-  pop.innerHTML = `<span class="lm-reward-ring"></span><span class="lm-reward-ring lm-reward-ring-2"></span>`;
+
+  const coinCount = 10;
+  const coins = [];
+  for (let i = 0; i < coinCount; i += 1) {
+    const angle = (Math.PI * 2 * i) / coinCount + 0.35;
+    const dist = 42 + (i % 3) * 13;
+    coins.push(
+      `<span class="lm-reward-coin" style="--dx:${(Math.cos(angle) * dist).toFixed(1)}px;--dy:${(Math.sin(angle) * dist).toFixed(1)}px;animation-delay:${(i % 4) * 26}ms"></span>`
+    );
+  }
+  pop.innerHTML = `<span class="lm-reward-ring"></span><span class="lm-reward-ring lm-reward-ring-2"></span>${coins.join("")}`;
   document.body.appendChild(pop);
-  appendSparks(pop, 0, 0, 10, 3);
-  window.setTimeout(() => pop.remove(), 1000);
+  appendSparks(pop, 0, 0, 12, 3);
+  window.setTimeout(() => pop.remove(), 1150);
 }
 
 // New round: an orange candle-flip + horizontal sweep, replacing the bolt burst.

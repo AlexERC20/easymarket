@@ -12,7 +12,7 @@ import {
   showWinCelebration,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260701-14";
+} from "./lightning-motion.js?v=20260701-15";
 import {
   initAquarium,
   isAquariumEnabled,
@@ -21,7 +21,7 @@ import {
   setAquariumRuntimeAllowed,
   setAquariumShakeFeeder,
   spillAquariumFood,
-} from "./aquarium.js?v=20260701-07";
+} from "./aquarium.js?v=20260701-08";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -1826,9 +1826,10 @@ function setTaskButtonVisualState(button, status) {
   button.classList.toggle("claimable", claimable);
   button.classList.toggle("claimed", claimed);
   button.classList.toggle("not-ready", !claimable && !claimed);
-  if (claimed) {
-    button.textContent = "Забрано";
-  } else if (button.dataset.dailyTask) {
+  // Once claimed there's nothing to tap: hide the button and mark the chip earned.
+  button.classList.toggle("is-done", claimed);
+  button.closest(".task-item")?.querySelector(".task-reward")?.classList.toggle("claimed", claimed);
+  if (!claimed && button.dataset.dailyTask) {
     button.textContent = "Забрать";
   }
 }
@@ -5598,6 +5599,12 @@ async function claimDailyTaskByKey(taskKey, button = null) {
       }),
     });
     state.balance = result.balance ?? state.balance;
+    // Capture the button position before markDailyTaskClaimed hides it, so the
+    // reward burst + flying coin still originate from the row.
+    const claimRect = button?.getBoundingClientRect();
+    const claimOrigin = claimRect && claimRect.width
+      ? { getBoundingClientRect: () => claimRect }
+      : null;
     if (result.already_claimed || Number(result.awarded || 0) > 0) {
       markDailyTaskClaimed(taskKey);
     }
@@ -5607,8 +5614,8 @@ async function claimDailyTaskByKey(taskKey, button = null) {
     } else if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
       triggerLightningFlash("success");
-      showRewardPop(button);
-      flyRewardToBalance(button);
+      showRewardPop(claimOrigin);
+      flyRewardToBalance(claimOrigin);
       const claimedRow = button?.closest(".task-item, .task-row");
       if (claimedRow) {
         claimedRow.classList.remove("task-claimed");
@@ -5704,6 +5711,7 @@ function markReferralNudgeShownToday() {
 
 $("tasksBtn").addEventListener("click", () => {
   triggerHaptic("selection");
+  closeTopMoreMenu();
   renderTaskRewards();
   renderTaskStats();
   setTasksSheetOpen(true);
@@ -5903,6 +5911,7 @@ document.addEventListener("click", (event) => {
 
 $("btcMarketsBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
+  closeTopMoreMenu();
   setBtcMarketsSheetOpen(true);
   renderBtcMarketsList();
   void runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => showToast("Маркеты пока не загрузились."));
@@ -5940,6 +5949,7 @@ $("btcMarketsList")?.addEventListener("click", (event) => {
 
 $("worldCupBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
+  closeTopMoreMenu();
   setWorldCupSheetOpen(true);
   renderWorldCupList();
   void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => showToast("Маркеты пока не загрузились."));

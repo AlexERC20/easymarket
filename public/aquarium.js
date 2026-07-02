@@ -6,7 +6,7 @@
 // from the chart's own render loop and from market data, so the crumbs keep
 // falling onto the next round's fresh screen where the fish are already living.
 
-import { playAquariumFood, playAquariumEat } from "./lightning-motion.js?v=20260701-14";
+import { playAquariumFood, playAquariumEat } from "./lightning-motion.js?v=20260701-15";
 
 // Realistic little fish drawn as inline SVG (iOS DOM path). Faces +x; colours
 // come from CSS custom properties set per .fish-N class.

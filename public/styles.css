@@ -475,6 +475,18 @@ h2 {
   color: rgba(159, 213, 255, 0.92);
 }
 
+.top-more-item.plus-action {
+  color: rgba(183, 255, 77, 0.92);
+}
+
+.top-more-item.btc-action {
+  color: rgba(255, 184, 77, 0.92);
+}
+
+.top-more-item.sport-action {
+  color: rgba(126, 200, 255, 0.92);
+}
+
 @keyframes topMoreIn {
   from {
     opacity: 0;
@@ -2237,6 +2249,22 @@ code {
   color: var(--muted);
   background: rgba(255, 255, 255, 0.05);
   border-color: var(--line-soft);
+}
+
+/* Claimed daily task: no button, the reward chip turns green "earned". */
+.task-button.is-done {
+  display: none;
+}
+
+.task-reward.claimed {
+  color: var(--yes);
+  background: rgba(25, 195, 125, 0.14);
+  border-color: rgba(25, 195, 125, 0.42);
+}
+
+.task-reward.claimed::before {
+  content: "✓ ";
+  font-weight: 950;
 }
 
 /* Lightweight section labels (replace the accordions) */
