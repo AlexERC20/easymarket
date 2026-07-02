@@ -4415,6 +4415,56 @@ code {
   gap: 6px;
 }
 
+.limit-orders-toggle {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 13px;
+  background: rgba(10, 14, 22, 0.72);
+  color: var(--text);
+  padding: 10px 11px;
+  text-align: left;
+  transition: transform 120ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.limit-orders-toggle:active {
+  transform: scale(0.985);
+}
+
+.limit-orders-toggle.open {
+  border-color: rgba(76, 211, 194, 0.24);
+  background: rgba(12, 21, 29, 0.84);
+}
+
+.limit-orders-toggle span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.limit-orders-toggle b {
+  display: inline-grid;
+  min-width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(76, 211, 194, 0.13);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 1000;
+}
+
+.limit-orders-toggle small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
 .limit-orders-head,
 .limit-orders-empty {
   color: var(--muted);

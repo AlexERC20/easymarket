@@ -161,6 +161,7 @@ const state = {
     formAmount: "",
     pending: false,
     cancelPendingId: null,
+    myOrdersOpen: false,
   },
   lossRefundOffers: [],
   lossRefundRenderedKey: null,
@@ -2756,20 +2757,29 @@ function renderMyLimitOrders() {
   const orders = (state.orderbook.myOrders || [])
     .filter((order) => normalizeCurrency(order.currency) === state.currency);
   if (!orders.length) {
-    container.innerHTML = `<div class="limit-orders-empty">Нет открытых лимиток</div>`;
+    container.innerHTML = `
+      <button class="limit-orders-toggle" type="button" data-toggle-limit-orders>
+        <span>Мои лимитки</span>
+        <b>0</b>
+      </button>
+    `;
     return;
   }
 
   container.innerHTML = `
-    <div class="limit-orders-head">Мои лимитки</div>
-    ${orders.map((order) => `
-      <div class="my-limit-order">
-        <span>${escapeHtml(marketSideLabel(getDisplayMarket(), order.side))}</span>
-        <b>${formatCents(order.limit_price)}</b>
-        <small>${formatCurrencyAmount(order.remaining_reserved, order.currency)}</small>
-        <button type="button" data-cancel-limit-order="${order.id}" ${state.orderbook.cancelPendingId === order.id ? "disabled" : ""}>Cancel</button>
-      </div>
-    `).join("")}
+    <button class="limit-orders-toggle ${state.orderbook.myOrdersOpen ? "open" : ""}" type="button" data-toggle-limit-orders>
+      <span>Мои лимитки</span>
+      <b>${orders.length}</b>
+      <small>${state.orderbook.myOrdersOpen ? "Свернуть" : "Показать"}</small>
+    </button>
+    ${state.orderbook.myOrdersOpen ? orders.map((order) => `
+        <div class="my-limit-order">
+          <span>${escapeHtml(marketSideLabel(getDisplayMarket(), order.side))}</span>
+          <b>${formatCents(order.limit_price)}</b>
+          <small>${formatCurrencyAmount(order.remaining_reserved, order.currency)}</small>
+          <button type="button" data-cancel-limit-order="${order.id}" ${state.orderbook.cancelPendingId === order.id ? "disabled" : ""}>Cancel</button>
+        </div>
+      `).join("") : ""}
   `;
 }
 
@@ -6169,6 +6179,14 @@ $("limitOrderForm")?.addEventListener("submit", (event) => {
 });
 
 $("myLimitOrders")?.addEventListener("click", (event) => {
+  const toggle = event.target?.closest?.("[data-toggle-limit-orders]");
+  if (toggle) {
+    triggerHaptic("selection");
+    state.orderbook.myOrdersOpen = !state.orderbook.myOrdersOpen;
+    renderOrderbookPanel();
+    return;
+  }
+
   const button = event.target?.closest?.("[data-cancel-limit-order]");
   if (!button) {
     return;
