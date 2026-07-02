@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260702-08" />
+    <link rel="stylesheet" href="/styles.css?v=20260702-09" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260701-12" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -445,18 +445,25 @@
 
           <div id="clanCreateView" class="clan-view hidden">
             <div id="clanCreateCard" class="clan-create-card">
-              <strong>Создать свой клан</strong>
-              <small>Выбери имя и иконку. Можно добавить ссылку на канал.</small>
               <div class="clan-create-preview" aria-hidden="true">
                 <span class="clan-create-preview-icon" id="clanPreviewIcon"></span>
                 <div>
                   <strong id="clanPreviewName" class="placeholder">Название клана</strong>
-                  <small>Так клан появится в списке</small>
+                  <small>Так клан появится в лиге</small>
                 </div>
               </div>
-              <input id="clanNameInput" maxlength="28" placeholder="Название клана" />
-              <div id="clanIconPicker" class="clan-icon-picker" aria-label="Иконка клана"></div>
-              <input id="clanChannelInput" maxlength="160" placeholder="Ссылка на канал, необязательно" />
+              <label class="clan-field">
+                <span>Название клана</span>
+                <input id="clanNameInput" maxlength="28" placeholder="Например, BTC Bulls" />
+              </label>
+              <div class="clan-field">
+                <span>Иконка</span>
+                <div id="clanIconPicker" class="clan-icon-picker" aria-label="Иконка клана"></div>
+              </div>
+              <label class="clan-field">
+                <span>Канал <em>необязательно</em></span>
+                <input id="clanChannelInput" maxlength="160" placeholder="https://t.me/..." />
+              </label>
               <button id="clanCreateBtn" class="trade-confirm" type="button">Создать клан · 10 000 ★</button>
             </div>
           </div>
@@ -464,31 +471,31 @@
           <div id="clanRulesView" class="clan-view hidden">
             <div id="clanRulesCard" class="clan-rules-card">
               <div class="rules-hero">
-                <span>⚡</span>
+                <div class="rules-hero-badge" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5h10v3.2a5 5 0 0 1-10 0V5z"/><path d="M7 6H4.3v1.4a3 3 0 0 0 3 2.9M17 6h2.7v1.4a3 3 0 0 1-3 2.9M12 13.4V17M8.5 20.5h7M9.4 20.5l.6-3.5h4l.6 3.5"/></svg></div>
                 <div>
                   <strong>Правила клановой лиги</strong>
-                  <small>Соревнование идёт по очкам. Звёздные маркеты дают личный фан, а клановую войну двигают USDT-прогнозы и задания.</small>
+                  <small>Клан-войну двигают USDT-прогнозы и задания. Звёздные маркеты — личный фан.</small>
                 </div>
               </div>
-              <div class="rules-prize-grid">
-                <div><b>1 место</b><span>5 000 USDT</span></div>
-                <div><b>2 место</b><span>3 000 USDT</span></div>
-                <div><b>3 место</b><span>1 000 USDT</span></div>
+              <div class="clan-prize-podium rules-podium">
+                <span><b>5 000</b><small>USDT</small></span>
+                <span><b>3 000</b><small>USDT</small></span>
+                <span><b>1 000</b><small>USDT</small></span>
               </div>
-              <p class="rules-note">Приз клана делится между участниками пропорционально их личным очкам вклада.</p>
+              <p class="rules-note">Приз клана делится между участниками пропорционально личным очкам вклада.</p>
               <div class="rules-score-list">
-                <div><span>USDT победа</span><b>+3</b></div>
-                <div><span>USDT проигрыш</span><b class="negative">-1</b></div>
-                <div><span>Новый участник</span><b>+5</b></div>
-                <div><span>Ежедневный вход</span><b>+2</b></div>
-                <div><span>Первая ставка дня</span><b>+3</b></div>
-                <div><span>BTC / футбол прогноз</span><b>+3</b></div>
-                <div><span>5 BTC прогнозов</span><b>+8</b></div>
-                <div><span>Победный прогноз</span><b>+5</b></div>
-                <div><span>5 побед подряд</span><b>+12</b></div>
-                <div><span>Share друзьям</span><b>+2</b></div>
-                <div><span>Подписки AV/чат</span><b>+5</b></div>
-                <div><span>Приватка</span><b>+10</b></div>
+                <div class="rules-score-row"><span>USDT победа</span><b class="pts up">+3</b></div>
+                <div class="rules-score-row"><span>USDT проигрыш</span><b class="pts down">−1</b></div>
+                <div class="rules-score-row"><span>Новый участник</span><b class="pts up">+5</b></div>
+                <div class="rules-score-row"><span>Ежедневный вход</span><b class="pts up">+2</b></div>
+                <div class="rules-score-row"><span>Первая ставка дня</span><b class="pts up">+3</b></div>
+                <div class="rules-score-row"><span>BTC / футбол прогноз</span><b class="pts up">+3</b></div>
+                <div class="rules-score-row"><span>5 BTC прогнозов</span><b class="pts up">+8</b></div>
+                <div class="rules-score-row"><span>Победный прогноз</span><b class="pts up">+5</b></div>
+                <div class="rules-score-row"><span>5 побед подряд</span><b class="pts up">+12</b></div>
+                <div class="rules-score-row"><span>Share друзьям</span><b class="pts up">+2</b></div>
+                <div class="rules-score-row"><span>Подписки AV/чат</span><b class="pts up">+5</b></div>
+                <div class="rules-score-row"><span>Приватка</span><b class="pts up">+10</b></div>
               </div>
             </div>
           </div>

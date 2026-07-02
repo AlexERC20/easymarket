@@ -1828,7 +1828,8 @@ code {
   z-index: 30;
   display: grid;
   align-items: end;
-  background: rgba(0, 0, 0, 0.44);
+  /* Darker backdrop so the live chart/aquarium behind doesn't flicker through. */
+  background: rgba(3, 6, 11, 0.74);
   padding: 14px;
 }
 
@@ -4028,6 +4029,91 @@ code {
   color: rgba(243, 246, 251, 0.78);
   font-size: 12px;
   font-weight: 850;
+}
+
+/* --- Sexy rules page --- */
+.rules-hero-badge {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 15px;
+  color: #ffd166;
+  background: radial-gradient(circle at 30% 20%, rgba(255, 209, 102, 0.24), rgba(255, 209, 102, 0.06));
+  border: 1px solid rgba(255, 209, 102, 0.34);
+  box-shadow: 0 0 22px rgba(255, 209, 102, 0.12);
+}
+
+.rules-hero-badge svg {
+  width: 26px;
+  height: 26px;
+}
+
+.rules-podium {
+  margin: 4px 0 2px;
+}
+
+.rules-score-list .pts {
+  min-width: 42px;
+  text-align: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.rules-score-list .pts.up {
+  color: var(--yes);
+  background: rgba(25, 195, 125, 0.15);
+  border: 1px solid rgba(25, 195, 125, 0.34);
+}
+
+.rules-score-list .pts.down {
+  color: var(--no);
+  background: rgba(239, 70, 111, 0.15);
+  border: 1px solid rgba(239, 70, 111, 0.34);
+}
+
+/* --- Clan create form --- */
+.clan-field {
+  display: grid;
+  gap: 5px;
+}
+
+.clan-field > span {
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.clan-field > span em {
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.6;
+  font-weight: 700;
+}
+
+/* Stagger the create-form pieces in when the view opens. */
+.sheet-view-animating .clan-create-card > * {
+  animation: clanCreateIn 380ms var(--ease-default) both;
+}
+.sheet-view-animating .clan-create-card > *:nth-child(2) { animation-delay: 45ms; }
+.sheet-view-animating .clan-create-card > *:nth-child(3) { animation-delay: 90ms; }
+.sheet-view-animating .clan-create-card > *:nth-child(4) { animation-delay: 135ms; }
+.sheet-view-animating .clan-create-card > *:nth-child(5) { animation-delay: 180ms; }
+
+@keyframes clanCreateIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-view-animating .clan-create-card > * {
+    animation: none !important;
+  }
 }
 
 .rules-score-list b {
