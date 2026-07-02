@@ -5300,6 +5300,25 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+// Keep a focused sheet input visible above the on-screen keyboard so the
+// bottom-anchored panel doesn't jump/jitter when the keyboard opens.
+document.addEventListener("focusin", (event) => {
+  const el = event.target;
+  if (!(el instanceof HTMLElement) || !el.matches("input, textarea")) {
+    return;
+  }
+  if (!el.closest(".task-sheet")) {
+    return;
+  }
+  window.setTimeout(() => {
+    try {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+    } catch {
+      el.scrollIntoView();
+    }
+  }, 280);
+});
+
 $("clanInfoBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   state.clanView = "rules";

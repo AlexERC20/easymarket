@@ -3722,6 +3722,35 @@ code {
 .clan-icon-option.lion, .clan-create-preview-icon.lion { background: linear-gradient(145deg, #d9a43a, #71501d); }
 .clan-icon-option.shark, .clan-create-preview-icon.shark { background: linear-gradient(145deg, #46d5e8, #1d5a79); }
 
+/* Flat clan icons: a tinted silhouette on a subtle flat chip (was glossy/convex),
+   matching the flat scoring-page style across list, detail, my-clan and picker. */
+.clan-avatar,
+.user-clan-icon,
+.clan-detail-avatar,
+.clan-icon-option,
+.clan-create-preview-icon {
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: none;
+}
+
+.clan-avatar svg,
+.user-clan-icon svg,
+.clan-detail-avatar svg,
+.clan-icon-option svg,
+.clan-create-preview-icon svg {
+  fill: currentColor;
+}
+
+.clan-avatar.bull, .user-clan-icon.bull, .clan-detail-avatar.bull, .clan-icon-option.bull, .clan-create-preview-icon.bull { color: #45d98a; background: rgba(69, 217, 138, 0.13); }
+.clan-avatar.bear, .user-clan-icon.bear, .clan-detail-avatar.bear, .clan-icon-option.bear, .clan-create-preview-icon.bear { color: #ff6b6b; background: rgba(255, 107, 107, 0.13); }
+.clan-avatar.fox, .user-clan-icon.fox, .clan-detail-avatar.fox, .clan-icon-option.fox, .clan-create-preview-icon.fox { color: #f7ac57; background: rgba(247, 172, 87, 0.13); }
+.clan-avatar.wolf, .user-clan-icon.wolf, .clan-detail-avatar.wolf, .clan-icon-option.wolf, .clan-create-preview-icon.wolf { color: #a6c0e6; background: rgba(166, 192, 230, 0.12); }
+.clan-avatar.eagle, .user-clan-icon.eagle, .clan-detail-avatar.eagle, .clan-icon-option.eagle, .clan-create-preview-icon.eagle { color: #6db2ff; background: rgba(109, 178, 255, 0.13); }
+.clan-avatar.tiger, .user-clan-icon.tiger, .clan-detail-avatar.tiger, .clan-icon-option.tiger, .clan-create-preview-icon.tiger { color: #ffcf5e; background: rgba(255, 207, 94, 0.13); }
+.clan-avatar.lion, .user-clan-icon.lion, .clan-detail-avatar.lion, .clan-icon-option.lion, .clan-create-preview-icon.lion { color: #ecb84e; background: rgba(236, 184, 78, 0.13); }
+.clan-avatar.shark, .user-clan-icon.shark, .clan-detail-avatar.shark, .clan-icon-option.shark, .clan-create-preview-icon.shark { color: #55e2f4; background: rgba(85, 226, 244, 0.13); }
+.clan-avatar.panda, .user-clan-icon.panda, .clan-detail-avatar.panda, .clan-icon-option.panda, .clan-create-preview-icon.panda { color: #d7dde6; background: rgba(215, 221, 230, 0.12); }
+
 .clan-create-card input {
   min-height: 44px;
   border: 1px solid rgba(255, 255, 255, 0.08);
