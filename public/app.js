@@ -1098,6 +1098,12 @@ function drawMarketChartFrame(ts) {
     return;
   }
 
+  // Pause the loop while a sheet covers the chart; it resumes on sheet close.
+  if (isBlockingSheetOpen()) {
+    state.chartRaf = null;
+    return;
+  }
+
   // ~30fps cap: the per-frame work (up to ~80 avatar draws with shadows/clips,
   // the path, gradients and labels) is the app's heaviest loop; halving its rate
   // roughly halves that cost with no visible difference on a price chart.
@@ -1402,11 +1408,18 @@ function drawMarketChartFrame(ts) {
   state.chartRaf = null;
 }
 
+// A full-screen sheet (tasks/wallet/clans/etc.) covers the chart, so there's no
+// reason to keep repainting it behind them — doing so churns the compositor
+// (visible jitter on the open sheet) and burns CPU/heat.
+function isBlockingSheetOpen() {
+  return Boolean(document.querySelector(".task-sheet.sheet-open"));
+}
+
 function renderMarketChart() {
   if (syncAquariumRuntimeForMarket()) {
     primeAquarium();
   }
-  if (state.chartRaf) {
+  if (state.chartRaf || isBlockingSheetOpen()) {
     return;
   }
   state.chartRaf = requestAnimationFrame(drawMarketChartFrame);
@@ -2076,6 +2089,8 @@ function closeSheet(sheetOrId, options = {}) {
     sheet.classList.add("hidden");
     sheet.classList.remove("sheet-open", "sheet-closing");
     sheetCloseTimers.delete(sheet);
+    // Resume the chart loop now that the sheet no longer covers it.
+    renderMarketChart();
     options.afterClose?.();
   };
   const pendingTimer = sheetCloseTimers.get(sheet);
@@ -3830,12 +3845,10 @@ function renderClans() {
     detailCard.innerHTML = "";
   }
 
-  const maxClanScore = Math.max(1, ...state.clans.map((clan) => Number(clan.score) || 0));
   const html = state.clans.map((clan) => {
     const rank = Number(clan.rank) || 0;
-    const bar = Math.max(0.04, (Number(clan.score) || 0) / maxClanScore);
     return `
-    <div class="clan-row ${clan.user_is_member ? "active" : ""} ${clan.id === state.selectedClanId ? "selected" : ""}" data-open-clan="${clan.id}" style="--bar:${bar.toFixed(3)}">
+    <div class="clan-row ${clan.user_is_member ? "active" : ""} ${clan.id === state.selectedClanId ? "selected" : ""}" data-open-clan="${clan.id}">
       <span class="clan-rank ${rank >= 1 && rank <= 3 ? `rank-${rank}` : ""}">${rank || "-"}</span>
       ${clanIconMarkup(clan)}
       <div class="clan-info">
@@ -3845,7 +3858,6 @@ function renderClans() {
       <button class="task-button" data-join-clan="${clan.id}" type="button" ${clan.user_is_member ? "disabled" : ""}>
         ${clan.user_is_member ? "Твой" : "Войти"}
       </button>
-      <span class="clan-bar" aria-hidden="true"></span>
     </div>
   `;
   }).join("");

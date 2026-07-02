@@ -3456,7 +3456,7 @@ code {
   gap: 10px;
   border-radius: 0;
   background: transparent;
-  padding: 11px 0 13px;
+  padding: 11px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   animation: softRise 180ms ease both;
 }
@@ -3466,22 +3466,7 @@ code {
 }
 
 .clan-row.active {
-  outline: 1px solid rgba(61, 201, 122, 0.35);
   background: rgba(24, 57, 43, 0.5);
-}
-
-/* Score bar relative to the leader, along the row's bottom edge. */
-.clan-bar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 4px;
-  height: 2px;
-  border-radius: 2px;
-  transform: scaleX(var(--bar, 0));
-  transform-origin: left center;
-  background: linear-gradient(90deg, rgba(53, 246, 255, 0.55), rgba(183, 255, 77, 0.65));
-  opacity: 0.65;
 }
 
 .clan-rank {
@@ -4382,7 +4367,7 @@ code {
 }
 
 .clan-row.selected {
-  outline: 1px solid rgba(94, 161, 255, 0.44);
+  background: rgba(94, 161, 255, 0.1);
 }
 
 .market-panel-tabs,
