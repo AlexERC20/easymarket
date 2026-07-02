@@ -4536,7 +4536,8 @@ code {
   }
 }
 
-.task-row.task-claimed {
+.task-row.task-claimed,
+.task-item.task-claimed {
   animation: taskClaimGlow 900ms ease both;
 }
 
@@ -4560,7 +4561,8 @@ code {
   .position-actions strong.pnl-flash-up,
   .position-actions strong.pnl-flash-down,
   .reward-coin,
-  .task-row.task-claimed {
+  .task-row.task-claimed,
+  .task-item.task-claimed {
     animation: none !important;
   }
 }

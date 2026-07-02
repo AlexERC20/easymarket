@@ -5376,6 +5376,7 @@ async function claimShareTask() {
     }
     if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
+      triggerLightningFlash("success");
       showRewardPop();
       showToast(`+${formatFire(result.awarded)} за share.`);
       return;
@@ -5408,6 +5409,7 @@ async function claimSimpleTask(taskKey) {
     }
     if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
+      triggerLightningFlash("success");
       showRewardPop();
       showToast(`+${formatFire(result.awarded)} за задание.`);
       return;
@@ -5448,6 +5450,7 @@ async function claimDailyPresenceTask() {
       showToast("Ежедневный вход уже забран.");
     } else if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
+      triggerLightningFlash("success");
       showRewardPop();
       showToast(`+${formatFire(result.awarded)} за 5 минут в EasyMarket.`);
     } else {
@@ -5603,9 +5606,10 @@ async function claimDailyTaskByKey(taskKey, button = null) {
       showToast("Этот дейлик уже забран.");
     } else if (Number(result.awarded || 0) > 0) {
       triggerHaptic("success");
+      triggerLightningFlash("success");
       showRewardPop(button);
       flyRewardToBalance(button);
-      const claimedRow = button?.closest(".task-row");
+      const claimedRow = button?.closest(".task-item, .task-row");
       if (claimedRow) {
         claimedRow.classList.remove("task-claimed");
         void claimedRow.offsetWidth;
