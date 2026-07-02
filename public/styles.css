@@ -4202,9 +4202,15 @@ code {
   place-items: center;
   background: rgba(0, 0, 0, 0.36);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 14px 26px rgba(0, 0, 0, 0.24);
   font-size: 30px;
   font-weight: 950;
+}
+
+/* Keep the my-clan icon and detail avatar flat (these rules sit after the flatten
+   block, so re-assert box-shadow:none here). */
+.user-clan-icon,
+.clan-detail-avatar {
+  box-shadow: none;
 }
 
 .clan-detail-hero strong {
