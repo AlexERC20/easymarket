@@ -82,14 +82,10 @@ const state = {
   marketStats: [],
   recentMarkets: [],
   leaderboard: [],
-  leaderboardCache: {
-    STAR: null,
-    USDT: null,
-  },
-  leaderboardCacheAt: {
-    STAR: 0,
-    USDT: 0,
-  },
+  leaderboardClans: [],
+  leaderboardMode: "BEST_24H",
+  leaderboardCache: {},
+  leaderboardCacheAt: {},
   leaderboardLoading: false,
   leaderboardRequestId: 0,
   activity: [],
@@ -138,7 +134,7 @@ const state = {
     loading: false,
     items: [],
   },
-  leaderboardCurrency: "STAR",
+  leaderboardCurrency: "USDT",
   clans: [],
   userClan: null,
   clansLoading: false,
@@ -257,6 +253,11 @@ const formatFireDecimal = (value) => Number(value || 0).toLocaleString("ru-RU", 
   maximumFractionDigits: 1,
 });
 const normalizeCurrency = (value) => (String(value || "STAR").toUpperCase() === "USDT" ? "USDT" : "STAR");
+const normalizeLeaderboardMode = (value) => {
+  const mode = String(value || "BEST_24H").toUpperCase();
+  return ["BEST_24H", "WINS_24H", "BALANCE", "CLANS"].includes(mode) ? mode : "BEST_24H";
+};
+const getLeaderboardCacheKey = (mode = state.leaderboardMode, currency = state.leaderboardCurrency) => `${normalizeLeaderboardMode(mode)}:${normalizeCurrency(currency)}`;
 const getAmountsForCurrency = (currency = state.currency) => (normalizeCurrency(currency) === "USDT" ? USDT_AMOUNTS : STAR_AMOUNTS);
 const getTierForAmount = (amount, currency = state.currency) => {
   const numeric = Math.abs(Number(amount || 0));
@@ -2481,12 +2482,15 @@ async function loadRecentMarkets() {
 
 async function loadLeaderboard(currency = state.leaderboardCurrency, options = {}) {
   const normalizedCurrency = normalizeCurrency(currency);
-  const cached = state.leaderboardCache[normalizedCurrency];
-  const cachedAt = Number(state.leaderboardCacheAt[normalizedCurrency] || 0);
+  const mode = normalizeLeaderboardMode(options.mode || state.leaderboardMode);
+  const cacheKey = getLeaderboardCacheKey(mode, normalizedCurrency);
+  const cached = state.leaderboardCache[cacheKey];
+  const cachedAt = Number(state.leaderboardCacheAt[cacheKey] || 0);
   const cacheFresh = Boolean(cached && Date.now() - cachedAt < LEADERBOARD_CACHE_MS);
   if (!options.force && cacheFresh) {
-    if (state.leaderboardCurrency === normalizedCurrency) {
-      state.leaderboard = cached;
+    if (state.leaderboardCurrency === normalizedCurrency && state.leaderboardMode === mode) {
+      state.leaderboard = cached.players || [];
+      state.leaderboardClans = cached.clans || [];
       state.leaderboardLoading = false;
       renderLeaderboard();
     }
@@ -2496,8 +2500,9 @@ async function loadLeaderboard(currency = state.leaderboardCurrency, options = {
   const requestId = state.leaderboardRequestId + 1;
   state.leaderboardRequestId = requestId;
 
-  if (cached && state.leaderboardCurrency === normalizedCurrency) {
-    state.leaderboard = cached;
+  if (cached && state.leaderboardCurrency === normalizedCurrency && state.leaderboardMode === mode) {
+    state.leaderboard = cached.players || [];
+    state.leaderboardClans = cached.clans || [];
   }
   state.leaderboardLoading = !cached || Boolean(options.force);
 
@@ -2506,13 +2511,18 @@ async function loadLeaderboard(currency = state.leaderboardCurrency, options = {
   }
 
   try {
-    const data = await api(`/api/leaderboard?limit=30&currency=${encodeURIComponent(normalizedCurrency)}`);
+    const data = await api(`/api/leaderboard?limit=30&currency=${encodeURIComponent(normalizedCurrency)}&mode=${encodeURIComponent(mode)}`);
     const players = data.players || [];
-    state.leaderboardCache[normalizedCurrency] = players;
-    state.leaderboardCacheAt[normalizedCurrency] = Date.now();
+    const clans = data.clans || [];
+    state.leaderboardCache[cacheKey] = {
+      players,
+      clans,
+    };
+    state.leaderboardCacheAt[cacheKey] = Date.now();
 
-    if (state.leaderboardCurrency === normalizedCurrency && state.leaderboardRequestId === requestId) {
+    if (state.leaderboardCurrency === normalizedCurrency && state.leaderboardMode === mode && state.leaderboardRequestId === requestId) {
       state.leaderboard = players;
+      state.leaderboardClans = clans;
       state.leaderboardLoading = false;
       renderLeaderboard();
       return;
@@ -3687,13 +3697,48 @@ function renderLeaderboard() {
   document.querySelectorAll("[data-leaderboard-currency]").forEach((button) => {
     button.classList.toggle("active", normalizeCurrency(button.dataset.leaderboardCurrency) === state.leaderboardCurrency);
   });
+  document.querySelectorAll("[data-leaderboard-mode]").forEach((button) => {
+    button.classList.toggle("active", normalizeLeaderboardMode(button.dataset.leaderboardMode) === state.leaderboardMode);
+  });
 
   container.classList.toggle("loading", Boolean(state.leaderboardLoading));
+
+  const mode = normalizeLeaderboardMode(state.leaderboardMode);
+  if (mode === "CLANS") {
+    if (!state.leaderboardClans.length) {
+      container.innerHTML = state.leaderboardLoading
+        ? '<p class="muted">Загружаю кланы...</p>'
+        : '<p class="muted">Кланы пока не попали в рейтинг.</p>';
+      return;
+    }
+
+    const rows = state.leaderboardClans.map((clan, index) => {
+      const rank = Number(clan.rank || index + 1);
+      const rankClass = rank <= 3 ? ` rank-${rank}` : "";
+      const isMine = Boolean(clan.user_is_member || (state.userClan && Number(state.userClan.id) === Number(clan.id)));
+      return `
+        <div class="leaderboard-row clan-rating-row${rankClass}${isMine ? " is-me" : ""}">
+          <span class="leaderboard-rank">${rank}</span>
+          ${clanIconMarkup(clan, "leaderboard-clan-icon")}
+          <div class="leaderboard-player">
+            <strong>${escapeHtml(clan.name)}${isMine ? " · твой" : ""}</strong>
+            <small>${formatFire(clan.members_count)} участников · фонд ${formatClanPrize(clan.rank)}</small>
+          </div>
+          <strong class="leaderboard-balance">${formatFire(clan.score)} pts</strong>
+        </div>
+      `;
+    }).join("");
+    const loadingPill = state.leaderboardLoading
+      ? '<div class="leaderboard-refresh-pill">Обновляю...</div>'
+      : "";
+    container.innerHTML = `${loadingPill}${rows}`;
+    return;
+  }
 
   if (!state.leaderboard.length) {
     container.innerHTML = state.leaderboardLoading
       ? '<p class="muted">Загружаю рейтинг...</p>'
-      : '<p class="muted">Пока нет игроков в рейтинге.</p>';
+      : '<p class="muted">За последние 24 часа пока нет победителей.</p>';
     return;
   }
 
@@ -3707,14 +3752,25 @@ function renderLeaderboard() {
     const isMe = state.user && String(player.telegram_id) === String(state.user.telegram_id);
     const rankClass = rank <= 3 ? ` rank-${rank}` : "";
     const rankMark = rank <= 3 ? medals[rank - 1] : String(rank);
+    const mainValue = mode === "BEST_24H"
+      ? Number(player.best_pnl_24h || 0)
+      : mode === "WINS_24H"
+        ? Number(player.total_pnl_24h || 0)
+        : Number(player.balance || 0);
+    const meta = mode === "BEST_24H"
+      ? `${escapeHtml(player.market_label || player.market_title || "market")} · ${escapeHtml(sideLabel(player.side || ""))} · всего +${formatCurrencyAmount(player.total_pnl_24h || player.best_pnl_24h || 0, player.currency || state.leaderboardCurrency)}`
+      : mode === "WINS_24H"
+        ? `${formatFire(player.wins_24h)} побед · лучший ${formatCurrencyAmount(player.best_pnl_24h || 0, player.currency || state.leaderboardCurrency)}`
+        : `${formatFire(player.bet_count)} ставок · WR ${winRate.toFixed(0)}%`;
+    const valueClass = mode === "BALANCE" ? "" : " profit";
     return `
       <div class="leaderboard-row${rankClass}${isMe ? " is-me" : ""}">
         <span class="leaderboard-rank">${rankMark}</span>
         <div class="leaderboard-player">
           <strong>${escapeHtml(name)}${isMe ? " · ты" : ""}</strong>
-          <small>${formatFire(player.bet_count)} ставок · WR ${winRate.toFixed(0)}%</small>
+          <small>${meta}</small>
         </div>
-        <strong class="leaderboard-balance">${formatCurrencyAmount(player.balance, player.currency || state.leaderboardCurrency)}</strong>
+        <strong class="leaderboard-balance${valueClass}">${mode === "BALANCE" ? formatCurrencyAmount(mainValue, player.currency || state.leaderboardCurrency) : formatSignedCurrencyAmount(mainValue, player.currency || state.leaderboardCurrency)}</strong>
       </div>
     `;
   }).join("");
@@ -5685,14 +5741,46 @@ document.querySelectorAll("[data-leaderboard-currency]").forEach((button) => {
     }
     triggerHaptic("selection");
     state.leaderboardCurrency = nextCurrency;
-    const cachedAt = Number(state.leaderboardCacheAt[nextCurrency] || 0);
-    const cacheFresh = Boolean(state.leaderboardCache[nextCurrency] && Date.now() - cachedAt < LEADERBOARD_CACHE_MS);
-    if (state.leaderboardCache[nextCurrency]) {
-      state.leaderboard = state.leaderboardCache[nextCurrency];
+    const cacheKey = getLeaderboardCacheKey(state.leaderboardMode, nextCurrency);
+    const cached = state.leaderboardCache[cacheKey];
+    const cachedAt = Number(state.leaderboardCacheAt[cacheKey] || 0);
+    const cacheFresh = Boolean(cached && Date.now() - cachedAt < LEADERBOARD_CACHE_MS);
+    if (cached) {
+      state.leaderboard = cached.players || [];
+      state.leaderboardClans = cached.clans || [];
     }
     state.leaderboardLoading = !cacheFresh;
     renderLeaderboard();
     void loadLeaderboard(nextCurrency).catch(() => {
+      state.leaderboardLoading = false;
+      renderLeaderboard();
+      showToast("Рейтинг пока не загрузился.");
+    });
+  });
+});
+
+document.querySelectorAll("[data-leaderboard-mode]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const nextMode = normalizeLeaderboardMode(button.dataset.leaderboardMode);
+    if (state.leaderboardMode === nextMode) {
+      return;
+    }
+    triggerHaptic("selection");
+    state.leaderboardMode = nextMode;
+    const cacheKey = getLeaderboardCacheKey(nextMode, state.leaderboardCurrency);
+    const cached = state.leaderboardCache[cacheKey];
+    const cachedAt = Number(state.leaderboardCacheAt[cacheKey] || 0);
+    const cacheFresh = Boolean(cached && Date.now() - cachedAt < LEADERBOARD_CACHE_MS);
+    if (cached) {
+      state.leaderboard = cached.players || [];
+      state.leaderboardClans = cached.clans || [];
+    } else {
+      state.leaderboard = [];
+      state.leaderboardClans = [];
+    }
+    state.leaderboardLoading = !cacheFresh;
+    renderLeaderboard();
+    void loadLeaderboard(state.leaderboardCurrency).catch(() => {
       state.leaderboardLoading = false;
       renderLeaderboard();
       showToast("Рейтинг пока не загрузился.");

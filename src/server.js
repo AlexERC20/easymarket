@@ -860,11 +860,14 @@ app.get("/api/markets/recent", async (req, res) => {
 
 app.get("/api/leaderboard", async (req, res) => {
   try {
-    const players = await getLeaderboard(req.query.limit, req.query.currency);
+    const result = await getLeaderboard({
+      limit: req.query.limit,
+      currency: req.query.currency,
+      mode: req.query.mode,
+    });
     res.status(200).json({
       ok: true,
-      currency: String(req.query.currency || "STAR").toUpperCase() === "USDT" ? "USDT" : "STAR",
-      players,
+      ...result,
     });
   } catch (error) {
     sendApiError(res, error);

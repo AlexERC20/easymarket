@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260702-13" />
+    <link rel="stylesheet" href="/styles.css?v=20260703-01" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260701-12" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -399,8 +399,14 @@
             <button id="leaderboardCloseBtn" class="icon-button" type="button" aria-label="Закрыть рейтинг">×</button>
           </div>
           <div class="leaderboard-currency-toggle" role="tablist" aria-label="Валюта рейтинга">
-            <button class="active" type="button" data-leaderboard-currency="STAR">Звезды</button>
-            <button type="button" data-leaderboard-currency="USDT">USDT</button>
+            <button type="button" data-leaderboard-currency="STAR">Звезды</button>
+            <button class="active" type="button" data-leaderboard-currency="USDT">USDT</button>
+          </div>
+          <div class="leaderboard-mode-tabs" role="tablist" aria-label="Режим рейтинга">
+            <button class="active" type="button" data-leaderboard-mode="BEST_24H">Профит 24ч</button>
+            <button type="button" data-leaderboard-mode="WINS_24H">Победы 24ч</button>
+            <button type="button" data-leaderboard-mode="BALANCE">Баланс</button>
+            <button type="button" data-leaderboard-mode="CLANS">Кланы</button>
           </div>
           <div id="leaderboardList" class="leaderboard-list stagger-list">
             <p class="muted">Загружаю рейтинг...</p>
@@ -748,6 +754,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260702-13" type="module"></script>
+    <script src="/app.js?v=20260703-01" type="module"></script>
   </body>
 </html>

@@ -4674,9 +4674,252 @@ export async function getRecentMarkets(limit = 10) {
   return result.rows.map(mapMarket);
 }
 
-export async function getLeaderboard(limit = 30, currencyInput = "STAR") {
-  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 30));
-  const currency = normalizeCurrency(currencyInput);
+function normalizeLeaderboardMode(modeInput) {
+  const mode = String(modeInput || "BEST_24H").trim().toUpperCase();
+  if (["BEST_24H", "WINS_24H", "BALANCE", "CLANS"].includes(mode)) {
+    return mode;
+  }
+  return "BEST_24H";
+}
+
+function mapLeaderboardPlayer(row, currency, mode = "BALANCE") {
+  const settledCount = Number(row.settled_count || 0);
+  const winCount = Number(row.win_count || 0);
+  return {
+    telegram_id: row.telegram_id,
+    username: row.username,
+    first_name: row.first_name,
+    currency,
+    mode,
+    balance: toNumber(row.balance),
+    best_pnl_24h: toNumber(row.best_pnl_24h),
+    total_pnl_24h: toNumber(row.total_pnl_24h),
+    total_payout_24h: toNumber(row.total_payout_24h),
+    wins_24h: Number(row.wins_24h || 0),
+    bet_count: Number(row.bet_count || 0),
+    settled_count: settledCount,
+    win_count: winCount,
+    win_rate_pct: settledCount > 0 ? Math.round((winCount / settledCount) * 1000) / 10 : 0,
+    market_id: row.market_id === null || row.market_id === undefined ? null : Number(row.market_id),
+    market_title: row.market_title || null,
+    market_label: row.market_label || null,
+    market_type: row.market_type || null,
+    side: row.side || null,
+    resolved_at: row.resolved_at || null,
+  };
+}
+
+export async function getLeaderboard(options = {}) {
+  const safeLimit = Math.max(1, Math.min(100, Number(options.limit) || 30));
+  const currency = normalizeCurrency(options.currency);
+  const mode = normalizeLeaderboardMode(options.mode);
+
+  if (mode === "CLANS") {
+    const result = await query(
+      `
+        WITH scores AS (
+          SELECT clan_id, COALESCE(SUM(points), 0) AS score
+          FROM clan_score_events
+          GROUP BY clan_id
+        ),
+        members AS (
+          SELECT clan_id, COUNT(*)::int AS members_count
+          FROM clan_members
+          GROUP BY clan_id
+        ),
+        clan_totals AS (
+          SELECT
+            clans.*,
+            COALESCE(scores.score, 0) AS score,
+            COALESCE(members.members_count, 0) AS members_count,
+            0 AS user_is_member,
+            0 AS user_contribution_score
+          FROM clans
+          LEFT JOIN scores ON scores.clan_id = clans.id
+          LEFT JOIN members ON members.clan_id = clans.id
+        )
+        SELECT
+          *,
+          RANK() OVER (ORDER BY score DESC, members_count DESC, id ASC)::int AS rank
+        FROM clan_totals
+        ORDER BY score DESC, members_count DESC, id ASC
+        LIMIT $1
+      `,
+      [safeLimit],
+    );
+
+    return {
+      mode,
+      currency,
+      players: [],
+      clans: result.rows.map(mapClan),
+    };
+  }
+
+  if (mode === "BEST_24H") {
+    const result = await query(
+      `
+        WITH ranked_positions AS (
+          SELECT
+            p.user_id,
+            p.market_id,
+            p.side,
+            p.pnl,
+            p.payout,
+            p.spent,
+            p.updated_at,
+            m.title AS market_title,
+            m.label AS market_label,
+            CASE
+              WHEN m.symbol LIKE '${WORLD_CUP_SYMBOL_PREFIX}%' THEN 'WORLD_CUP_WINNER'
+              WHEN m.symbol = ANY($3::text[]) THEN 'BTC_UPDOWN'
+              ELSE m.symbol
+            END AS market_type,
+            COALESCE(m.resolved_at, p.updated_at) AS resolved_at,
+            ROW_NUMBER() OVER (
+              PARTITION BY p.user_id
+              ORDER BY p.pnl DESC, COALESCE(m.resolved_at, p.updated_at) DESC, p.id DESC
+            ) AS row_rank
+          FROM positions p
+          JOIN markets m ON m.id = p.market_id
+          WHERE p.currency = $2
+            AND p.status = 'resolved'
+            AND p.pnl > 0
+            AND COALESCE(m.resolved_at, p.updated_at) >= now() - interval '24 hours'
+        ),
+        daily_totals AS (
+          SELECT
+            user_id,
+            COUNT(*) AS wins_24h,
+            SUM(pnl) AS total_pnl_24h,
+            SUM(payout) AS total_payout_24h,
+            MAX(pnl) AS best_pnl_24h
+          FROM ranked_positions
+          GROUP BY user_id
+        ),
+        trade_stats AS (
+          SELECT user_id, COUNT(*) FILTER (WHERE action = 'BUY') AS bet_count
+          FROM trades
+          WHERE currency = $2
+          GROUP BY user_id
+        ),
+        position_stats AS (
+          SELECT
+            user_id,
+            COUNT(*) FILTER (WHERE status <> 'open') AS settled_count,
+            COUNT(*) FILTER (WHERE status <> 'open' AND pnl > 0) AS win_count
+          FROM positions
+          WHERE currency = $2
+          GROUP BY user_id
+        )
+        SELECT
+          users.telegram_id,
+          users.username,
+          users.first_name,
+          0 AS balance,
+          daily_totals.best_pnl_24h,
+          daily_totals.total_pnl_24h,
+          daily_totals.total_payout_24h,
+          daily_totals.wins_24h,
+          COALESCE(trade_stats.bet_count, 0) AS bet_count,
+          COALESCE(position_stats.settled_count, 0) AS settled_count,
+          COALESCE(position_stats.win_count, 0) AS win_count,
+          ranked_positions.market_id,
+          ranked_positions.market_title,
+          ranked_positions.market_label,
+          ranked_positions.market_type,
+          ranked_positions.side,
+          ranked_positions.resolved_at
+        FROM ranked_positions
+        JOIN daily_totals ON daily_totals.user_id = ranked_positions.user_id
+        JOIN users ON users.id = ranked_positions.user_id
+        LEFT JOIN trade_stats ON trade_stats.user_id = users.id
+        LEFT JOIN position_stats ON position_stats.user_id = users.id
+        WHERE ranked_positions.row_rank = 1
+        ORDER BY daily_totals.best_pnl_24h DESC, daily_totals.total_pnl_24h DESC, ranked_positions.resolved_at DESC
+        LIMIT $1
+      `,
+      [safeLimit, currency, BTC_MARKET_SYMBOLS],
+    );
+
+    return {
+      mode,
+      currency,
+      players: result.rows.map((row) => mapLeaderboardPlayer(row, currency, mode)),
+      clans: [],
+    };
+  }
+
+  if (mode === "WINS_24H") {
+    const result = await query(
+      `
+        WITH daily_positions AS (
+          SELECT p.*
+          FROM positions p
+          JOIN markets m ON m.id = p.market_id
+          WHERE p.currency = $2
+            AND p.status = 'resolved'
+            AND p.pnl > 0
+            AND COALESCE(m.resolved_at, p.updated_at) >= now() - interval '24 hours'
+        ),
+        trade_stats AS (
+          SELECT user_id, COUNT(*) FILTER (WHERE action = 'BUY') AS bet_count
+          FROM trades
+          WHERE currency = $2
+          GROUP BY user_id
+        ),
+        position_stats AS (
+          SELECT
+            user_id,
+            COUNT(*) FILTER (WHERE status <> 'open') AS settled_count,
+            COUNT(*) FILTER (WHERE status <> 'open' AND pnl > 0) AS win_count
+          FROM positions
+          WHERE currency = $2
+          GROUP BY user_id
+        )
+        SELECT
+          users.telegram_id,
+          users.username,
+          users.first_name,
+          0 AS balance,
+          MAX(daily_positions.pnl) AS best_pnl_24h,
+          SUM(daily_positions.pnl) AS total_pnl_24h,
+          SUM(daily_positions.payout) AS total_payout_24h,
+          COUNT(*) AS wins_24h,
+          COALESCE(trade_stats.bet_count, 0) AS bet_count,
+          COALESCE(position_stats.settled_count, 0) AS settled_count,
+          COALESCE(position_stats.win_count, 0) AS win_count,
+          NULL AS market_id,
+          NULL AS market_title,
+          NULL AS market_label,
+          NULL AS market_type,
+          NULL AS side,
+          MAX(daily_positions.updated_at) AS resolved_at
+        FROM daily_positions
+        JOIN users ON users.id = daily_positions.user_id
+        LEFT JOIN trade_stats ON trade_stats.user_id = users.id
+        LEFT JOIN position_stats ON position_stats.user_id = users.id
+        GROUP BY
+          users.telegram_id,
+          users.username,
+          users.first_name,
+          trade_stats.bet_count,
+          position_stats.settled_count,
+          position_stats.win_count
+        ORDER BY SUM(daily_positions.pnl) DESC, COUNT(*) DESC, MAX(daily_positions.pnl) DESC
+        LIMIT $1
+      `,
+      [safeLimit, currency],
+    );
+
+    return {
+      mode,
+      currency,
+      players: result.rows.map((row) => mapLeaderboardPlayer(row, currency, mode)),
+      clans: [],
+    };
+  }
+
   if (currency === "USDT") {
     const result = await query(
       `
@@ -4718,21 +4961,12 @@ export async function getLeaderboard(limit = 30, currencyInput = "STAR") {
       [safeLimit, currency],
     );
 
-    return result.rows.map((row) => {
-      const settledCount = Number(row.settled_count || 0);
-      const winCount = Number(row.win_count || 0);
-      return {
-        telegram_id: row.telegram_id,
-        username: row.username,
-        first_name: row.first_name,
-        currency,
-        balance: toNumber(row.balance),
-        bet_count: Number(row.bet_count || 0),
-        settled_count: settledCount,
-        win_count: winCount,
-        win_rate_pct: settledCount > 0 ? Math.round((winCount / settledCount) * 1000) / 10 : 0,
-      };
-    });
+    return {
+      mode,
+      currency,
+      players: result.rows.map((row) => mapLeaderboardPlayer(row, currency, mode)),
+      clans: [],
+    };
   }
 
   const balanceTable = balanceTableForCurrency(currency);
@@ -4773,21 +5007,12 @@ export async function getLeaderboard(limit = 30, currencyInput = "STAR") {
     [safeLimit, currency],
   );
 
-  return result.rows.map((row) => {
-    const settledCount = Number(row.settled_count || 0);
-    const winCount = Number(row.win_count || 0);
-    return {
-      telegram_id: row.telegram_id,
-      username: row.username,
-      first_name: row.first_name,
-      currency,
-      balance: toNumber(row.balance),
-      bet_count: Number(row.bet_count || 0),
-      settled_count: settledCount,
-      win_count: winCount,
-      win_rate_pct: settledCount > 0 ? Math.round((winCount / settledCount) * 1000) / 10 : 0,
-    };
-  });
+  return {
+    mode,
+    currency,
+    players: result.rows.map((row) => mapLeaderboardPlayer(row, currency, mode)),
+    clans: [],
+  };
 }
 
 export async function getUserPositions(telegramId) {

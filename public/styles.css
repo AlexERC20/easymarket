@@ -231,7 +231,8 @@ body.telegram-desktop-shell {
 
 .currency-switch,
 .wallet-currency-toggle,
-.leaderboard-currency-toggle {
+.leaderboard-currency-toggle,
+.leaderboard-mode-tabs {
   display: inline-grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
@@ -249,7 +250,8 @@ body.telegram-desktop-shell {
 
 .currency-switch button,
 .wallet-currency-toggle button,
-.leaderboard-currency-toggle button {
+.leaderboard-currency-toggle button,
+.leaderboard-mode-tabs button {
   min-width: 34px;
   min-height: 26px;
   border: 0;
@@ -268,15 +270,28 @@ body.telegram-desktop-shell {
 
 .currency-switch button.active,
 .wallet-currency-toggle button.active,
-.leaderboard-currency-toggle button.active {
+.leaderboard-currency-toggle button.active,
+.leaderboard-mode-tabs button.active {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text);
 }
 
 .wallet-currency-toggle,
-.leaderboard-currency-toggle {
+.leaderboard-currency-toggle,
+.leaderboard-mode-tabs {
   width: 100%;
   margin-top: 8px;
+}
+
+.leaderboard-mode-tabs {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.leaderboard-mode-tabs button {
+  min-width: 0;
+  padding: 0 7px;
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 h2 {
@@ -2982,6 +2997,39 @@ code {
   font-size: 14px;
   font-weight: 950;
   font-variant-numeric: tabular-nums;
+}
+
+.leaderboard-balance.profit {
+  color: var(--yes);
+  text-shadow: 0 0 18px rgba(36, 214, 132, 0.18);
+}
+
+.leaderboard-row.clan-rating-row {
+  grid-template-columns: 34px 34px minmax(0, 1fr) auto;
+}
+
+.leaderboard-clan-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.9);
+  background: linear-gradient(135deg, rgba(88, 166, 255, 0.26), rgba(153, 102, 255, 0.18));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.leaderboard-clan-icon svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+
+.leaderboard-clan-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .world-cup-panel {
