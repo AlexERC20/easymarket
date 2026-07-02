@@ -5102,7 +5102,7 @@ $("clanCreateBtn")?.addEventListener("click", async () => {
     state.clanCreating = false;
     if (button) {
       button.disabled = false;
-      button.textContent = "Создать клан";
+      button.textContent = "Создать клан · 10 000 ★";
     }
   }
 });
