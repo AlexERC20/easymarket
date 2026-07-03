@@ -1127,15 +1127,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  body.telegram-ios-shell .lm-energy-bg {
+  body.telegram-shell .lm-energy-bg {
     display: block !important;
   }
 
-  body.telegram-ios-shell .lm-loader {
+  body.telegram-shell .lm-loader {
     display: grid !important;
   }
 
-  body.telegram-ios-shell .lm-stake-shockwave {
+  body.telegram-shell .lm-stake-shockwave {
     display: block !important;
   }
 }

@@ -6,7 +6,7 @@
 // from the chart's own render loop and from market data, so the crumbs keep
 // falling onto the next round's fresh screen where the fish are already living.
 
-import { playAquariumFood, playAquariumEat } from "./lightning-motion.js?v=20260701-15";
+import { playAquariumFood, playAquariumEat } from "./lightning-motion.js?v=20260703-17";
 
 // Realistic little fish drawn as inline SVG (iOS DOM path). Faces +x; colours
 // come from CSS custom properties set per .fish-N class.
@@ -116,7 +116,8 @@ function readEnabledFlag() {
 }
 
 function reducedMotion() {
-  return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+  const reduced = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+  return reduced && !isTelegramMiniApp();
 }
 
 function isTelegramMiniApp() {
@@ -1710,7 +1711,7 @@ export function initAquarium() {
   window.Telegram?.WebApp?.onEvent?.("viewportChanged", () => resume(10));
   const motionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
   motionQuery?.addEventListener?.("change", (event) => {
-    if (event.matches) {
+    if (event.matches && !isTelegramMiniApp()) {
       stopLoop();
       clearCanvas();
     } else if (enabled) {

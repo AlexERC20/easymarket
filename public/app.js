@@ -12,7 +12,7 @@ import {
   showWinCelebration,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260703-16";
+} from "./lightning-motion.js?v=20260703-17";
 import {
   initAquarium,
   isAquariumEnabled,
@@ -21,7 +21,7 @@ import {
   setAquariumRuntimeAllowed,
   setAquariumShakeFeeder,
   spillAquariumFood,
-} from "./aquarium.js?v=20260703-07";
+} from "./aquarium.js?v=20260703-08";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -2079,14 +2079,13 @@ function isSheetOpen(id) {
   return Boolean(element && !element.classList.contains("hidden"));
 }
 
-function isTelegramIosWebApp() {
-  const platform = String(window.Telegram?.WebApp?.platform || "").toLowerCase();
-  return platform === "ios" || /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+function isTelegramWebApp() {
+  return Boolean(window.Telegram?.WebApp);
 }
 
 function prefersReducedMotion() {
   const reduced = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
-  return reduced && !isTelegramIosWebApp();
+  return reduced && !isTelegramWebApp();
 }
 
 function openSheet(sheetOrId) {
