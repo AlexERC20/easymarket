@@ -1552,6 +1552,144 @@ async function distributeProfitFee(client, input) {
   };
 }
 
+export async function distributeDueClanRewardFunds() {
+  const currentMonthKey = getMonthKey();
+  return withTransaction(async (client) => {
+    const fundResult = await client.query(
+      `
+        SELECT
+          month_key,
+          clan_id,
+          currency,
+          COALESCE(SUM(amount), 0) AS amount
+        FROM clan_reward_fund_ledger
+        WHERE month_key < $1
+        GROUP BY month_key, clan_id, currency
+        HAVING COALESCE(SUM(amount), 0) > 0
+        ORDER BY month_key ASC, clan_id ASC, currency ASC
+        LIMIT 20
+      `,
+      [currentMonthKey],
+    );
+
+    const summaries = [];
+    for (const fund of fundResult.rows) {
+      const monthKey = String(fund.month_key || "");
+      const clanId = fund.clan_id;
+      const currency = normalizeCurrency(fund.currency);
+      const amount = Math.round(toNumber(fund.amount) * 100) / 100;
+      if (!monthKey || !clanId || amount <= 0) {
+        continue;
+      }
+
+      const alreadyPaidResult = await client.query(
+        `
+          SELECT COALESCE(SUM(amount), 0) AS paid
+          FROM clan_reward_payouts
+          WHERE month_key = $1
+            AND clan_id = $2
+            AND currency = $3
+        `,
+        [monthKey, clanId, currency],
+      );
+      if (toNumber(alreadyPaidResult.rows[0]?.paid) >= amount - 0.01) {
+        continue;
+      }
+
+      const membersResult = await client.query(
+        `
+          WITH monthly_scores AS (
+            SELECT
+              user_id,
+              GREATEST(COALESCE(SUM(points), 0), 0) AS contribution_score
+            FROM clan_score_events
+            WHERE clan_id = $1
+              AND to_char(created_at, 'YYYY-MM') = $2
+            GROUP BY user_id
+          )
+          SELECT
+            clan_members.user_id,
+            COALESCE(monthly_scores.contribution_score, 0) AS contribution_score
+          FROM clan_members
+          LEFT JOIN monthly_scores ON monthly_scores.user_id = clan_members.user_id
+          WHERE clan_members.clan_id = $1
+          ORDER BY COALESCE(monthly_scores.contribution_score, 0) DESC, clan_members.joined_at ASC
+        `,
+        [clanId, monthKey],
+      );
+      const members = membersResult.rows;
+      if (!members.length) {
+        continue;
+      }
+
+      const totalContribution = members.reduce(
+        (sum, member) => sum + Math.max(0, toNumber(member.contribution_score)),
+        0,
+      );
+      let remaining = amount;
+      let paidCount = 0;
+      for (let index = 0; index < members.length; index += 1) {
+        const member = members[index];
+        const isLast = index === members.length - 1;
+        const contribution = Math.max(0, toNumber(member.contribution_score));
+        const rawShare = totalContribution > 0
+          ? amount * (contribution / totalContribution)
+          : amount / members.length;
+        const payout = isLast
+          ? Math.max(0, Math.round(remaining * 100) / 100)
+          : Math.max(0, Math.round(rawShare * 100) / 100);
+        remaining = Math.max(0, Math.round((remaining - payout) * 100) / 100);
+        if (payout <= 0) {
+          continue;
+        }
+
+        const payoutResult = await client.query(
+          `
+            INSERT INTO clan_reward_payouts (
+              month_key,
+              clan_id,
+              user_id,
+              currency,
+              amount,
+              contribution_score
+            )
+            VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric)
+            ON CONFLICT DO NOTHING
+            RETURNING *
+          `,
+          [monthKey, clanId, member.user_id, currency, payout, contribution],
+        );
+        if (!payoutResult.rows[0]) {
+          continue;
+        }
+
+        await creditCurrencyBalance(
+          client,
+          member.user_id,
+          currency,
+          payout,
+          `clan_monthly_reward${balanceReasonSuffix(currency)}`,
+          `clan:${clanId}:month:${monthKey}`,
+        );
+        paidCount += 1;
+      }
+
+      summaries.push({
+        month_key: monthKey,
+        clan_id: Number(clanId),
+        currency,
+        amount,
+        paid_count: paidCount,
+      });
+    }
+
+    return {
+      ok: true,
+      summaries,
+    };
+  });
+}
+
 export async function upsertUser(input) {
   const telegramId = String(input.telegram_id ?? "").trim();
   if (!telegramId) {

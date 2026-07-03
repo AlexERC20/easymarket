@@ -19,6 +19,7 @@ import {
   createBtc5mMarket,
   createLimitOrder,
   deleteClan,
+  distributeDueClanRewardFunds,
   ensureActiveMarket,
   getActiveMarket,
   getAppActivityStats,
@@ -87,6 +88,7 @@ let marketEngineBusy = false;
 let priceEngineBusy = false;
 let usdtDepositScannerBusy = false;
 let databaseCleanupBusy = false;
+let clanRewardDistributionBusy = false;
 
 function sendApiError(res, error, fallbackStatus = 500) {
   const message = error instanceof Error ? error.message : String(error);
@@ -1330,6 +1332,29 @@ async function databaseCleanupTick(reason = "scheduled") {
   }
 }
 
+async function clanRewardDistributionTick(reason = "scheduled") {
+  if (clanRewardDistributionBusy) {
+    return null;
+  }
+
+  clanRewardDistributionBusy = true;
+  try {
+    const summary = await distributeDueClanRewardFunds();
+    if (summary.summaries?.length) {
+      console.log("[easymarket] clan reward distribution finished", {
+        reason,
+        summaries: summary.summaries,
+      });
+    }
+    return summary;
+  } catch (error) {
+    console.warn("[easymarket] clan reward distribution failed:", error instanceof Error ? error.message : "unknown error");
+    return null;
+  } finally {
+    clanRewardDistributionBusy = false;
+  }
+}
+
 async function startMarketEngine() {
   if (marketEngineStarted || !getPool()) {
     return;
@@ -1343,6 +1368,7 @@ async function startMarketEngine() {
     }
     await runMigrations();
     await ensureActiveMarket();
+    void clanRewardDistributionTick("startup");
   } catch (error) {
     console.warn("[easymarket] startup market check failed:", error instanceof Error ? error.message : "unknown error");
   }
@@ -1371,6 +1397,10 @@ async function startMarketEngine() {
       void databaseCleanupTick("daily");
     }, config.databaseCleanupIntervalMs);
   }
+
+  setInterval(() => {
+    void clanRewardDistributionTick("daily");
+  }, 86_400_000);
 }
 
 app.listen(config.port, "0.0.0.0", () => {

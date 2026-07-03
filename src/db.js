@@ -497,6 +497,21 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_clan_reward_fund_ledger_month_clan
       ON clan_reward_fund_ledger(month_key, clan_id, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS clan_reward_payouts (
+      id BIGSERIAL PRIMARY KEY,
+      month_key TEXT NOT NULL,
+      clan_id BIGINT REFERENCES clans(id) ON DELETE SET NULL,
+      user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      currency TEXT NOT NULL,
+      amount NUMERIC(20, 8) NOT NULL,
+      contribution_score NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(month_key, clan_id, user_id, currency)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_clan_reward_payouts_user_created
+      ON clan_reward_payouts(user_id, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS limit_orders (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
