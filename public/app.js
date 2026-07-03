@@ -190,6 +190,9 @@ const state = {
   freshActivityIds: new Set(),
   lastPositionPnl: {},
   seenSettledPositionIds: new Set(),
+  winStreak: 0,
+  renderedPositionIds: new Set(),
+  positionsWarmedUp: false,
   pendingBuy: false,
   pendingBuyKey: null,
   buyQueue: [],
@@ -1520,6 +1523,57 @@ function showTopupSuccessAnimation(label = "TOP UP") {
   showSuccessLightningBurst(label, { tier: 4, epic: true });
 }
 
+// Quiet, respectful closure on a losing round — a small muted "−$X" that sinks
+// and fades over the chart. Not a punishment, just an ending.
+function showLossClose(label) {
+  if (prefersReducedMotion()) {
+    return;
+  }
+  const host = document.querySelector(".chart-frame");
+  if (!host) {
+    return;
+  }
+  const el = document.createElement("div");
+  el.className = "loss-close";
+  el.textContent = label;
+  host.appendChild(el);
+  window.setTimeout(() => el.remove(), 1700);
+}
+
+// Escalating combo badge for consecutive winning rounds (item 5).
+function showStreakCombo(streak) {
+  if (prefersReducedMotion()) {
+    return;
+  }
+  const host = document.querySelector(".chart-frame");
+  if (!host) {
+    return;
+  }
+  const tier = Math.min(5, Math.max(2, Number(streak) || 2));
+  const el = document.createElement("div");
+  el.className = `streak-combo tier-${tier}`;
+  el.innerHTML = `<b>×${streak}</b><span>серия побед</span>`;
+  host.appendChild(el);
+  triggerHaptic("selection");
+  window.setTimeout(() => el.remove(), 2000);
+}
+
+// A gold coin drips into the live clan bank number when it grows (item 6).
+function dropClanBankCoin() {
+  if (prefersReducedMotion()) {
+    return;
+  }
+  const bank = $("clanWarBank");
+  const hero = bank?.closest(".clan-war-hero");
+  if (!hero) {
+    return;
+  }
+  const coin = document.createElement("span");
+  coin.className = "clan-bank-coin";
+  hero.appendChild(coin);
+  window.setTimeout(() => coin.remove(), 950);
+}
+
 function showWinOverlay(label, value = 0, tier = 1) {
   const overlay = $("winOverlay");
   const amount = $("winOverlayAmount");
@@ -2450,23 +2504,25 @@ function handleMarketActivity(activity) {
 }
 
 function handleSettlements(positions) {
-  const settled = (positions || [])
-    .filter((position) => position.status !== "open")
-    .filter((position) => Number(position.payout || 0) > 0 || Number(position.pnl || 0) > 0);
+  const allSettled = (positions || []).filter((position) => position.status !== "open");
 
   if (state.settlementsLoaded) {
-    const newWins = settled.filter((position) => !state.seenSettledPositionIds.has(position.id));
+    const newSettled = allSettled.filter((position) => !state.seenSettledPositionIds.has(position.id));
+    const marketResolved = newSettled.filter((position) => position.status === "resolved");
+    const newWins = marketResolved.filter((position) => Number(position.pnl || 0) > 0);
+    const newLosses = marketResolved.filter((position) => Number(position.pnl || 0) < 0);
+
     if (newWins.length) {
       triggerHaptic("win");
       const winsByCurrency = newWins.reduce((map, item) => {
         const currency = normalizeCurrency(item.currency);
-        map.set(currency, (map.get(currency) || 0) + Number(item.pnl || item.payout || 0));
+        map.set(currency, (map.get(currency) || 0) + Number(item.pnl || 0));
         return map;
       }, new Map());
-      const largestWin = Math.max(...newWins.map((item) => Math.abs(Number(item.pnl || item.payout || 0))));
+      const largestWin = Math.max(...newWins.map((item) => Math.abs(Number(item.pnl || 0))));
       const winTier = newWins.reduce((tier, item) => {
         const currency = normalizeCurrency(item.currency);
-        const value = Math.abs(Number(item.pnl || item.payout || 0));
+        const value = Math.abs(Number(item.pnl || 0));
         return Math.max(tier, getTierForAmount(value, currency));
       }, 1);
       const label = Array.from(winsByCurrency.entries())
@@ -2484,10 +2540,36 @@ function handleSettlements(positions) {
       };
       showToast(`Есть выигрыш: ${label}`);
       showWinOverlay(label, largestWin, winTier);
+
+      // Win streak (item 5): a clean winning round grows the combo; any loss breaks it.
+      if (!newLosses.length) {
+        state.winStreak += 1;
+        if (state.winStreak >= 2) {
+          showStreakCombo(state.winStreak);
+        }
+      }
+    }
+
+    if (newLosses.length) {
+      state.winStreak = 0;
+      const lossByCurrency = newLosses.reduce((map, item) => {
+        const currency = normalizeCurrency(item.currency);
+        const lost = Math.abs(Number(item.pnl || 0));
+        map.set(currency, (map.get(currency) || 0) + lost);
+        return map;
+      }, new Map());
+      const lossLabel = Array.from(lossByCurrency.entries())
+        .filter(([, value]) => value > 0)
+        .map(([currency, value]) => `−${formatCurrencyAmount(value, currency)}`)
+        .join(" · ");
+      if (lossLabel) {
+        triggerHaptic("warning");
+        showLossClose(lossLabel);
+      }
     }
   }
 
-  settled.forEach((position) => state.seenSettledPositionIds.add(position.id));
+  allSettled.forEach((position) => state.seenSettledPositionIds.add(position.id));
   state.settlementsLoaded = true;
 }
 
@@ -3450,17 +3532,23 @@ function renderMe() {
       delete state.lastPositionPnl[id];
     }
   }
+  for (const id of state.renderedPositionIds) {
+    if (!openPositionIds.has(String(id))) {
+      state.renderedPositionIds.delete(id);
+    }
+  }
   setSectionToggle("positionToggle", positions.length, "positions");
 
   const container = $("positionList");
   renderLossRefundOffers();
   if (!positions.length) {
     container.innerHTML = '<p class="muted">Позиции пока нет.</p>';
+    state.positionsWarmedUp = true;
     return;
   }
 
   const visiblePositions = state.expanded.positions ? positions : positions.slice(0, COLLAPSE_LIMIT);
-  container.innerHTML = visiblePositions.map((position) => {
+  container.innerHTML = visiblePositions.map((position, index) => {
     const payout = Number(position.shares || 0);
     const spent = Number(position.spent || 0);
     const currency = normalizeCurrency(position.currency);
@@ -3499,8 +3587,11 @@ function renderMe() {
         ? ` · ${formatDurationShort(secondsLeft)}`
         : " · закрывается";
     const marketLabel = getPositionMarketLabel(position, activeMarket);
+    // A freshly-opened position slides in with a glow so you see "my bet landed".
+    const isNew = state.positionsWarmedUp && !prefersReducedMotion()
+      && !state.renderedPositionIds.has(position.id);
     return `
-      <div class="mini-row">
+      <div class="mini-row${isNew ? " pos-enter" : ""}"${isNew ? ` style="animation-delay:${Math.min(index, 5) * 55}ms"` : ""}>
         <div>
           <strong class="side-${position.side}">${escapeHtml(marketLabel)} · ${marketSideLabel(activeMarket, position.side)}</strong>
           <br />
@@ -3525,6 +3616,11 @@ function renderMe() {
       </div>
     `;
   }).join("");
+
+  // Remember which positions we've shown so only genuinely new ones animate in;
+  // the first render seeds silently (existing positions don't all fly in on open).
+  positions.forEach((position) => state.renderedPositionIds.add(position.id));
+  state.positionsWarmedUp = true;
 }
 
 function getLossRefundCost(offer) {
@@ -3886,8 +3982,12 @@ function renderClanWar() {
   if (bankEl) {
     const isLeaderboard = (state.clanView || "leaderboard") === "leaderboard"
       && !$("clansLeaderboardView")?.classList.contains("hidden");
-    if (isLeaderboard && state.clanWarBankShown != null && !prefersReducedMotion()) {
+    const prevShown = state.clanWarBankShown;
+    if (isLeaderboard && prevShown != null && !prefersReducedMotion()) {
       animateText(bankEl, bankValue, formatClanWarBank, 900);
+      if (bankValue > prevShown + 0.001) {
+        dropClanBankCoin();
+      }
     } else {
       bankEl.dataset.value = String(bankValue);
       bankEl.textContent = formatClanWarBank(bankValue);
