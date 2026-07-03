@@ -54,7 +54,7 @@ export const config = {
   marketDurationMinutes: parseNumber(process.env.MARKET_DURATION_MINUTES, 5, 1),
   marketLiquidity: parseNumber(process.env.MARKET_LIQUIDITY, 10_000, 100),
   marketFeeBps: parseNumber(process.env.MARKET_FEE_BPS, 200, 0),
-  marketProfitFeeBps: parseNumber(process.env.MARKET_PROFIT_FEE_BPS, 500, 0),
+  marketProfitFeeBps: parseNumber(process.env.MARKET_PROFIT_FEE_BPS, 700, 0),
   marketMakerSpreadBps: parseNumber(process.env.MARKET_MAKER_SPREAD_BPS, 300, 0),
   pricePollMs: parseNumber(process.env.PRICE_POLL_MS, 1_000, 250),
   priceTicksEnabled: !parseBoolean(process.env.PRICE_TICKS_DISABLED, false),

@@ -9,7 +9,9 @@ const MIN_PRICE = 0.001;
 const MAX_PRICE = 0.999;
 const BTC_MIN_PRICE = 0.001;
 const DEFAULT_FEE_BPS = 200;
-const DEFAULT_PROFIT_FEE_BPS = 500;
+const DEFAULT_PROFIT_FEE_BPS = 700;
+const DEFAULT_REFERRAL_PROFIT_SHARE_BPS = 100;
+const DEFAULT_CLAN_PROFIT_SHARE_BPS = 100;
 const DEFAULT_MARKET_MAKER_SPREAD_BPS = 300;
 const BUY_IMPACT_MULTIPLIER = 1.08;
 const SELL_IMPACT_MULTIPLIER = 1.42;
@@ -509,8 +511,158 @@ function getProfitFeeBps() {
   return Number.isFinite(config.marketProfitFeeBps) ? config.marketProfitFeeBps : DEFAULT_PROFIT_FEE_BPS;
 }
 
-function calculateProfitFee(profit) {
-  return Math.round(Math.max(0, Number(profit || 0)) * (getProfitFeeBps() / 10_000) * 100) / 100;
+function normalizeEconomySettings(row = {}) {
+  const profitFeeBps = Math.max(0, Math.round(toNumber(row.profit_fee_bps, getProfitFeeBps())));
+  const referralProfitShareBps = Math.max(0, Math.round(toNumber(
+    row.referral_profit_share_bps,
+    DEFAULT_REFERRAL_PROFIT_SHARE_BPS,
+  )));
+  const clanProfitShareBps = Math.max(0, Math.round(toNumber(
+    row.clan_profit_share_bps,
+    DEFAULT_CLAN_PROFIT_SHARE_BPS,
+  )));
+  const cappedReferralBps = Math.min(referralProfitShareBps, profitFeeBps);
+  const cappedClanBps = Math.min(clanProfitShareBps, Math.max(0, profitFeeBps - cappedReferralBps));
+
+  return {
+    profit_fee_bps: profitFeeBps,
+    referral_profit_share_bps: cappedReferralBps,
+    clan_profit_share_bps: cappedClanBps,
+    project_profit_share_bps: Math.max(0, profitFeeBps - cappedReferralBps - cappedClanBps),
+    updated_by_telegram_id: row.updated_by_telegram_id ?? null,
+    updated_by_username: row.updated_by_username ?? null,
+    updated_at: row.updated_at ?? null,
+  };
+}
+
+async function getEconomySettingsWithClient(client) {
+  const result = await client.query(
+    `
+      INSERT INTO project_economy_settings (
+        id,
+        profit_fee_bps,
+        referral_profit_share_bps,
+        clan_profit_share_bps
+      )
+      VALUES (1, $1, $2, $3)
+      ON CONFLICT (id) DO NOTHING
+      RETURNING *
+    `,
+    [
+      DEFAULT_PROFIT_FEE_BPS,
+      DEFAULT_REFERRAL_PROFIT_SHARE_BPS,
+      DEFAULT_CLAN_PROFIT_SHARE_BPS,
+    ],
+  );
+
+  if (result.rows[0]) {
+    return normalizeEconomySettings(result.rows[0]);
+  }
+
+  const existing = await client.query(
+    `
+      SELECT *
+      FROM project_economy_settings
+      WHERE id = 1
+      LIMIT 1
+    `,
+  );
+  return normalizeEconomySettings(existing.rows[0]);
+}
+
+export async function getProjectEconomySettings() {
+  const result = await query(
+    `
+      SELECT *
+      FROM project_economy_settings
+      WHERE id = 1
+      LIMIT 1
+    `,
+  );
+  if (result.rows[0]) {
+    return normalizeEconomySettings(result.rows[0]);
+  }
+
+  return withTransaction((client) => getEconomySettingsWithClient(client));
+}
+
+function parseBpsValue(value, fallback = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(0, Math.round(parsed));
+}
+
+function parsePercentOrBps(input, bpsInput, fallback = 0) {
+  if (bpsInput !== undefined && bpsInput !== null && bpsInput !== "") {
+    return parseBpsValue(bpsInput, fallback);
+  }
+  if (input === undefined || input === null || input === "") {
+    return fallback;
+  }
+  return parseBpsValue(Number(input) * 100, fallback);
+}
+
+export async function updateProjectEconomySettings(input = {}) {
+  const current = await getProjectEconomySettings();
+  const profitFeeBps = parsePercentOrBps(
+    input.profit_fee_pct ?? input.profitFeePct,
+    input.profit_fee_bps ?? input.profitFeeBps,
+    current.profit_fee_bps,
+  );
+  const referralProfitShareBps = parsePercentOrBps(
+    input.referral_profit_share_pct ?? input.referralProfitSharePct,
+    input.referral_profit_share_bps ?? input.referralProfitShareBps,
+    current.referral_profit_share_bps,
+  );
+  const clanProfitShareBps = parsePercentOrBps(
+    input.clan_profit_share_pct ?? input.clanProfitSharePct,
+    input.clan_profit_share_bps ?? input.clanProfitShareBps,
+    current.clan_profit_share_bps,
+  );
+
+  if (profitFeeBps > 5_000 || referralProfitShareBps > 5_000 || clanProfitShareBps > 5_000) {
+    throw new Error("invalid_economy_settings");
+  }
+  if (referralProfitShareBps + clanProfitShareBps > profitFeeBps) {
+    throw new Error("invalid_economy_settings");
+  }
+
+  const result = await query(
+    `
+      INSERT INTO project_economy_settings (
+        id,
+        profit_fee_bps,
+        referral_profit_share_bps,
+        clan_profit_share_bps,
+        updated_by_telegram_id,
+        updated_by_username,
+        updated_at
+      )
+      VALUES (1, $1, $2, $3, $4, $5, now())
+      ON CONFLICT (id) DO UPDATE SET
+        profit_fee_bps = EXCLUDED.profit_fee_bps,
+        referral_profit_share_bps = EXCLUDED.referral_profit_share_bps,
+        clan_profit_share_bps = EXCLUDED.clan_profit_share_bps,
+        updated_by_telegram_id = EXCLUDED.updated_by_telegram_id,
+        updated_by_username = EXCLUDED.updated_by_username,
+        updated_at = now()
+      RETURNING *
+    `,
+    [
+      profitFeeBps,
+      referralProfitShareBps,
+      clanProfitShareBps,
+      input.admin_telegram_id ? String(input.admin_telegram_id) : null,
+      input.admin_username ? String(input.admin_username).replace(/^@/, "") : null,
+    ],
+  );
+  return normalizeEconomySettings(result.rows[0]);
+}
+
+function calculateProfitFeeFromSettings(profit, settings) {
+  return Math.round(Math.max(0, Number(profit || 0)) * (settings.profit_fee_bps / 10_000) * 100) / 100;
 }
 
 function getMarketMakerSpreadBps() {
@@ -1208,6 +1360,195 @@ async function awardClanPoints(client, userId, marketId, points, reason, currenc
   return {
     clan_id: Number(clanId),
     points: numericPoints,
+  };
+}
+
+async function getTopClanForReward(client) {
+  await ensureDefaultClans(client);
+  const result = await client.query(
+    `
+      WITH scores AS (
+        SELECT clan_id, COALESCE(SUM(points), 0) AS score
+        FROM clan_score_events
+        GROUP BY clan_id
+      ),
+      members AS (
+        SELECT clan_id, COUNT(*)::int AS members_count
+        FROM clan_members
+        GROUP BY clan_id
+      )
+      SELECT
+        clans.id,
+        COALESCE(scores.score, 0) AS score,
+        COALESCE(members.members_count, 0) AS members_count
+      FROM clans
+      LEFT JOIN scores ON scores.clan_id = clans.id
+      LEFT JOIN members ON members.clan_id = clans.id
+      ORDER BY COALESCE(scores.score, 0) DESC, COALESCE(members.members_count, 0) DESC, clans.id ASC
+      LIMIT 1
+    `,
+  );
+  return result.rows[0] || null;
+}
+
+async function getReferrerForUser(client, userId) {
+  const userResult = await client.query(
+    `
+      SELECT telegram_id, referred_by_telegram_id
+      FROM users
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [userId],
+  );
+  const referredByTelegramId = String(userResult.rows[0]?.referred_by_telegram_id || "").trim();
+  const ownTelegramId = String(userResult.rows[0]?.telegram_id || "").trim();
+  if (!referredByTelegramId || referredByTelegramId === ownTelegramId) {
+    return null;
+  }
+
+  const referrerResult = await client.query(
+    `
+      SELECT *
+      FROM users
+      WHERE telegram_id = $1
+      LIMIT 1
+    `,
+    [referredByTelegramId],
+  );
+  return referrerResult.rows[0] || null;
+}
+
+function getMonthKey(date = new Date()) {
+  return date.toISOString().slice(0, 7);
+}
+
+async function distributeProfitFee(client, input) {
+  const grossProfit = Math.max(0, Math.round(Number(input.grossProfit || 0) * 100) / 100);
+  const totalFee = Math.max(0, Math.round(Number(input.totalFee || 0) * 100) / 100);
+  if (grossProfit <= 0 || totalFee <= 0) {
+    return {
+      total_fee: 0,
+      project_fee: 0,
+      referral_fee: 0,
+      clan_fee: 0,
+    };
+  }
+
+  const currency = normalizeCurrency(input.currency);
+  const settings = input.settings || await getEconomySettingsWithClient(client);
+  let referralFee = Math.min(
+    totalFee,
+    Math.round(grossProfit * (settings.referral_profit_share_bps / 10_000) * 100) / 100,
+  );
+  let clanFee = Math.min(
+    Math.max(0, totalFee - referralFee),
+    Math.round(grossProfit * (settings.clan_profit_share_bps / 10_000) * 100) / 100,
+  );
+  let projectFee = Math.max(0, Math.round((totalFee - referralFee - clanFee) * 100) / 100);
+  const reason = String(input.reason || "profit_fee");
+  const source = String(input.source || `market:${input.marketId || "unknown"}`);
+  const eventKey = String(input.eventKey || `${reason}:${input.positionId || "-"}:${input.tradeId || "-"}`);
+
+  let referrer = null;
+  if (referralFee > 0) {
+    referrer = await getReferrerForUser(client, input.userId);
+    if (referrer) {
+      await creditCurrencyBalance(
+        client,
+        referrer.id,
+        currency,
+        referralFee,
+        `profit_fee_referral${balanceReasonSuffix(currency)}`,
+        source,
+      );
+    } else {
+      projectFee = Math.round((projectFee + referralFee) * 100) / 100;
+      referralFee = 0;
+    }
+  }
+
+  let topClan = null;
+  if (clanFee > 0) {
+    topClan = await getTopClanForReward(client);
+    if (topClan) {
+      await client.query(
+        `
+          INSERT INTO clan_reward_fund_ledger (
+            clan_id,
+            market_id,
+            position_id,
+            trade_id,
+            currency,
+            amount,
+            month_key,
+            source
+          )
+          VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8)
+        `,
+        [
+          topClan.id,
+          input.marketId || null,
+          input.positionId || null,
+          input.tradeId || null,
+          currency,
+          clanFee,
+          getMonthKey(),
+          source,
+        ],
+      );
+    } else {
+      projectFee = Math.round((projectFee + clanFee) * 100) / 100;
+      clanFee = 0;
+    }
+  }
+
+  await client.query(
+    `
+      INSERT INTO profit_fee_distributions (
+        event_key,
+        position_id,
+        trade_id,
+        market_id,
+        user_id,
+        currency,
+        gross_profit,
+        total_fee,
+        project_fee,
+        referral_fee,
+        clan_fee,
+        referrer_user_id,
+        clan_id,
+        reason
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::numeric, $12, $13, $14)
+      ON CONFLICT (event_key) DO NOTHING
+    `,
+    [
+      eventKey,
+      input.positionId || null,
+      input.tradeId || null,
+      input.marketId || null,
+      input.userId || null,
+      currency,
+      grossProfit,
+      totalFee,
+      projectFee,
+      referralFee,
+      clanFee,
+      referrer?.id || null,
+      topClan?.id || null,
+      reason,
+    ],
+  );
+
+  return {
+    total_fee: totalFee,
+    project_fee: projectFee,
+    referral_fee: referralFee,
+    clan_fee: clanFee,
+    referrer_user_id: referrer ? Number(referrer.id) : null,
+    clan_id: topClan ? Number(topClan.id) : null,
   };
 }
 
@@ -4346,7 +4687,9 @@ export async function sellOutcome(input) {
     const soldRatio = sharesToSell / positionShares;
     const spentSold = toNumber(position.spent) * soldRatio;
     const bonusSpentSold = toNumber(position.bonus_spent) * soldRatio;
-    const fee = calculateProfitFee(gross - spentSold);
+    const grossProfit = gross - spentSold;
+    const economySettings = await getEconomySettingsWithClient(client);
+    const fee = calculateProfitFeeFromSettings(grossProfit, economySettings);
     const proceeds = Math.max(0, Math.round((gross - fee) * 100) / 100);
     const realizedPnl = proceeds - spentSold;
     const remainingShares = Math.max(0, positionShares - sharesToSell);
@@ -4372,6 +4715,19 @@ export async function sellOutcome(input) {
       `,
       [user.id, marketId, side, proceeds, fee, quote.executionPrice, sharesToSell, currency],
     );
+    await distributeProfitFee(client, {
+      settings: economySettings,
+      userId: user.id,
+      marketId,
+      positionId: position.id,
+      tradeId: tradeResult.rows[0]?.id,
+      currency,
+      grossProfit,
+      totalFee: fee,
+      reason: "market_sell_profit_fee",
+      source: `market:${marketId}:sell:${tradeResult.rows[0]?.id}`,
+      eventKey: `trade:${tradeResult.rows[0]?.id}:profit_fee`,
+    });
 
     const positionUpdateResult = await client.query(
       `
@@ -4589,6 +4945,7 @@ export async function resolveExpiredMarkets() {
         `,
         [currentMarket.id],
       );
+      const economySettings = await getEconomySettingsWithClient(client);
 
       for (const position of positions.rows) {
         const currency = normalizeCurrency(position.currency);
@@ -4596,7 +4953,8 @@ export async function resolveExpiredMarkets() {
         const shares = toNumber(position.shares);
         const spent = toNumber(position.spent);
         const grossPayout = position.side === winner ? shares : 0;
-        const fee = calculateProfitFee(grossPayout - spent);
+        const grossProfit = grossPayout - spent;
+        const fee = calculateProfitFeeFromSettings(grossProfit, economySettings);
         const payout = Math.max(0, Math.round((grossPayout - fee) * 100) / 100);
         const pnl = payout - spent;
 
@@ -4622,6 +4980,21 @@ export async function resolveExpiredMarkets() {
             `market:${currentMarket.id}`,
             getBonusRatioForAmount(position.bonus_spent, position.spent),
           );
+        }
+
+        if (fee > 0) {
+          await distributeProfitFee(client, {
+            settings: economySettings,
+            userId: position.user_id,
+            marketId: currentMarket.id,
+            positionId: position.id,
+            currency,
+            grossProfit,
+            totalFee: fee,
+            reason: "market_settlement_profit_fee",
+            source: `market:${currentMarket.id}:settlement`,
+            eventKey: `position:${position.id}:settlement_profit_fee`,
+          });
         }
 
         if (currency === "USDT" && pnl < 0) {

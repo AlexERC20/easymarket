@@ -31,6 +31,7 @@ import {
   getMarketComments,
   getMarketOrderBook,
   getMarketChart,
+  getProjectEconomySettings,
   getRecentActivity,
   getRecentMarkets,
   getUserSnapshot,
@@ -42,6 +43,7 @@ import {
   sellOutcome,
   syncFireBalanceByUsername,
   syncFireBalance,
+  updateProjectEconomySettings,
   updateLiveBtcPrice,
   upsertUser,
 } from "./services/marketService.js";
@@ -135,6 +137,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "invalid_clan_channel",
     "clan_exists",
     "clan_default_locked",
+    "invalid_economy_settings",
   ]);
 
   if (message === "DATABASE_URL is not configured.") {
@@ -1131,6 +1134,39 @@ app.post("/api/bridge/clans/:clanId/delete", requireBridgeSecret, async (req, re
     res.status(200).json({
       ok: true,
       ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/settings", requireBridgeSecret, async (_req, res) => {
+  try {
+    const settings = await getProjectEconomySettings();
+    res.status(200).json({
+      ok: true,
+      settings,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/economy/settings", requireBridgeSecret, async (req, res) => {
+  try {
+    const settings = await updateProjectEconomySettings({
+      profit_fee_pct: req.body?.profit_fee_pct ?? req.body?.profitFeePct,
+      profit_fee_bps: req.body?.profit_fee_bps ?? req.body?.profitFeeBps,
+      referral_profit_share_pct: req.body?.referral_profit_share_pct ?? req.body?.referralProfitSharePct,
+      referral_profit_share_bps: req.body?.referral_profit_share_bps ?? req.body?.referralProfitShareBps,
+      clan_profit_share_pct: req.body?.clan_profit_share_pct ?? req.body?.clanProfitSharePct,
+      clan_profit_share_bps: req.body?.clan_profit_share_bps ?? req.body?.clanProfitShareBps,
+      admin_telegram_id: req.body?.admin_telegram_id ?? req.body?.adminTelegramId,
+      admin_username: req.body?.admin_username ?? req.body?.adminUsername,
+    });
+    res.status(200).json({
+      ok: true,
+      settings,
     });
   } catch (error) {
     sendApiError(res, error);

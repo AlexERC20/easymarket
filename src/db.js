@@ -150,6 +150,25 @@ export async function runMigrations() {
       UNIQUE(referred_user_id)
     );
 
+    CREATE TABLE IF NOT EXISTS project_economy_settings (
+      id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      profit_fee_bps INTEGER NOT NULL DEFAULT 700,
+      referral_profit_share_bps INTEGER NOT NULL DEFAULT 100,
+      clan_profit_share_bps INTEGER NOT NULL DEFAULT 100,
+      updated_by_telegram_id TEXT,
+      updated_by_username TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    INSERT INTO project_economy_settings (
+      id,
+      profit_fee_bps,
+      referral_profit_share_bps,
+      clan_profit_share_bps
+    )
+    VALUES (1, 700, 100, 100)
+    ON CONFLICT (id) DO NOTHING;
+
     CREATE TABLE IF NOT EXISTS usdt_loss_refund_offers (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -439,6 +458,44 @@ export async function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_trades_user_market_created
       ON trades(user_id, market_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS profit_fee_distributions (
+      id BIGSERIAL PRIMARY KEY,
+      event_key TEXT UNIQUE NOT NULL,
+      position_id BIGINT REFERENCES positions(id) ON DELETE SET NULL,
+      trade_id BIGINT REFERENCES trades(id) ON DELETE SET NULL,
+      market_id BIGINT REFERENCES markets(id) ON DELETE SET NULL,
+      user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      currency TEXT NOT NULL,
+      gross_profit NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      total_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      project_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      referral_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      clan_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      referrer_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      clan_id BIGINT REFERENCES clans(id) ON DELETE SET NULL,
+      reason TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_profit_fee_distributions_market_created
+      ON profit_fee_distributions(market_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS clan_reward_fund_ledger (
+      id BIGSERIAL PRIMARY KEY,
+      clan_id BIGINT REFERENCES clans(id) ON DELETE SET NULL,
+      market_id BIGINT REFERENCES markets(id) ON DELETE SET NULL,
+      position_id BIGINT REFERENCES positions(id) ON DELETE SET NULL,
+      trade_id BIGINT REFERENCES trades(id) ON DELETE SET NULL,
+      currency TEXT NOT NULL,
+      amount NUMERIC(20, 8) NOT NULL,
+      month_key TEXT NOT NULL,
+      source TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_clan_reward_fund_ledger_month_clan
+      ON clan_reward_fund_ledger(month_key, clan_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS limit_orders (
       id BIGSERIAL PRIMARY KEY,
