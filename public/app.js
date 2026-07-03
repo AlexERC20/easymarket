@@ -243,6 +243,21 @@ const sheetCloseTimers = new WeakMap();
 const sheetHeightTimers = new WeakMap();
 const $ = (id) => document.getElementById(id);
 
+function markTelegramShellEarly() {
+  const tg = window.Telegram?.WebApp;
+  if (!tg) {
+    return;
+  }
+  const platform = String(tg.platform || "").toLowerCase();
+  const mobileByPlatform = platform === "ios" || platform === "android";
+  const mobileByViewport = window.matchMedia?.("(pointer: coarse)")?.matches
+    && Math.min(window.innerWidth || 0, window.screen?.width || 0) <= 820;
+  document.body.classList.add("telegram-shell");
+  document.body.classList.toggle("telegram-ios-shell", platform === "ios" || /iPhone|iPad|iPod/i.test(navigator.userAgent || ""));
+  document.body.classList.toggle("telegram-desktop-shell", !(mobileByPlatform || mobileByViewport));
+}
+
+markTelegramShellEarly();
 initLightningMotion();
 initAquarium();
 // Let a phone shake feed the fish on demand, mid-round, from the current chart.
