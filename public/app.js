@@ -4302,14 +4302,10 @@ function getStoryMediaUrl() {
   const value = Number(state.lastWin?.primaryValue || 0);
   const currency = state.lastWin?.primaryCurrency || "USDT";
   if (value > 0) {
-    // Only digits/dot/letters → URL-safe even if Telegram re-encodes the media URL.
-    const params = new URLSearchParams({
-      value: String(value),
-      currency: String(currency),
-      ticker: String(state.lastWin?.ticker || "BTC · 5 мин"),
-      user: String(state.user?.username ? `@${state.user.username}` : state.user?.first_name || ""),
-    });
-    return `${window.location.origin}/api/share/story?${params.toString()}`;
+    // ONLY digits/dot/letters — URL-safe even if Telegram re-encodes the media URL.
+    // Never pass free-form text (Cyrillic ticker/username) here: it would double-
+    // encode into raw %-codes on the card. All other text is baked server-side.
+    return `${window.location.origin}/api/share/story?value=${encodeURIComponent(value)}&currency=${encodeURIComponent(currency)}`;
   }
   return `${window.location.origin}/share/story-win.png`;
 }
