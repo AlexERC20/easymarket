@@ -3,6 +3,8 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { renderStoryCardPng } from "./services/shareCardService.js";
+
 import { config } from "./config.js";
 import { getPool, getSafeDatabaseErrorMessage, query, runMigrations } from "./db.js";
 import {
@@ -654,6 +656,23 @@ app.get("/api/clans", async (req, res) => {
     res.status(200).json(result);
   } catch (error) {
     sendApiError(res, error);
+  }
+});
+
+// Dynamic Story share image with the player's profit baked in, for shareToStory.
+app.get("/api/share/story", async (req, res) => {
+  try {
+    const png = await renderStoryCardPng(String(req.query.amount || ""));
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.status(200).end(png);
+  } catch (error) {
+    // Fall back to the static branded card so shareToStory still gets valid media.
+    res.sendFile(path.join(publicDir, "share", "story-win.png"), (sendError) => {
+      if (sendError && !res.headersSent) {
+        sendApiError(res, error);
+      }
+    });
   }
 });
 

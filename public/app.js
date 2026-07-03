@@ -4131,7 +4131,36 @@ function getShareWinText() {
 }
 
 function getStoryMediaUrl() {
-  return `${window.location.origin}/share/story-win.png`;
+  const amount = state.lastWin?.amountLabel || "";
+  if (!amount) {
+    return `${window.location.origin}/share/story-win.png`;
+  }
+  return `${window.location.origin}/api/share/story?amount=${encodeURIComponent(amount)}`;
+}
+
+function isShareWinsEnabled() {
+  try {
+    return window.localStorage?.getItem("easymarket_share_wins") !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function setShareWinsEnabled(enabled) {
+  try {
+    window.localStorage?.setItem("easymarket_share_wins", enabled ? "1" : "0");
+  } catch {
+    // Ignore storage errors (private mode etc).
+  }
+  return enabled;
+}
+
+function renderShareWinsToggle() {
+  const button = $("shareWinsToggleBtn");
+  if (!button) return;
+  const enabled = isShareWinsEnabled();
+  button.classList.toggle("active", enabled);
+  button.setAttribute("aria-pressed", enabled ? "true" : "false");
 }
 
 function openShareWinSheet() {
@@ -4155,7 +4184,7 @@ function openShareWinSheet() {
 }
 
 function maybeAutoOpenShareWin() {
-  if (!state.lastWin) {
+  if (!state.lastWin || !isShareWinsEnabled()) {
     return;
   }
   const now = Date.now();
@@ -5552,6 +5581,7 @@ $("settingsBtn")?.addEventListener("click", () => {
   closeTopMoreMenu();
   renderSoundToggle();
   renderAquariumToggle();
+  renderShareWinsToggle();
   openSheet($("settingsSheet"));
 });
 
@@ -5581,9 +5611,15 @@ $("shareToStoryBtn")?.addEventListener("click", () => shareWinToStory());
 $("shareToChatBtn")?.addEventListener("click", () => shareWinToChat());
 $("shareCopyBtn")?.addEventListener("click", () => shareWinCopy());
 $("winOverlay")?.addEventListener("click", () => {
-  if (state.lastWin) {
+  if (state.lastWin && isShareWinsEnabled()) {
     openShareWinSheet();
   }
+});
+
+$("shareWinsToggleBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  setShareWinsEnabled(!isShareWinsEnabled());
+  renderShareWinsToggle();
 });
 
 document.addEventListener("click", (event) => {
