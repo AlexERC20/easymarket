@@ -204,7 +204,6 @@ const state = {
   sideSelectedMarketId: null,
   winOverlayTimer: null,
   lastWin: null,
-  lastShareAutoAt: 0,
   publicConfig: {
     av_bot_url: "https://t.me/voit_help_bot?start=buy_stars",
     mini_app_url: "https://t.me/voit_help_bot?startapp=easymarket",
@@ -2442,7 +2441,6 @@ function handleSettlements(positions) {
       };
       showToast(`Есть выигрыш: ${label}`);
       showWinOverlay(label, largestWin, winTier);
-      maybeAutoOpenShareWin();
     }
   }
 
@@ -4185,27 +4183,6 @@ function openShareWinSheet() {
   }
   openSheet(sheet);
   triggerHaptic("win");
-}
-
-function maybeAutoOpenShareWin() {
-  if (!state.lastWin || !isShareWinsEnabled()) {
-    return;
-  }
-  const now = Date.now();
-  // Throttle so a burst of settlements doesn't spam the share sheet.
-  if (now - (state.lastShareAutoAt || 0) < 120_000) {
-    return;
-  }
-  if (isBlockingSheetOpen()) {
-    return;
-  }
-  state.lastShareAutoAt = now;
-  window.setTimeout(() => {
-    if (isBlockingSheetOpen()) {
-      return;
-    }
-    openShareWinSheet();
-  }, 1500);
 }
 
 function shareWinToChat() {
