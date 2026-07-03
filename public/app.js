@@ -12,7 +12,7 @@ import {
   showWinCelebration,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260701-15";
+} from "./lightning-motion.js?v=20260703-16";
 import {
   initAquarium,
   isAquariumEnabled,
@@ -1752,6 +1752,7 @@ function getTelegramUser() {
     };
     try {
       document.body.classList.add("telegram-shell");
+      document.body.classList.toggle("telegram-ios-shell", platform === "ios" || /iPhone|iPad|iPod/i.test(navigator.userAgent || ""));
       document.body.classList.toggle("telegram-desktop-shell", !mobileShell);
       tg.ready();
       if (mobileShell) {
@@ -2078,8 +2079,14 @@ function isSheetOpen(id) {
   return Boolean(element && !element.classList.contains("hidden"));
 }
 
+function isTelegramIosWebApp() {
+  const platform = String(window.Telegram?.WebApp?.platform || "").toLowerCase();
+  return platform === "ios" || /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+}
+
 function prefersReducedMotion() {
-  return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+  const reduced = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+  return reduced && !isTelegramIosWebApp();
 }
 
 function openSheet(sheetOrId) {

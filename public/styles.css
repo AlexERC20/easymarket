@@ -762,6 +762,22 @@ h2 {
   .outcome-button.side-charge {
     animation: none !important;
   }
+
+  body.telegram-ios-shell .countdown.is-urgent strong {
+    animation: countdownUrgent 1s var(--ease-default) infinite !important;
+  }
+
+  body.telegram-ios-shell #currentPrice.price-up {
+    animation: priceFlashUp 580ms ease !important;
+  }
+
+  body.telegram-ios-shell #currentPrice.price-down {
+    animation: priceFlashDown 580ms ease !important;
+  }
+
+  body.telegram-ios-shell .outcome-button.side-charge {
+    animation: outcomeCharge 460ms var(--ease-default) !important;
+  }
 }
 
 .market-meta {
@@ -5514,5 +5530,22 @@ code {
   .task-row.task-claimed,
   .task-item.task-claimed {
     animation: none !important;
+  }
+
+  body.telegram-ios-shell .position-actions strong.pnl-flash-up {
+    animation: pnlFlashUp 680ms ease !important;
+  }
+
+  body.telegram-ios-shell .position-actions strong.pnl-flash-down {
+    animation: pnlFlashDown 680ms ease !important;
+  }
+
+  body.telegram-ios-shell .reward-coin {
+    animation: rewardFly 740ms cubic-bezier(0.4, 0, 0.2, 1) both !important;
+  }
+
+  body.telegram-ios-shell .task-row.task-claimed,
+  body.telegram-ios-shell .task-item.task-claimed {
+    animation: taskClaimGlow 900ms ease both !important;
   }
 }

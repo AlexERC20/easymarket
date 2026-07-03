@@ -57,8 +57,18 @@ try {
   soundEnabled = false;
 }
 
+function isTelegramIosWebApp() {
+  const platform = String(window.Telegram?.WebApp?.platform || "").toLowerCase();
+  return platform === "ios" || /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+}
+
 function reducedMotion() {
-  return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+  const reduced = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+  // Telegram's iOS WebView can report reduced motion and silently suppress the
+  // short game feedback we rely on: rewards, round sweep, win burst. Keep those
+  // transactional effects alive on iPhone while the CSS still tones down heavy
+  // ambient loops.
+  return reduced && !isTelegramIosWebApp();
 }
 
 function getAudioContext() {
