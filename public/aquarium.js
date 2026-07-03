@@ -1000,10 +1000,17 @@ function ingestAccel(x, y, z) {
 }
 
 function tiltHandler(event) {
+  // Telegram native orientation wins when active — never let both drive tilt.
+  if (tgOrientStarted) {
+    return;
+  }
   ingestOrientationGamma(Number(event.gamma)); // degrees
 }
 
 function motionHandler(event) {
+  if (tgAccelStarted) {
+    return;
+  }
   const a = event.accelerationIncludingGravity || event.acceleration || {};
   ingestAccel(Number(a.x), Number(a.y), Number(a.z));
 }
@@ -1156,7 +1163,11 @@ function requestTiltAccess() {
     window.addEventListener("devicemotion", motionHandler, { passive: true });
   };
 
-  if (typeof window.DeviceOrientationEvent !== "undefined") {
+  // Only fall back to W3C sensors when Telegram's native ones are NOT driving.
+  // If both feed tiltTarget (Telegram gamma in radians, W3C gamma in degrees,
+  // often with opposite sign) they fight every event and the tank oscillates —
+  // the Android bug. iOS Telegram never doubled because its W3C events are dead.
+  if (!tgOrientStarted && typeof window.DeviceOrientationEvent !== "undefined") {
     const req = window.DeviceOrientationEvent?.requestPermission;
     if (typeof req === "function") {
       if (!tiltPermissionAsked) {
@@ -1175,20 +1186,22 @@ function requestTiltAccess() {
     }
   }
 
-  const motionReq = window.DeviceMotionEvent?.requestPermission;
-  if (typeof motionReq === "function") {
-    if (!motionPermissionAsked) {
-      motionPermissionAsked = true;
-      motionReq.call(window.DeviceMotionEvent)
-        .then((state) => {
-          if (state === "granted") {
-            addMotion();
-          }
-        })
-        .catch(() => undefined);
+  if (!tgAccelStarted) {
+    const motionReq = window.DeviceMotionEvent?.requestPermission;
+    if (typeof motionReq === "function") {
+      if (!motionPermissionAsked) {
+        motionPermissionAsked = true;
+        motionReq.call(window.DeviceMotionEvent)
+          .then((state) => {
+            if (state === "granted") {
+              addMotion();
+            }
+          })
+          .catch(() => undefined);
+      }
+    } else {
+      addMotion();
     }
-  } else {
-    addMotion();
   }
 }
 
