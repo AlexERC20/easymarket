@@ -4095,6 +4095,7 @@ code {
 }
 .clan-war-podium span:active { transform: scale(0.96); }
 .clan-war-podium-ic {
+  position: relative;
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -4105,14 +4106,23 @@ code {
   overflow: hidden;
 }
 .clan-war-podium-ic svg { width: 18px; height: 18px; fill: currentColor; }
-.clan-war-podium-ic img { grid-area: 1 / 1; width: 100%; height: 100%; object-fit: cover; }
-/* Keep the channel-photo fallback hidden behind the img until it errors. */
-.clan-war-podium-ic .clan-avatar-fallback {
-  grid-area: 1 / 1;
-  display: grid;
-  place-items: center;
+/* Absolute-fill the container so object-fit crops from the center regardless of
+   how the grid item resolves percentage height (it wasn't, so only the top of
+   the avatar showed). */
+.clan-war-podium-ic img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* Keep the channel-photo fallback hidden behind the img until it errors. */
+.clan-war-podium-ic .clan-avatar-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
   opacity: 0;
   pointer-events: none;
 }

@@ -3855,16 +3855,30 @@ function renderClanWar() {
   if (podium) {
     const top3 = state.clans.slice(0, 3);
     if (top3.length < 3) {
-      setInnerHtmlIfChanged(podium, "");
+      if (podium.dataset.sig) {
+        podium.innerHTML = "";
+        podium.dataset.sig = "";
+      }
     } else {
-      const html = top3.map((clan) => `
-        <span data-open-clan="${clan.id}">
-          ${clanIconMarkup(clan, "clan-war-podium-ic")}
-          <b>${escapeHtml(clan.name)}</b>
-          <small>${formatFire(clan.score)} pts</small>
-        </span>
-      `).join("");
-      setInnerHtmlIfChanged(podium, html);
+      // Rebuild only when the lineup/avatar/name changes. A live score tick must
+      // NOT recreate the <img> avatars — that reload is what flickers them.
+      const sig = top3.map((c) => `${c.id}:${c.channel_avatar_url || ""}:${c.name}`).join("|");
+      if (podium.dataset.sig !== sig) {
+        podium.innerHTML = top3.map((clan) => `
+          <span data-open-clan="${clan.id}">
+            ${clanIconMarkup(clan, "clan-war-podium-ic")}
+            <b>${escapeHtml(clan.name)}</b>
+            <small>${formatFire(clan.score)} pts</small>
+          </span>
+        `).join("");
+        podium.dataset.sig = sig;
+      } else {
+        const spans = podium.children;
+        top3.forEach((clan, i) => {
+          const small = spans[i]?.querySelector("small");
+          if (small) small.textContent = `${formatFire(clan.score)} pts`;
+        });
+      }
     }
   }
 }
@@ -6397,6 +6411,19 @@ function setLeaderboardSheetOpen(open) {
   }
 }
 
+async function refreshClanWar() {
+  if (!state.user?.telegram_id) {
+    return;
+  }
+  // Poll updates only the live bank + top-3 podium in place — it must NOT rebuild
+  // the whole clans list (that recreates every avatar <img> and flickers them).
+  const data = await api(`/api/clans?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
+  state.clans = data.clans || state.clans;
+  state.userClan = data.user_clan || state.userClan;
+  state.clanWar = data.clan_war || state.clanWar;
+  renderClanWar();
+}
+
 function startClanWarPoll() {
   stopClanWarPoll();
   // Keep the monthly bank feeling live while the user watches the league.
@@ -6408,7 +6435,7 @@ function startClanWarPoll() {
     if (state.clanView !== "leaderboard" || document.hidden) {
       return;
     }
-    void loadClans().catch(() => undefined);
+    void refreshClanWar().catch(() => undefined);
   }, 15_000);
 }
 
