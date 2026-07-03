@@ -2065,14 +2065,18 @@ function renderTaskTabs() {
 function renderTaskStats() {
   const list = $("taskStatsList");
   if (!list) return;
+  const sheetOpen = isSheetOpen("tasksSheet");
+  if (!sheetOpen || state.taskTab !== "stats") {
+    return;
+  }
 
   const stats = state.marketStats || [];
   if (!stats.length) {
-    list.innerHTML = `
+    setInnerHtmlIfChanged(list, `
       <div class="task-stat-empty">
         Пока нет рассчитанных рынков. Сделай ставку и дождись закрытия маркета.
       </div>
-    `;
+    `);
     return;
   }
 
@@ -2110,7 +2114,7 @@ function renderTaskStats() {
       </div>
     `;
   }).join("");
-  list.innerHTML = summary + rows;
+  setInnerHtmlIfChanged(list, summary + rows);
 }
 
 async function api(path, options = {}) {
@@ -3542,13 +3546,13 @@ function renderMe() {
   const container = $("positionList");
   renderLossRefundOffers();
   if (!positions.length) {
-    container.innerHTML = '<p class="muted">Позиции пока нет.</p>';
+    setInnerHtmlIfChanged(container, '<p class="muted">Позиции пока нет.</p>');
     state.positionsWarmedUp = true;
     return;
   }
 
   const visiblePositions = state.expanded.positions ? positions : positions.slice(0, COLLAPSE_LIMIT);
-  container.innerHTML = visiblePositions.map((position, index) => {
+  const html = visiblePositions.map((position, index) => {
     const payout = Number(position.shares || 0);
     const spent = Number(position.spent || 0);
     const currency = normalizeCurrency(position.currency);
@@ -3616,6 +3620,7 @@ function renderMe() {
       </div>
     `;
   }).join("");
+  setInnerHtmlIfChanged(container, html);
 
   // Remember which positions we've shown so only genuinely new ones animate in;
   // the first render seeds silently (existing positions don't all fly in on open).
@@ -6519,8 +6524,8 @@ function setTasksSheetOpen(open) {
   if (open) {
     renderTaskRewards();
     renderTaskTabs();
-    renderTaskStats();
     openSheet(sheet);
+    renderTaskStats();
   } else {
     closeSheet(sheet);
   }
@@ -6627,8 +6632,6 @@ function markReferralNudgeShownToday() {
 $("tasksBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   closeTopMoreMenu();
-  renderTaskRewards();
-  renderTaskStats();
   setTasksSheetOpen(true);
 });
 
