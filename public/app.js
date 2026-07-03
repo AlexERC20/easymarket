@@ -139,7 +139,10 @@ const state = {
   leaderboardCurrency: "USDT",
   clans: [],
   userClan: null,
+  clanWar: null,
+  clanWarBankShown: null,
   clansLoading: false,
+  clansPollTimer: null,
   clanCreating: false,
   selectedClanIconKey: "bull",
   handledClanLaunch: false,
@@ -200,6 +203,8 @@ const state = {
   pendingSellPositionId: null,
   sideSelectedMarketId: null,
   winOverlayTimer: null,
+  lastWin: null,
+  lastShareAutoAt: 0,
   publicConfig: {
     av_bot_url: "https://t.me/voit_help_bot?start=buy_stars",
     mini_app_url: "https://t.me/voit_help_bot?startapp=easymarket",
@@ -537,20 +542,6 @@ function formatChannelLabel(value) {
 
 function buildClanInviteUrl(clan) {
   return buildTelegramMiniAppLaunchUrl(`clan_${clan?.id || ""}`);
-}
-
-function getClanPrizeUsdt(rank) {
-  const prizes = {
-    1: 5000,
-    2: 3000,
-    3: 1000,
-  };
-  return prizes[Number(rank)] || 0;
-}
-
-function formatClanPrize(rank) {
-  const prize = getClanPrizeUsdt(rank);
-  return prize > 0 ? `${formatFire(prize)}$` : "топ-3";
 }
 
 function getLaunchClanId() {
@@ -2120,12 +2111,12 @@ function beginSheetContentMorph(sheetOrId, viewKey) {
   const panel = getSheetPanel(sheet);
   if (!panel || sheet?.classList.contains("hidden") || sheet?.classList.contains("sheet-closing") || prefersReducedMotion()) {
     if (panel) panel.dataset.motionView = viewKey || "";
-    return { panel, viewKey, animate: false };
+    return { panel, viewKey, animate: false, morphHeight: false };
   }
 
   const previousView = panel.dataset.motionView || "";
   if (previousView === (viewKey || "")) {
-    return { panel, viewKey, animate: false };
+    return { panel, viewKey, animate: false, morphHeight: false };
   }
 
   const pendingTimer = sheetHeightTimers.get(panel);
@@ -2134,11 +2125,21 @@ function beginSheetContentMorph(sheetOrId, viewKey) {
     sheetHeightTimers.delete(panel);
   }
 
-  const startHeight = panel.getBoundingClientRect().height;
-  panel.style.height = `${startHeight}px`;
-  panel.style.overflowY = "hidden";
-  panel.classList.add("sheet-height-morphing", "sheet-view-animating");
-  return { panel, viewKey, animate: true };
+  // Fixed-height panels keep a stable frame — only crossfade the view, never
+  // animate the container height (that height jump is what feels janky).
+  const morphHeight = !panel.classList.contains("sheet-stable-height");
+  if (morphHeight) {
+    const startHeight = panel.getBoundingClientRect().height;
+    panel.style.height = `${startHeight}px`;
+    panel.style.overflowY = "hidden";
+    panel.classList.add("sheet-height-morphing");
+  } else {
+    // Real view change on a fixed-height panel — start the new view at the top.
+    // (This branch only runs when the view actually changed, not on re-renders.)
+    panel.scrollTop = 0;
+  }
+  panel.classList.add("sheet-view-animating");
+  return { panel, viewKey, animate: true, morphHeight };
 }
 
 function finishSheetContentMorph(morph) {
@@ -2146,6 +2147,16 @@ function finishSheetContentMorph(morph) {
   if (!panel) return;
   panel.dataset.motionView = morph.viewKey || "";
   if (!morph.animate) return;
+
+  if (!morph.morphHeight) {
+    const timer = window.setTimeout(() => {
+      panel.classList.remove("sheet-view-animating");
+      sheetHeightTimers.delete(panel);
+    }, SHEET_HEIGHT_MORPH_MS);
+    sheetHeightTimers.set(panel, timer);
+    return;
+  }
+
   const endHeight = panel.scrollHeight;
   window.requestAnimationFrame(() => {
     panel.style.height = `${endHeight}px`;
@@ -2419,8 +2430,17 @@ function handleSettlements(positions) {
       const label = Array.from(winsByCurrency.entries())
         .map(([currency, value]) => formatSignedCurrencyAmount(value, currency))
         .join(" · ");
+      const primaryWin = Array.from(winsByCurrency.entries())
+        .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
+      state.lastWin = {
+        amountLabel: primaryWin ? formatSignedCurrencyAmount(primaryWin[1], primaryWin[0]) : label,
+        label,
+        tier: winTier,
+        at: Date.now(),
+      };
       showToast(`Есть выигрыш: ${label}`);
       showWinOverlay(label, largestWin, winTier);
+      maybeAutoOpenShareWin();
     }
   }
 
@@ -2553,6 +2573,7 @@ async function loadClans() {
     const data = await api(`/api/clans?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
     state.clans = data.clans || [];
     state.userClan = data.user_clan || null;
+    state.clanWar = data.clan_war || state.clanWar;
     if (!state.clans.some((clan) => clan.id === state.selectedClanId)) {
       state.selectedClanId = state.userClan?.id || state.clans[0]?.id || null;
     }
@@ -3725,7 +3746,7 @@ function renderLeaderboard() {
           ${clanIconMarkup(clan, "leaderboard-clan-icon")}
           <div class="leaderboard-player">
             <strong>${escapeHtml(clan.name)}${isMine ? " · твой" : ""}</strong>
-            <small>${formatFire(clan.members_count)} участников · фонд ${formatClanPrize(clan.rank)}</small>
+            <small>${formatFire(clan.members_count)} участников${Number(clan.rank) === 1 ? " · лидер месяца" : ""}</small>
           </div>
           <strong class="leaderboard-balance">${formatFire(clan.score)} pts</strong>
         </div>
@@ -3775,6 +3796,77 @@ function renderLeaderboard() {
     `;
   }).join("");
   container.innerHTML = rows;
+}
+
+const CLAN_WAR_MONTHS = [
+  "январь", "февраль", "март", "апрель", "май", "июнь",
+  "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+];
+
+function formatClanWarMonth(monthKey) {
+  const month = Number(String(monthKey || "").split("-")[1]);
+  return CLAN_WAR_MONTHS[month - 1] || "";
+}
+
+function formatClanWarCountdown(iso) {
+  const end = new Date(iso || 0).getTime();
+  const ms = end - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) {
+    return "скоро";
+  }
+  const days = Math.floor(ms / 86_400_000);
+  const hours = Math.floor((ms % 86_400_000) / 3_600_000);
+  if (days > 0) {
+    return `${days} дн ${hours} ч`;
+  }
+  const mins = Math.floor((ms % 3_600_000) / 60_000);
+  return `${hours} ч ${mins} мин`;
+}
+
+function formatClanWarBank(value) {
+  const num = Math.max(0, Number(value || 0));
+  const rounded = num >= 100 ? Math.round(num) : Math.round(num * 10) / 10;
+  return `${rounded.toLocaleString("ru-RU", { maximumFractionDigits: 1 })} USDT`;
+}
+
+function renderClanWar() {
+  const war = state.clanWar;
+  const bankEl = $("clanWarBank");
+  const monthEl = $("clanWarMonth");
+  const endsEl = $("clanWarEnds");
+  const podium = $("clanWarPodium");
+  const bankValue = Number(war?.bank_usdt || 0);
+
+  if (monthEl && war?.month_key) monthEl.textContent = formatClanWarMonth(war.month_key);
+  if (endsEl) endsEl.textContent = war?.ends_at ? formatClanWarCountdown(war.ends_at) : "—";
+
+  if (bankEl) {
+    const isLeaderboard = (state.clanView || "leaderboard") === "leaderboard"
+      && !$("clansLeaderboardView")?.classList.contains("hidden");
+    if (isLeaderboard && state.clanWarBankShown != null && !prefersReducedMotion()) {
+      animateText(bankEl, bankValue, formatClanWarBank, 900);
+    } else {
+      bankEl.dataset.value = String(bankValue);
+      bankEl.textContent = formatClanWarBank(bankValue);
+    }
+    state.clanWarBankShown = bankValue;
+  }
+
+  if (podium) {
+    const top3 = state.clans.slice(0, 3);
+    if (top3.length < 3) {
+      setInnerHtmlIfChanged(podium, "");
+    } else {
+      const html = top3.map((clan) => `
+        <span data-open-clan="${clan.id}">
+          ${clanIconMarkup(clan, "clan-war-podium-ic")}
+          <b>${escapeHtml(clan.name)}</b>
+          <small>${formatFire(clan.score)} pts</small>
+        </span>
+      `).join("");
+      setInnerHtmlIfChanged(podium, html);
+    }
+  }
 }
 
 function renderClans() {
@@ -3831,6 +3923,8 @@ function renderClans() {
     userCard.innerHTML = "";
   }
 
+  renderClanWar();
+
   if (state.clansLoading && !state.clans.length) {
     setInnerHtmlIfChanged(list, '<p class="muted">Загружаю кланы...</p>');
     detailCard.innerHTML = "";
@@ -3852,7 +3946,14 @@ function renderClans() {
     const members = (selectedClan.members || []).slice(0, 12);
     const channelUrl = normalizeChannelUrl(selectedClan.channel_url);
     const channelLabel = formatChannelLabel(selectedClan.channel_url);
-    const clanPrize = getClanPrizeUsdt(selectedClan.rank);
+    const rank = Number(selectedClan.rank) || 0;
+    const isLeader = rank === 1;
+    const bankLabel = formatClanWarBank(state.clanWar?.bank_usdt || 0);
+    const goalLine = isLeader
+      ? "Ваш клан №1 — сейчас забирает банк месяца"
+      : rank > 1
+        ? `Вы на ${rank} месте. Банк уходит клану №1 — обгоняйте лидера`
+        : "Поднимайтесь в топ-1, чтобы забрать банк";
     const memberRows = members.length
       ? members.map((member) => {
         const name = member.username ? `@${member.username}` : member.first_name || `user ${member.telegram_id}`;
@@ -3873,19 +3974,29 @@ function renderClans() {
       <div class="clan-detail-hero">
         ${clanIconMarkup(selectedClan, "clan-detail-avatar")}
         <div>
-          <strong>${escapeHtml(selectedClan.name)}</strong>
+          <strong>${escapeHtml(selectedClan.name)}${isLeader ? ' <em class="clan-leader-tag">лидер</em>' : ""}</strong>
           <small>${formatFire(selectedClan.members_count)} участников</small>
         </div>
       </div>
       <div class="clan-stat-grid">
-        <div><b>${selectedClan.rank || "-"}</b><span>место</span></div>
-        <div><b>${formatClanPrize(selectedClan.rank)}</b><span>фонд</span></div>
+        <div><b>${rank || "-"}</b><span>место</span></div>
         <div><b>${formatFire(selectedClan.score)}</b><span>очки</span></div>
+        <div><b>${formatFire(selectedClan.members_count)}</b><span>состав</span></div>
       </div>
-      <div class="clan-goal-card">
-        <small>Недельная клановая лига</small>
-        <strong>${clanPrize > 0 ? `Текущий фонд места: ${formatFire(clanPrize)} USDT` : "Залетайте в топ-3, чтобы открыть фонд"}</strong>
-        <span>Если клан финиширует в призах, фонд делится между участниками пропорционально личному вкладу в очки клана.</span>
+      <div class="clan-goal-card ${isLeader ? "is-leader" : ""}">
+        <small>Банк месяца · ${bankLabel}</small>
+        <strong>${goalLine}</strong>
+        <span>В конце месяца весь банк уходит клану №1 и делится между топ-30 участниками пропорционально личным очкам вклада.</span>
+      </div>
+      <div class="clan-todo">
+        <p class="clan-todo-title">Как поднять клан наверх</p>
+        <div class="rules-score-list">
+          <div class="rules-score-row"><span>USDT-прогноз — победа</span><b class="pts up">+3</b></div>
+          <div class="rules-score-row"><span>Заходи каждый день</span><b class="pts up">+2</b></div>
+          <div class="rules-score-row"><span>Первая ставка дня</span><b class="pts up">+3</b></div>
+          <div class="rules-score-row"><span>Серия из 5 побед</span><b class="pts up">+12</b></div>
+          <div class="rules-score-row"><span>Позвать друга в клан</span><b class="pts up">+5</b></div>
+        </div>
       </div>
       <div class="clan-link-actions">
         ${channelUrl ? `<button class="clan-link-button secondary" data-open-channel="${escapeHtml(channelUrl)}" type="button">${escapeHtml(channelLabel || "Канал клана")}</button>` : ""}
@@ -3898,7 +4009,15 @@ function renderClans() {
     detailCard.innerHTML = "";
   }
 
-  const html = state.clans.map((clan) => {
+  // Top-3 live in the podium above; the list carries the chasing pack (rank 4+).
+  // With fewer than 3 clans the podium stays empty, so list every clan instead
+  // (otherwise a fresh 1-2 clan league would render nothing and be unjoinable).
+  const rest = state.clans.length >= 3 ? state.clans.slice(3) : state.clans.slice();
+  if (!rest.length) {
+    setInnerHtmlIfChanged(list, '<p class="muted clans-list-empty">Все кланы уже в топ-3 — они борются за банк выше. Вступай и двигай свой клан наверх.</p>');
+    return;
+  }
+  const html = rest.map((clan) => {
     const rank = Number(clan.rank) || 0;
     return `
     <div class="clan-row ${clan.user_is_member ? "active" : ""} ${clan.id === state.selectedClanId ? "selected" : ""}" data-open-clan="${clan.id}">
@@ -3997,6 +4116,100 @@ async function shareClan(clan) {
   }
   const copied = await copyToClipboard(inviteUrl);
   showToast(copied ? "Ссылка на клан скопирована." : "Не получилось скопировать ссылку.");
+}
+
+function getShareWinUrl() {
+  return state.user?.telegram_id
+    ? buildInviteUrl(state.user.telegram_id)
+    : buildTelegramMiniAppLaunchUrl("easymarket");
+}
+
+function getShareWinText() {
+  const amount = state.lastWin?.amountLabel || state.lastWin?.label || "";
+  const head = amount ? `${amount} на BTC за 5 минут. ` : "";
+  return `Выигрыш есть — можно поесть. ${head}Играй и ты в EasyMarket →`;
+}
+
+function getStoryMediaUrl() {
+  return `${window.location.origin}/share/story-win.png`;
+}
+
+function openShareWinSheet() {
+  const win = state.lastWin;
+  const sheet = $("shareWinSheet");
+  if (!win || !sheet) {
+    return;
+  }
+  const amountEl = $("shareCardAmount");
+  if (amountEl) amountEl.textContent = win.amountLabel || win.label || "+0";
+  const tickerEl = $("shareCardTicker");
+  if (tickerEl) tickerEl.textContent = win.ticker || "BTC · 5 мин";
+  const userEl = $("shareCardUser");
+  if (userEl) {
+    userEl.textContent = state.user?.username
+      ? `@${state.user.username}`
+      : state.user?.first_name || "";
+  }
+  openSheet(sheet);
+  triggerHaptic("win");
+}
+
+function maybeAutoOpenShareWin() {
+  if (!state.lastWin) {
+    return;
+  }
+  const now = Date.now();
+  // Throttle so a burst of settlements doesn't spam the share sheet.
+  if (now - (state.lastShareAutoAt || 0) < 120_000) {
+    return;
+  }
+  if (isBlockingSheetOpen()) {
+    return;
+  }
+  state.lastShareAutoAt = now;
+  window.setTimeout(() => {
+    if (isBlockingSheetOpen()) {
+      return;
+    }
+    openShareWinSheet();
+  }, 1500);
+}
+
+function shareWinToChat() {
+  triggerHaptic("selection");
+  const url = getShareWinUrl();
+  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(getShareWinText())}`;
+  if (window.Telegram?.WebApp?.openTelegramLink) {
+    window.Telegram.WebApp.openTelegramLink(shareUrl);
+    return;
+  }
+  window.open(shareUrl, "_blank", "noopener,noreferrer");
+}
+
+function shareWinToStory() {
+  triggerHaptic("selection");
+  const tg = window.Telegram?.WebApp;
+  const url = getShareWinUrl();
+  const canStory = tg && typeof tg.shareToStory === "function"
+    && (typeof tg.isVersionAtLeast !== "function" || tg.isVersionAtLeast("7.8"));
+  if (canStory) {
+    try {
+      tg.shareToStory(getStoryMediaUrl(), {
+        text: getShareWinText(),
+        widget_link: { url, name: "Играть" },
+      });
+      return;
+    } catch {
+      // Fall through to chat share.
+    }
+  }
+  shareWinToChat();
+}
+
+async function shareWinCopy() {
+  triggerHaptic("selection");
+  const copied = await copyToClipboard(getShareWinUrl());
+  showToast(copied ? "Ссылка скопирована." : "Не удалось скопировать ссылку.");
 }
 
 function formatVolume(value) {
@@ -5353,6 +5566,26 @@ $("settingsSheet")?.addEventListener("click", (event) => {
   }
 });
 
+$("shareWinCloseBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  closeSheet($("shareWinSheet"));
+});
+
+$("shareWinSheet")?.addEventListener("click", (event) => {
+  if (event.target === $("shareWinSheet")) {
+    closeSheet($("shareWinSheet"));
+  }
+});
+
+$("shareToStoryBtn")?.addEventListener("click", () => shareWinToStory());
+$("shareToChatBtn")?.addEventListener("click", () => shareWinToChat());
+$("shareCopyBtn")?.addEventListener("click", () => shareWinCopy());
+$("winOverlay")?.addEventListener("click", () => {
+  if (state.lastWin) {
+    openShareWinSheet();
+  }
+});
+
 document.addEventListener("click", (event) => {
   if (!(event.target instanceof Element) || !event.target.closest(".top-actions")) {
     closeTopMoreMenu();
@@ -5399,6 +5632,17 @@ $("clanCreateToggleBtn")?.addEventListener("click", () => {
 $("clansBackBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   state.clanView = "leaderboard";
+  renderClans();
+});
+
+$("clanWarPodium")?.addEventListener("click", (event) => {
+  const item = event.target.closest("[data-open-clan]");
+  if (!item) {
+    return;
+  }
+  state.selectedClanId = Number(item.dataset.openClan);
+  state.clanView = "detail";
+  triggerHaptic("selection");
   renderClans();
 });
 
@@ -6136,14 +6380,39 @@ function setLeaderboardSheetOpen(open) {
   }
 }
 
+function startClanWarPoll() {
+  stopClanWarPoll();
+  // Keep the monthly bank feeling live while the user watches the league.
+  state.clansPollTimer = window.setInterval(() => {
+    if (!isSheetOpen("clansSheet")) {
+      stopClanWarPoll();
+      return;
+    }
+    if (state.clanView !== "leaderboard" || document.hidden) {
+      return;
+    }
+    void loadClans().catch(() => undefined);
+  }, 15_000);
+}
+
+function stopClanWarPoll() {
+  if (state.clansPollTimer) {
+    window.clearInterval(state.clansPollTimer);
+    state.clansPollTimer = null;
+  }
+}
+
 function setClansSheetOpen(open) {
   const sheet = $("clansSheet");
   if (!sheet) return;
   if (open) {
     state.clanView = "leaderboard";
+    state.clanWarBankShown = null;
     void loadClans().catch(() => showToast("Кланы пока не загрузились."));
     openSheet(sheet);
+    startClanWarPoll();
   } else {
+    stopClanWarPoll();
     closeSheet(sheet);
   }
 }

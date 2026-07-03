@@ -1552,135 +1552,174 @@ async function distributeProfitFee(client, input) {
   };
 }
 
+// Only the most active members share the monthly bank so inactive "dead souls"
+// don't dilute everyone's cut. Sorted by monthly contribution, capped here.
+const CLAN_REWARD_MAX_MEMBERS = 30;
+
 export async function distributeDueClanRewardFunds() {
   const currentMonthKey = getMonthKey();
   return withTransaction(async (client) => {
-    const fundResult = await client.query(
+    // Closed months that accrued a bank. Winner-takes-all: the whole month pool
+    // goes to the single clan that scored the most that month, split across its
+    // top-30 members by monthly contribution. This mirrors the "клан №1 забирает
+    // банк" model shown in the UI, so the displayed bank == what the winner wins.
+    const monthsResult = await client.query(
       `
-        SELECT
-          month_key,
-          clan_id,
-          currency,
-          COALESCE(SUM(amount), 0) AS amount
+        SELECT month_key
         FROM clan_reward_fund_ledger
         WHERE month_key < $1
-        GROUP BY month_key, clan_id, currency
+        GROUP BY month_key
         HAVING COALESCE(SUM(amount), 0) > 0
-        ORDER BY month_key ASC, clan_id ASC, currency ASC
-        LIMIT 20
+        ORDER BY month_key ASC
+        LIMIT 12
       `,
       [currentMonthKey],
     );
 
     const summaries = [];
-    for (const fund of fundResult.rows) {
-      const monthKey = String(fund.month_key || "");
-      const clanId = fund.clan_id;
-      const currency = normalizeCurrency(fund.currency);
-      const amount = Math.round(toNumber(fund.amount) * 100) / 100;
-      if (!monthKey || !clanId || amount <= 0) {
+    for (const monthRow of monthsResult.rows) {
+      const monthKey = String(monthRow.month_key || "");
+      if (!monthKey) {
         continue;
       }
 
-      const alreadyPaidResult = await client.query(
+      // Winner = the clan with the highest score earned during that month.
+      const winnerResult = await client.query(
         `
-          SELECT COALESCE(SUM(amount), 0) AS paid
-          FROM clan_reward_payouts
+          SELECT clan_id
+          FROM clan_score_events
+          WHERE to_char(created_at, 'YYYY-MM') = $1
+          GROUP BY clan_id
+          ORDER BY COALESCE(SUM(points), 0) DESC, clan_id ASC
+          LIMIT 1
+        `,
+        [monthKey],
+      );
+      const winnerClanId = winnerResult.rows[0]?.clan_id;
+      if (!winnerClanId) {
+        continue;
+      }
+
+      // One bank per currency for the whole month — every clan's fees fought for it.
+      const poolResult = await client.query(
+        `
+          SELECT currency, COALESCE(SUM(amount), 0) AS amount
+          FROM clan_reward_fund_ledger
           WHERE month_key = $1
-            AND clan_id = $2
-            AND currency = $3
+          GROUP BY currency
+          HAVING COALESCE(SUM(amount), 0) > 0
         `,
-        [monthKey, clanId, currency],
+        [monthKey],
       );
-      if (toNumber(alreadyPaidResult.rows[0]?.paid) >= amount - 0.01) {
-        continue;
-      }
 
-      const membersResult = await client.query(
-        `
-          WITH monthly_scores AS (
-            SELECT
-              user_id,
-              GREATEST(COALESCE(SUM(points), 0), 0) AS contribution_score
-            FROM clan_score_events
-            WHERE clan_id = $1
-              AND to_char(created_at, 'YYYY-MM') = $2
-            GROUP BY user_id
-          )
-          SELECT
-            clan_members.user_id,
-            COALESCE(monthly_scores.contribution_score, 0) AS contribution_score
-          FROM clan_members
-          LEFT JOIN monthly_scores ON monthly_scores.user_id = clan_members.user_id
-          WHERE clan_members.clan_id = $1
-          ORDER BY COALESCE(monthly_scores.contribution_score, 0) DESC, clan_members.joined_at ASC
-        `,
-        [clanId, monthKey],
-      );
-      const members = membersResult.rows;
-      if (!members.length) {
-        continue;
-      }
-
-      const totalContribution = members.reduce(
-        (sum, member) => sum + Math.max(0, toNumber(member.contribution_score)),
-        0,
-      );
-      let remaining = amount;
-      let paidCount = 0;
-      for (let index = 0; index < members.length; index += 1) {
-        const member = members[index];
-        const isLast = index === members.length - 1;
-        const contribution = Math.max(0, toNumber(member.contribution_score));
-        const rawShare = totalContribution > 0
-          ? amount * (contribution / totalContribution)
-          : amount / members.length;
-        const payout = isLast
-          ? Math.max(0, Math.round(remaining * 100) / 100)
-          : Math.max(0, Math.round(rawShare * 100) / 100);
-        remaining = Math.max(0, Math.round((remaining - payout) * 100) / 100);
-        if (payout <= 0) {
+      for (const poolRow of poolResult.rows) {
+        const currency = normalizeCurrency(poolRow.currency);
+        const amount = Math.round(toNumber(poolRow.amount) * 100) / 100;
+        if (amount <= 0) {
           continue;
         }
 
-        const payoutResult = await client.query(
+        const alreadyPaidResult = await client.query(
           `
-            INSERT INTO clan_reward_payouts (
-              month_key,
-              clan_id,
-              user_id,
-              currency,
-              amount,
-              contribution_score
-            )
-            VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric)
-            ON CONFLICT DO NOTHING
-            RETURNING *
+            SELECT COALESCE(SUM(amount), 0) AS paid
+            FROM clan_reward_payouts
+            WHERE month_key = $1
+              AND clan_id = $2
+              AND currency = $3
           `,
-          [monthKey, clanId, member.user_id, currency, payout, contribution],
+          [monthKey, winnerClanId, currency],
         );
-        if (!payoutResult.rows[0]) {
+        if (toNumber(alreadyPaidResult.rows[0]?.paid) >= amount - 0.01) {
           continue;
         }
 
-        await creditCurrencyBalance(
-          client,
-          member.user_id,
-          currency,
-          payout,
-          `clan_monthly_reward${balanceReasonSuffix(currency)}`,
-          `clan:${clanId}:month:${monthKey}`,
+        const membersResult = await client.query(
+          `
+            WITH monthly_scores AS (
+              SELECT
+                user_id,
+                GREATEST(COALESCE(SUM(points), 0), 0) AS contribution_score
+              FROM clan_score_events
+              WHERE clan_id = $1
+                AND to_char(created_at, 'YYYY-MM') = $2
+              GROUP BY user_id
+            )
+            SELECT
+              clan_members.user_id,
+              COALESCE(monthly_scores.contribution_score, 0) AS contribution_score
+            FROM clan_members
+            LEFT JOIN monthly_scores ON monthly_scores.user_id = clan_members.user_id
+            WHERE clan_members.clan_id = $1
+            ORDER BY COALESCE(monthly_scores.contribution_score, 0) DESC, clan_members.joined_at ASC
+            LIMIT ${CLAN_REWARD_MAX_MEMBERS}
+          `,
+          [winnerClanId, monthKey],
         );
-        paidCount += 1;
-      }
+        const members = membersResult.rows;
+        if (!members.length) {
+          continue;
+        }
 
-      summaries.push({
-        month_key: monthKey,
-        clan_id: Number(clanId),
-        currency,
-        amount,
-        paid_count: paidCount,
-      });
+        const totalContribution = members.reduce(
+          (sum, member) => sum + Math.max(0, toNumber(member.contribution_score)),
+          0,
+        );
+        let remaining = amount;
+        let paidCount = 0;
+        for (let index = 0; index < members.length; index += 1) {
+          const member = members[index];
+          const isLast = index === members.length - 1;
+          const contribution = Math.max(0, toNumber(member.contribution_score));
+          const rawShare = totalContribution > 0
+            ? amount * (contribution / totalContribution)
+            : amount / members.length;
+          const payout = isLast
+            ? Math.max(0, Math.round(remaining * 100) / 100)
+            : Math.max(0, Math.round(rawShare * 100) / 100);
+          remaining = Math.max(0, Math.round((remaining - payout) * 100) / 100);
+          if (payout <= 0) {
+            continue;
+          }
+
+          const payoutResult = await client.query(
+            `
+              INSERT INTO clan_reward_payouts (
+                month_key,
+                clan_id,
+                user_id,
+                currency,
+                amount,
+                contribution_score
+              )
+              VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric)
+              ON CONFLICT DO NOTHING
+              RETURNING *
+            `,
+            [monthKey, winnerClanId, member.user_id, currency, payout, contribution],
+          );
+          if (!payoutResult.rows[0]) {
+            continue;
+          }
+
+          await creditCurrencyBalance(
+            client,
+            member.user_id,
+            currency,
+            payout,
+            `clan_monthly_reward${balanceReasonSuffix(currency)}`,
+            `clan:${winnerClanId}:month:${monthKey}`,
+          );
+          paidCount += 1;
+        }
+
+        summaries.push({
+          month_key: monthKey,
+          clan_id: Number(winnerClanId),
+          currency,
+          amount,
+          paid_count: paidCount,
+        });
+      }
     }
 
     return {
@@ -3046,6 +3085,40 @@ function mapClan(row) {
   };
 }
 
+function getMonthEndIso(date = new Date()) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1)).toISOString();
+}
+
+// Live "bank" that clans fight for this month: 1% of profit fees accrued so far.
+async function getClanWarSummary(client) {
+  const monthKey = getMonthKey();
+  const result = await client.query(
+    `
+      SELECT currency, COALESCE(SUM(amount), 0) AS amount
+      FROM clan_reward_fund_ledger
+      WHERE month_key = $1
+      GROUP BY currency
+    `,
+    [monthKey],
+  );
+  let bankUsdt = 0;
+  let bankFire = 0;
+  for (const row of result.rows) {
+    if (normalizeCurrency(row.currency) === "USDT") {
+      bankUsdt += toNumber(row.amount);
+    } else {
+      bankFire += toNumber(row.amount);
+    }
+  }
+  return {
+    month_key: monthKey,
+    bank_usdt: Math.round(bankUsdt * 100) / 100,
+    bank_fire: Math.round(bankFire),
+    ends_at: getMonthEndIso(),
+    max_members: CLAN_REWARD_MAX_MEMBERS,
+  };
+}
+
 async function getClansWithClient(client, userId = 0) {
   await ensureDefaultClans(client);
   const result = await client.query(
@@ -3134,10 +3207,13 @@ async function getClansWithClient(client, userId = 0) {
     }
   }
 
+  const clanWar = await getClanWarSummary(client);
+
   return {
     ok: true,
     clans,
     user_clan: clans.find((clan) => clan.user_is_member) || null,
+    clan_war: clanWar,
     rules: {
       join_points: 5,
       win_points: 3,

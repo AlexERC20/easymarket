@@ -1092,6 +1092,8 @@ h2 {
 
 .win-overlay.show {
   animation: winReveal 4.4s ease both;
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .win-overlay.show::before {
@@ -1131,6 +1133,128 @@ h2 {
     0 0 14px rgba(255, 255, 255, 0.55),
     0 0 30px rgba(183, 255, 77, 0.58),
     0 0 48px rgba(53, 246, 255, 0.36);
+}
+
+/* --- Win share card --- */
+.share-win-panel { padding: 12px 14px 18px; }
+.share-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 22px;
+  padding: 20px;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  color: #fff;
+  background:
+    radial-gradient(360px 220px at 50% 6%, rgba(53, 135, 237, 0.34), transparent 62%),
+    radial-gradient(260px 180px at 50% 22%, rgba(255, 209, 102, 0.2), transparent 60%),
+    linear-gradient(180deg, #101a2c 0%, #0a0f1a 62%, #070a12 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.share-card-sheen {
+  position: absolute;
+  top: 0;
+  left: -60%;
+  width: 55%;
+  height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.14), transparent);
+  transform: skewX(-18deg);
+  pointer-events: none;
+}
+.task-sheet.sheet-open .share-card-sheen {
+  animation: shareSheen 1100ms var(--ease-default) 240ms 1 both;
+}
+@keyframes shareSheen {
+  from { left: -60%; }
+  to { left: 130%; }
+}
+.share-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.share-card-brand {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: rgba(255, 255, 255, 0.92);
+}
+.share-card-ticker {
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffd166;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 209, 102, 0.12);
+  border: 1px solid rgba(255, 209, 102, 0.3);
+}
+.share-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 18px 0;
+}
+.share-card-eyebrow {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+}
+.share-card-amount {
+  margin: 6px 0 2px;
+  font-size: 58px;
+  line-height: 1;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+  color: #b7ff4d;
+  text-shadow: 0 0 18px rgba(183, 255, 77, 0.5), 0 0 40px rgba(53, 246, 255, 0.28);
+}
+.share-card-tagline {
+  margin: 12px 0 0;
+  font-size: 20px;
+  font-weight: 900;
+  color: #ffd166;
+}
+.share-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+.share-card-user {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.7);
+}
+.share-card-cta {
+  font-size: 13px;
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.9);
+}
+.share-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+.share-actions-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.share-hint {
+  margin: 12px 4px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+@media (prefers-reduced-motion: reduce) {
+  .share-card-sheen { display: none; }
 }
 
 .price-board strong,
@@ -3438,7 +3562,10 @@ code {
 }
 
 .clans-panel {
-  max-height: 88vh;
+  /* Fixed height so switching league/detail/create/rules never resizes the
+     sheet — the content crossfades inside a stable frame instead of jumping. */
+  height: 88vh;
+  max-height: calc(100dvh - max(54px, env(safe-area-inset-top)) - max(18px, env(safe-area-inset-bottom)));
   overflow-y: auto;
   padding: 0;
 }
@@ -3924,6 +4051,88 @@ code {
   background: linear-gradient(145deg, #e6b183, #c07b45);
 }
 
+/* Clan war: live monthly bank hero + top-3 podium */
+.clan-war-hero {
+  gap: 3px;
+  padding: 18px 16px 20px;
+  min-height: 0;
+}
+.clan-war-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82);
+}
+.clan-war-eyebrow span { color: #ffe1a0; text-transform: capitalize; }
+.clan-war-bank {
+  font-size: 42px;
+  line-height: 1.04;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+  color: #fff;
+  text-shadow: 0 6px 22px rgba(0, 0, 0, 0.32);
+}
+.clan-war-hero small { margin-top: 2px; }
+.clan-war-timer {
+  margin: 9px 0 0;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(6, 12, 22, 0.24);
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.82);
+}
+.clan-war-timer b { color: #ffe1a0; font-weight: 900; }
+
+.clan-war-podium { margin-top: 2px; }
+.clan-war-podium span {
+  padding: 26px 4px 9px;
+  gap: 3px;
+  cursor: pointer;
+  transition: transform 140ms var(--ease-default);
+}
+.clan-war-podium span:active { transform: scale(0.96); }
+.clan-war-podium-ic {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  overflow: hidden;
+}
+.clan-war-podium-ic svg { width: 18px; height: 18px; fill: currentColor; }
+.clan-war-podium-ic img { grid-area: 1 / 1; width: 100%; height: 100%; object-fit: cover; }
+/* Keep the channel-photo fallback hidden behind the img until it errors. */
+.clan-war-podium-ic .clan-avatar-fallback {
+  grid-area: 1 / 1;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+.clan-war-podium b {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.clan-war-podium small {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+.clan-war-podium span:nth-child(1) { min-height: 104px; }
+.clan-war-podium span:nth-child(2) { min-height: 92px; }
+.clan-war-podium span:nth-child(3) { min-height: 84px; }
+.clans-list-empty { padding: 18px 10px; text-align: center; line-height: 1.42; }
+
 /* Sheet content stagger on open */
 @keyframes sheetItemIn {
   from { opacity: 0; transform: translateY(9px); }
@@ -4030,6 +4239,37 @@ code {
   font-size: 12px;
   font-weight: 800;
   line-height: 1.35;
+}
+
+.rules-bank {
+  display: grid;
+  gap: 8px;
+}
+.rules-bank-step {
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  align-items: center;
+  gap: 12px;
+  border-radius: 14px;
+  background: rgba(7, 10, 16, 0.52);
+  padding: 11px 12px;
+}
+.rules-bank-step b {
+  display: grid;
+  place-items: center;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255, 209, 102, 0.18), rgba(255, 209, 102, 0.05));
+  border: 1px solid rgba(255, 209, 102, 0.32);
+  color: #ffd166;
+  font-size: 15px;
+  font-weight: 950;
+}
+.rules-bank-step span {
+  color: rgba(243, 246, 251, 0.82);
+  font-size: 12.5px;
+  font-weight: 750;
+  line-height: 1.3;
 }
 
 .rules-score-list {
@@ -4316,6 +4556,39 @@ code {
   margin-top: 8px;
   color: rgba(255, 255, 255, 0.72);
   line-height: 1.35;
+}
+
+.clan-goal-card.is-leader {
+  background: linear-gradient(180deg, rgba(255, 209, 102, 0.16), rgba(255, 209, 102, 0.05));
+  border: 1px solid rgba(255, 209, 102, 0.4);
+}
+.clan-goal-card.is-leader small { color: #ffd166; }
+
+.clan-leader-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: linear-gradient(145deg, #ffe08a, #f5b400);
+  color: #0a0e16;
+  font-size: 10px;
+  font-weight: 900;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.clan-todo {
+  border-radius: 18px;
+  background: #25262a;
+  padding: 12px 14px 6px;
+}
+.clan-todo-title {
+  margin: 0 0 4px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 900;
 }
 
 .clan-link-actions {

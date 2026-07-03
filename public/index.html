@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260703-02" />
+    <link rel="stylesheet" href="/styles.css?v=20260703-03" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260701-12" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -414,8 +414,40 @@
         </div>
       </section>
 
+      <section id="shareWinSheet" class="task-sheet hidden" aria-label="Поделиться выигрышем">
+        <div class="task-panel share-win-panel">
+          <div class="task-head sheet-close-only">
+            <button id="shareWinCloseBtn" class="icon-button" type="button" aria-label="Закрыть">×</button>
+          </div>
+          <div class="share-card" id="shareCard">
+            <div class="share-card-sheen" aria-hidden="true"></div>
+            <div class="share-card-top">
+              <span class="share-card-brand">EASYMARKET</span>
+              <span class="share-card-ticker" id="shareCardTicker">BTC · 5 мин</span>
+            </div>
+            <div class="share-card-body">
+              <p class="share-card-eyebrow" id="shareCardEyebrow">Ставка сыграла</p>
+              <strong class="share-card-amount" id="shareCardAmount">+0</strong>
+              <p class="share-card-tagline">Выигрыш есть — можно поесть</p>
+            </div>
+            <div class="share-card-foot">
+              <span class="share-card-user" id="shareCardUser"></span>
+              <span class="share-card-cta">играй и ты →</span>
+            </div>
+          </div>
+          <div class="share-actions">
+            <button id="shareToStoryBtn" class="trade-confirm share-story-btn" type="button">Поделиться в сторис</button>
+            <div class="share-actions-row">
+              <button id="shareToChatBtn" class="clan-link-button" type="button">В чат</button>
+              <button id="shareCopyBtn" class="clan-link-button secondary" type="button">Скопировать ссылку</button>
+            </div>
+          </div>
+          <p class="share-hint">По твоей ссылке друзья получают бонус, а тебе — процент с их игры.</p>
+        </div>
+      </section>
+
       <section id="clansSheet" class="task-sheet hidden" aria-label="Кланы">
-        <div class="task-panel clans-panel">
+        <div class="task-panel clans-panel sheet-stable-height">
           <div class="task-head">
             <button id="clansBackBtn" class="icon-button hidden" type="button" aria-label="Назад">‹</button>
             <div>
@@ -429,16 +461,13 @@
             </div>
           </div>
           <div id="clansLeaderboardView" class="clan-view">
-            <div class="clan-hero">
-              <div class="clan-trophy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5h10v3.2a5 5 0 0 1-10 0V5z"/><path d="M7 6H4.3v1.4a3 3 0 0 0 3 2.9M17 6h2.7v1.4a3 3 0 0 1-3 2.9M12 13.4V17M8.5 20.5h7M9.4 20.5l.6-3.5h4l.6 3.5"/></svg></div>
-              <strong>Клановая лига</strong>
-              <small>Фонд недели получает топ-3 клана. Внутри клана приз делится пропорционально личному вкладу.</small>
-              <div class="clan-prize-podium">
-                <span><b>5 000</b><small>USDT</small></span>
-                <span><b>3 000</b><small>USDT</small></span>
-                <span><b>1 000</b><small>USDT</small></span>
-              </div>
+            <div class="clan-hero clan-war-hero">
+              <p class="clan-war-eyebrow">Банк месяца · <span id="clanWarMonth">—</span></p>
+              <strong id="clanWarBank" class="clan-war-bank">—</strong>
+              <small>Забирает клан №1 в конце месяца. Делят топ-30 участников по личному вкладу.</small>
+              <p class="clan-war-timer">до розыгрыша <b id="clanWarEnds">—</b></p>
             </div>
+            <div id="clanWarPodium" class="clan-prize-podium clan-war-podium"></div>
             <div id="userClanCard" class="user-clan-card hidden"></div>
             <div id="clansList" class="clans-list stagger-list">
               <p class="muted">Загружаю кланы...</p>
@@ -479,16 +508,16 @@
               <div class="rules-hero">
                 <div class="rules-hero-badge" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5h10v3.2a5 5 0 0 1-10 0V5z"/><path d="M7 6H4.3v1.4a3 3 0 0 0 3 2.9M17 6h2.7v1.4a3 3 0 0 1-3 2.9M12 13.4V17M8.5 20.5h7M9.4 20.5l.6-3.5h4l.6 3.5"/></svg></div>
                 <div>
-                  <strong>Правила клановой лиги</strong>
+                  <strong>Как работает банк клана</strong>
                   <small>Клан-войну двигают USDT-прогнозы и задания. Звёздные маркеты — личный фан.</small>
                 </div>
               </div>
-              <div class="clan-prize-podium rules-podium">
-                <span><b>5 000</b><small>USDT</small></span>
-                <span><b>3 000</b><small>USDT</small></span>
-                <span><b>1 000</b><small>USDT</small></span>
+              <div class="rules-bank">
+                <div class="rules-bank-step"><b>1%</b><span>всех комиссий уходит в банк месяца</span></div>
+                <div class="rules-bank-step"><b>№1</b><span>клан с топом очков в конце месяца забирает весь банк</span></div>
+                <div class="rules-bank-step"><b>30</b><span>самых активных делят банк по личному вкладу</span></div>
               </div>
-              <p class="rules-note">Приз клана делится между участниками пропорционально личным очкам вклада.</p>
+              <p class="rules-note">Копи очки вклада — они решают, попадёшь ли ты в топ-30 и какой будет твоя доля.</p>
               <div class="rules-score-list">
                 <div class="rules-score-row"><span>USDT победа</span><b class="pts up">+3</b></div>
                 <div class="rules-score-row"><span>USDT проигрыш</span><b class="pts down">−1</b></div>
@@ -754,6 +783,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260703-02" type="module"></script>
+    <script src="/app.js?v=20260703-03" type="module"></script>
   </body>
 </html>
