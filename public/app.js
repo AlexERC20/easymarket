@@ -2534,11 +2534,17 @@ function handleSettlements(positions) {
         .join(" · ");
       const primaryWin = Array.from(winsByCurrency.entries())
         .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
+      const primaryPosition = newWins
+        .slice()
+        .sort((a, b) => Math.abs(Number(b.pnl || 0)) - Math.abs(Number(a.pnl || 0)))[0];
+      const primaryMarket = primaryPosition ? getPositionMarket(primaryPosition) : null;
       state.lastWin = {
         amountLabel: primaryWin ? formatSignedCurrencyAmount(primaryWin[1], primaryWin[0]) : label,
         primaryValue: primaryWin ? Math.abs(Number(primaryWin[1])) : 0,
         primaryCurrency: primaryWin ? primaryWin[0] : "USDT",
         label,
+        ticker: primaryPosition ? getPositionMarketLabel(primaryPosition, primaryMarket) : "BTC · 5 мин",
+        side: primaryPosition?.side || "",
         tier: winTier,
         at: Date.now(),
       };
@@ -4297,7 +4303,13 @@ function getStoryMediaUrl() {
   const currency = state.lastWin?.primaryCurrency || "USDT";
   if (value > 0) {
     // Only digits/dot/letters → URL-safe even if Telegram re-encodes the media URL.
-    return `${window.location.origin}/api/share/story?value=${encodeURIComponent(value)}&currency=${encodeURIComponent(currency)}`;
+    const params = new URLSearchParams({
+      value: String(value),
+      currency: String(currency),
+      ticker: String(state.lastWin?.ticker || "BTC · 5 мин"),
+      user: String(state.user?.username ? `@${state.user.username}` : state.user?.first_name || ""),
+    });
+    return `${window.location.origin}/api/share/story?${params.toString()}`;
   }
   return `${window.location.origin}/share/story-win.png`;
 }
@@ -4332,6 +4344,10 @@ function openShareWinSheet() {
   const sheet = $("shareWinSheet");
   if (!win || !sheet) {
     return;
+  }
+  const card = $("shareCard");
+  if (card) {
+    card.dataset.tier = String(Math.max(1, Math.min(4, Number(win.tier || 1))));
   }
   const amountEl = $("shareCardAmount");
   if (amountEl) amountEl.textContent = win.amountLabel || win.label || "+0";

@@ -665,7 +665,10 @@ app.get("/api/share/story", async (req, res) => {
   try {
     const label = formatStoryAmount(req.query.value, req.query.currency)
       || String(req.query.amount || "");
-    const png = await renderStoryCardPng(label);
+    const png = await renderStoryCardPng(label, {
+      ticker: req.query.ticker,
+      user: req.query.user,
+    });
     res.setHeader("Content-Type", "image/png");
     res.setHeader("Cache-Control", "public, max-age=300");
     res.status(200).end(png);

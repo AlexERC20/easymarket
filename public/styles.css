@@ -1256,103 +1256,302 @@ h2 {
 /* --- Win share card --- */
 .share-win-panel { padding: 12px 14px 18px; }
 .share-card {
+  --share-accent: #b7ff4d;
+  --share-cyan: #35f6ff;
+  --share-purple: #9d6cff;
+  --share-gold: #ffd166;
   position: relative;
+  isolation: isolate;
   overflow: hidden;
-  border-radius: 22px;
-  padding: 20px;
-  min-height: 300px;
+  border-radius: 28px;
+  padding: 19px;
+  min-height: 342px;
   display: flex;
   flex-direction: column;
   color: #fff;
   background:
-    radial-gradient(360px 220px at 50% 6%, rgba(53, 135, 237, 0.34), transparent 62%),
-    radial-gradient(260px 180px at 50% 22%, rgba(255, 209, 102, 0.2), transparent 60%),
-    linear-gradient(180deg, #101a2c 0%, #0a0f1a 62%, #070a12 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+    radial-gradient(360px 210px at 20% 8%, rgba(53, 246, 255, 0.22), transparent 68%),
+    radial-gradient(360px 240px at 92% 20%, rgba(157, 108, 255, 0.22), transparent 70%),
+    radial-gradient(280px 180px at 52% 82%, rgba(183, 255, 77, 0.16), transparent 70%),
+    linear-gradient(160deg, #111827 0%, #0c111d 46%, #070a12 100%);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.56),
+    0 0 0 1px rgba(183, 255, 77, 0.08) inset,
+    0 0 42px rgba(53, 246, 255, 0.10);
+  transform: translateZ(0);
 }
-.share-card-sheen {
+.share-card[data-tier="3"],
+.share-card[data-tier="4"] {
+  --share-accent: #35f6ff;
+  --share-gold: #ffdc7a;
+}
+.share-card[data-tier="4"] {
+  --share-accent: #ffe86b;
+  --share-cyan: #7bfffd;
+  --share-purple: #ff62df;
+}
+.share-card::before,
+.share-card::after,
+.share-card-aura,
+.share-card-grid,
+.share-card-sheen,
+.share-card-orbit {
   position: absolute;
-  top: 0;
-  left: -60%;
-  width: 55%;
-  height: 100%;
-  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.14), transparent);
-  transform: skewX(-18deg);
   pointer-events: none;
 }
+.share-card::before {
+  content: "";
+  inset: 10px;
+  z-index: -1;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.10), transparent 30%, transparent 70%, rgba(255, 255, 255, 0.06)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), transparent 42%);
+}
+.share-card::after {
+  content: "";
+  inset: -38%;
+  z-index: -2;
+  border-radius: 999px;
+  background:
+    conic-gradient(from 210deg, transparent 0deg, rgba(53, 246, 255, 0.0) 34deg, rgba(53, 246, 255, 0.28) 70deg, transparent 116deg, rgba(183, 255, 77, 0.22) 190deg, transparent 250deg, rgba(157, 108, 255, 0.20) 310deg, transparent 360deg);
+  filter: blur(22px);
+  opacity: 0.72;
+}
+.share-card-aura {
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  background:
+    radial-gradient(190px 150px at 50% 36%, rgba(183, 255, 77, 0.30), transparent 72%),
+    radial-gradient(220px 170px at 84% 86%, rgba(53, 246, 255, 0.16), transparent 72%);
+  opacity: 0.92;
+}
+.share-card-grid {
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 28px 28px;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 24%, #000 78%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 24%, #000 78%, transparent 100%);
+  opacity: 0.20;
+}
+.share-card-sheen {
+  top: -30%;
+  left: -70%;
+  z-index: 3;
+  width: 52%;
+  height: 160%;
+  border-radius: 999px;
+  background:
+    linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.26), rgba(183, 255, 77, 0.16), transparent);
+  transform: rotate(14deg);
+  filter: blur(1px);
+}
+.share-card-orbit {
+  right: -46px;
+  top: 56px;
+  width: 170px;
+  height: 170px;
+  z-index: -1;
+  border-radius: 999px;
+  border: 1px solid rgba(53, 246, 255, 0.30);
+  box-shadow:
+    0 0 24px rgba(53, 246, 255, 0.16),
+    0 0 0 16px rgba(157, 108, 255, 0.04),
+    0 0 0 34px rgba(183, 255, 77, 0.025);
+}
+.task-sheet.sheet-open .share-card {
+  animation: shareCardPop 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
 .task-sheet.sheet-open .share-card-sheen {
-  animation: shareSheen 1100ms var(--ease-default) 240ms 1 both;
+  animation: shareSheen 1250ms cubic-bezier(0.22, 1, 0.36, 1) 180ms 1 both;
+}
+.task-sheet.sheet-open .share-card-orbit {
+  animation: shareOrbitPulse 1700ms ease-out 260ms 1 both;
+}
+@keyframes shareCardPop {
+  from { opacity: 0; transform: translateY(18px) scale(0.965); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 @keyframes shareSheen {
-  from { left: -60%; }
-  to { left: 130%; }
+  from { left: -70%; opacity: 0; }
+  18% { opacity: 1; }
+  to { left: 122%; opacity: 0; }
+}
+@keyframes shareOrbitPulse {
+  0% { opacity: 0; transform: scale(0.76) rotate(-18deg); }
+  55% { opacity: 1; transform: scale(1.04) rotate(8deg); }
+  100% { opacity: 0.72; transform: scale(1) rotate(0deg); }
 }
 .share-card-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
 }
 .share-card-brand {
   font-size: 14px;
-  font-weight: 800;
-  letter-spacing: 3px;
-  color: rgba(255, 255, 255, 0.92);
+  font-weight: 950;
+  color: rgba(255, 255, 255, 0.96);
+  text-shadow: 0 0 18px rgba(53, 246, 255, 0.32);
 }
 .share-card-ticker {
+  max-width: 52%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
-  font-weight: 800;
-  color: #ffd166;
-  padding: 4px 10px;
+  font-weight: 900;
+  color: #071017;
+  padding: 6px 10px;
   border-radius: 999px;
-  background: rgba(255, 209, 102, 0.12);
-  border: 1px solid rgba(255, 209, 102, 0.3);
+  background: linear-gradient(135deg, var(--share-gold), var(--share-accent));
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 10px 26px rgba(183, 255, 77, 0.20);
+}
+.share-card-bolt {
+  position: relative;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 78px;
+  height: 78px;
+  margin: 17px 0 0;
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at 32% 22%, rgba(255, 255, 255, 0.34), transparent 30%),
+    linear-gradient(145deg, rgba(255, 209, 102, 0.95), rgba(183, 255, 77, 0.92) 56%, rgba(53, 246, 255, 0.88));
+  box-shadow:
+    0 16px 32px rgba(0, 0, 0, 0.32),
+    0 0 28px rgba(183, 255, 77, 0.46),
+    0 0 0 9px rgba(255, 255, 255, 0.045);
+}
+.share-card-bolt::before,
+.share-card-bolt::after {
+  content: "";
+  position: absolute;
+  inset: -12px;
+  border-radius: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  opacity: 0.7;
+}
+.share-card-bolt::after {
+  inset: -24px;
+  opacity: 0.28;
+}
+.share-card-bolt svg {
+  width: 44px;
+  height: 44px;
+  filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.34));
+}
+.share-card-bolt path {
+  fill: #071017;
 }
 .share-card-body {
   flex: 1;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 18px 0;
+  align-items: center;
+  text-align: center;
+  padding: 14px 0 10px;
 }
 .share-card-eyebrow {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 850;
-  letter-spacing: 0.14em;
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 950;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(213, 225, 245, 0.72);
 }
 .share-card-amount {
-  margin: 6px 0 2px;
-  font-size: 58px;
-  line-height: 1;
+  max-width: 100%;
+  margin: 0;
+  font-size: clamp(42px, 14vw, 68px);
+  line-height: 0.98;
   font-weight: 950;
-  letter-spacing: -0.02em;
-  color: #b7ff4d;
-  text-shadow: 0 0 18px rgba(183, 255, 77, 0.5), 0 0 40px rgba(53, 246, 255, 0.28);
+  color: #efffe4;
+  text-shadow:
+    0 0 12px rgba(255, 255, 255, 0.60),
+    0 0 28px rgba(183, 255, 77, 0.70),
+    0 0 58px rgba(53, 246, 255, 0.28);
 }
+.share-card-chart {
+  position: relative;
+  width: min(250px, 78%);
+  height: 52px;
+  margin: 14px auto 3px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    linear-gradient(90deg, transparent, rgba(183, 255, 77, 0.12), transparent);
+  overflow: hidden;
+}
+.share-card-chart::before {
+  content: "";
+  position: absolute;
+  left: 13%;
+  right: 12%;
+  top: 28px;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 209, 102, 0.36), var(--share-accent), var(--share-cyan));
+  box-shadow: 0 0 18px rgba(183, 255, 77, 0.58);
+  transform: skewY(-9deg);
+}
+.share-card-chart span {
+  position: absolute;
+  bottom: 9px;
+  width: 8px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--share-accent), rgba(53, 246, 255, 0.36));
+  box-shadow: 0 0 14px rgba(183, 255, 77, 0.60);
+}
+.share-card-chart span:nth-child(1) { left: 18%; height: 16px; opacity: 0.48; }
+.share-card-chart span:nth-child(2) { left: 34%; height: 22px; opacity: 0.60; }
+.share-card-chart span:nth-child(3) { left: 51%; height: 29px; opacity: 0.76; }
+.share-card-chart span:nth-child(4) { left: 68%; height: 35px; opacity: 0.90; }
+.share-card-chart span:nth-child(5) { left: 84%; height: 42px; opacity: 1; }
 .share-card-tagline {
-  margin: 12px 0 0;
-  font-size: 20px;
-  font-weight: 900;
-  color: #ffd166;
+  max-width: 260px;
+  margin: 10px 0 0;
+  font-size: 19px;
+  line-height: 1.1;
+  font-weight: 950;
+  color: var(--share-gold);
 }
 .share-card-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 4px;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
 }
 .share-card-user {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.7);
+  font-weight: 800;
+  color: rgba(223, 232, 248, 0.74);
 }
 .share-card-cta {
+  flex: 0 0 auto;
   font-size: 13px;
-  font-weight: 900;
-  color: rgba(255, 255, 255, 0.9);
+  font-weight: 950;
+  color: #071017;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--share-accent), var(--share-cyan));
+  box-shadow: 0 10px 28px rgba(53, 246, 255, 0.18);
 }
 .share-actions {
   display: grid;
@@ -1372,6 +1571,11 @@ h2 {
   line-height: 1.4;
 }
 @media (prefers-reduced-motion: reduce) {
+  .task-sheet.sheet-open .share-card,
+  .task-sheet.sheet-open .share-card-sheen,
+  .task-sheet.sheet-open .share-card-orbit {
+    animation: none;
+  }
   .share-card-sheen { display: none; }
 }
 
