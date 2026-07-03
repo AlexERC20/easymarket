@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { renderStoryCardPng } from "./services/shareCardService.js";
+import { renderStoryCardPng, formatStoryAmount } from "./services/shareCardService.js";
 
 import { config } from "./config.js";
 import { getPool, getSafeDatabaseErrorMessage, query, runMigrations } from "./db.js";
@@ -660,9 +660,12 @@ app.get("/api/clans", async (req, res) => {
 });
 
 // Dynamic Story share image with the player's profit baked in, for shareToStory.
+// Prefer clean numeric value+currency (URL-safe); the label is built here.
 app.get("/api/share/story", async (req, res) => {
   try {
-    const png = await renderStoryCardPng(String(req.query.amount || ""));
+    const label = formatStoryAmount(req.query.value, req.query.currency)
+      || String(req.query.amount || "");
+    const png = await renderStoryCardPng(label);
     res.setHeader("Content-Type", "image/png");
     res.setHeader("Cache-Control", "public, max-age=300");
     res.status(200).end(png);

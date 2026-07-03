@@ -2434,6 +2434,8 @@ function handleSettlements(positions) {
         .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
       state.lastWin = {
         amountLabel: primaryWin ? formatSignedCurrencyAmount(primaryWin[1], primaryWin[0]) : label,
+        primaryValue: primaryWin ? Math.abs(Number(primaryWin[1])) : 0,
+        primaryCurrency: primaryWin ? primaryWin[0] : "USDT",
         label,
         tier: winTier,
         at: Date.now(),
@@ -4131,11 +4133,13 @@ function getShareWinText() {
 }
 
 function getStoryMediaUrl() {
-  const amount = state.lastWin?.amountLabel || "";
-  if (!amount) {
-    return `${window.location.origin}/share/story-win.png`;
+  const value = Number(state.lastWin?.primaryValue || 0);
+  const currency = state.lastWin?.primaryCurrency || "USDT";
+  if (value > 0) {
+    // Only digits/dot/letters → URL-safe even if Telegram re-encodes the media URL.
+    return `${window.location.origin}/api/share/story?value=${encodeURIComponent(value)}&currency=${encodeURIComponent(currency)}`;
   }
-  return `${window.location.origin}/api/share/story?amount=${encodeURIComponent(amount)}`;
+  return `${window.location.origin}/share/story-win.png`;
 }
 
 function isShareWinsEnabled() {

@@ -23,6 +23,23 @@ function normalizeAmount(raw) {
   return cleaned || "Выигрыш";
 }
 
+// Build the profit label server-side from clean numeric params, so nothing
+// with URL-sensitive characters ($, +, non-breaking spaces) is ever passed
+// through the query string (Telegram re-encodes the media URL, which would
+// otherwise surface raw %-codes on the card).
+export function formatStoryAmount(value, currency) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "";
+  }
+  const isUsdt = String(currency || "").toUpperCase() === "USDT";
+  const rounded = isUsdt ? Math.round(numeric * 100) / 100 : Math.round(numeric);
+  const grouped = rounded
+    .toLocaleString("en-US", { maximumFractionDigits: isUsdt ? 2 : 0 })
+    .replace(/,/g, " ");
+  return isUsdt ? `+$${grouped}` : `+${grouped} ★`;
+}
+
 function amountFontSize(label) {
   const len = label.length;
   if (len > 14) return 82;
