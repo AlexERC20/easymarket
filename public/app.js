@@ -1462,6 +1462,28 @@ function flyRewardToBalance(fromEl, glyph = "⭐") {
   window.setTimeout(() => coin.remove(), 760);
 }
 
+function captureAnimationOrigin(element) {
+  const rect = element?.getBoundingClientRect?.();
+  return rect && rect.width && rect.height
+    ? { getBoundingClientRect: () => rect }
+    : null;
+}
+
+function playTaskRewardAnimation(sourceElement = null, rowElement = null) {
+  const origin = sourceElement?.getBoundingClientRect ? captureAnimationOrigin(sourceElement) : sourceElement;
+  const claimedRow = rowElement || sourceElement?.closest?.(".task-item, .task-row");
+  triggerHaptic("success");
+  triggerLightningFlash("success");
+  showRewardPop(origin);
+  flyRewardToBalance(origin);
+  if (claimedRow) {
+    claimedRow.classList.remove("task-claimed");
+    void claimedRow.offsetWidth;
+    claimedRow.classList.add("task-claimed");
+    window.setTimeout(() => claimedRow.classList.remove("task-claimed"), 900);
+  }
+}
+
 function showRoundTransition(market) {
   if (!market?.id || state.lastRoundTransitionMarketId === market.id) {
     return;
@@ -6107,7 +6129,7 @@ function openBotTopup(url) {
   window.location.href = url;
 }
 
-async function claimShareTask() {
+async function claimShareTask(sourceElement = null) {
   if (!state.user?.telegram_id) {
     return;
   }
@@ -6128,9 +6150,7 @@ async function claimShareTask() {
       return;
     }
     if (Number(result.awarded || 0) > 0) {
-      triggerHaptic("success");
-      triggerLightningFlash("success");
-      showRewardPop();
+      playTaskRewardAnimation(sourceElement);
       showToast(`+${formatFire(result.awarded)} за share.`);
       return;
     }
@@ -6140,7 +6160,7 @@ async function claimShareTask() {
   }
 }
 
-async function claimSimpleTask(taskKey) {
+async function claimSimpleTask(taskKey, sourceElement = null) {
   if (!state.user?.telegram_id) {
     return;
   }
@@ -6161,9 +6181,7 @@ async function claimSimpleTask(taskKey) {
       return;
     }
     if (Number(result.awarded || 0) > 0) {
-      triggerHaptic("success");
-      triggerLightningFlash("success");
-      showRewardPop();
+      playTaskRewardAnimation(sourceElement);
       showToast(`+${formatFire(result.awarded)} за задание.`);
       return;
     }
@@ -6173,7 +6191,7 @@ async function claimSimpleTask(taskKey) {
   }
 }
 
-async function claimDailyPresenceTask() {
+async function claimDailyPresenceTask(sourceElement = null) {
   if (!state.user?.telegram_id || state.presence.pending) {
     return;
   }
@@ -6185,6 +6203,8 @@ async function claimDailyPresenceTask() {
   }
 
   state.presence.pending = true;
+  const rewardOrigin = captureAnimationOrigin(sourceElement);
+  const rewardRow = sourceElement?.closest?.(".task-item, .task-row");
   try {
     const result = await api("/api/tasks/daily", {
       method: "POST",
@@ -6202,9 +6222,7 @@ async function claimDailyPresenceTask() {
     if (result.already_claimed) {
       showToast("Ежедневный вход уже забран.");
     } else if (Number(result.awarded || 0) > 0) {
-      triggerHaptic("success");
-      triggerLightningFlash("success");
-      showRewardPop();
+      playTaskRewardAnimation(rewardOrigin || sourceElement, rewardRow);
       showToast(`+${formatFire(result.awarded)} за 5 минут в EasyMarket.`);
     } else {
       showToast("Дневной лимит бонусов уже достигнут.");
@@ -6247,7 +6265,7 @@ function updatePresenceTaskButton() {
   });
 }
 
-async function shareInvite({ awardShareTask = false } = {}) {
+async function shareInvite({ awardShareTask = false, sourceElement = null } = {}) {
   triggerHaptic("selection");
   if (!state.user?.telegram_id) {
     showToast("Сначала нужен пользователь.");
@@ -6261,7 +6279,7 @@ async function shareInvite({ awardShareTask = false } = {}) {
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
     if (awardShareTask) {
-      await claimShareTask();
+      await claimShareTask(sourceElement);
     } else {
       showToast(`+${formatFire(usdtBonus)} USDT после первой ставки друга.`);
     }
@@ -6276,7 +6294,7 @@ async function shareInvite({ awardShareTask = false } = {}) {
         url: inviteUrl,
       });
       if (awardShareTask) {
-        await claimShareTask();
+        await claimShareTask(sourceElement);
       }
       return;
     }
@@ -6286,7 +6304,7 @@ async function shareInvite({ awardShareTask = false } = {}) {
 
   window.open(shareUrl, "_blank", "noopener,noreferrer");
   if (awardShareTask) {
-    await claimShareTask();
+    await claimShareTask(sourceElement);
   } else {
     showToast(`+${formatFire(usdtBonus)} USDT после первой ставки друга.`);
   }
@@ -6351,12 +6369,8 @@ async function claimDailyTaskByKey(taskKey, button = null) {
       }),
     });
     state.balance = result.balance ?? state.balance;
-    // Capture the button position before markDailyTaskClaimed hides it, so the
-    // reward burst + flying coin still originate from the row.
-    const claimRect = button?.getBoundingClientRect();
-    const claimOrigin = claimRect && claimRect.width
-      ? { getBoundingClientRect: () => claimRect }
-      : null;
+    const claimOrigin = captureAnimationOrigin(button);
+    const claimedRow = button?.closest(".task-item, .task-row");
     if (result.already_claimed || Number(result.awarded || 0) > 0) {
       markDailyTaskClaimed(taskKey);
     }
@@ -6364,17 +6378,7 @@ async function claimDailyTaskByKey(taskKey, button = null) {
     if (result.already_claimed) {
       showToast("Этот дейлик уже забран.");
     } else if (Number(result.awarded || 0) > 0) {
-      triggerHaptic("success");
-      triggerLightningFlash("success");
-      showRewardPop(claimOrigin);
-      flyRewardToBalance(claimOrigin);
-      const claimedRow = button?.closest(".task-item, .task-row");
-      if (claimedRow) {
-        claimedRow.classList.remove("task-claimed");
-        void claimedRow.offsetWidth;
-        claimedRow.classList.add("task-claimed");
-        window.setTimeout(() => claimedRow.classList.remove("task-claimed"), 900);
-      }
+      playTaskRewardAnimation(claimOrigin || button, claimedRow);
       showToast(`+${formatFire(result.awarded)} за дейлик.`);
     } else {
       showToast("Дневной лимит бонусов уже достигнут.");
@@ -6547,19 +6551,21 @@ $("tasksSheet").addEventListener("click", (event) => {
   }
 });
 
-$("taskChannelBtn").addEventListener("click", () => {
+$("taskChannelBtn").addEventListener("click", (event) => {
   triggerHaptic("selection");
   openTelegramUrl(state.publicConfig.av_channel_url || "https://t.me/erc20coin");
+  const sourceElement = event.currentTarget;
   window.setTimeout(() => {
-    void claimSimpleTask("av_channel");
+    void claimSimpleTask("av_channel", sourceElement);
   }, 900);
 });
 
-$("taskChatBtn").addEventListener("click", () => {
+$("taskChatBtn").addEventListener("click", (event) => {
   triggerHaptic("selection");
   openTelegramUrl(state.publicConfig.av_chat_url || "https://t.me/thedaomaker");
+  const sourceElement = event.currentTarget;
   window.setTimeout(() => {
-    void claimSimpleTask("av_chat");
+    void claimSimpleTask("av_chat", sourceElement);
   }, 900);
 });
 
@@ -6569,22 +6575,22 @@ $("taskPrivateChatBtn").addEventListener("click", () => {
   showToast(`После подписки на приватку AV-бот начислит аванс ${formatFire(Number(state.publicConfig.task_private_chat_fire || 15000))}.`);
 });
 
-$("taskShareBtn").addEventListener("click", () => {
-  void shareInvite({ awardShareTask: true });
+$("taskShareBtn").addEventListener("click", (event) => {
+  void shareInvite({ awardShareTask: true, sourceElement: event.currentTarget });
 });
 
-$("referralNudgeShareBtn")?.addEventListener("click", () => {
+$("referralNudgeShareBtn")?.addEventListener("click", (event) => {
   hideReferralNudge();
-  void shareInvite({ awardShareTask: true });
+  void shareInvite({ awardShareTask: true, sourceElement: event.currentTarget });
 });
 
 $("referralNudgeCloseBtn")?.addEventListener("click", () => {
   hideReferralNudge();
 });
 
-$("taskDailyPresenceBtn")?.addEventListener("click", () => {
+$("taskDailyPresenceBtn")?.addEventListener("click", (event) => {
   triggerHaptic("selection");
-  void claimDailyPresenceTask();
+  void claimDailyPresenceTask(event.currentTarget);
 });
 
 document.querySelector(".task-list")?.addEventListener("click", (event) => {
