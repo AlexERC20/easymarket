@@ -27,6 +27,7 @@ const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
 const BUY_IMPACT_MULTIPLIER = 1.08;
 const SELL_IMPACT_MULTIPLIER = 1.42;
+const MARKET_MAKER_DENSITY_MULTIPLIER = 1.4;
 const MAX_SINGLE_TRADE_SHIFT = 0.46;
 const MIN_TAIL_DEPTH_FACTOR = 0.004;
 const STAR_AMOUNTS = [50, 100, 500, 1000];
@@ -2842,7 +2843,7 @@ function buildSyntheticOrderbook(market, side) {
   const price = getOutcomePrice(market, side);
   const volume = side === "YES" ? Number(market?.yes_volume || 0) : Number(market?.no_volume || 0);
   const liquidity = Math.max(50, Number(market?.liquidity || 10000));
-  const depthBase = Math.max(12, Math.sqrt(liquidity + volume) * 0.7);
+  const depthBase = Math.max(12, Math.sqrt(liquidity + volume) * 0.7 * MARKET_MAKER_DENSITY_MULTIPLIER);
   const minPrice = getMarketMinOutcomePrice(market);
 
   return Array.from({ length: 5 }, (_, index) => {
@@ -3253,7 +3254,7 @@ function estimateBuyQuote({ market, side, amount }) {
     : Math.max(1_200, Math.min(24_000, rawLiquidity));
   const distanceFromCenter = Math.min(1, Math.abs(price - 0.5) / 0.5);
   const depthFactor = MIN_TAIL_DEPTH_FACTOR + (1 - MIN_TAIL_DEPTH_FACTOR) * Math.pow(1 - distanceFromCenter, 2.35);
-  const liquidity = Math.max(35, baseLiquidity * depthFactor);
+  const liquidity = Math.max(35, baseLiquidity * MARKET_MAKER_DENSITY_MULTIPLIER * depthFactor);
   const impact = Math.min(MAX_SINGLE_TRADE_SHIFT, (Number(amount || 0) / liquidity) * BUY_IMPACT_MULTIPLIER);
   const nextPrice = Math.max(minPrice, Math.min(1 - minPrice, price + impact));
   const executionPrice = Math.max(minPrice, Math.min(1 - minPrice, Math.max(price, nextPrice) * (1 + MARKET_MAKER_SPREAD_RATE)));
@@ -3503,7 +3504,7 @@ function estimateSellQuote({ position, market, outcomePrice }) {
     : Math.max(1_200, Math.min(24_000, rawLiquidity));
   const distanceFromCenter = Math.min(1, Math.abs(price - 0.5) / 0.5);
   const depthFactor = MIN_TAIL_DEPTH_FACTOR + (1 - MIN_TAIL_DEPTH_FACTOR) * Math.pow(1 - distanceFromCenter, 2.35);
-  const liquidity = Math.max(35, baseLiquidity * depthFactor);
+  const liquidity = Math.max(35, baseLiquidity * MARKET_MAKER_DENSITY_MULTIPLIER * depthFactor);
   const estimatedGross = shares * price;
   const impact = Math.min(0.42, (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER);
   const nextPrice = Math.max(minPrice, price - impact);

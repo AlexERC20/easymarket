@@ -15,6 +15,7 @@ const DEFAULT_CLAN_PROFIT_SHARE_BPS = 100;
 const DEFAULT_MARKET_MAKER_SPREAD_BPS = 300;
 const BUY_IMPACT_MULTIPLIER = 1.08;
 const SELL_IMPACT_MULTIPLIER = 1.42;
+const MARKET_MAKER_DENSITY_MULTIPLIER = 1.4;
 const MAX_SINGLE_TRADE_SHIFT = 0.46;
 const MIN_TAIL_DEPTH_FACTOR = 0.004;
 const REFERRAL_SIGNUP_BONUS = 100;
@@ -706,7 +707,7 @@ function getEffectiveMarketMakerLiquidity(market, outcomePrice) {
   const baseLiquidity = isSportsMarket(market)
     ? Math.max(1_500, Math.min(30_000, Math.sqrt(rawLiquidity) * 2.1))
     : Math.max(1_200, Math.min(24_000, rawLiquidity));
-  return Math.max(35, baseLiquidity * getTailDepthFactor(outcomePrice, getMarketMinOutcomePrice(market)));
+  return Math.max(35, baseLiquidity * MARKET_MAKER_DENSITY_MULTIPLIER * getTailDepthFactor(outcomePrice, getMarketMinOutcomePrice(market)));
 }
 
 function getFairOutcomePrice(market, side, currentPrice = getCurrentPriceForMarket(market)) {
