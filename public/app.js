@@ -20,8 +20,7 @@ import {
   setAquariumEnabled,
   setAquariumRuntimeAllowed,
   setAquariumShakeFeeder,
-  spillAquariumFood,
-} from "./aquarium.js?v=20260703-08";
+} from "./aquarium.js?v=20260704-03";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -1511,11 +1510,8 @@ function showRoundTransition(market) {
   triggerHaptic("round");
   showRoundSweep("NEXT ROUND");
   showToast("Раунд завершён. Готовлю следующий...");
-  if (shouldRunAquariumForMarket(market)) {
-    // Spill 5m BTC avatar dots into the aquarium as falling food. Long/sports
-    // markets keep the chart lightweight and skip the aquarium entirely.
-    spillAquariumFood(buildAquariumFoodForMarket(market));
-  }
+  // No automatic food fall at round end (kept the phone hot) — the aquarium
+  // now only spills food when the user shakes the device.
 }
 
 function showTopupSuccessAnimation(label = "TOP UP") {

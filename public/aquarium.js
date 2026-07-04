@@ -25,9 +25,9 @@ const DOM_FISH_SVG = `
 
 const STORAGE_KEY = "easymarket_aquarium";
 const USER_CHOICE_KEY = "easymarket_aquarium_choice_v2";
-const MAX_FOOD = 80;
-const FISH_MIN = 4;
-const FISH_MAX = 5;
+const MAX_FOOD = 40; // halved to keep the phone cool
+const FISH_MIN = 2;
+const FISH_MAX = 3;
 const FOOD_ARM_MS = 1500; // brief settle before the hungry fish start hunting
 const EAT_MS = 3280; // a bite is gradual, never instant
 const FRAME_MS = 33; // ~30fps simulation cap to stay light on the phone
@@ -950,6 +950,8 @@ export function spillAquariumFood(avatars, summon = false) {
   if (!enabled || !Array.isArray(avatars) || !avatars.length) {
     return;
   }
+  // Halve the crumbs per spill so the tank stays light on the phone.
+  avatars = avatars.filter((_, index) => index % 2 === 0);
   playAquariumFood(); // soft sprinkle as the crumbs hit the water
   appendDomFood(avatars);
   if (summon) {
