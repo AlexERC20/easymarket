@@ -43,59 +43,36 @@ const DAILY_TASK_KEYS = [
 ];
 
 const WORLD_CUP_FALLBACK_MARKETS = [
-  { polymarketId: "fallback-france", team: "France", icon: "🇫🇷", yesPrice: 0.171, volume: 54_606_121 },
-  { polymarketId: "fallback-spain", team: "Spain", icon: "🇪🇸", yesPrice: 0.146, volume: 48_880_678 },
-  { polymarketId: "fallback-portugal", team: "Portugal", icon: "🇵🇹", yesPrice: 0.108, volume: 48_252_376 },
-  { polymarketId: "fallback-england", team: "England", icon: "🏴", yesPrice: 0.105, volume: 45_020_000 },
-  { polymarketId: "fallback-brazil", team: "Brazil", icon: "🇧🇷", yesPrice: 0.093, volume: 44_500_000 },
-  { polymarketId: "fallback-argentina", team: "Argentina", icon: "🇦🇷", yesPrice: 0.084, volume: 43_700_000 },
-  { polymarketId: "fallback-germany", team: "Germany", icon: "🇩🇪", yesPrice: 0.061, volume: 38_200_000 },
-  { polymarketId: "fallback-netherlands", team: "Netherlands", icon: "🇳🇱", yesPrice: 0.049, volume: 31_900_000 },
-  { polymarketId: "fallback-belgium", team: "Belgium", icon: "🇧🇪", yesPrice: 0.035, volume: 24_700_000 },
-  { polymarketId: "fallback-usa", team: "USA", icon: "🇺🇸", yesPrice: 0.026, volume: 21_000_000 },
-  { polymarketId: "fallback-mexico", team: "Mexico", icon: "🇲🇽", yesPrice: 0.018, volume: 16_600_000 },
-  { polymarketId: "fallback-canada", team: "Canada", icon: "🇨🇦", yesPrice: 0.012, volume: 12_300_000 },
+  { polymarketId: "fallback-france", team: "France", icon: "🇫🇷", yesPrice: 0.3285, volume: 97_261_093 },
+  { polymarketId: "fallback-spain", team: "Spain", icon: "🇪🇸", yesPrice: 0.1805, volume: 89_534_071 },
+  { polymarketId: "fallback-argentina", team: "Argentina", icon: "🇦🇷", yesPrice: 0.1705, volume: 102_824_162 },
+  { polymarketId: "fallback-england", team: "England", icon: "🏴", yesPrice: 0.1525, volume: 84_462_721 },
+  { polymarketId: "fallback-norway", team: "Norway", icon: "🇳🇴", yesPrice: 0.0475, volume: 109_060_486 },
+  { polymarketId: "fallback-colombia", team: "Colombia", icon: "🇨🇴", yesPrice: 0.0315, volume: 98_203_045 },
+  { polymarketId: "fallback-usa", team: "USA", icon: "🇺🇸", yesPrice: 0.0295, volume: 138_797_963 },
+  { polymarketId: "fallback-morocco", team: "Morocco", icon: "🇲🇦", yesPrice: 0.0265, volume: 134_104_608 },
+  { polymarketId: "fallback-belgium", team: "Belgium", icon: "🇧🇪", yesPrice: 0.0135, volume: 108_134_290 },
+  { polymarketId: "fallback-switzerland", team: "Switzerland", icon: "🇨🇭", yesPrice: 0.0095, volume: 98_917_472 },
+  { polymarketId: "fallback-egypt", team: "Egypt", icon: "🇪🇬", yesPrice: 0.0035, volume: 133_276_897 },
 ];
 
+// Quarter-final stage shortlist. Keep unresolved round-of-16 pair winners here
+// until the official feed settles them, but drop eliminated teams immediately so
+// old football markets stop filling the UI and polling work.
 const ACTIVE_WORLD_CUP_TEAM_KEYS = new Set([
-  "south-africa",
-  "canada",
-  "brazil",
-  "japan",
-  "germany",
-  "paraguay",
-  "netherlands",
   "morocco",
-  "cote-d-ivoire",
-  "ivory-coast",
   "norway",
   "france",
-  "sweden",
-  "mexico",
-  "ecuador",
-  "england",
-  "dr-congo",
-  "congo-dr",
-  "democratic-republic-of-congo",
-  "belgium",
-  "senegal",
+  "spain",
   "usa",
   "united-states",
   "united-states-of-america",
-  "bosnia-and-herzegovina",
-  "spain",
-  "austria",
-  "portugal",
-  "croatia",
+  "belgium",
+  "england",
   "switzerland",
-  "algeria",
-  "australia",
   "egypt",
   "argentina",
-  "cabo-verde",
-  "cape-verde",
   "colombia",
-  "ghana",
 ]);
 
 let worldCupSyncPromise = null;
@@ -898,6 +875,9 @@ function parseJsonArray(value) {
 }
 
 function normalizeWorldCupFeedMarket(market) {
+  if (market?.closed || market?.archived || market?.acceptingOrders === false) {
+    return null;
+  }
   const outcomePrices = parseJsonArray(market.outcomePrices);
   const rawYesPrice = Number(outcomePrices[0]);
   const team = normalizeWorldCupTeam(market.question);
