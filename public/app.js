@@ -202,6 +202,7 @@ const state = {
   expiryRefreshMarketId: null,
   lastRoundTransitionMarketId: null,
   lastClosedMarketToastAt: 0,
+  lastFinalTickKey: null,
   pendingSellSide: null,
   pendingSellPositionId: null,
   sideSelectedMarketId: null,
@@ -1627,6 +1628,20 @@ function showLossClose(label) {
   el.textContent = label;
   host.appendChild(el);
   window.setTimeout(() => el.remove(), 1700);
+  // Несколько частиц пепла оседают вслед за суммой — тихое завершение,
+  // сознательно скромнее победного залпа.
+  for (let i = 0; i < 8; i += 1) {
+    const ash = document.createElement("i");
+    ash.className = "loss-ash";
+    ash.style.setProperty("--dx", `${((Math.random() - 0.5) * 120).toFixed(0)}px`);
+    ash.style.setProperty("--fall", `${(40 + Math.random() * 70).toFixed(0)}px`);
+    ash.style.setProperty("--delay", `${(Math.random() * 200).toFixed(0)}ms`);
+    ash.style.setProperty("--sz", `${(2 + Math.random() * 2.5).toFixed(1)}px`);
+    ash.style.left = `${(44 + Math.random() * 12).toFixed(1)}%`;
+    ash.style.top = `${(40 + Math.random() * 12).toFixed(1)}%`;
+    host.appendChild(ash);
+    window.setTimeout(() => ash.remove(), 2100);
+  }
 }
 
 // Escalating combo badge for consecutive winning rounds (item 5).
@@ -3473,10 +3488,17 @@ function updateTimer() {
   const remainingMs = new Date(market.end_time).getTime() - Date.now();
   const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
   // Build tension in the final seconds of a round (pulse + red on the counter).
-  document.querySelector(".countdown")?.classList.toggle(
-    "is-urgent",
-    market.status === "open" && remainingMs > 0 && seconds <= 10,
-  );
+  const finalPhase = market.status === "open" && remainingMs > 0;
+  const countdownEl = document.querySelector(".countdown");
+  countdownEl?.classList.toggle("is-urgent", finalPhase && seconds <= 10);
+  countdownEl?.classList.toggle("is-final", finalPhase && seconds <= 3);
+  // Красная виньетка по графику в самые последние секунды раунда.
+  document.querySelector(".chart-frame")?.classList.toggle("round-final", finalPhase && seconds <= 5);
+  // Хаптик-тики 3-2-1: рука чувствует финал, даже если глаза на графике.
+  if (finalPhase && seconds <= 3 && state.lastFinalTickKey !== `${market.id}:${seconds}`) {
+    state.lastFinalTickKey = `${market.id}:${seconds}`;
+    triggerHaptic("selection");
+  }
   if (remainingMs <= 0 && market.status === "open" && state.expiryRefreshMarketId !== market.id) {
     state.expiryRefreshMarketId = market.id;
     state.buyQueue = [];

@@ -717,6 +717,34 @@ h2 {
   50% { transform: scale(1.12); text-shadow: 0 0 14px rgba(239, 70, 111, 0.85); }
 }
 
+/* Последние 3 секунды: удар сильнее, в такт хаптик-тикам 3-2-1. */
+.countdown.is-final strong {
+  color: #ff3d64;
+  animation: countdownFinal 1s var(--ease-default) infinite;
+}
+
+@keyframes countdownFinal {
+  0% { transform: scale(1.3); text-shadow: 0 0 24px rgba(239, 70, 111, 1); }
+  55% { transform: scale(1.02); text-shadow: 0 0 8px rgba(239, 70, 111, 0.45); }
+  100% { transform: scale(1.3); text-shadow: 0 0 24px rgba(239, 70, 111, 1); }
+}
+
+/* Красная виньетка по краям графика в финале раунда. */
+.chart-frame.round-final::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  box-shadow: inset 0 0 36px rgba(239, 70, 111, 0.24), inset 0 0 10px rgba(239, 70, 111, 0.12);
+  animation: roundFinalVignette 1s var(--ease-default) infinite;
+}
+
+@keyframes roundFinalVignette {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
 /* Green/red glow on the live price when it ticks up or down. */
 #currentPrice.price-up {
   animation: priceFlashUp 640ms var(--ease-default);
@@ -790,6 +818,24 @@ h2 {
   100% { opacity: 0; transform: translate(-50%, -18%) scale(0.94); filter: blur(1px); }
 }
 
+/* Пепел проигрыша: несколько серых частиц оседают и растворяются. */
+.loss-ash {
+  position: absolute;
+  z-index: 5;
+  width: var(--sz, 3px);
+  height: var(--sz, 3px);
+  border-radius: 50%;
+  background: rgba(150, 152, 162, 0.7);
+  pointer-events: none;
+  animation: lossAsh 1600ms var(--ease-default) var(--delay, 0ms) both;
+}
+
+@keyframes lossAsh {
+  0% { opacity: 0; transform: translate(0, 0); }
+  12% { opacity: 0.8; }
+  100% { opacity: 0; transform: translate(var(--dx, 0px), var(--fall, 60px)); filter: blur(1px); }
+}
+
 /* Escalating win-streak combo badge (item 5). */
 .streak-combo {
   position: absolute;
@@ -859,14 +905,25 @@ h2 {
 
 @media (prefers-reduced-motion: reduce) {
   .countdown.is-urgent strong,
+  .countdown.is-final strong,
+  .chart-frame.round-final::after,
+  .loss-ash,
   #currentPrice.price-up,
   #currentPrice.price-down,
   .outcome-button.side-charge {
     animation: none !important;
   }
 
+  .chart-frame.round-final::after {
+    opacity: 0.5;
+  }
+
   body.telegram-shell .countdown.is-urgent strong {
     animation: countdownUrgent 1s var(--ease-default) infinite !important;
+  }
+
+  body.telegram-shell .countdown.is-final strong {
+    animation: countdownFinal 1s var(--ease-default) infinite !important;
   }
 
   body.telegram-shell #currentPrice.price-up {
