@@ -3,6 +3,23 @@ import sharp from "sharp";
 const WIDTH = 1080;
 const HEIGHT = 1920;
 
+// Молния велком-заставки (viewBox 64x64) как полигон для сэмплинга частиц.
+const BOLT_POLY = [
+  [36.8, 3],
+  [13.6, 35.6],
+  [29.6, 35.6],
+  [24.8, 61],
+  [50.4, 25.2],
+  [34.2, 25.2],
+];
+
+// Градиент велкома: тёплый верх -> лайм -> циан.
+const GRADIENT_STOPS = [
+  { at: 0, rgb: [255, 247, 168] },
+  { at: 0.45, rgb: [183, 255, 77] },
+  { at: 1, rgb: [53, 246, 255] },
+];
+
 function escapeXml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -16,7 +33,7 @@ function escapeXml(value) {
 // formatting are normalised to plain spaces so the glyph always exists.
 function normalizeAmount(raw) {
   const cleaned = String(raw ?? "")
-    .replace(/ /g, " ")
+    .replace(/ /g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 22);
@@ -45,73 +62,229 @@ function amountFontSize(label) {
   if (len > 14) return 92;
   if (len > 11) return 112;
   if (len > 8) return 126;
-  return 140;
+  return 144;
 }
 
-// Clean, premium vertical Story card. Deliberately NO SVG filters
-// (feGaussianBlur / feDropShadow) — librsvg (via sharp) renders those
-// unreliably; glow is faked with layered translucent gradient shapes, which
-// render crisply everywhere.
+// Детерминированный PRNG: карточка при одинаковой сумме рендерится одинаково.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function next() {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function pointInPoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function gradientColor(t) {
+  const at = Math.min(1, Math.max(0, t));
+  let lower = GRADIENT_STOPS[0];
+  let upper = GRADIENT_STOPS[GRADIENT_STOPS.length - 1];
+  for (let i = 0; i < GRADIENT_STOPS.length - 1; i += 1) {
+    if (at >= GRADIENT_STOPS[i].at && at <= GRADIENT_STOPS[i + 1].at) {
+      lower = GRADIENT_STOPS[i];
+      upper = GRADIENT_STOPS[i + 1];
+      break;
+    }
+  }
+  const span = upper.at - lower.at || 1;
+  const k = (at - lower.at) / span;
+  return [
+    Math.round(lower.rgb[0] + (upper.rgb[0] - lower.rgb[0]) * k),
+    Math.round(lower.rgb[1] + (upper.rgb[1] - lower.rgb[1]) * k),
+    Math.round(lower.rgb[2] + (upper.rgb[2] - lower.rgb[2]) * k),
+  ];
+}
+
+function haloIdFor(ny) {
+  if (ny < 0.3) return "haloWarm";
+  if (ny < 0.62) return "haloLime";
+  return "haloCyan";
+}
+
+// Молния, собранная из светящихся частиц (как в велком-заставке).
+// Каждая частица: мягкое гало + цветное ядро + горячий белый центр.
+function buildParticleBolt(rand, cx, cy, boltHeight) {
+  const scale = boltHeight / 64;
+  const halos = [];
+  const cores = [];
+  for (let gy = 3; gy <= 61; gy += 2.0) {
+    for (let gx = 13; gx <= 51; gx += 2.0) {
+      const jx = gx + (rand() - 0.5) * 1.5;
+      const jy = gy + (rand() - 0.5) * 1.5;
+      if (!pointInPoly(jx, jy, BOLT_POLY)) {
+        continue;
+      }
+      const px = (cx + (jx - 32) * scale).toFixed(1);
+      const py = (cy + (jy - 32) * scale).toFixed(1);
+      const ny = (jy - 3) / 58;
+      const [r, g, b] = gradientColor(ny);
+      const coreR = (5.6 + rand() * 3.6).toFixed(1);
+      halos.push(`<circle cx="${px}" cy="${py}" r="${(coreR * 2.5).toFixed(1)}" fill="url(#${haloIdFor(ny)})"/>`);
+      cores.push(`<circle cx="${px}" cy="${py}" r="${coreR}" fill="rgb(${r},${g},${b})" opacity="${(0.78 + rand() * 0.22).toFixed(2)}"/>`);
+      cores.push(`<circle cx="${px}" cy="${py}" r="${(coreR * 0.36).toFixed(1)}" fill="#ffffff" opacity="0.85"/>`);
+    }
+  }
+  return halos.join("\n  ") + "\n  " + cores.join("\n  ");
+}
+
+// Кометы, летящие к молнии: карточка ловит момент сборки логотипа из частиц.
+function buildComets(rand, cx, cy) {
+  const defs = [];
+  const shapes = [];
+  const count = 14;
+  for (let i = 0; i < count; i += 1) {
+    const angle = (i / count) * Math.PI * 2 + rand() * 0.5;
+    const dist = 430 + rand() * 260;
+    const hx = cx + Math.cos(angle) * dist;
+    const hy = cy + Math.sin(angle) * dist * 0.86;
+    if (hy < 330 || hy > 1010) {
+      continue; // не заезжаем на текстовые зоны
+    }
+    const len = 70 + rand() * 110;
+    const tx = hx + Math.cos(angle) * len;
+    const ty = hy + Math.sin(angle) * len;
+    const [r, g, b] = gradientColor(rand());
+    const id = `comet${i}`;
+    defs.push(`<linearGradient id="${id}" x1="${tx.toFixed(0)}" y1="${ty.toFixed(0)}" x2="${hx.toFixed(0)}" y2="${hy.toFixed(0)}" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="rgb(${r},${g},${b})" stop-opacity="0"/>
+      <stop offset="1" stop-color="rgb(${r},${g},${b})" stop-opacity="0.66"/>
+    </linearGradient>`);
+    shapes.push(`<line x1="${tx.toFixed(0)}" y1="${ty.toFixed(0)}" x2="${hx.toFixed(0)}" y2="${hy.toFixed(0)}" stroke="url(#${id})" stroke-width="${(4.5 + rand() * 3).toFixed(1)}" stroke-linecap="round"/>
+  <circle cx="${hx.toFixed(0)}" cy="${hy.toFixed(0)}" r="${(4 + rand() * 3).toFixed(1)}" fill="rgb(${r},${g},${b})" opacity="0.9"/>`);
+  }
+  return { defs: defs.join("\n    "), shapes: shapes.join("\n  ") };
+}
+
+// Редкая светящаяся пыль по всей карточке — глубина сцены.
+function buildDust(rand) {
+  const dots = [];
+  for (let i = 0; i < 30; i += 1) {
+    const x = Math.round(40 + rand() * (WIDTH - 80));
+    const y = Math.round(150 + rand() * (HEIGHT - 340));
+    const [r, g, b] = gradientColor(rand());
+    dots.push(`<circle cx="${x}" cy="${y}" r="${(1.6 + rand() * 2.6).toFixed(1)}" fill="rgb(${r},${g},${b})" opacity="${(0.08 + rand() * 0.16).toFixed(2)}"/>`);
+  }
+  return dots.join("\n  ");
+}
+
+// Вертикальная Story-карточка в стиле велком-заставки: молния EasyMarket,
+// собранная из частиц, кометы сборки, вордмарк и выигрыш. Сознательно БЕЗ
+// SVG-фильтров (feGaussianBlur/feDropShadow) — librsvg через sharp рендерит их
+// ненадёжно; всё свечение сделано слоями полупрозрачных градиентных фигур.
 export function buildStoryCardSvg(amountLabel) {
   const raw = normalizeAmount(amountLabel);
   const amount = escapeXml(raw);
   const amountSize = amountFontSize(raw);
+  // Сид зависит от суммы: у одной суммы стабильная картинка, у разных — свой
+  // рисунок частиц.
+  let seed = 0x9e3779b9;
+  for (const ch of raw) {
+    seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+  }
+  const rand = mulberry32(seed);
+
+  const boltCx = 540;
+  const boltCy = 640;
+  const comets = buildComets(rand, boltCx, boltCy);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#0c1524"/>
-      <stop offset="0.55" stop-color="#080d17"/>
-      <stop offset="1" stop-color="#05080e"/>
+      <stop offset="0" stop-color="#0a101c"/>
+      <stop offset="0.5" stop-color="#070a10"/>
+      <stop offset="1" stop-color="#04060b"/>
     </linearGradient>
-    <radialGradient id="glowBlue" cx="50%" cy="50%" r="50%">
-      <stop offset="0" stop-color="#3587ed" stop-opacity="0.42"/>
-      <stop offset="1" stop-color="#3587ed" stop-opacity="0"/>
-    </radialGradient>
     <radialGradient id="glowLime" cx="50%" cy="50%" r="50%">
-      <stop offset="0" stop-color="#b7ff4d" stop-opacity="0.30"/>
+      <stop offset="0" stop-color="#b7ff4d" stop-opacity="0.17"/>
       <stop offset="1" stop-color="#b7ff4d" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ffe6a3"/>
-      <stop offset="1" stop-color="#f5b400"/>
+    <radialGradient id="glowCyan" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#35f6ff" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#35f6ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowAmount" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#b7ff4d" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#b7ff4d" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="haloWarm" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#fff7a8" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#fff7a8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="haloLime" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#b7ff4d" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#b7ff4d" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="haloCyan" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#35f6ff" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#35f6ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vignette" cx="50%" cy="46%" r="72%">
+      <stop offset="0" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="0.72" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#02040a" stop-opacity="0.78"/>
+    </radialGradient>
+    <linearGradient id="scan" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#b7ff4d" stop-opacity="0"/>
+      <stop offset="0.35" stop-color="#b7ff4d"/>
+      <stop offset="0.65" stop-color="#35f6ff"/>
+      <stop offset="1" stop-color="#35f6ff" stop-opacity="0"/>
     </linearGradient>
-    <linearGradient id="spark" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" stop-color="#45d98a"/>
-      <stop offset="1" stop-color="#8ef0c2"/>
+    <linearGradient id="cta" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#b7ff4d"/>
+      <stop offset="1" stop-color="#35f6ff"/>
     </linearGradient>
+    ${comets.defs}
   </defs>
 
   <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#bg)"/>
-  <ellipse cx="540" cy="470" rx="720" ry="470" fill="url(#glowBlue)"/>
-  <ellipse cx="540" cy="900" rx="440" ry="320" fill="url(#glowLime)"/>
-  <ellipse cx="540" cy="1560" rx="640" ry="420" fill="url(#glowBlue)"/>
+  <ellipse cx="${boltCx}" cy="${boltCy}" rx="470" ry="400" fill="url(#glowLime)"/>
+  <ellipse cx="${boltCx}" cy="1160" rx="520" ry="360" fill="url(#glowCyan)"/>
 
-  <polyline points="70,1210 300,1140 470,1215 690,1005 860,1060 1010,880"
-    fill="none" stroke="url(#spark)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
-  <circle cx="1010" cy="880" r="14" fill="#8ef0c2" opacity="0.7"/>
+  ${buildDust(rand)}
 
-  <text x="540" y="250" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
-    font-size="46" letter-spacing="16" fill="#ffffff" fill-opacity="0.94">EASYMARKET</text>
-  <rect x="470" y="286" width="140" height="7" rx="4" fill="url(#gold)"/>
+  ${comets.shapes}
 
-  <polygon points="558,372 470,610 540,610 505,772 636,528 566,528 628,372" fill="url(#gold)"/>
+  ${buildParticleBolt(rand, boltCx, boltCy, 580)}
 
-  <text x="540" y="852" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
-    font-size="42" letter-spacing="6" fill="#c9d4e5" fill-opacity="0.85">ТВОЙ ВЫИГРЫШ</text>
-  <text x="540" y="${amountSize > 128 ? 992 : 982}" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
+  <text x="540" y="228" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
+    font-size="54" letter-spacing="18" fill="#f7fbff" fill-opacity="0.97">EASYMARKET</text>
+  <text x="540" y="288" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
+    font-size="26" letter-spacing="12" fill="#b7ff4d" fill-opacity="0.66">ПРОГНОЗИРУЙ · ВЫИГРЫВАЙ</text>
+  <rect x="410" y="316" width="260" height="5" rx="2.5" fill="url(#scan)"/>
+
+  <ellipse cx="540" cy="1170" rx="430" ry="150" fill="url(#glowAmount)"/>
+  <text x="540" y="1076" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
+    font-size="38" letter-spacing="10" fill="#c9d4e5" fill-opacity="0.82">ТВОЙ ВЫИГРЫШ</text>
+  <text x="540" y="1218" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
     font-size="${amountSize}" fill="#b7ff4d">${amount}</text>
 
-  <text x="540" y="1150" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
-    font-size="58" fill="#ffd166">Выигрыш есть — можно поесть</text>
-  <text x="540" y="1240" text-anchor="middle" font-family="DejaVu Sans"
-    font-size="46" fill="#c9d4e5" fill-opacity="0.86">BTC вверх или вниз за 5 минут</text>
+  <text x="540" y="1364" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
+    font-size="56" fill="#ffe66d">Выигрыш есть — можно поесть</text>
+  <text x="540" y="1448" text-anchor="middle" font-family="DejaVu Sans"
+    font-size="44" fill="#c9d4e5" fill-opacity="0.85">BTC вверх или вниз за 5 минут</text>
 
-  <rect x="290" y="1560" width="500" height="118" rx="59" fill="url(#gold)"/>
-  <text x="540" y="1636" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
-    font-size="50" fill="#0a0e16">Играй и ты  →</text>
-  <text x="540" y="1798" text-anchor="middle" font-family="DejaVu Sans"
+  <ellipse cx="540" cy="1624" rx="330" ry="110" fill="url(#glowLime)"/>
+  <rect x="280" y="1560" width="520" height="120" rx="60" fill="url(#cta)"/>
+  <text x="540" y="1638" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
+    font-size="50" fill="#06130d">Играй и ты  →</text>
+  <text x="540" y="1800" text-anchor="middle" font-family="DejaVu Sans"
     font-size="36" fill="#8b97a8" fill-opacity="0.85">жми ссылку ниже</text>
+
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#vignette)"/>
 </svg>`;
 }
 

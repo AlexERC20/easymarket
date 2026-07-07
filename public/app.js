@@ -4570,11 +4570,55 @@ function renderShareWinsToggle() {
   button.setAttribute("aria-pressed", enabled ? "true" : "false");
 }
 
+// Молния из частиц для шэир-карточки — статичный кадр велком-заставки.
+// Тот же силуэт и градиент (тёплый верх -> лайм -> циан), что и на сплеше.
+function buildShareBoltParticlesSvg() {
+  const poly = [[36.8, 3], [13.6, 35.6], [29.6, 35.6], [24.8, 61], [50.4, 25.2], [34.2, 25.2]];
+  const inPoly = (x, y) => {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {
+      const [xi, yi] = poly[i];
+      const [xj, yj] = poly[j];
+      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  };
+  const mix = (t) => {
+    const stops = [[255, 247, 168], [183, 255, 77], [53, 246, 255]];
+    const [a, b, k] = t < 0.45
+      ? [stops[0], stops[1], t / 0.45]
+      : [stops[1], stops[2], (t - 0.45) / 0.55];
+    return [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * k));
+  };
+  const parts = [];
+  for (let gy = 3; gy <= 61; gy += 2.5) {
+    for (let gx = 13; gx <= 51; gx += 2.5) {
+      const x = gx + (Math.random() - 0.5) * 1.8;
+      const y = gy + (Math.random() - 0.5) * 1.8;
+      if (!inPoly(x, y)) {
+        continue;
+      }
+      const [r, g, b] = mix((y - 3) / 58);
+      const size = 0.8 + Math.random() * 0.7;
+      parts.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(size * 2.2).toFixed(1)}" fill="rgb(${r},${g},${b})" opacity="0.13"/>`);
+      parts.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${size.toFixed(1)}" fill="rgb(${r},${g},${b})" opacity="${(0.8 + Math.random() * 0.2).toFixed(2)}"/>`);
+    }
+  }
+  return `<svg viewBox="0 0 64 64" focusable="false" aria-hidden="true">${parts.join("")}</svg>`;
+}
+
 function openShareWinSheet() {
   const win = state.lastWin;
   const sheet = $("shareWinSheet");
   if (!win || !sheet) {
     return;
+  }
+  const bolt = $("shareCardBolt");
+  if (bolt && bolt.dataset.particled !== "1") {
+    bolt.dataset.particled = "1";
+    bolt.innerHTML = buildShareBoltParticlesSvg();
   }
   const card = $("shareCard");
   if (card) {

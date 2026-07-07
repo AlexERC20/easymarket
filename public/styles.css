@@ -1375,15 +1375,16 @@ h2 {
   overflow: hidden;
   border-radius: 22px;
   padding: 20px;
-  min-height: 306px;
+  min-height: 316px;
   display: flex;
   flex-direction: column;
   color: #fff;
   background:
-    radial-gradient(360px 220px at 50% 4%, rgba(53, 135, 237, 0.34), transparent 62%),
-    radial-gradient(280px 210px at 50% 76%, rgba(183, 255, 77, 0.16), transparent 60%),
-    linear-gradient(180deg, #101a2c 0%, #0a0f1a 60%, #070a12 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+    radial-gradient(300px 250px at 50% 32%, rgba(183, 255, 77, 0.11), transparent 62%),
+    radial-gradient(320px 240px at 50% 88%, rgba(53, 246, 255, 0.08), transparent 64%),
+    radial-gradient(520px 460px at 50% 48%, rgba(10, 14, 22, 0) 55%, rgba(3, 5, 9, 0.62) 100%),
+    #070a10;
+  border: 1px solid rgba(183, 255, 77, 0.16);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
 }
 .share-card-sheen {
@@ -1410,32 +1411,31 @@ h2 {
 }
 .share-card-brand {
   font-size: 14px;
-  font-weight: 800;
-  letter-spacing: 3px;
-  color: rgba(255, 255, 255, 0.92);
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  color: rgba(247, 251, 255, 0.96);
+  text-shadow: 0 0 14px rgba(183, 255, 77, 0.35), 0 0 30px rgba(53, 246, 255, 0.2);
 }
 .share-card-ticker {
   font-size: 11px;
   font-weight: 800;
-  color: #ffd166;
+  color: #b7ff4d;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(255, 209, 102, 0.12);
-  border: 1px solid rgba(255, 209, 102, 0.3);
+  background: rgba(183, 255, 77, 0.1);
+  border: 1px solid rgba(183, 255, 77, 0.32);
 }
 .share-card-bolt {
-  margin: 14px auto 0;
-  width: 54px;
-  height: 54px;
+  margin: 10px auto 0;
+  width: 98px;
+  height: 98px;
   display: grid;
   place-items: center;
-  color: #ffd166;
 }
 .share-card-bolt svg {
-  width: 42px;
-  height: 42px;
-  fill: currentColor;
-  filter: drop-shadow(0 6px 16px rgba(255, 209, 102, 0.4));
+  width: 98px;
+  height: 98px;
+  filter: drop-shadow(0 0 16px rgba(183, 255, 77, 0.4)) drop-shadow(0 0 34px rgba(53, 246, 255, 0.18));
 }
 .share-card-body {
   flex: 1;
@@ -1464,9 +1464,32 @@ h2 {
 }
 .share-card-tagline {
   margin: 12px 0 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 900;
-  color: #ffd166;
+  color: #ffe66d;
+  text-shadow: 0 0 16px rgba(255, 230, 109, 0.25);
+}
+/* Сканирующая полоска из велком-заставки. */
+.share-card-scan {
+  display: block;
+  margin: 13px auto 0;
+  width: 118px;
+  height: 2px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+.share-card-scan i {
+  display: block;
+  height: 100%;
+  width: 46%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, #b7ff4d 35%, #35f6ff 65%, transparent);
+  animation: shareScan 1.15s var(--ease-default) infinite;
+}
+@keyframes shareScan {
+  0% { transform: translateX(-130%); }
+  100% { transform: translateX(300%); }
 }
 .share-card-foot {
   display: flex;
@@ -1482,7 +1505,8 @@ h2 {
 .share-card-cta {
   font-size: 13px;
   font-weight: 900;
-  color: rgba(255, 255, 255, 0.9);
+  color: #b7ff4d;
+  text-shadow: 0 0 12px rgba(183, 255, 77, 0.3);
 }
 .share-actions {
   display: grid;
@@ -1503,6 +1527,7 @@ h2 {
 }
 @media (prefers-reduced-motion: reduce) {
   .share-card-sheen { display: none; }
+  .share-card-scan i { animation: none !important; }
 }
 
 .price-board strong,
