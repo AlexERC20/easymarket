@@ -2066,7 +2066,9 @@ h2 {
   text-shadow: 0 0 12px rgba(255, 209, 102, 0.35);
 }
 
-.activity-row.big-bet::after {
+/* Глинт пробегает только при появлении сделки (.fresh); дальше строка —
+   спокойное статичное золото, пере-рендеры ленты её не дёргают. */
+.activity-row.big-bet.fresh::after {
   content: "";
   position: absolute;
   inset: 0;

@@ -188,6 +188,7 @@ const state = {
   aquariumSnapAt: 0,
   aquariumRuntimeAllowed: false,
   freshActivityIds: new Set(),
+  playedActivityAnimIds: new Set(), // въезд/глинт уже проигран — не повторять на пере-рендерах
   lastPositionPnl: {},
   seenSettledPositionIds: new Set(),
   winStreak: 0,
@@ -4045,7 +4046,9 @@ function renderActivity() {
     const name = trade.username || trade.first_name || `user ${trade.telegram_id}`;
     const action = trade.action || "BUY";
     const marketLabel = getActivityMarketLabel(trade);
-    const isFresh = state.freshActivityIds.has(trade.id);
+    // Въезд и глинт играют один раз — на приходе сделки. Пере-рендеры от
+    // свернуть/развернуть и поллинга не должны заново дёргать анимации.
+    const isFresh = state.freshActivityIds.has(trade.id) && !state.playedActivityAnimIds.has(trade.id);
     // Крупная ставка получает золотую строку с глинтом — магнит для глаз в ленте.
     const isBig = Number(trade.amount || 0) >= (normalizeCurrency(trade.currency) === "STAR" ? 500 : 50);
     return `
@@ -4060,6 +4063,15 @@ function renderActivity() {
     `;
   }).join("");
   setInnerHtmlIfChanged(container, html);
+  // Помечаем показанные "свежие" строки как отыгравшие анимацию.
+  visibleActivity.forEach((trade) => {
+    if (state.freshActivityIds.has(trade.id)) {
+      state.playedActivityAnimIds.add(trade.id);
+    }
+  });
+  if (state.playedActivityAnimIds.size > 400) {
+    state.playedActivityAnimIds = new Set(Array.from(state.playedActivityAnimIds).slice(-200));
+  }
 }
 
 function renderRecentMarkets() {
