@@ -1297,6 +1297,12 @@ function drawMarketChartFrame(ts) {
   }
   state.chartLastMarketId = market.id;
 
+  // Интро переключения рынка: старый кадр растворяется, а новая линия
+  // прорисовывается слева направо (wipe-клип ниже).
+  const introElapsed = state.chartIntroStart ? performance.now() - state.chartIntroStart : CHART_INTRO_MS;
+  const intro = Math.min(1, Math.max(0, introElapsed / CHART_INTRO_MS));
+  const introEase = 1 - (1 - intro) ** 3;
+
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = appBg;
   ctx.fillRect(0, 0, width, height);
@@ -1345,6 +1351,14 @@ function drawMarketChartFrame(ts) {
   const gradient = ctx.createLinearGradient(0, top, 0, bottom);
   gradient.addColorStop(0, isUp ? "rgba(25,195,125,0.24)" : "rgba(239,70,111,0.22)");
   gradient.addColorStop(1, "rgba(8,13,22,0)");
+
+  const wipeActive = intro < 1 && pathPoints.length > 1;
+  if (wipeActive) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, left + (right - left) * introEase, height);
+    ctx.clip();
+  }
 
   if (pathPoints.length > 1) {
     ctx.save();
@@ -1420,13 +1434,49 @@ function drawMarketChartFrame(ts) {
 
   const latest = pathPoints[pathPoints.length - 1];
   if (latest) {
+    const headRgb = isUp ? "25,195,125" : "239,70,111";
+    const pulse = 0.5 + 0.5 * Math.sin(nowTs * 0.005);
+
+    // Хвост кометы: последние ~44px пути подсвечены градиентом к голове.
+    let tailStart = pathPoints.length - 1;
+    let tailLen = 0;
+    while (tailStart > 0 && tailLen < 44) {
+      tailLen += Math.hypot(
+        pathPoints[tailStart].x - pathPoints[tailStart - 1].x,
+        pathPoints[tailStart].y - pathPoints[tailStart - 1].y,
+      );
+      tailStart -= 1;
+    }
+    if (tailStart < pathPoints.length - 1) {
+      const tailFrom = pathPoints[tailStart];
+      const tailGrad = ctx.createLinearGradient(tailFrom.x, tailFrom.y, latest.x, latest.y);
+      tailGrad.addColorStop(0, `rgba(${headRgb},0)`);
+      tailGrad.addColorStop(1, `rgba(${headRgb},${(0.2 + pulse * 0.18).toFixed(3)})`);
+      ctx.strokeStyle = tailGrad;
+      ctx.lineWidth = 9;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(tailFrom.x, tailFrom.y);
+      for (let i = tailStart + 1; i < pathPoints.length; i += 1) {
+        ctx.lineTo(pathPoints[i].x, pathPoints[i].y);
+      }
+      ctx.stroke();
+    }
+
+    // Пульсирующее ядро с дышащим ореолом.
     ctx.fillStyle = isUp ? "#19c37d" : "#ef466f";
     ctx.shadowColor = isUp ? "rgba(25,195,125,0.55)" : "rgba(239,70,111,0.52)";
     ctx.shadowBlur = 18;
     ctx.beginPath();
-    ctx.arc(latest.x, latest.y, 5.5, 0, Math.PI * 2);
+    ctx.arc(latest.x, latest.y, 5.5 + pulse * 1.3, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
+    ctx.strokeStyle = `rgba(${headRgb},${(0.34 - pulse * 0.22).toFixed(3)})`;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(latest.x, latest.y, 9 + pulse * 4.5, 0, Math.PI * 2);
+    ctx.stroke();
 
     const currentLabel = worldCup
       ? `${(state.smoothedPrice || currentPrice).toFixed(1)}%`
@@ -1441,6 +1491,10 @@ function drawMarketChartFrame(ts) {
     ctx.textBaseline = "middle";
     ctx.fillText(currentLabel, labelX + 9, labelY + 14);
     ctx.shadowBlur = 0;
+  }
+
+  if (wipeActive) {
+    ctx.restore(); // конец wipe-клипа прорисовки линии
   }
 
   drawTargetCrossFx(ctx, latest, openY, width);
@@ -1494,12 +1548,9 @@ function drawMarketChartFrame(ts) {
 
   // Dissolve the previous market's snapshot on top of the new chart so the switch
   // reads as a smooth crossfade instead of an abrupt cut + ragged redraw.
-  const introElapsed = state.chartIntroStart ? performance.now() - state.chartIntroStart : CHART_INTRO_MS;
-  const intro = Math.min(1, Math.max(0, introElapsed / CHART_INTRO_MS));
   if (intro < 1 && chartSnapshotCanvas) {
-    const ease = 1 - Math.pow(1 - intro, 3); // ease-out cubic
     ctx.save();
-    ctx.globalAlpha = 1 - ease;
+    ctx.globalAlpha = 1 - introEase;
     ctx.drawImage(chartSnapshotCanvas, 0, 0, width, height);
     ctx.restore();
   }
