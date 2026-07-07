@@ -3563,7 +3563,10 @@ function renderMarket() {
   animateText($("openPrice"), worldCup ? Number(market?.volume || 0) : openPrice, (value) => (
     worldCup ? formatFire(value) : `$${formatPrice(value)}`
   ));
-  rollText($("currentPrice"), currentPrice, (value) => (
+  // Цена тикает чаще (1.5s poll), чем успевает докрутиться барабан, поэтому
+  // здесь плавный каунт-ап как у остальных цифр карточки; барабан — только на
+  // балансе, где обновления редкие и дискретные.
+  animateText($("currentPrice"), currentPrice, (value) => (
     worldCup ? `${value.toFixed(1)}%` : `$${formatPrice(value)}`
   ));
   // Brief green/red glow on the live price when it ticks up or down.
