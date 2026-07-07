@@ -6,7 +6,7 @@
 // from the chart's own render loop and from market data, so the crumbs keep
 // falling onto the next round's fresh screen where the fish are already living.
 
-import { playAquariumFood, playAquariumEat } from "./lightning-motion.js?v=20260703-17";
+import { playAquariumFood, playAquariumEat } from "./lightning-motion.js?v=20260707-01";
 
 // Realistic little fish drawn as inline SVG (iOS DOM path). Faces +x; colours
 // come from CSS custom properties set per .fish-N class.
@@ -45,6 +45,18 @@ const FISH_PALETTES = [
   { body: "#ff7aa8", belly: "#ffd6e4", fin: "#ff4f86" }, // coral
 ];
 
+// Видовые пропорции: вытянутая "неонка", классика и вуалевая "золотая".
+// bodyH — полувысота тела в долях размера, tailLen/tailSpread — геометрия
+// хвоста, veil — вуалевый хвост с размашистым мягким взмахом.
+const FISH_SPECIES = [
+  { key: "sleek", weight: 0.35, bodyH: 0.42, tailLen: 1.38, tailSpread: 0.42, dorsal: 0.72, veil: 0, size: [10, 13], speed: [21, 30] },
+  { key: "classic", weight: 0.4, bodyH: 0.54, tailLen: 1.55, tailSpread: 0.55, dorsal: 1, veil: 0, size: [11, 16], speed: [16, 26] },
+  { key: "fancy", weight: 0.25, bodyH: 0.6, tailLen: 1.92, tailSpread: 0.72, dorsal: 1.12, veil: 1, size: [12, 17], speed: [13, 20] },
+];
+
+const DEBRIS_MAX = 26; // крошки, разлетающиеся при укусе
+const MOUTH_BUBBLES_MAX = 14; // пузырьки изо рта после укуса
+
 let canvas = null;
 let ctx = null;
 let enabled = false;
@@ -58,6 +70,9 @@ let dpr = 1;
 let fish = [];
 let food = [];
 let bubbles = [];
+let debris = []; // короткоживущие крошки от укусов
+let mouthBubbles = []; // пузырьки изо рта
+let simT = 0; // накопленное время симуляции, сек (для дрейфа света и покачиваний)
 let pendingFoodAvatars = [];
 let pendingSummon = false; // remember to summon canvas fish once the canvas is ready
 
@@ -94,6 +109,12 @@ export function setAquariumShakeFeeder(fn) {
 
 let waterGrad = null;
 let waterGradH = 0;
+// Предрендеренные спрайты света и свечения корма: рисуются один раз,
+// на кадре остаются только дешёвые drawImage (никакого shadowBlur).
+let lightShaftSprite = null;
+let lightShaftH = 0;
+let causticSprite = null;
+let foodGlowSprites = null;
 let domLayer = null;
 let domFish = [];
 let domFood = [];
@@ -292,7 +313,7 @@ function summonDomFish() {
   const palettes = ["gold", "cyan", "violet", "mint", "coral"];
   for (let i = 0; i < fishCount; i += 1) {
     const el = document.createElement("span");
-    const scale = 0.76 + i * 0.07;
+    const scale = rand(0.66, 1.0); // заметный разброс размеров вместо клонов
     el.className = `aquarium-dom-fish fish-${i + 1} ${palettes[i] || "gold"}`;
     el.innerHTML = DOM_FISH_SVG;
     layer.appendChild(el);
@@ -555,6 +576,10 @@ function updateDomFish(dt, width, height) {
         f.satietyUntil = now + rand(450, 1500);
         playAquariumEat();
       }
+    } else if (now < f.satietyUntil) {
+      // Сытая рыба зависает на месте, слегка покачиваясь.
+      ax = -f.vx * 1.7;
+      ay = Math.sin(now * 0.0024 + (f.bobPhase || 0)) * 7 - f.vy * 1.5;
     } else {
       // Smoothly drifting heading gives natural curved cruising, not jerky turns.
       if (f.heading === undefined) {
@@ -622,6 +647,8 @@ function updateDomFish(dt, width, height) {
     if (Math.abs(f.vx) > 1.4) {
       f.dir = f.vx >= 0 ? 1 : -1;
     }
+    // Плавный разворот и для DOM-рыбок (iOS/десктоп).
+    f.facing = (f.facing ?? f.dir) + (f.dir - (f.facing ?? f.dir)) * Math.min(1, dt * 6.5);
   }
 
   // Remove fish that have fully left the frame so the loop can wind down.
@@ -644,7 +671,9 @@ function renderDomAquarium() {
     const sp = Math.hypot(f.vx, f.vy);
     const bob = Math.sin((tNow / 1000) * f.bobRate + f.bobPhase) * 1.4;
     const angle = Math.max(-0.2, Math.min(0.2, f.vy * 0.018));
-    f.el.style.transform = `translate3d(${f.x.toFixed(1)}px, ${(f.y + bob).toFixed(1)}px, 0) translate(-50%, -50%) scaleX(${f.dir}) scale(${f.scale}) rotate(${angle.toFixed(3)}rad)`;
+    const facingRaw = f.facing ?? f.dir;
+    const facing = Math.abs(facingRaw) < 0.08 ? (facingRaw < 0 ? -0.08 : 0.08) : facingRaw;
+    f.el.style.transform = `translate3d(${f.x.toFixed(1)}px, ${(f.y + bob).toFixed(1)}px, 0) translate(-50%, -50%) scaleX(${facing.toFixed(3)}) scale(${f.scale}) rotate(${angle.toFixed(3)}rad)`;
     // Tail beats faster as the fish speeds up / darts.
     const tailMs = Math.max(250, 720 - sp * 9);
     f.el.style.setProperty("--tail-ms", `${tailMs.toFixed(0)}ms`);
@@ -827,7 +856,8 @@ function summonFish() {
   const count = Math.round(rand(FISH_MIN, FISH_MAX));
   for (let i = 0; i < count; i += 1) {
     const palette = FISH_PALETTES[Math.floor(Math.random() * FISH_PALETTES.length)];
-    const size = rand(11, 16);
+    const species = pickSpecies();
+    const size = rand(species.size[0], species.size[1]);
     const fromLeft = Math.random() > 0.5;
     fish.push({
       x: fromLeft ? -size * 2 : cssW + size * 2, // enter from off-screen
@@ -836,9 +866,12 @@ function summonFish() {
       vy: rand(-4, 4),
       size,
       palette,
-      speed: rand(16, 26),
+      species,
+      speed: rand(species.speed[0], species.speed[1]),
       tailPhase: Math.random() * Math.PI * 2,
       dir: fromLeft ? 1 : -1,
+      facing: fromLeft ? 1 : -1, // плавный разворот: facing тянется к dir
+      mouth: 0,
       target: null,
       satietyUntil: 0,
       wanderUntil: 0,
@@ -878,6 +911,157 @@ export function primeAquarium(retries = 10) {
   return false;
 }
 
+function pickSpecies() {
+  const roll = Math.random();
+  let acc = 0;
+  for (const sp of FISH_SPECIES) {
+    acc += sp.weight;
+    if (roll <= acc) {
+      return sp;
+    }
+  }
+  return FISH_SPECIES[FISH_SPECIES.length - 1];
+}
+
+function makeRadialSprite(rgb, coreAlpha = 0.55) {
+  const size = 48;
+  const sprite = document.createElement("canvas");
+  sprite.width = size;
+  sprite.height = size;
+  const g = sprite.getContext("2d");
+  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, `rgba(${rgb},${coreAlpha})`);
+  grad.addColorStop(0.55, `rgba(${rgb},${coreAlpha * 0.3})`);
+  grad.addColorStop(1, `rgba(${rgb},0)`);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  return sprite;
+}
+
+function foodGlow(side) {
+  if (!foodGlowSprites) {
+    foodGlowSprites = {
+      YES: makeRadialSprite("25,195,125"),
+      NO: makeRadialSprite("239,70,111"),
+    };
+  }
+  return side === "YES" ? foodGlowSprites.YES : foodGlowSprites.NO;
+}
+
+function buildShaftSprite(heightPx) {
+  const w = 96;
+  const h = Math.max(60, Math.round(heightPx));
+  const sprite = document.createElement("canvas");
+  sprite.width = w;
+  sprite.height = h;
+  const g = sprite.getContext("2d");
+  const vertical = g.createLinearGradient(0, 0, 0, h);
+  vertical.addColorStop(0, "rgba(190,235,255,0.5)");
+  vertical.addColorStop(0.6, "rgba(160,225,255,0.14)");
+  vertical.addColorStop(1, "rgba(150,220,255,0)");
+  g.fillStyle = vertical;
+  g.fillRect(0, 0, w, h);
+  // мягкие боковые края луча
+  g.globalCompositeOperation = "destination-in";
+  const horizontal = g.createLinearGradient(0, 0, w, 0);
+  horizontal.addColorStop(0, "rgba(255,255,255,0)");
+  horizontal.addColorStop(0.5, "rgba(255,255,255,1)");
+  horizontal.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = horizontal;
+  g.fillRect(0, 0, w, h);
+  return sprite;
+}
+
+function buildCausticSprite() {
+  const w = 220;
+  const h = 34;
+  const sprite = document.createElement("canvas");
+  sprite.width = w;
+  sprite.height = h;
+  const g = sprite.getContext("2d");
+  g.strokeStyle = "rgba(190,240,255,0.8)";
+  g.lineWidth = 1.1;
+  for (let i = 0; i < 9; i += 1) {
+    const cx = rand(14, w - 14);
+    const cy = rand(h * 0.35, h * 0.95);
+    const rx = rand(9, 26);
+    g.globalAlpha = rand(0.25, 0.6);
+    g.beginPath();
+    g.ellipse(cx, cy, rx, rx * rand(0.32, 0.5), rand(-0.3, 0.3), Math.PI * 1.05, Math.PI * 1.95);
+    g.stroke();
+  }
+  // каустика проявляется к полу
+  g.globalCompositeOperation = "destination-in";
+  const fade = g.createLinearGradient(0, 0, 0, h);
+  fade.addColorStop(0, "rgba(255,255,255,0)");
+  fade.addColorStop(0.55, "rgba(255,255,255,0.75)");
+  fade.addColorStop(1, "rgba(255,255,255,1)");
+  g.fillStyle = fade;
+  g.fillRect(0, 0, w, h);
+  return sprite;
+}
+
+function ensureWaterSprites() {
+  const bandH = Math.round(Math.max(60, bandBottom() - bandTop() + 20));
+  if (!lightShaftSprite || lightShaftH !== bandH) {
+    lightShaftH = bandH;
+    lightShaftSprite = buildShaftSprite(bandH);
+  }
+  if (!causticSprite) {
+    causticSprite = buildCausticSprite();
+  }
+}
+
+// Крошки и пузырьки в момент укуса: еда не исчезает "в никуда".
+function spawnBiteFx(f, crumb) {
+  const dir = (f.facing ?? f.dir) >= 0 ? 1 : -1;
+  for (let i = 0; i < 3; i += 1) {
+    if (debris.length >= DEBRIS_MAX) {
+      break;
+    }
+    debris.push({
+      x: crumb.x,
+      y: crumb.y,
+      vx: rand(-26, 26),
+      vy: rand(-30, -6),
+      s: rand(1, 2),
+      life: rand(0.35, 0.6),
+      color: crumb.color || "#cfd8e3",
+    });
+  }
+  const count = 2 + Math.round(Math.random());
+  for (let i = 0; i < count; i += 1) {
+    if (mouthBubbles.length >= MOUTH_BUBBLES_MAX) {
+      break;
+    }
+    mouthBubbles.push({
+      x: f.x + dir * f.size + rand(-2, 2),
+      y: f.y + rand(-2, 2),
+      r: rand(0.6, 1.3),
+      speed: rand(10, 18),
+      vx: dir * rand(2, 8),
+      phase: Math.random() * Math.PI * 2,
+      life: rand(0.9, 1.6),
+      alpha: rand(0.18, 0.3),
+    });
+  }
+}
+
+function updateDebris(dt) {
+  for (let i = debris.length - 1; i >= 0; i -= 1) {
+    const d = debris[i];
+    d.vy += 30 * dt;
+    d.vx *= 0.92;
+    d.vy *= 0.96;
+    d.x += d.vx * dt;
+    d.y += d.vy * dt;
+    d.life -= dt;
+    if (d.life <= 0) {
+      debris.splice(i, 1);
+    }
+  }
+}
+
 function resetBubble(b, seed) {
   b.x = rand(cssW * 0.1, cssW * 0.9);
   b.y = seed ? rand(bandTop(), bandBottom()) : bandBottom();
@@ -885,6 +1069,7 @@ function resetBubble(b, seed) {
   b.speed = rand(6, 14);
   b.drift = rand(-0.4, 0.4);
   b.alpha = rand(0.05, 0.16);
+  b.phase = Math.random() * Math.PI * 2; // горизонтальный вобл при всплытии
   return b;
 }
 
@@ -1225,7 +1410,9 @@ function updateFood(dt) {
     if (!f.settled) {
       f.vy += 24 * dt; // slow sink
       f.vy = Math.min(f.vy, 36);
-      f.vx += (current + (Math.random() - 0.5) * 40) * dt;
+      // Тонет как листик: маятниковое покачивание вместо чистого шума.
+      f.wobble += dt * 2.4;
+      f.vx += (current + Math.sin(f.wobble) * 34 + (Math.random() - 0.5) * 14) * dt;
       f.vx *= 0.92;
       f.x += f.vx * dt;
       f.y += f.vy * dt;
@@ -1344,11 +1531,17 @@ function updateFish(dt) {
         f.target.biteX = f.x; // crumb gets gulped toward the mouth
         f.target.biteY = f.y;
         f.target.eat = Math.max(f.target.eat, 0.0001); // begin the bite
+        spawnBiteFx(f, f.target); // крошки в стороны + пузырьки изо рта
+        f.mouthUntil = now + 260;
         f.target.claimedBy = null;
         f.target = null;
         f.satietyUntil = now + rand(450, 1500); // brief pause, then hunt again
         playAquariumEat();
       }
+    } else if (now < f.satietyUntil) {
+      // Сытая рыба "переваривает": гасит ход и зависает, чуть покачиваясь.
+      ax = -f.vx * 1.7;
+      ay = Math.sin(simT * 2.4 + f.tailPhase * 0.25) * 7 - f.vy * 1.5;
     } else {
       // Smoothly drifting heading -> natural curved cruising instead of jerks.
       if (f.heading === undefined) {
@@ -1364,8 +1557,12 @@ function updateFish(dt) {
       ay = Math.sin(f.heading) * cruise * 0.55;
     }
 
-    // Gentle separation between schoolmates.
+    // Gentle separation between schoolmates + мягкое выравнивание курса,
+    // чтобы блуждающие без еды рыбы читались как стайка, а не одиночки.
     if (!f.leaving) {
+      let alignVx = 0;
+      let alignVy = 0;
+      let alignN = 0;
       for (const other of fish) {
         if (other === f) {
           continue;
@@ -1379,6 +1576,15 @@ function updateFish(dt) {
           ax += (sx / d) * f.speed * 0.9;
           ay += (sy / d) * f.speed * 0.9;
         }
+        if (!other.leaving && d2 < 110 * 110) {
+          alignVx += other.vx;
+          alignVy += other.vy;
+          alignN += 1;
+        }
+      }
+      if (alignN && !f.target && now >= f.satietyUntil) {
+        ax += (alignVx / alignN - f.vx) * 0.5;
+        ay += (alignVy / alignN - f.vy) * 0.5;
       }
     }
 
@@ -1420,6 +1626,12 @@ function updateFish(dt) {
     if (Math.abs(f.vx) > 1.5) {
       f.dir = f.vx >= 0 ? 1 : -1;
     }
+    // Плавный разворот: facing скользит к dir, рыба сжимается в профиль и
+    // разжимается уже в другую сторону вместо мгновенного зеркала.
+    f.facing = (f.facing ?? f.dir) + (f.dir - (f.facing ?? f.dir)) * Math.min(1, dt * 6.5);
+    // Рот приоткрывается на подходе к еде и в момент укуса.
+    const mouthWant = (f.target && Math.hypot(f.target.x - f.x, f.target.y - f.y) < f.size * 2.6) || now < (f.mouthUntil || 0) ? 1 : 0;
+    f.mouth = (f.mouth || 0) + (mouthWant - (f.mouth || 0)) * Math.min(1, dt * 9);
     f.tailPhase += dt * (5 + Math.min(12, sp * 0.25));
   }
 
@@ -1429,10 +1641,22 @@ function updateFish(dt) {
 
 function updateBubbles(dt) {
   for (const b of bubbles) {
+    b.phase = (b.phase ?? Math.random() * Math.PI * 2) + dt * (1.8 + b.r);
     b.y -= b.speed * dt;
-    b.x += b.drift;
-    if (b.y < bandTop() - 4) {
+    b.x += b.drift + Math.sin(b.phase) * b.r * 0.35;
+    if (b.y < bandTop() + 2) {
       resetBubble(b, false);
+    }
+  }
+  for (let i = mouthBubbles.length - 1; i >= 0; i -= 1) {
+    const b = mouthBubbles[i];
+    b.phase += dt * 3;
+    b.y -= b.speed * dt;
+    b.x += b.vx * dt + Math.sin(b.phase) * 0.4;
+    b.vx *= 0.94;
+    b.life -= dt;
+    if (b.life <= 0 || b.y < bandTop() + 2) {
+      mouthBubbles.splice(i, 1);
     }
   }
 }
@@ -1449,6 +1673,34 @@ function drawWater() {
   ctx.fillStyle = waterGrad;
   ctx.fillRect(0, top, cssW, cssH - top);
 
+  // Диагональные столбы света, медленно гуляющие по сцене.
+  ensureWaterSprites();
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 3; i += 1) {
+    const sway = Math.sin(simT * 0.07 + i * 2.1) * cssW * 0.045;
+    const x = cssW * (0.2 + i * 0.3) + sway;
+    const widthScale = 0.75 + i * 0.3;
+    ctx.globalAlpha = Math.max(0.02, 0.05 + 0.025 * Math.sin(simT * 0.11 + i * 1.7));
+    ctx.save();
+    ctx.translate(x, top - 8);
+    ctx.rotate(0.21);
+    ctx.drawImage(lightShaftSprite, (-96 * widthScale) / 2, 0, 96 * widthScale, lightShaftH);
+    ctx.restore();
+  }
+  // Каустика у пола: две встречные бегущие полосы бликов.
+  const cw = causticSprite.width;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const speed = pass ? -7 : 5;
+    const off = (((simT * speed) % cw) + cw) % cw;
+    ctx.globalAlpha = 0.08;
+    for (let x = -off; x < cssW; x += cw) {
+      ctx.drawImage(causticSprite, x, bandBottom() - (pass ? 27 : 19));
+    }
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+
   // faint floor line
   ctx.strokeStyle = "rgba(120,200,255,0.10)";
   ctx.lineWidth = 1;
@@ -1458,8 +1710,18 @@ function drawWater() {
   ctx.stroke();
 
   for (const b of bubbles) {
+    // Пузырёк тает у самой поверхности, а не телепортируется вниз.
+    const surface = Math.min(1, Math.max(0, (b.y - top) / 14));
     ctx.beginPath();
-    ctx.fillStyle = `rgba(180,230,255,${b.alpha})`;
+    ctx.fillStyle = `rgba(180,230,255,${(b.alpha * surface).toFixed(3)})`;
+    ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  for (const b of mouthBubbles) {
+    const surface = Math.min(1, Math.max(0, (b.y - top) / 14));
+    const fade = Math.min(1, b.life / 0.4);
+    ctx.beginPath();
+    ctx.fillStyle = `rgba(200,240,255,${(b.alpha * surface * fade).toFixed(3)})`;
     ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
     ctx.fill();
   }
@@ -1472,10 +1734,15 @@ function drawFood() {
     if (r < 0.4) {
       continue;
     }
+    // Свечение — предрендеренный спрайт: заметно дешевле shadowBlur на 40 крошках.
+    const fade = f.fade ?? 1;
+    ctx.globalAlpha = fade * 0.7;
+    const glow = foodGlow(f.side);
+    ctx.drawImage(glow, f.x - r * 2.2, f.y - r * 2.2, r * 4.4, r * 4.4);
+    ctx.globalAlpha = 1;
+
     ctx.save();
-    ctx.globalAlpha = f.fade ?? 1; // fade out near end of life
-    ctx.shadowColor = f.side === "YES" ? "rgba(25,195,125,0.5)" : "rgba(239,70,111,0.5)";
-    ctx.shadowBlur = 6;
+    ctx.globalAlpha = fade; // fade out near end of life
     ctx.beginPath();
     ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
     ctx.closePath();
@@ -1490,7 +1757,6 @@ function drawFood() {
       g.addColorStop(1, "rgba(14,20,32,0.95)");
       ctx.fillStyle = g;
       ctx.fillRect(f.x - r, f.y - r, r * 2, r * 2);
-      ctx.shadowBlur = 0;
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -1509,79 +1775,132 @@ function drawFood() {
       ctx.restore();
     }
   }
+
+  // Крошки, отлетевшие от укуса: пара пикселей, тонущих и тающих.
+  for (const d of debris) {
+    ctx.globalAlpha = Math.max(0, Math.min(1, d.life / 0.5)) * 0.8;
+    ctx.fillStyle = d.color;
+    ctx.fillRect(d.x - d.s / 2, d.y - d.s / 2, d.s, d.s);
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawFish(f) {
   const s = f.size;
-  const wag = Math.sin(f.tailPhase) * s * 0.45;
+  const sp = f.species || FISH_SPECIES[1];
+  const bh = s * sp.bodyH; // полувысота тела
+  const speedNow = Math.hypot(f.vx, f.vy);
+  const spNorm = Math.min(1, speedNow / (f.speed * 2.2));
+  // Хвост машет размашистее на рывке; хвостовая треть тела гнётся следом
+  // с отставанием фазы (follow-through), медленный ход — мелкие взмахи.
+  const wag = Math.sin(f.tailPhase) * s * (0.26 + spNorm * 0.34) * (sp.veil ? 1.35 : 1);
+  const bend = Math.sin(f.tailPhase - 0.9) * s * (0.09 + spNorm * 0.1);
+  const midBend = bend * 0.45;
   const tiltAngle = Math.max(-0.34, Math.min(0.34, f.vy * 0.02));
+  // Разворот проходит через профиль: |facing| < 1 сжимает рыбу по X.
+  const facingRaw = f.facing ?? f.dir;
+  const facing = Math.abs(facingRaw) < 0.08 ? (facingRaw < 0 ? -0.08 : 0.08) : facingRaw;
+
   ctx.save();
   ctx.translate(f.x, f.y);
   ctx.rotate(tiltAngle);
-  ctx.scale(f.dir, 1);
+  ctx.scale(facing, 1);
+
+  const tl = s * sp.tailLen;
+  const tspread = s * sp.tailSpread;
+  const tailRootX = -s * 0.74;
 
   // forked, curved tail that sweeps as it swims
   ctx.beginPath();
-  ctx.moveTo(-s * 0.72, 0);
-  ctx.quadraticCurveTo(-s * 1.22, -s * 0.16 + wag * 0.6, -s * 1.55, -s * 0.55 + wag);
-  ctx.quadraticCurveTo(-s * 1.16, wag * 0.5, -s * 1.55, s * 0.55 + wag);
-  ctx.quadraticCurveTo(-s * 1.22, s * 0.16 + wag * 0.6, -s * 0.72, 0);
+  ctx.moveTo(tailRootX, bend * 0.9);
+  ctx.quadraticCurveTo(-tl * 0.78, bend + wag * 0.55 - tspread * 0.3, -tl, bend + wag - tspread);
+  ctx.quadraticCurveTo(-tl * 0.72, bend + wag * 0.5, -tl, bend + wag + tspread);
+  ctx.quadraticCurveTo(-tl * 0.78, bend + wag * 0.55 + tspread * 0.3, tailRootX, bend * 0.9);
   ctx.closePath();
   ctx.fillStyle = f.palette.fin;
-  ctx.globalAlpha = 0.9;
+  ctx.globalAlpha = sp.veil ? 0.8 : 0.9;
   ctx.fill();
 
-  // dorsal fin
+  // dorsal fin (следует за изгибом спины)
   ctx.beginPath();
-  ctx.moveTo(-s * 0.12, -s * 0.44);
-  ctx.quadraticCurveTo(s * 0.14, -s * 0.96, s * 0.44, -s * 0.34);
+  ctx.moveTo(-s * 0.12, midBend - bh * 0.82);
+  ctx.quadraticCurveTo(s * 0.14, midBend - bh * 0.82 - s * 0.5 * sp.dorsal, s * 0.44, -bh * 0.6);
   ctx.closePath();
   ctx.fillStyle = f.palette.fin;
   ctx.globalAlpha = 0.82;
   ctx.fill();
 
-  // pectoral fin (small belly fin, gives a sense of paddling)
+  // Грудной плавник гребёт на медленном ходу и прижимается на рывке.
+  const paddle = Math.sin(f.tailPhase * 0.55) * (1 - spNorm * 0.72);
   ctx.beginPath();
-  ctx.moveTo(s * 0.2, s * 0.18);
-  ctx.quadraticCurveTo(0, s * 0.72, s * 0.44, s * 0.42);
+  ctx.moveTo(s * 0.2, bh * 0.32);
+  ctx.quadraticCurveTo(s * (0.02 - paddle * 0.1), bh * (1.15 + paddle * 0.35), s * 0.46, bh * (0.72 + paddle * 0.18));
   ctx.closePath();
   ctx.fillStyle = f.palette.fin;
   ctx.globalAlpha = 0.55;
   ctx.fill();
 
-  // body (gradient is constant in local space, so build it once per fish)
+  // Гибкое тело: нос жёсткий, к хвосту сечение сходит и следует за изгибом.
   ctx.globalAlpha = 0.96;
   if (!f.bodyGrad) {
-    f.bodyGrad = ctx.createLinearGradient(0, -s * 0.5, 0, s * 0.5);
+    f.bodyGrad = ctx.createLinearGradient(0, -bh, 0, bh);
     f.bodyGrad.addColorStop(0, f.palette.body);
     f.bodyGrad.addColorStop(1, f.palette.belly);
   }
   ctx.fillStyle = f.bodyGrad;
   ctx.beginPath();
-  ctx.ellipse(0, 0, s, s * 0.54, 0, 0, Math.PI * 2);
+  ctx.moveTo(s * 0.98, 0);
+  ctx.quadraticCurveTo(s * 0.5, -bh * 1.04, -s * 0.08, midBend - bh * 0.92);
+  ctx.quadraticCurveTo(-s * 0.52, midBend * 1.3 - bh * 0.6, tailRootX, bend - bh * 0.26);
+  ctx.quadraticCurveTo(-s * 0.86, bend, tailRootX, bend + bh * 0.26);
+  ctx.quadraticCurveTo(-s * 0.52, midBend * 1.3 + bh * 0.6, -s * 0.08, midBend + bh * 0.92);
+  ctx.quadraticCurveTo(s * 0.5, bh * 1.04, s * 0.98, 0);
+  ctx.closePath();
   ctx.fill();
+
+  // Блик по спине — дешёвый rim-light вместо теней.
+  ctx.globalAlpha = 0.18;
+  ctx.strokeStyle = "rgba(255,255,255,0.9)";
+  ctx.lineWidth = Math.max(0.7, s * 0.07);
+  ctx.beginPath();
+  ctx.moveTo(s * 0.72, -bh * 0.42);
+  ctx.quadraticCurveTo(s * 0.2, -bh * 1.02, -s * 0.2, midBend - bh * 0.72);
+  ctx.stroke();
 
   // gill arc
   ctx.globalAlpha = 0.22;
   ctx.strokeStyle = "rgba(10,16,24,0.85)";
   ctx.lineWidth = Math.max(0.6, s * 0.05);
   ctx.beginPath();
-  ctx.arc(s * 0.18, 0, s * 0.5, -0.85, 0.85);
+  ctx.arc(s * 0.18, 0, bh * 0.92, -0.85, 0.85);
   ctx.stroke();
+
+  // Приоткрытый рот на подходе к еде.
+  const mouth = f.mouth || 0;
+  if (mouth > 0.06) {
+    ctx.globalAlpha = 0.9 * mouth;
+    ctx.fillStyle = "rgba(9,13,20,0.9)";
+    ctx.beginPath();
+    ctx.moveTo(s * 1.0, 0);
+    ctx.lineTo(s * 0.74, -s * 0.02 - s * 0.09 * mouth);
+    ctx.lineTo(s * 0.74, s * 0.02 + s * 0.11 * mouth);
+    ctx.closePath();
+    ctx.fill();
+  }
 
   // eye with catch-light
   ctx.globalAlpha = 1;
   ctx.fillStyle = "#ffffff";
   ctx.beginPath();
-  ctx.arc(s * 0.52, -s * 0.12, s * 0.18, 0, Math.PI * 2);
+  ctx.arc(s * 0.52, -bh * 0.22, s * 0.18, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = "#0b1018";
   ctx.beginPath();
-  ctx.arc(s * 0.56, -s * 0.12, s * 0.095, 0, Math.PI * 2);
+  ctx.arc(s * 0.56, -bh * 0.22, s * 0.095, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = "rgba(255,255,255,0.92)";
   ctx.beginPath();
-  ctx.arc(s * 0.6, -s * 0.17, s * 0.035, 0, Math.PI * 2);
+  ctx.arc(s * 0.6, -bh * 0.31, s * 0.035, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
@@ -1626,17 +1945,20 @@ function frame(ts) {
   }
   const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0.033;
   lastTs = ts;
+  simT += dt;
 
   tilt += (tiltTarget - tilt) * Math.min(1, dt * 4);
   tiltImpulse *= Math.max(0, 1 - dt * 2.1);
 
   updateFood(dt);
   updateFish(dt);
+  updateDebris(dt);
   updateBubbles(dt);
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
-  if (food.length || fish.length) {
+  const alive = food.length || fish.length || debris.length || mouthBubbles.length;
+  if (alive) {
     drawWater();
     drawFood();
     for (const f of fish) {
@@ -1646,7 +1968,7 @@ function frame(ts) {
 
   // Animate only while there is food or fish; otherwise wind down so the canvas
   // stays clear and nothing burns CPU at idle.
-  if (enabled && (fish.length || food.length)) {
+  if (enabled && alive) {
     rafId = requestAnimationFrame(frame);
   }
 }
