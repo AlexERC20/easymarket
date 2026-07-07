@@ -745,6 +745,60 @@ h2 {
   50% { opacity: 1; }
 }
 
+/* Цифры-барабаны: изменившиеся символы выкатываются по вертикали. */
+.odo-cell {
+  position: relative;
+  display: inline-grid;
+  vertical-align: baseline;
+}
+
+.odo-cell > span {
+  grid-area: 1 / 1;
+  animation-delay: calc(var(--odo-i, 0) * 24ms);
+}
+
+/* Уходящий символ не участвует в ширине ячейки: ширину задаёт новый. */
+.odo-cell .odo-out-up,
+.odo-cell .odo-out-down {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.odo-cell .odo-out-up { animation-name: odoOutUp; }
+.odo-cell .odo-in-up { animation-name: odoInUp; }
+.odo-cell .odo-out-down { animation-name: odoOutDown; }
+.odo-cell .odo-in-down { animation-name: odoInDown; }
+
+.odo-cell .odo-out-up,
+.odo-cell .odo-in-up,
+.odo-cell .odo-out-down,
+.odo-cell .odo-in-down {
+  animation-duration: 300ms;
+  animation-timing-function: var(--ease-default);
+  animation-fill-mode: both;
+}
+
+@keyframes odoOutUp {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-0.55em); }
+}
+
+@keyframes odoInUp {
+  from { opacity: 0; transform: translateY(0.55em); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes odoOutDown {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(0.55em); }
+}
+
+@keyframes odoInDown {
+  from { opacity: 0; transform: translateY(-0.55em); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* Green/red glow on the live price when it ticks up or down. */
 #currentPrice.price-up {
   animation: priceFlashUp 640ms var(--ease-default);
@@ -908,6 +962,7 @@ h2 {
   .countdown.is-final strong,
   .chart-frame.round-final::after,
   .loss-ash,
+  .odo-cell > span,
   #currentPrice.price-up,
   #currentPrice.price-down,
   .outcome-button.side-charge {

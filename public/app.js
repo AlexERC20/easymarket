@@ -1789,6 +1789,72 @@ function animateText(element, nextValue, formatter, duration = 360) {
   textAnimations.set(element, requestAnimationFrame(step));
 }
 
+// Цифры-барабаны: вместо каунт-апа изменившиеся символы выкатываются по
+// вертикали (стиль телеграм-счётчика). Сравнение выравнено по правому краю,
+// чтобы у "999 -> 1 000" катились только реально изменившиеся разряды.
+const textRollCleanups = new WeakMap();
+
+function rollText(element, nextValue, formatter) {
+  if (!element) {
+    return false;
+  }
+  const numericValue = Number(nextValue || 0);
+  const previousValue = Number(element.dataset.value);
+  element.dataset.value = String(numericValue);
+  const nextText = formatter(numericValue);
+  if (!Number.isFinite(previousValue) || prefersReducedMotion()) {
+    element.textContent = nextText;
+    return false;
+  }
+  const prevText = formatter(previousValue);
+  if (prevText === nextText) {
+    element.textContent = nextText;
+    return false;
+  }
+
+  const up = numericValue >= previousValue;
+  const maxLen = Math.max(prevText.length, nextText.length);
+  const fragment = document.createDocumentFragment();
+  let rollIndex = 0;
+  for (let i = 0; i < maxLen; i += 1) {
+    const oldChar = prevText[prevText.length - maxLen + i] ?? "";
+    const newChar = nextText[nextText.length - maxLen + i] ?? "";
+    if (oldChar === newChar) {
+      fragment.appendChild(document.createTextNode(newChar));
+      continue;
+    }
+    const cell = document.createElement("span");
+    cell.className = "odo-cell";
+    cell.style.setProperty("--odo-i", String(rollIndex));
+    rollIndex += 1;
+    if (oldChar) {
+      const oldSpan = document.createElement("span");
+      oldSpan.className = up ? "odo-out-up" : "odo-out-down";
+      oldSpan.textContent = oldChar;
+      cell.appendChild(oldSpan);
+    }
+    if (newChar) {
+      const newSpan = document.createElement("span");
+      newSpan.className = up ? "odo-in-up" : "odo-in-down";
+      newSpan.textContent = newChar;
+      cell.appendChild(newSpan);
+    }
+    fragment.appendChild(cell);
+  }
+  element.replaceChildren(fragment);
+
+  const previousCleanup = textRollCleanups.get(element);
+  if (previousCleanup) {
+    window.clearTimeout(previousCleanup);
+  }
+  // После прокрутки сплющиваем DOM обратно в плоский текст.
+  textRollCleanups.set(element, window.setTimeout(() => {
+    element.textContent = formatter(Number(element.dataset.value || 0));
+    textRollCleanups.delete(element);
+  }, 380));
+  return true;
+}
+
 function normalizeTelegramUser(user, authSource) {
   if (!user?.id) {
     return null;
@@ -3438,7 +3504,7 @@ function renderMarket() {
   animateText($("openPrice"), worldCup ? Number(market?.volume || 0) : openPrice, (value) => (
     worldCup ? formatFire(value) : `$${formatPrice(value)}`
   ));
-  animateText($("currentPrice"), currentPrice, (value) => (
+  rollText($("currentPrice"), currentPrice, (value) => (
     worldCup ? `${value.toFixed(1)}%` : `$${formatPrice(value)}`
   ));
   // Brief green/red glow on the live price when it ticks up or down.
@@ -3641,7 +3707,12 @@ function renderMe() {
   document.querySelectorAll("[data-currency-toggle]").forEach((button) => {
     button.classList.toggle("active", normalizeCurrency(button.dataset.currencyToggle) === state.currency);
   });
-  animateText(balanceElement, activeBalance, (value) => formatHeaderCurrencyAmount(value, state.currency));
+  if (rollText(balanceElement, activeBalance, (value) => formatHeaderCurrencyAmount(value, state.currency))) {
+    balanceElement.classList.remove("balance-pop");
+    void balanceElement.offsetWidth;
+    balanceElement.classList.add("balance-pop");
+    triggerBalancePulse(balanceElement);
+  }
 
   const positions = state.positions.filter((position) => (
     position.status === "open" && normalizeCurrency(position.currency) === state.currency
