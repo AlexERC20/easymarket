@@ -33,7 +33,8 @@ EasyMarket is a standalone Render service for a Telegram Mini App prediction-mar
 │   ├── app.js
 │   ├── styles.css
 │   ├── lightning-motion.css
-│   └── lightning-motion.js
+│   ├── lightning-motion.js
+│   └── welcome-motion.js
 └── src/
     ├── config.js
     ├── db.js
@@ -368,6 +369,23 @@ Important nuance:
 - Button stake tiers are read from `data-stake-tier`.
 - Do not reintroduce `data-lm-active-tier` with direct button `box-shadow`; it caused square sticky shadows on stake buttons.
 - Prefer masked internal overlays (`.lm-button-flash`) and sparks rather than external shadows on buttons.
+
+### `public/welcome-motion.js`
+
+Canvas welcome splash played inside the lightning loader overlay.
+
+Responsibilities:
+
+- particle assembly of the bolt logo (targets sampled from the SVG bolt path),
+- lock-in flash with shockwave rings, sparks, screen shake, heavy haptic,
+- idle breathing with micro lightning arcs while data loads,
+- letter-by-letter wordmark reveal (`.lm-welcome-*` classes in lightning-motion.css),
+- exit burst when `hideLightningLoader()` is called.
+
+Important nuance:
+
+- `lightning-motion.js` keeps the old static `.lm-loader-card` as the reduced-motion / error fallback.
+- `hideLightningLoader()` enforces `WELCOME_MIN_SHOW_MS` (2.4s) so a fast load does not cut the story before the flash; do not remove the overlay directly.
 
 ### `public/lightning-motion.css`
 

@@ -1,3 +1,5 @@
+import { createWelcomeMotion } from "./welcome-motion.js?v=20260707-01";
+
 const BUTTON_SELECTOR = [
   ".amount-button",
   ".outcome-button",
@@ -292,6 +294,9 @@ function boltSvg(className = "lm-loader-bolt") {
   `;
 }
 
+let welcomeMotion = null;
+let loaderShownAt = 0;
+
 function ensureLoader() {
   let loader = document.getElementById("lightningLoader");
   if (loader) {
@@ -301,13 +306,25 @@ function ensureLoader() {
   loader = document.createElement("div");
   loader.id = "lightningLoader";
   loader.className = "lm-loader";
-  loader.innerHTML = `
-    <div class="lm-loader-card">
-      ${boltSvg("lm-loader-bolt")}
-      <strong>EASYMARKET</strong>
-    </div>
-  `;
   document.body.appendChild(loader);
+  loaderShownAt = performance.now();
+
+  if (!reducedMotion()) {
+    try {
+      welcomeMotion = createWelcomeMotion(loader);
+    } catch {
+      welcomeMotion = null;
+    }
+  }
+
+  if (!welcomeMotion) {
+    loader.innerHTML = `
+      <div class="lm-loader-card">
+        ${boltSvg("lm-loader-bolt")}
+        <strong>EASYMARKET</strong>
+      </div>
+    `;
+  }
   return loader;
 }
 
@@ -732,14 +749,46 @@ export function showLightningLoader() {
   return loader;
 }
 
+// Держим сплеш минимум до вспышки и появления вордмарка, чтобы историю
+// «частицы -> молния -> имя» не обрывало быстрой загрузкой.
+const WELCOME_MIN_SHOW_MS = 2400;
+
 export function hideLightningLoader() {
   const loader = document.getElementById("lightningLoader");
-  if (!loader) {
+  if (!loader || loader.dataset.lmClosing === "1") {
+    return;
+  }
+  loader.dataset.lmClosing = "1";
+
+  const motion = welcomeMotion;
+  welcomeMotion = null;
+
+  const fadeAway = () => {
+    loader.classList.add("hidden");
+    window.setTimeout(() => {
+      try {
+        motion?.destroy();
+      } catch {
+        // не блокируем удаление оверлея
+      }
+      loader.remove();
+    }, 340);
+  };
+
+  if (!motion) {
+    fadeAway();
     return;
   }
 
-  loader.classList.add("hidden");
-  window.setTimeout(() => loader.remove(), 320);
+  const holdMs = Math.max(0, WELCOME_MIN_SHOW_MS - (performance.now() - loaderShownAt));
+  window.setTimeout(() => {
+    try {
+      motion.startExit();
+    } catch {
+      // разлёт не сыграл — просто гасим оверлей
+    }
+    window.setTimeout(fadeAway, 400);
+  }, holdMs);
 }
 
 export function refreshLightningTargets(root = document) {

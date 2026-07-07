@@ -12,7 +12,7 @@ import {
   showWinCelebration,
   triggerBalancePulse,
   triggerButtonLightning,
-} from "./lightning-motion.js?v=20260703-17";
+} from "./lightning-motion.js?v=20260707-01";
 import {
   initAquarium,
   isAquariumEnabled,
