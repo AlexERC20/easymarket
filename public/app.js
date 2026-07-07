@@ -1095,6 +1095,93 @@ function getMyChartBet(market) {
   };
 }
 
+// Искра пересечения таргет-линии: цена пробивает цель — главный драматический
+// момент ставки, он должен ощущаться (вспышка + волна по линии + хаптика).
+let chartCrossFx = null;
+let chartCrossPrevSide = 0;
+let chartCrossLastAt = 0;
+let chartCrossMarketId = null;
+
+function detectTargetCross(market, openPrice) {
+  const crossSide = state.smoothedPrice >= openPrice ? 1 : -1;
+  if (chartCrossMarketId !== market.id) {
+    // Новый рынок: запоминаем сторону без эффекта, чтобы не мигать на переключении.
+    chartCrossMarketId = market.id;
+    chartCrossPrevSide = crossSide;
+    return;
+  }
+  if (crossSide === chartCrossPrevSide) {
+    return;
+  }
+  chartCrossPrevSide = crossSide;
+  const now = performance.now();
+  // Троттлинг: когда цена "едет по линии", не превращаем график в стробоскоп.
+  if (market.status !== "open" || now - chartCrossLastAt < 1500) {
+    return;
+  }
+  chartCrossLastAt = now;
+  const sparks = [];
+  for (let i = 0; i < 8; i += 1) {
+    sparks.push({
+      vx: (Math.random() - 0.5) * 90,
+      vy: -crossSide * (18 + Math.random() * 70),
+      size: 1.4 + Math.random() * 1.6,
+    });
+  }
+  chartCrossFx = { start: now, dir: crossSide, sparks };
+  triggerHaptic("light");
+}
+
+function drawTargetCrossFx(ctx, latest, openY, width) {
+  if (!chartCrossFx || !latest) {
+    return;
+  }
+  const k = (performance.now() - chartCrossFx.start) / 700;
+  if (k >= 1) {
+    chartCrossFx = null;
+    return;
+  }
+  const rgb = chartCrossFx.dir > 0 ? "25,195,125" : "239,70,111";
+  const cx = latest.x;
+  const easeOut = 1 - (1 - k) ** 3;
+
+  // Волна энергии, разбегающаяся по таргет-линии от точки пробоя.
+  const spread = Math.max(12, easeOut * width * 0.55);
+  const lineGrad = ctx.createLinearGradient(cx - spread, 0, cx + spread, 0);
+  lineGrad.addColorStop(0, `rgba(${rgb},0)`);
+  lineGrad.addColorStop(0.5, `rgba(${rgb},${(0.85 * (1 - k)).toFixed(3)})`);
+  lineGrad.addColorStop(1, `rgba(${rgb},0)`);
+  ctx.strokeStyle = lineGrad;
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(cx - spread, openY);
+  ctx.lineTo(cx + spread, openY);
+  ctx.stroke();
+
+  // Расходящееся кольцо в точке пробоя.
+  const ringK = Math.min(1, k / 0.6);
+  ctx.strokeStyle = `rgba(${rgb},${(0.65 * (1 - ringK)).toFixed(3)})`;
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.arc(cx, openY, 4 + (1 - (1 - ringK) ** 3) * 24, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Сноп искр в сторону пробоя.
+  const t = k * 0.7; // сек с момента пробоя
+  ctx.fillStyle = `rgba(${rgb},${(0.9 * (1 - k)).toFixed(3)})`;
+  for (const spark of chartCrossFx.sparks) {
+    const sx = cx + spark.vx * t;
+    const sy = openY + spark.vy * t;
+    ctx.fillRect(sx - spark.size / 2, sy - spark.size / 2, spark.size, spark.size);
+  }
+
+  // Вспышка на самой точке.
+  ctx.fillStyle = `rgba(255,255,255,${(0.8 * (1 - k)).toFixed(3)})`;
+  ctx.beginPath();
+  ctx.arc(cx, openY, 2.6, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawMarketChartFrame(ts) {
   const canvas = $("marketChart");
   const market = getDisplayMarket();
@@ -1139,6 +1226,9 @@ function drawMarketChartFrame(ts) {
     state.smoothedPrice = currentPrice;
   } else {
     state.smoothedPrice += (currentPrice - state.smoothedPrice) * 0.045;
+  }
+  if (!worldCup && Number.isFinite(openPrice) && openPrice > 0) {
+    detectTargetCross(market, openPrice);
   }
 
   const sourcePoints = getDisplayChartPoints(market)
@@ -1352,6 +1442,8 @@ function drawMarketChartFrame(ts) {
     ctx.shadowBlur = 0;
   }
 
+  drawTargetCrossFx(ctx, latest, openY, width);
+
   // "Your bet" pill in the bottom-left corner when the user holds a position.
   const myBet = getMyChartBet(market);
   if (myBet) {
@@ -1411,7 +1503,7 @@ function drawMarketChartFrame(ts) {
     ctx.restore();
   }
 
-  if ((market.status === "open" && btc) || Math.abs((state.smoothedPrice || 0) - currentPrice) > 0.04 || intro < 1) {
+  if ((market.status === "open" && btc) || Math.abs((state.smoothedPrice || 0) - currentPrice) > 0.04 || intro < 1 || chartCrossFx) {
     state.chartRaf = requestAnimationFrame(drawMarketChartFrame);
     return;
   }
