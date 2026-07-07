@@ -5011,6 +5011,8 @@ async function loadWalletHistory() {
   }
 }
 
+let lastWalletPane = null;
+
 function renderTopupSheet() {
   const isTopupMode = state.topup.mode !== "withdraw";
   const currency = normalizeCurrency(state.topup.currency);
@@ -5018,6 +5020,24 @@ function renderTopupSheet() {
   const isHistoryOpen = Boolean(state.topup.historyOpen);
   const intent = state.topup.intent;
   const hasPendingIntent = isUsdt && intent?.status === "pending";
+
+  // Направленный слайд при переключении Пополнить <-> Вывести.
+  const paneKey = isHistoryOpen ? "history" : isTopupMode ? "topup" : "withdraw";
+  if (
+    lastWalletPane && lastWalletPane !== paneKey
+    && paneKey !== "history" && lastWalletPane !== "history"
+    && !prefersReducedMotion()
+  ) {
+    const slidingPanel = isTopupMode ? $("topupModePanel") : $("withdrawModePanel");
+    if (slidingPanel) {
+      const slideClass = isTopupMode ? "wallet-slide-left" : "wallet-slide-right";
+      slidingPanel.classList.remove("wallet-slide-left", "wallet-slide-right");
+      void slidingPanel.offsetWidth;
+      slidingPanel.classList.add(slideClass);
+      window.setTimeout(() => slidingPanel.classList.remove(slideClass), 400);
+    }
+  }
+  lastWalletPane = paneKey;
   const hasAmount = hasTopupAmountValue(state.topup.amount);
   const amount = hasAmount ? normalizeTopupAmount(state.topup.amount, currency) : "";
   state.topup.amount = amount;
@@ -5045,6 +5065,42 @@ function renderTopupSheet() {
   $("usdtDepositPanel")?.classList.toggle("hidden", !isUsdt || !isTopupMode || !hasPendingIntent);
   $("usdtDepositIntentBox")?.classList.toggle("hidden", !hasPendingIntent);
   $("usdtDepositIntentBox")?.classList.toggle("is-waiting", hasPendingIntent);
+
+  // Степпер депозита: Заявка -> Перевод -> Зачисление.
+  const stepper = $("usdtDepositStepper");
+  if (stepper) {
+    const showStepper = isUsdt && isTopupMode && !isHistoryOpen && Boolean(intent)
+      && (intent.status === "pending" || intent.status === "credited");
+    stepper.classList.toggle("hidden", !showStepper);
+    if (showStepper) {
+      const credited = intent.status === "credited";
+      stepper.querySelectorAll(".usdt-step").forEach((step) => {
+        const stepIndex = Number(step.dataset.step);
+        step.classList.toggle("done", credited || stepIndex === 1);
+        step.classList.toggle("active", !credited && stepIndex === 2);
+      });
+      stepper.querySelectorAll(".usdt-step-line").forEach((line) => {
+        line.classList.toggle("done", credited || line.dataset.line === "1");
+      });
+    }
+  }
+
+  // Пресеты сумм: только на этапе ввода, пока нет активной заявки.
+  const presetsBox = $("topupPresets");
+  if (presetsBox) {
+    const showPresets = isTopupMode && !isHistoryOpen && !hasPendingIntent;
+    presetsBox.classList.toggle("hidden", !showPresets);
+    if (showPresets) {
+      const presets = WALLET_TOPUP_PRESETS[currency] || [];
+      const currentAmount = Number(state.topup.amount || 0);
+      setInnerHtmlIfChanged(presetsBox, presets.map((value) => `
+        <button type="button" data-topup-preset="${value}"
+          class="${currentAmount === value ? "active" : ""}"${state.topup.pending ? " disabled" : ""}>
+          ${currency === "USDT" ? `$${value}` : `${value} ★`}
+        </button>
+      `).join(""));
+    }
+  }
   if ($("usdtDepositExactAmount")) {
     const exactAmountText = hasPendingIntent
       ? `${Number(intent.deposit_amount || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`
@@ -5078,6 +5134,25 @@ function renderTopupSheet() {
     "aria-label",
     depositAddress ? `Скопировать адрес для пополнения ${depositAddress}` : "Скопировать адрес"
   );
+
+  // QR адреса: рисуем один раз на адрес; при любом сбое просто прячем бокс.
+  const qrBox = $("usdtQrBox");
+  if (qrBox) {
+    let qrReady = false;
+    if (hasPendingIntent && depositAddress) {
+      if (qrBox.dataset.qrFor === depositAddress) {
+        qrReady = true;
+      } else if (drawWalletQr($("usdtQrCanvas"), depositAddress)) {
+        qrBox.dataset.qrFor = depositAddress;
+        qrReady = true;
+      } else {
+        qrBox.dataset.qrFor = "";
+      }
+    } else {
+      qrBox.dataset.qrFor = "";
+    }
+    qrBox.classList.toggle("hidden", !qrReady);
+  }
   if ($("walletSheetTitle")) {
     $("walletSheetTitle").textContent = isHistoryOpen
       ? "История кошелька"
@@ -5146,6 +5221,23 @@ function renderTopupSheet() {
     $("withdrawReason").textContent = state.withdrawal.reason || "";
     $("withdrawReason").classList.toggle("hidden", !state.withdrawal.reason);
   }
+  // Живая сводка вывода: сколько спишем и сколько останется.
+  if ($("withdrawSummary")) {
+    const withdrawAmountRaw = String(state.withdrawal.amount || "").replace(",", ".").trim();
+    const withdrawAmount = Number(withdrawAmountRaw);
+    const cashBalance = Number(state.usdtCashBalance || 0);
+    const hasWithdrawAmount = withdrawAmountRaw !== "" && Number.isFinite(withdrawAmount) && withdrawAmount > 0;
+    const overBalance = hasWithdrawAmount && withdrawAmount > cashBalance;
+    const showSummary = !isTopupMode && !isHistoryOpen && hasWithdrawAmount;
+    $("withdrawSummary").classList.toggle("hidden", !showSummary);
+    $("withdrawSummary").classList.toggle("over", overBalance);
+    $("withdrawSummary").textContent = !showSummary
+      ? ""
+      : overBalance
+        ? `Доступно для вывода: ${formatCurrencyAmount(cashBalance, "USDT")} (основной баланс)`
+        : `Спишем ${formatCurrencyAmount(withdrawAmount, "USDT")} · Останется ${formatCurrencyAmount(Math.max(0, cashBalance - withdrawAmount), "USDT")}`;
+  }
+  renderWithdrawAddressCheck();
   if ($("withdrawSubmitBtn")) {
     $("withdrawSubmitBtn").disabled = isHistoryOpen || isTopupMode || state.withdrawal.pending || !state.user;
     $("withdrawSubmitBtn").textContent = state.withdrawal.pending ? "Создаю заявку..." : "Вывести";
@@ -5244,6 +5336,7 @@ async function refreshDepositIntent() {
     if (data.intent?.status === "credited") {
       stopDepositPolling();
       showTopupSuccessAnimation("TOP UP");
+      flyWalletCoinsToBalance("$");
       showToast("USDT зачислены на баланс.");
       await loadMe();
       return;
@@ -5305,6 +5398,237 @@ async function copyWalletField(button, value, successMessage) {
   showToast(copied ? successMessage : "Не получилось скопировать. Скопируй вручную.");
 }
 
+// ===== QR-код адреса депозита =====
+// Самодостаточный генератор под одну задачу: EVM-адрес (42 ASCII-символа).
+// Версия 3 / ECC M вмещает ровно 42 байта — без выбора версии, мульти-блоков
+// и подбора маски (маска 0, формат-константа 0x5412). Если текст не влезает,
+// честно возвращаем null и просто не показываем QR.
+const QR_SIZE = 29;
+const QR_DATA_CODEWORDS = 44;
+const QR_EC_CODEWORDS = 26;
+const QR_EXP = new Array(512);
+const QR_LOG = new Array(256);
+{
+  let x = 1;
+  for (let i = 0; i < 255; i += 1) {
+    QR_EXP[i] = x;
+    QR_LOG[x] = i;
+    x <<= 1;
+    if (x & 0x100) x ^= 0x11d;
+  }
+  for (let i = 255; i < 512; i += 1) QR_EXP[i] = QR_EXP[i - 255];
+}
+
+function qrGeneratorPoly(degree) {
+  let poly = [1];
+  for (let i = 0; i < degree; i += 1) {
+    const next = new Array(poly.length + 1).fill(0);
+    for (let j = 0; j < poly.length; j += 1) {
+      next[j] ^= poly[j];
+      if (poly[j] !== 0) {
+        next[j + 1] ^= QR_EXP[(QR_LOG[poly[j]] + i) % 255];
+      }
+    }
+    poly = next;
+  }
+  return poly;
+}
+
+function qrEcFor(data) {
+  const gen = qrGeneratorPoly(QR_EC_CODEWORDS);
+  const buffer = data.concat(new Array(QR_EC_CODEWORDS).fill(0));
+  for (let i = 0; i < data.length; i += 1) {
+    const factor = buffer[i];
+    if (factor === 0) continue;
+    const logFactor = QR_LOG[factor];
+    for (let j = 0; j < gen.length; j += 1) {
+      if (gen[j] !== 0) {
+        buffer[i + j] ^= QR_EXP[(QR_LOG[gen[j]] + logFactor) % 255];
+      }
+    }
+  }
+  return buffer.slice(data.length);
+}
+
+function qrBuildCodewords(text) {
+  const bytes = Array.from(String(text), (ch) => ch.charCodeAt(0) & 0xff);
+  if (!bytes.length || bytes.length > 42) {
+    return null;
+  }
+  const bits = [];
+  const pushBits = (value, count) => {
+    for (let i = count - 1; i >= 0; i -= 1) bits.push((value >> i) & 1);
+  };
+  pushBits(0b0100, 4); // байтовый режим
+  pushBits(bytes.length, 8);
+  bytes.forEach((b) => pushBits(b, 8));
+  const capacity = QR_DATA_CODEWORDS * 8;
+  pushBits(0, Math.min(4, capacity - bits.length)); // терминатор
+  while (bits.length % 8) bits.push(0);
+  const codewords = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    let value = 0;
+    for (let j = 0; j < 8; j += 1) value = (value << 1) | bits[i + j];
+    codewords.push(value);
+  }
+  const pads = [0xec, 0x11];
+  for (let i = 0; codewords.length < QR_DATA_CODEWORDS; i += 1) {
+    codewords.push(pads[i % 2]);
+  }
+  return codewords.concat(qrEcFor(codewords));
+}
+
+function qrBuildMatrix(text) {
+  const codewords = qrBuildCodewords(text);
+  if (!codewords) {
+    return null;
+  }
+  const n = QR_SIZE;
+  const modules = Array.from({ length: n }, () => new Array(n).fill(false));
+  const reserved = Array.from({ length: n }, () => new Array(n).fill(false));
+  const setFunc = (r, c, value) => {
+    modules[r][c] = value;
+    reserved[r][c] = true;
+  };
+
+  const placeFinder = (top, left) => {
+    for (let r = -1; r <= 7; r += 1) {
+      for (let c = -1; c <= 7; c += 1) {
+        const rr = top + r;
+        const cc = left + c;
+        if (rr < 0 || rr >= n || cc < 0 || cc >= n) continue;
+        const inOuter = r >= 0 && r <= 6 && c >= 0 && c <= 6;
+        const isBorder = r === 0 || r === 6 || c === 0 || c === 6;
+        const isCore = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+        setFunc(rr, cc, inOuter && (isBorder || isCore));
+      }
+    }
+  };
+  placeFinder(0, 0);
+  placeFinder(0, n - 7);
+  placeFinder(n - 7, 0);
+
+  // Выравнивающий узор версии 3 — центр (22, 22).
+  for (let r = -2; r <= 2; r += 1) {
+    for (let c = -2; c <= 2; c += 1) {
+      setFunc(22 + r, 22 + c, Math.max(Math.abs(r), Math.abs(c)) !== 1);
+    }
+  }
+
+  for (let i = 8; i < n - 8; i += 1) {
+    if (!reserved[6][i]) setFunc(6, i, i % 2 === 0);
+    if (!reserved[i][6]) setFunc(i, 6, i % 2 === 0);
+  }
+
+  setFunc(n - 8, 8, true); // тёмный модуль
+
+  // Резерв под формат-биты.
+  for (let i = 0; i < 9; i += 1) {
+    if (!reserved[8][i]) setFunc(8, i, false);
+    if (!reserved[i][8]) setFunc(i, 8, false);
+  }
+  for (let i = 0; i < 8; i += 1) {
+    if (!reserved[8][n - 1 - i]) setFunc(8, n - 1 - i, false);
+    if (!reserved[n - 1 - i][8]) setFunc(n - 1 - i, 8, false);
+  }
+
+  // Данные: змейка парами столбцов справа налево, маска 0 ((r + c) % 2 === 0).
+  const totalBits = codewords.length * 8;
+  let bitIndex = 0;
+  let upward = true;
+  for (let col = n - 1; col > 0; col -= 2) {
+    if (col === 6) col = 5;
+    for (let i = 0; i < n; i += 1) {
+      const r = upward ? n - 1 - i : i;
+      for (const c of [col, col - 1]) {
+        if (reserved[r][c]) continue;
+        const bit = bitIndex < totalBits
+          ? ((codewords[bitIndex >> 3] >> (7 - (bitIndex & 7))) & 1) === 1
+          : false;
+        bitIndex += 1;
+        modules[r][c] = bit !== ((r + c) % 2 === 0);
+      }
+    }
+    upward = !upward;
+  }
+
+  // Формат-биты (ECC M + маска 0): раскладка как в эталонных генераторах.
+  const format = 0x5412;
+  for (let i = 0; i < 15; i += 1) {
+    const bit = ((format >> i) & 1) === 1;
+    if (i < 6) modules[i][8] = bit;
+    else if (i < 8) modules[i + 1][8] = bit;
+    else modules[n - 15 + i][8] = bit;
+    if (i < 8) modules[8][n - 1 - i] = bit;
+    else if (i < 9) modules[8][15 - i - 1 + 1] = bit;
+    else modules[8][15 - i - 1] = bit;
+  }
+  modules[n - 8][8] = true;
+
+  return modules;
+}
+
+function drawWalletQr(canvas, text) {
+  try {
+    const matrix = qrBuildMatrix(text);
+    if (!matrix || !(canvas instanceof HTMLCanvasElement)) {
+      return false;
+    }
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return false;
+    }
+    const quiet = 3;
+    const total = QR_SIZE + quiet * 2;
+    const px = Math.max(2, Math.floor(210 / total));
+    const size = px * total;
+    canvas.width = size;
+    canvas.height = size;
+    ctx.fillStyle = "#f2f6fb";
+    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = "#0a0e14";
+    for (let r = 0; r < QR_SIZE; r += 1) {
+      for (let c = 0; c < QR_SIZE; c += 1) {
+        if (matrix[r][c]) {
+          ctx.fillRect((c + quiet) * px, (r + quiet) * px, px, px);
+        }
+      }
+    }
+    return true;
+  } catch {
+    return false; // QR — украшение; депозитный флоу не должен от него зависеть
+  }
+}
+
+// Быстрые суммы пополнения: одно касание вместо набора.
+const WALLET_TOPUP_PRESETS = { USDT: [15, 50, 100, 500], STAR: [100, 500, 1000, 5000] };
+
+// Живая подсказка валидности адреса вывода (без полного пере-рендера).
+function renderWithdrawAddressCheck() {
+  const label = $("withdrawAddressInput")?.closest("label");
+  const check = $("withdrawAddressCheck");
+  if (!label || !check) {
+    return;
+  }
+  const address = String(state.withdrawal.address || "").trim();
+  const valid = /^0x[a-fA-F0-9]{40}$/.test(address);
+  const invalid = !valid && address.length > 8;
+  label.classList.toggle("addr-valid", valid);
+  label.classList.toggle("addr-invalid", invalid);
+  check.textContent = valid ? "✓" : invalid ? "!" : "";
+}
+
+// Монеты летят из кошелька к балансу в хедере при зачислении депозита.
+function flyWalletCoinsToBalance(glyph = "$") {
+  const source = $("usdtDepositStepper") || $("walletFullBalance");
+  if (!source) {
+    return;
+  }
+  for (let i = 0; i < 3; i += 1) {
+    window.setTimeout(() => flyRewardToBalance(source, glyph), i * 150);
+  }
+}
+
 async function createUsdtDepositIntent() {
   if (!state.user?.telegram_id) {
     triggerHaptic("warning");
@@ -5333,7 +5657,14 @@ async function createUsdtDepositIntent() {
     state.topup.intent = result.intent;
     triggerHaptic("success");
     triggerLightningFlash("success");
-    showToast("Заявка создана. Отправь точную сумму.");
+    // Сразу кладём точную сумму в буфер — одним касанием меньше в кошельке.
+    const exactAmount = result.intent?.deposit_amount != null
+      ? Number(result.intent.deposit_amount).toFixed(2)
+      : "";
+    const amountCopied = exactAmount ? await copyToClipboard(exactAmount) : false;
+    showToast(amountCopied
+      ? `Заявка создана. Сумма ${exactAmount} скопирована — вставь в кошелёк.`
+      : "Заявка создана. Отправь точную сумму.");
     startDepositPolling();
   } catch (error) {
     triggerHaptic("error");
@@ -5401,6 +5732,7 @@ async function checkUsdtDepositIntent() {
     if (state.topup.intent?.status === "credited") {
       stopDepositPolling();
       showTopupSuccessAnimation("TOP UP");
+      flyWalletCoinsToBalance("$");
       showToast("USDT зачислены.");
     } else {
       triggerHaptic("warning");
@@ -6336,6 +6668,27 @@ $("withdrawAmountInput")?.addEventListener("input", () => {
 $("withdrawAddressInput")?.addEventListener("input", () => {
   state.withdrawal.address = $("withdrawAddressInput").value;
   state.withdrawal.reason = "";
+  renderWithdrawAddressCheck();
+});
+
+$("withdrawMaxBtn")?.addEventListener("click", (event) => {
+  event.preventDefault();
+  triggerHaptic("selection");
+  const cash = Math.floor(Number(state.usdtCashBalance || 0) * 100) / 100;
+  state.withdrawal.amount = cash > 0 ? String(cash) : "";
+  state.withdrawal.reason = "";
+  renderTopupSheet();
+});
+
+$("topupPresets")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-topup-preset]");
+  if (!button || button.disabled || state.topup.intent?.status === "pending") {
+    return;
+  }
+  triggerHaptic("selection");
+  state.topup.amount = normalizeTopupAmount(button.dataset.topupPreset, state.topup.currency);
+  state.topup.reason = "";
+  renderTopupSheet();
 });
 
 document.querySelectorAll("[data-withdraw-network]").forEach((button) => {

@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260708-01" />
-    <link rel="stylesheet" href="/lightning-motion.css?v=20260707-01" />
+    <link rel="stylesheet" href="/styles.css?v=20260708-02" />
+    <link rel="stylesheet" href="/lightning-motion.css?v=20260708-01" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -339,11 +339,24 @@
           </div>
           <div class="topup-body">
             <div id="topupModePanel" class="wallet-mode-panel">
+              <div id="usdtDepositStepper" class="usdt-stepper hidden" aria-hidden="true">
+                <div class="usdt-step" data-step="1"><i>1</i><span>Заявка</span></div>
+                <div class="usdt-step-line" data-line="1"></div>
+                <div class="usdt-step" data-step="2"><i>2</i><span>Перевод</span></div>
+                <div class="usdt-step-line" data-line="2"></div>
+                <div class="usdt-step" data-step="3"><i>3</i><span>Зачисление</span></div>
+              </div>
               <label class="topup-custom-amount">
-                <input id="topupCustomAmount" type="number" min="1" max="100000" step="0.01" inputmode="decimal" placeholder="Введи сумму пополнения" />
+                <span class="wallet-field-label">Сумма пополнения</span>
+                <input id="topupCustomAmount" type="number" min="1" max="100000" step="0.01" inputmode="decimal" placeholder="0.00" />
               </label>
+              <div id="topupPresets" class="wallet-presets" role="group" aria-label="Быстрые суммы"></div>
               <p id="topupReason">Зачислим в баланс после оплаты.</p>
               <div id="usdtDepositPanel" class="usdt-deposit-panel hidden">
+                <div id="usdtQrBox" class="usdt-qr-box hidden" aria-hidden="true">
+                  <canvas id="usdtQrCanvas" width="210" height="210"></canvas>
+                  <small>Сканируй из кошелька — адрес подставится сам</small>
+                </div>
                 <button class="usdt-address-card wallet-copyable hidden" data-usdt-address-card="evm" id="usdtAddressCopy" type="button" aria-label="Скопировать адрес">
                   <div>
                     <small id="usdtEvmAddressLabel">Шаг 1 · кошелёк для пополнения</small>
@@ -375,15 +388,20 @@
               <button id="topupBuyBtn" class="trade-confirm" type="button">Купить</button>
             </div>
             <div id="withdrawModePanel" class="wallet-mode-panel hidden">
-              <label class="topup-custom-amount">
-                <input id="withdrawAmountInput" type="number" min="1" max="100000" step="0.01" inputmode="decimal" placeholder="Сумма вывода" />
+              <label class="topup-custom-amount wallet-amount-field">
+                <span class="wallet-field-label">Сумма вывода</span>
+                <input id="withdrawAmountInput" type="number" min="1" max="100000" step="0.01" inputmode="decimal" placeholder="0.00" />
+                <button id="withdrawMaxBtn" class="wallet-max-btn" type="button">MAX</button>
               </label>
-              <label class="topup-custom-amount">
-                <input id="withdrawAddressInput" type="text" inputmode="text" autocomplete="off" placeholder="Кошелек получателя" />
+              <div id="withdrawSummary" class="withdraw-summary hidden"></div>
+              <label class="topup-custom-amount wallet-addr-field">
+                <span class="wallet-field-label">Адрес получателя</span>
+                <input id="withdrawAddressInput" type="text" inputmode="text" autocomplete="off" placeholder="0x…" />
+                <span id="withdrawAddressCheck" class="wallet-addr-check" aria-hidden="true"></span>
               </label>
               <div class="withdraw-network-toggle" role="tablist" aria-label="Сеть вывода">
-                <button class="active" data-withdraw-network="BSC" type="button">BEP20</button>
-                <button data-withdraw-network="ETH" type="button">ERC20</button>
+                <button class="active" data-withdraw-network="BSC" type="button"><strong>BEP20</strong><small>быстро и дёшево · советуем</small></button>
+                <button data-withdraw-network="ETH" type="button"><strong>ERC20</strong><small>газ дороже</small></button>
               </div>
               <p id="withdrawReason"></p>
               <button id="withdrawSubmitBtn" class="trade-confirm" type="button">Вывести</button>
@@ -804,6 +822,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260708-01" type="module"></script>
+    <script src="/app.js?v=20260708-02" type="module"></script>
   </body>
 </html>

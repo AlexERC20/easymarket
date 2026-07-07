@@ -847,33 +847,49 @@
   100% { transform: translateY(360%); opacity: 0; }
 }
 
+/* Радар: вращающийся луч сканирует сеть, цель-«транзакция» вспыхивает. */
 .usdt-scan-orb {
   position: relative;
   flex: 0 0 auto;
-  width: 10px;
-  height: 10px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  background: var(--lm-cyan);
-  box-shadow: 0 0 10px rgba(53, 246, 255, 0.9);
+  border: 1px solid rgba(53, 246, 255, 0.4);
+  background: radial-gradient(circle at center, rgba(53, 246, 255, 0.16), rgba(53, 246, 255, 0.03) 72%);
+  box-shadow: 0 0 10px rgba(53, 246, 255, 0.25);
+  overflow: hidden;
 }
 
-.usdt-scan-orb::before,
+.usdt-scan-orb::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(183, 255, 77, 0.8), rgba(53, 246, 255, 0.22) 70deg, transparent 120deg);
+  animation: lmRadarSweep 1.9s linear infinite;
+}
+
 .usdt-scan-orb::after {
   content: "";
   position: absolute;
-  inset: 0;
+  left: 62%;
+  top: 26%;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
-  border: 1.5px solid rgba(53, 246, 255, 0.7);
-  animation: lmScanRing 1.9s var(--lm-ease) infinite;
+  background: #b7ff4d;
+  box-shadow: 0 0 8px rgba(183, 255, 77, 0.9);
+  animation: lmRadarBlip 1.9s ease-in-out infinite;
 }
 
-.usdt-scan-orb::after {
-  animation-delay: -0.95s;
+@keyframes lmRadarSweep {
+  to { transform: rotate(360deg); }
 }
 
-@keyframes lmScanRing {
-  0% { transform: scale(1); opacity: 0.85; }
-  100% { transform: scale(3.6); opacity: 0; }
+@keyframes lmRadarBlip {
+  0%, 16% { opacity: 0; }
+  26%, 55% { opacity: 1; }
+  72%, 100% { opacity: 0; }
 }
 
 .usdt-wait-text::after {
