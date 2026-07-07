@@ -1857,9 +1857,17 @@ function rollText(element, nextValue, formatter) {
     element.textContent = nextText;
     return false;
   }
+  // Прокрутка ещё идёт: DOM не трогаем, иначе каждый повторный рендер
+  // (рынок рендерится из нескольких поллеров) обрубает анимацию со снэпом.
+  // Свежее значение допишет cleanup по завершении текущей прокрутки.
+  if (textRollCleanups.has(element)) {
+    return false;
+  }
   const prevText = formatter(previousValue);
   if (prevText === nextText) {
-    element.textContent = nextText;
+    if (element.textContent !== nextText) {
+      element.textContent = nextText;
+    }
     return false;
   }
 

@@ -1051,6 +1051,8 @@ h2 {
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Моноширинные цифры: число не гуляет по ширине во время прокрутки барабана. */
+  font-variant-numeric: tabular-nums;
 }
 
 .price-board div:nth-child(2) strong,
