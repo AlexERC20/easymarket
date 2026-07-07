@@ -4035,8 +4035,10 @@ function renderActivity() {
     const action = trade.action || "BUY";
     const marketLabel = getActivityMarketLabel(trade);
     const isFresh = state.freshActivityIds.has(trade.id);
+    // Крупная ставка получает золотую строку с глинтом — магнит для глаз в ленте.
+    const isBig = Number(trade.amount || 0) >= (normalizeCurrency(trade.currency) === "STAR" ? 500 : 50);
     return `
-      <div class="activity-row ${isFresh ? "fresh" : ""}">
+      <div class="activity-row ${isFresh ? "fresh" : ""}${isBig ? " big-bet" : ""}">
         <div>
           <strong class="side-${trade.side}">${escapeHtml(name)} ${actionLabel(action)} ${getActivitySideLabel(trade)}</strong>
           <br />
