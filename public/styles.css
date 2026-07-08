@@ -3099,6 +3099,21 @@ code {
 }
 
 /* ===== Кошелёк: лейблы полей, пресеты, степпер, QR, сводка вывода ===== */
+
+/* У этих блоков собственный display объявлен позже глобального .hidden и
+   перебивает его — заставляем .hidden побеждать. */
+.topup-custom-amount.hidden,
+.wallet-presets.hidden,
+.usdt-stepper.hidden,
+.usdt-qr-box.hidden,
+.wallet-balance-line.hidden,
+.wallet-mode-toggle.hidden,
+.wallet-currency-toggle.hidden,
+.withdraw-summary.hidden,
+.usdt-deposit-panel.hidden,
+.wallet-mode-panel .trade-confirm.hidden {
+  display: none;
+}
 .wallet-field-label {
   font-size: 11px;
   font-weight: 850;
@@ -3310,11 +3325,6 @@ code {
   font-weight: 850;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-}
-
-.usdt-cents-note {
-  color: rgba(183, 255, 77, 0.75) !important;
-  font-size: 11px !important;
 }
 
 .usdt-deposit-panel button.usdt-address-mini {
