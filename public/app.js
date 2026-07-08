@@ -5114,7 +5114,7 @@ function renderTopupSheet() {
   }
   if ($("usdtDepositNetworkHint")) {
     $("usdtDepositNetworkHint").textContent = hasPendingIntent
-      ? "BEP20 или ERC20 · зачислится автоматически"
+      ? "Сети: BEP20 · ERC20"
       : "";
   }
   if ($("usdtCancelIntentBtn")) {
