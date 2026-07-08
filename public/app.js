@@ -5057,7 +5057,8 @@ function renderTopupSheet() {
   $("walletModeTopupBtn")?.classList.toggle("active", !isHistoryOpen && isTopupMode);
   $("walletModeWithdrawBtn")?.classList.toggle("active", !isHistoryOpen && !isTopupMode);
   $("walletHistoryBtn")?.classList.toggle("active", isHistoryOpen);
-  document.querySelector(".wallet-mode-toggle")?.classList.toggle("hidden", isHistoryOpen);
+  // На шаге 2 тоггл Пополнить/Вывести не нужен — только детали заявки.
+  document.querySelector(".wallet-mode-toggle")?.classList.toggle("hidden", isHistoryOpen || (hasPendingIntent && isTopupMode));
   document.querySelector(".wallet-currency-toggle")?.classList.toggle("hidden", isHistoryOpen || !isTopupMode || hasPendingIntent);
   document.querySelectorAll("[data-wallet-currency]").forEach((button) => {
     button.classList.toggle("active", normalizeCurrency(button.dataset.walletCurrency) === currency);
@@ -5263,7 +5264,11 @@ function renderTopupSheet() {
 }
 
 function openTopupSheet(amount, reason = "", mode = "topup", currencyOverride = null, afterAction = null) {
-  const targetCurrency = normalizeCurrency(currencyOverride || (mode === "withdraw" ? "USDT" : state.currency));
+  let targetCurrency = normalizeCurrency(currencyOverride || (mode === "withdraw" ? "USDT" : state.currency));
+  // Живая заявка важнее валюты по умолчанию: открываем сразу её детали.
+  if (mode !== "withdraw" && state.topup.intent?.status === "pending") {
+    targetCurrency = "USDT";
+  }
   state.topup.amount = hasTopupAmountValue(amount) ? normalizeTopupAmount(amount, targetCurrency) : "";
   state.topup.reason = reason;
   state.topup.mode = mode === "withdraw" ? "withdraw" : "topup";
@@ -5348,6 +5353,7 @@ async function refreshDepositIntent() {
   try {
     const data = await api(`/api/usdt/deposits/intents/${intent.id}?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
     state.topup.intent = data.intent;
+    saveStoredUsdtIntent(data.intent);
     renderTopupSheet();
     if (data.intent?.status === "credited") {
       stopDepositPolling();
@@ -5362,7 +5368,15 @@ async function refreshDepositIntent() {
       triggerHaptic("warning");
       showToast("Заявка истекла. Создай новую.");
     }
-  } catch {
+  } catch (error) {
+    if (error?.message === "deposit_intent_not_found") {
+      // Сервер заявку не знает (удалена/чужая) — не поллим её вечно.
+      state.topup.intent = null;
+      saveStoredUsdtIntent(null);
+      stopDepositPolling();
+      renderTopupSheet();
+      return;
+    }
     // Keep polling. Short RPC/API hiccups should not break the visible intent.
   }
 }
@@ -5645,6 +5659,60 @@ function flyWalletCoinsToBalance(glyph = "$") {
   }
 }
 
+// ===== Персистентность депозитной заявки =====
+// Заявка не должна пропадать при перезаходе: держим её в localStorage и при
+// старте сверяем с сервером (GET intent). Пока сервер не сказал
+// credited/expired — карточка заявки живёт.
+const USDT_INTENT_KEY = "easymarket_usdt_intent";
+
+function saveStoredUsdtIntent(intent) {
+  try {
+    if (intent?.id && intent.status === "pending") {
+      window.localStorage?.setItem(USDT_INTENT_KEY, JSON.stringify({
+        telegram_id: state.user?.telegram_id || null,
+        intent,
+      }));
+    } else {
+      window.localStorage?.removeItem(USDT_INTENT_KEY);
+    }
+  } catch {
+    // приватный режим / запрет storage — заявка останется до перезагрузки
+  }
+}
+
+function restoreUsdtIntent() {
+  try {
+    const raw = window.localStorage?.getItem(USDT_INTENT_KEY);
+    if (!raw) {
+      return;
+    }
+    const saved = JSON.parse(raw);
+    if (!saved?.intent?.id || saved.intent.status !== "pending") {
+      window.localStorage?.removeItem(USDT_INTENT_KEY);
+      return;
+    }
+    if (saved.telegram_id && state.user?.telegram_id
+      && String(saved.telegram_id) !== String(state.user.telegram_id)) {
+      window.localStorage?.removeItem(USDT_INTENT_KEY);
+      return;
+    }
+    if (state.topup.intent?.status === "pending") {
+      return; // уже есть живая заявка в состоянии
+    }
+    state.topup.intent = saved.intent;
+    // Поллинг сразу делает GET и приводит статус к серверной правде
+    // (credited -> успех и очистка, expired -> тост и очистка).
+    startDepositPolling();
+  } catch {
+    // повреждённая запись — просто забываем её
+    try {
+      window.localStorage?.removeItem(USDT_INTENT_KEY);
+    } catch {
+      // ignore
+    }
+  }
+}
+
 async function createUsdtDepositIntent() {
   if (!state.user?.telegram_id) {
     triggerHaptic("warning");
@@ -5671,6 +5739,7 @@ async function createUsdtDepositIntent() {
       }),
     });
     state.topup.intent = result.intent;
+    saveStoredUsdtIntent(result.intent);
     triggerHaptic("success");
     triggerLightningFlash("success");
     // Сразу кладём точную сумму в буфер — одним касанием меньше в кошельке.
@@ -5698,6 +5767,7 @@ async function cancelUsdtDepositIntent() {
   const intent = state.topup.intent;
   if (!intent?.id || !state.user?.telegram_id || intent.status !== "pending") {
     state.topup.intent = null;
+    saveStoredUsdtIntent(null);
     stopDepositPolling();
     renderTopupSheet();
     return;
@@ -5713,6 +5783,7 @@ async function cancelUsdtDepositIntent() {
       }),
     });
     state.topup.intent = null;
+    saveStoredUsdtIntent(null);
     stopDepositPolling();
     triggerHaptic("success");
     showToast("Заявка отменена.");
@@ -5743,6 +5814,7 @@ async function checkUsdtDepositIntent() {
       }),
     });
     state.topup.intent = result.intent || state.topup.intent;
+    saveStoredUsdtIntent(state.topup.intent);
     await loadWalletHistory().catch(() => undefined);
     await loadMe().catch(() => undefined);
     if (state.topup.intent?.status === "credited") {
@@ -7835,6 +7907,7 @@ loadPublicConfig()
     if (!authorized) {
       return null;
     }
+    restoreUsdtIntent(); // живая депозитная заявка переживает перезаход
     return refreshAll()
       .then(() => handleClanLaunchLink().catch(() => showToast("Клан по ссылке не найден.")))
       .then(() => {
