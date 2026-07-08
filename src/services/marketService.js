@@ -24,6 +24,30 @@ const CURRENCIES = new Set(["STAR", "USDT"]);
 const WORLD_CUP_SYNC_INTERVAL_MS = 90_000;
 const TOP_MARKET_SYNC_INTERVAL_MS = 10 * 60_000;
 const TOP_MARKET_LIMIT = 20;
+const TOP_MARKET_FETCH_LIMIT = 250;
+const TOP_MARKET_BLOCKED_PATTERN = new RegExp([
+  "jesus",
+  "christ",
+  "messiah",
+  "pope",
+  "catholic",
+  "religion",
+  "world cup",
+  "fifa",
+  "cry at the",
+  "presidential nomination",
+  "2028 (us )?presidential",
+  "democratic nomination",
+  "republican nomination",
+  "win the 2028",
+  "president in 2028",
+  "leader out before",
+  "next leader out",
+  "no listed leader",
+  "count binface",
+  "clacton by-election",
+  "next prime minister of ethiopia",
+].join("|"), "i");
 
 const BTC_MARKET_DEFS = [
   { key: "5M", symbol: MARKET_SYMBOL, label: "5m", title: "BTC Up or Down 5m", durationMinutes: null },
@@ -1028,6 +1052,7 @@ function isExcludedTopMarket(market) {
     text.includes(WORLD_CUP_EVENT_SLUG)
     || text.includes("world cup winner")
     || text.includes("2026 fifa world cup")
+    || TOP_MARKET_BLOCKED_PATTERN.test(text)
   ) {
     return true;
   }
@@ -1075,14 +1100,21 @@ function normalizeTopFeedMarket(market) {
 
   const yesPrice = clamp(rawYesPrice, MIN_PRICE, MAX_PRICE);
   const icon = market.icon || market.image || event?.icon || event?.image || "";
+  const volume24h = toNumber(market.volume24hrClob ?? market.volume24hr);
+  const volume1w = toNumber(market.volume1wkClob ?? market.volume1wk);
+  const liquidity = toNumber(market.liquidityNum ?? market.liquidity ?? config.marketLiquidity);
+  const activityScore = volume24h * 3 + volume1w * 0.7 + liquidity * 0.08;
   return {
     polymarketId: String(market.id || market.conditionId || market.slug || title),
     slug: market.slug || "",
     title,
     icon,
     yesPrice,
-    volume: toNumber(market.volumeNum ?? market.volume),
-    liquidity: toNumber(market.liquidityNum ?? market.liquidity ?? config.marketLiquidity),
+    volume: volume24h || toNumber(market.volumeNum ?? market.volume),
+    volume24h,
+    volume1w,
+    liquidity,
+    activityScore,
     endTime,
   };
 }
@@ -1091,7 +1123,7 @@ async function fetchTopMarketsFromPolymarket() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 6000);
   try {
-    const url = "https://gamma-api.polymarket.com/markets?active=true&closed=false&archived=false&limit=150&order=volumeNum&ascending=false";
+    const url = `https://gamma-api.polymarket.com/markets?active=true&closed=false&archived=false&limit=${TOP_MARKET_FETCH_LIMIT}&order=volume24hr&ascending=false`;
     const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) {
       throw new Error(`polymarket_${response.status}`);
@@ -1111,11 +1143,10 @@ async function fetchTopMarketsFromPolymarket() {
       }
       seen.add(key);
       markets.push(market);
-      if (markets.length >= TOP_MARKET_LIMIT) {
-        break;
-      }
     }
-    return markets;
+    return markets
+      .sort((a, b) => toNumber(b.activityScore) - toNumber(a.activityScore))
+      .slice(0, TOP_MARKET_LIMIT);
   } finally {
     clearTimeout(timeout);
   }
