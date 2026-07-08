@@ -569,6 +569,30 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_market_comments_market_created
       ON market_comments(market_id, created_at DESC);
 
+    -- Стрик входа «Заряд молнии»: дни подряд + бесплатная заморозка раз в неделю.
+    CREATE TABLE IF NOT EXISTS user_streaks (
+      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      current_streak INT NOT NULL DEFAULT 0,
+      best_streak INT NOT NULL DEFAULT 0,
+      last_day_key TEXT,
+      freeze_week_key TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Клиентские события для дейликов (кормление рыбок, просмотры рынков, сторис).
+    CREATE TABLE IF NOT EXISTS user_task_events (
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      day_key TEXT NOT NULL,
+      event_key TEXT NOT NULL,
+      count INT NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, day_key, event_key)
+    );
+
+    -- Счастливый раунд x2: флаг на рынке, бонус начисляется при резолве.
+    ALTER TABLE markets
+      ADD COLUMN IF NOT EXISTS is_lucky BOOLEAN NOT NULL DEFAULT false;
+
 
     CREATE TABLE IF NOT EXISTS price_ticks (
       id BIGSERIAL PRIMARY KEY,

@@ -13,10 +13,13 @@ import {
   addMarketComment,
   buyOutcome,
   cancelLimitOrder,
+  checkinStreak,
   claimDailyTask,
   claimLossRefundWithStars,
   claimShareTask,
   completeVerifiedTask,
+  getEngagementState,
+  ingestTaskEvent,
   createClan,
   createBtc5mMarket,
   createLimitOrder,
@@ -127,6 +130,8 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "invalid_sell_shares",
     "invalid_task",
     "task_not_ready",
+    "task_not_in_rotation",
+    "invalid_task_event",
     "comment_required",
     "insufficient_shares",
     "invalid_market_price",
@@ -940,6 +945,47 @@ app.post("/api/tasks/claim", async (req, res) => {
       first_name: req.body?.first_name,
       task_key: taskKey,
       source: "mini_app_task",
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+// Стрик «Заряд молнии»: отметка входа за сегодня (+лутбокс на 7-й день).
+app.post("/api/streak/checkin", async (req, res) => {
+  try {
+    const result = await checkinStreak({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+// Клиентские события прогресса дейликов (кормление рыбок, просмотры, сторис).
+app.post("/api/tasks/event", async (req, res) => {
+  try {
+    const result = await ingestTaskEvent({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      event_key: req.body?.event_key ?? req.body?.eventKey,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+// Состояние заданий дня: ротация 3 дейликов, лестница присутствия, разовые, стрик.
+app.get("/api/tasks/state", async (req, res) => {
+  try {
+    const result = await getEngagementState({
+      telegram_id: req.query?.telegram_id,
     });
     res.status(200).json(result);
   } catch (error) {

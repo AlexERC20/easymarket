@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260708-07" />
+    <link rel="stylesheet" href="/styles.css?v=20260708-08" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260708-01" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -155,94 +155,53 @@
             <button id="tasksTabStats" type="button" data-task-tab="stats">Моя статистика</button>
           </div>
           <div class="task-list">
+            <div class="streak-card" id="streakCard">
+              <div class="streak-bolt" id="streakBolt" aria-hidden="true"></div>
+              <div class="streak-info">
+                <strong>Заряд молнии</strong>
+                <small id="streakSubtitle">Заходи каждый день — на 7-й лутбокс</small>
+                <div class="streak-days" id="streakDays" aria-hidden="true"></div>
+              </div>
+              <div class="streak-count" id="streakCount"><b>0</b><span>дней</span></div>
+            </div>
+
             <div class="daily-progress" id="dailyProgressCard">
               <div class="daily-progress-top">
                 <span>Дейлики сегодня</span>
-                <b><span id="dailyProgressCount">0/7</span> · +<span id="dailyProgressSum">0</span></b>
+                <b><span id="dailyProgressCount">0/6</span> · +<span id="dailyProgressSum">0</span></b>
               </div>
               <div class="daily-progress-track"><span id="dailyProgressBar"></span></div>
             </div>
 
-            <p class="task-section">Сегодня</p>
-            <div class="task-item">
-              <span class="task-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3.5v3M16 3.5v3M8.8 14.9l2 2 3.6-4"/></svg></span>
-              <div class="task-body">
-                <strong>Ежедневный вход</strong>
-                <small>5 минут в приложении</small>
+            <div class="presence-ladder" id="presenceLadder">
+              <div class="presence-ladder-top">
+                <strong>Время в игре сегодня</strong>
+                <span id="presenceLadderTime">0 мин</span>
               </div>
-              <div class="task-act">
-                <span class="task-reward">+<span id="dailyPresenceTaskReward">50</span></span>
-                <button id="taskDailyPresenceBtn" class="task-button" type="button">Таймер</button>
-              </div>
-            </div>
-            <div class="task-item">
-              <span class="task-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.3"/><path d="M12 1.8v2.6M12 19.6v2.6M1.8 12h2.6M19.6 12h2.6"/></svg></span>
-              <div class="task-body">
-                <strong>Первая ставка дня</strong>
-                <small>Поставь 1 ставку</small>
-              </div>
-              <div class="task-act">
-                <span class="task-reward">+<span id="dailyBetTaskReward">50</span></span>
-                <button class="task-button" data-daily-task="daily_bet" type="button">Забрать</button>
-              </div>
-            </div>
-            <div class="task-item">
-              <span class="task-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M9.8 7.8v8.4M12.2 7.6v.9M12.2 15.5v.9M9.6 8.3h4.1c1.1 0 2 .7 2 1.7s-.9 1.7-2 1.7H9.6M9.6 11.7h4.4c1.2 0 2.1.8 2.1 1.8s-.9 1.8-2.1 1.8H9.6"/></svg></span>
-              <div class="task-body">
-                <strong>Прогноз по BTC</strong>
-                <small>1 прогноз в BTC-маркете</small>
-              </div>
-              <div class="task-act">
-                <span class="task-reward">+<span id="btcPredictionTaskReward">50</span></span>
-                <button class="task-button" data-daily-task="daily_btc_prediction" type="button">Забрать</button>
-              </div>
-            </div>
-            <div class="task-item">
-              <span class="task-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 7l3.3 2.4-1.25 3.85h-4.1L8.65 9.4 12 7z"/><path d="M12 4.2v2.8M6.4 10.3l2.25.9M17.6 10.3l-2.25.9M9.85 13.25 8.3 15.6M14.15 13.25l1.55 2.35"/></svg></span>
-              <div class="task-body">
-                <strong>Прогноз на футбол</strong>
-                <small>1 футбольный прогноз</small>
-              </div>
-              <div class="task-act">
-                <span class="task-reward">+<span id="footballPredictionTaskReward">50</span></span>
-                <button class="task-button" data-daily-task="daily_football_prediction" type="button">Забрать</button>
-              </div>
-            </div>
-            <div class="task-item">
-              <span class="task-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20.5h16M7 20.5V14M12 20.5V8.5M17 20.5v-9.5"/></svg></span>
-              <div class="task-body">
-                <strong>5 прогнозов BTC</strong>
-                <small>Пять BTC-прогнозов за день</small>
-              </div>
-              <div class="task-act">
-                <span class="task-reward">+<span id="btc5PredictionsTaskReward">300</span></span>
-                <button class="task-button" data-daily-task="daily_btc_5_predictions" type="button">Забрать</button>
-              </div>
-            </div>
-            <div class="task-item">
-              <span class="task-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 4.5h9v3.4a4.5 4.5 0 0 1-9 0V4.5z"/><path d="M7.5 5.6H5.2v1.1a2.6 2.6 0 0 0 2.7 2.6M16.5 5.6h2.3v1.1a2.6 2.6 0 0 1-2.7 2.6M12 12.4V16M9 19.5h6M9.9 19.5l.5-3.5h3.2l.5 3.5"/></svg></span>
-              <div class="task-body">
-                <strong>Выиграй прогноз</strong>
-                <small>Первая победа дня</small>
-              </div>
-              <div class="task-act">
-                <span class="task-reward">+<span id="win1TaskReward">50</span></span>
-                <button class="task-button" data-daily-task="daily_win_1" type="button">Забрать</button>
-              </div>
-            </div>
-            <div class="task-item">
-              <span class="task-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5c.8 2.8-2.6 3.9-2.6 7a2.6 2.6 0 0 0 5.2 0c0-.7.35-1.25.35-1.25.95 1 1.65 2.4 1.65 3.9a4.6 4.6 0 0 1-9.2 0c0-3.65 3.4-5.25 4.6-9.65z"/></svg></span>
-              <div class="task-body">
-                <strong>5 побед подряд</strong>
-                <small>Серия из пяти побед</small>
-              </div>
-              <div class="task-act">
-                <span class="task-reward">+<span id="winStreak5TaskReward">300</span></span>
-                <button class="task-button" data-daily-task="daily_win_streak_5" type="button">Забрать</button>
+              <div class="presence-ladder-track"><span id="presenceLadderBar"></span></div>
+              <div class="presence-ladder-steps">
+                <button class="presence-step" data-presence-key="daily_presence" type="button"><b>5 мин</b><span>+<i id="dailyPresenceTaskReward">50</i></span></button>
+                <button class="presence-step" data-presence-key="presence_15" type="button"><b>15 мин</b><span>+75</span></button>
+                <button class="presence-step" data-presence-key="presence_30" type="button"><b>30 мин</b><span>+200</span></button>
               </div>
             </div>
 
+            <p class="task-section">Дейлики дня · новые в полночь</p>
+            <div id="dailyRotationList" class="daily-rotation">
+              <p class="muted">Загружаю задания…</p>
+            </div>
             <p class="task-section">Социальные</p>
+            <div class="task-item">
+              <span class="task-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M16.5 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M3.8 20.2v-1.4c0-3 1.8-5.2 3.7-5.2s3.7 2.2 3.7 5.2v1.4"/><path d="M12.8 20.2v-1.4c0-3 1.8-5.2 3.7-5.2s3.7 2.2 3.7 5.2v1.4"/></svg></span>
+              <div class="task-body">
+                <strong>Вступи в клан</strong>
+                <small>Найди свою команду в squad wars</small>
+              </div>
+              <div class="task-act">
+                <span class="task-reward">+200</span>
+                <button id="joinClanTaskBtn" class="task-button" type="button">Вступить</button>
+              </div>
+            </div>
             <div class="task-item info">
               <span class="task-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-8l-4 3.2V16.5H5A1.5 1.5 0 0 1 3.5 15V7A1.5 1.5 0 0 1 5 5.5z"/><path d="M7.5 9.5h9M7.5 12.5h6"/></svg></span>
               <div class="task-body">
@@ -824,6 +783,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260708-08" type="module"></script>
+    <script src="/app.js?v=20260708-09" type="module"></script>
   </body>
 </html>

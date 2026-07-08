@@ -107,6 +107,14 @@ export function setAquariumShakeFeeder(fn) {
   feedProvider = typeof fn === "function" ? fn : null;
 }
 
+// Эксклюзив за 30 дней стрика: в стае гарантированно живёт золотая рыбка.
+let goldenFishUnlocked = false;
+const GOLDEN_FISH_PALETTE = { body: "#ffd24d", belly: "#fff3c2", fin: "#ffb347" };
+
+export function setAquariumGoldenFish(enabled) {
+  goldenFishUnlocked = Boolean(enabled);
+}
+
 let waterGrad = null;
 let waterGradH = 0;
 // Предрендеренные спрайты света и свечения корма: рисуются один раз,
@@ -855,8 +863,12 @@ function summonFish() {
   }
   const count = Math.round(rand(FISH_MIN, FISH_MAX));
   for (let i = 0; i < count; i += 1) {
-    const palette = FISH_PALETTES[Math.floor(Math.random() * FISH_PALETTES.length)];
-    const species = pickSpecies();
+    // Первая рыба — золотая вуалевая, если открыт 30-дневный стрик.
+    const isGolden = goldenFishUnlocked && i === 0;
+    const palette = isGolden
+      ? GOLDEN_FISH_PALETTE
+      : FISH_PALETTES[Math.floor(Math.random() * FISH_PALETTES.length)];
+    const species = isGolden ? FISH_SPECIES[FISH_SPECIES.length - 1] : pickSpecies();
     const size = rand(species.size[0], species.size[1]);
     const fromLeft = Math.random() > 0.5;
     fish.push({

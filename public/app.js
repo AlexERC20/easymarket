@@ -18,9 +18,10 @@ import {
   isAquariumEnabled,
   primeAquarium,
   setAquariumEnabled,
+  setAquariumGoldenFish,
   setAquariumRuntimeAllowed,
   setAquariumShakeFeeder,
-} from "./aquarium.js?v=20260707-02";
+} from "./aquarium.js?v=20260708-01";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -230,10 +231,13 @@ const state = {
     stars_invoice_enabled: false,
   },
   presence: {
-    startedAt: null,
-    claimed: false,
+    activeMs: 0,
+    lastInteractionAt: Date.now(),
+    claimed: {},
     pending: false,
   },
+  engagement: null, // ротация дейликов + лестница + разовые (GET /api/tasks/state)
+  streak: null, // «Заряд молнии» (POST /api/streak/checkin)
   chartRaf: null,
   smoothedPrice: null,
   chartYMin: null,
@@ -271,6 +275,7 @@ setAquariumShakeFeeder(() => {
   if (!market || !shouldRunAquariumForMarket(market)) {
     return [];
   }
+  postTaskEvent("feed_fish"); // дейлик «Покорми рыбок»
   return buildAquariumFoodForMarket(market);
 });
 
@@ -1318,6 +1323,23 @@ function drawMarketChartFrame(ts) {
     ctx.stroke();
   }
 
+  // Счастливый раунд: заметная пилюля «⚡ x2» — выигрыш этого раунда удвоен.
+  if (market.is_lucky && market.status === "open") {
+    const luckyLabel = "⚡ ВЫИГРЫШ X2";
+    ctx.font = `${Math.max(11, width * 0.028)}px Inter, system-ui, sans-serif`;
+    const luckyWidth = ctx.measureText(luckyLabel).width + 22;
+    ctx.fillStyle = "rgba(183, 255, 77, 0.16)";
+    ctx.strokeStyle = "rgba(183, 255, 77, 0.55)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    roundedRectPath(ctx, left, top, luckyWidth, 26, 13);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#b7ff4d";
+    ctx.textBaseline = "middle";
+    ctx.fillText(luckyLabel, left + 11, top + 14);
+  }
+
   const openY = scaleY(openPrice);
   ctx.setLineDash([8, 9]);
   ctx.strokeStyle = "rgba(255,255,255,0.24)";
@@ -2052,7 +2074,6 @@ function renderTaskRewards() {
   const ref = Math.round(Number(state.publicConfig.referral_bonus_fire || 500));
   const refUsdt = Math.round(Number(state.publicConfig.referral_bet_bonus_usdt || 30));
   const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 50));
-  const dailyBet = Math.round(Number(state.publicConfig.task_daily_bet_fire || 50));
   if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
   if ($("channelTaskReward")) $("channelTaskReward").textContent = formatFire(sub);
   if ($("chatTaskReward")) $("chatTaskReward").textContent = formatFire(sub);
@@ -2060,13 +2081,6 @@ function renderTaskRewards() {
   if ($("refTaskReward")) $("refTaskReward").textContent = formatFire(ref);
   if ($("refTaskUsdtReward")) $("refTaskUsdtReward").textContent = formatFire(refUsdt);
   if ($("dailyPresenceTaskReward")) $("dailyPresenceTaskReward").textContent = formatFire(dailyPresence);
-  if ($("dailyBetTaskReward")) $("dailyBetTaskReward").textContent = formatFire(dailyBet);
-  // Fixed daily rewards come from one source (also drives the progress sum).
-  if ($("btcPredictionTaskReward")) $("btcPredictionTaskReward").textContent = formatFire(DAILY_TASK_FIXED_REWARD.daily_btc_prediction);
-  if ($("footballPredictionTaskReward")) $("footballPredictionTaskReward").textContent = formatFire(DAILY_TASK_FIXED_REWARD.daily_football_prediction);
-  if ($("btc5PredictionsTaskReward")) $("btc5PredictionsTaskReward").textContent = formatFire(DAILY_TASK_FIXED_REWARD.daily_btc_5_predictions);
-  if ($("win1TaskReward")) $("win1TaskReward").textContent = formatFire(DAILY_TASK_FIXED_REWARD.daily_win_1);
-  if ($("winStreak5TaskReward")) $("winStreak5TaskReward").textContent = formatFire(DAILY_TASK_FIXED_REWARD.daily_win_streak_5);
   renderSoundToggle();
   renderAquariumToggle();
   renderTaskSettings();
@@ -2134,24 +2148,16 @@ function markDailyTaskClaimed(taskKey) {
   renderTaskButtonStates();
 }
 
-// Daily tasks that count toward the "дейлики сегодня" progress header, with the
-// reward each one grants (presence/bet come from config, the rest are fixed).
-const DAILY_TASK_KEYS = [
-  "daily_presence",
-  "daily_bet",
-  "daily_btc_prediction",
-  "daily_football_prediction",
-  "daily_btc_5_predictions",
-  "daily_win_1",
-  "daily_win_streak_5",
+// Лестница присутствия: активные минуты за день -> три чекпоинта.
+const PRESENCE_LADDER = [
+  { key: "daily_presence", minutes: 5 },
+  { key: "presence_15", minutes: 15 },
+  { key: "presence_30", minutes: 30 },
 ];
-const DAILY_TASK_FIXED_REWARD = {
-  daily_btc_prediction: 50,
-  daily_football_prediction: 50,
-  daily_btc_5_predictions: 300,
-  daily_win_1: 50,
-  daily_win_streak_5: 300,
-};
+
+function isTaskClaimedLocally(key) {
+  return Boolean(state.presence.claimed[key] || getDailyTaskStatus(key).claimed);
+}
 
 function renderDailyProgress() {
   const countEl = $("dailyProgressCount");
@@ -2160,21 +2166,21 @@ function renderDailyProgress() {
   if (!countEl && !sumEl && !bar) return;
 
   const presenceReward = Math.round(Number(state.publicConfig.task_daily_presence_fire || 50));
-  const betReward = Math.round(Number(state.publicConfig.task_daily_bet_fire || 50));
-  const total = DAILY_TASK_KEYS.length;
-  let claimed = 0;
-  let sum = 0;
-  DAILY_TASK_KEYS.forEach((key) => {
-    const status = getDailyTaskStatus(key);
-    const isClaimed = key === "daily_presence"
-      ? Boolean(state.presence?.claimed || status.claimed)
-      : Boolean(status.claimed);
-    if (!isClaimed) return;
-    claimed += 1;
-    sum += key === "daily_presence" ? presenceReward
-      : key === "daily_bet" ? betReward
-      : (DAILY_TASK_FIXED_REWARD[key] || 0);
-  });
+  const entries = [
+    ...(state.engagement?.rotation || []).map((task) => ({
+      claimed: Boolean(task.claimed || getDailyTaskStatus(task.key).claimed),
+      amount: Number(task.amount || 0),
+    })),
+    ...PRESENCE_LADDER.map((step) => ({
+      claimed: isTaskClaimedLocally(step.key),
+      amount: step.key === "daily_presence"
+        ? presenceReward
+        : Number(state.engagement?.presence?.[step.key]?.amount || (step.key === "presence_15" ? 75 : 200)),
+    })),
+  ];
+  const total = entries.length || 6;
+  const claimed = entries.filter((entry) => entry.claimed).length;
+  const sum = entries.reduce((acc, entry) => acc + (entry.claimed ? entry.amount : 0), 0);
 
   if (countEl) countEl.textContent = `${claimed}/${total}`;
   if (sumEl) sumEl.textContent = formatFire(sum);
@@ -2186,7 +2192,7 @@ function renderTaskButtonStates() {
   document.querySelectorAll("[data-daily-task]").forEach((button) => {
     setTaskButtonVisualState(button, getDailyTaskStatus(button.dataset.dailyTask));
   });
-  updatePresenceTaskButton();
+  updatePresenceLadder();
   renderDailyProgress();
 }
 
@@ -2509,7 +2515,6 @@ async function upsertMe() {
   state.marketStats = data.market_stats || [];
   state.dailyTasks = data.daily_tasks || {};
   state.lossRefundOffers = data.loss_refund_offers || [];
-  state.presence.startedAt = Date.now();
   document.body.classList.remove("auth-only");
   $("authCard").classList.add("hidden");
   setConnection("LIVE", "online");
@@ -4611,6 +4616,7 @@ function shareWinToStory() {
         text: getShareWinText(),
         widget_link: { url, name: "Играть" },
       });
+      postTaskEvent("share_story"); // дейлик «Сторис с выигрышем»
       return;
     } catch {
       // Fall through to chat share.
@@ -7004,20 +7010,37 @@ async function claimSimpleTask(taskKey, sourceElement = null) {
   }
 }
 
-async function claimDailyPresenceTask(sourceElement = null) {
-  if (!state.user?.telegram_id || state.presence.pending) {
+// Активные минуты: вкладка видима и было взаимодействие за последние 2 минуты.
+function updatePresenceLadder() {
+  const minutes = state.presence.activeMs / 60_000;
+  const label = $("presenceLadderTime");
+  const bar = $("presenceLadderBar");
+  if (label) label.textContent = `${Math.floor(minutes)} мин`;
+  if (bar) bar.style.setProperty("--progress", String(Math.min(1, minutes / 30)));
+  document.querySelectorAll("[data-presence-key]").forEach((button) => {
+    const step = PRESENCE_LADDER.find((item) => item.key === button.dataset.presenceKey);
+    if (!step) return;
+    const claimed = isTaskClaimedLocally(step.key);
+    const ready = minutes >= step.minutes;
+    button.classList.toggle("claimed", claimed);
+    button.classList.toggle("claimable", ready && !claimed);
+    button.disabled = claimed || !ready;
+  });
+}
+
+async function claimPresenceStep(key, button = null) {
+  const step = PRESENCE_LADDER.find((item) => item.key === key);
+  if (!step || !state.user?.telegram_id || state.presence.pending || isTaskClaimedLocally(key)) {
     return;
   }
-  const elapsed = Date.now() - Number(state.presence.startedAt || Date.now());
-  if (elapsed < 5 * 60_000) {
-    const left = Math.ceil((5 * 60_000 - elapsed) / 1000);
-    showToast(`Осталось ${Math.ceil(left / 60)} мин.`);
+  const minutes = state.presence.activeMs / 60_000;
+  if (minutes < step.minutes) {
+    showToast(`Ещё ${Math.max(1, Math.ceil(step.minutes - minutes))} мин активной игры.`);
     return;
   }
 
   state.presence.pending = true;
-  const rewardOrigin = captureAnimationOrigin(sourceElement);
-  const rewardRow = sourceElement?.closest?.(".task-item, .task-row");
+  const rewardOrigin = captureAnimationOrigin(button);
   try {
     const result = await api("/api/tasks/daily", {
       method: "POST",
@@ -7025,57 +7048,28 @@ async function claimDailyPresenceTask(sourceElement = null) {
         telegram_id: state.user.telegram_id,
         username: state.user.username,
         first_name: state.user.first_name,
-        task_key: "daily_presence",
+        task_key: key,
       }),
     });
     state.balance = result.balance ?? state.balance;
-    state.presence.claimed = true;
-    markDailyTaskClaimed("daily_presence");
+    state.presence.claimed[key] = true;
+    markDailyTaskClaimed(key);
     renderMe();
     if (result.already_claimed) {
-      showToast("Ежедневный вход уже забран.");
+      showToast("Эта ступень уже забрана.");
     } else if (Number(result.awarded || 0) > 0) {
-      playTaskRewardAnimation(rewardOrigin || sourceElement, rewardRow);
-      showToast(`+${formatFire(result.awarded)} за 5 минут в EasyMarket.`);
+      playTaskRewardAnimation(rewardOrigin || button, button?.closest?.(".presence-ladder"));
+      showToast(`+${formatFire(result.awarded)} за ${step.minutes} минут в игре.`);
     } else {
       showToast("Дневной лимит бонусов уже достигнут.");
     }
   } catch {
-    showToast("Не получилось забрать daily.");
+    showToast("Не получилось забрать награду.");
   } finally {
     state.presence.pending = false;
+    updatePresenceLadder();
+    renderDailyProgress();
   }
-}
-
-function updatePresenceTaskButton() {
-  const button = $("taskDailyPresenceBtn");
-  if (!button || !state.presence.startedAt) {
-    return;
-  }
-  const status = getDailyTaskStatus("daily_presence");
-  if (state.presence.claimed || status.claimed) {
-    setTaskButtonVisualState(button, {
-      ready: true,
-      claimed: true,
-    });
-    return;
-  }
-  const elapsed = Date.now() - state.presence.startedAt;
-  const remainingMs = Math.max(0, 5 * 60_000 - elapsed);
-  if (remainingMs <= 0) {
-    button.textContent = "Забрать";
-    setTaskButtonVisualState(button, {
-      ready: true,
-      claimed: false,
-    });
-    return;
-  }
-  const seconds = Math.ceil(remainingMs / 1000);
-  button.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-  setTaskButtonVisualState(button, {
-    ready: false,
-    claimed: false,
-  });
 }
 
 async function shareInvite({ awardShareTask = false, sourceElement = null } = {}) {
@@ -7163,6 +7157,165 @@ async function submitMarketComment() {
   }
 }
 
+// ===== Стрик «Заряд молнии» + ротация дейликов =====
+const DAILY_TASK_META = {
+  daily_bet: { title: "Первая ставка дня", desc: "Поставь 1 ставку", icon: "🎯" },
+  daily_btc_prediction: { title: "Прогноз по BTC", desc: "1 прогноз в BTC-маркете", icon: "₿" },
+  daily_football_prediction: { title: "Прогноз на футбол", desc: "1 футбольный прогноз", icon: "⚽" },
+  daily_btc_5_predictions: { title: "5 прогнозов BTC", desc: "Пять BTC-прогнозов за день", icon: "📊" },
+  daily_win_1: { title: "Выиграй прогноз", desc: "Первая победа дня", icon: "🏆" },
+  daily_win_streak_5: { title: "5 побед подряд", desc: "Серия из пяти побед", icon: "🔥" },
+  daily_win_2_row: { title: "2 победы подряд", desc: "Выиграй два раунда подряд", icon: "⚡" },
+  daily_sniper: { title: "Снайпер", desc: "Ставка в последние 15 секунд раунда", icon: "🎯" },
+  daily_no_win: { title: "Против толпы", desc: "Выиграй ставкой на NO", icon: "🐻" },
+  daily_feed_fish: { title: "Покорми рыбок", desc: "Встряхни телефон на BTC 5m", icon: "🐟" },
+  daily_comment: { title: "Голос рынка", desc: "Оставь комментарий под рынком", icon: "💬" },
+  daily_explore_3: { title: "Разведка рынков", desc: "Открой BTC-лист, рынок из него и футбол", icon: "🧭" },
+  daily_share_story: { title: "Сторис с выигрышем", desc: "Поделись выигрышем в сторис", icon: "📣" },
+};
+
+const taskEventsSent = new Set();
+
+// Событие прогресса дейлика: fire-and-forget, один раз за день на ключ.
+function postTaskEvent(eventKey) {
+  if (!state.user?.telegram_id) return;
+  const dedupeKey = `${new Date().toISOString().slice(0, 10)}:${eventKey}`;
+  if (taskEventsSent.has(dedupeKey)) return;
+  taskEventsSent.add(dedupeKey);
+  api("/api/tasks/event", {
+    method: "POST",
+    body: JSON.stringify({
+      telegram_id: state.user.telegram_id,
+      username: state.user.username,
+      first_name: state.user.first_name,
+      event_key: eventKey,
+    }),
+  }).catch(() => taskEventsSent.delete(dedupeKey));
+}
+
+async function checkinStreakDaily() {
+  if (!state.user?.telegram_id) return;
+  try {
+    const result = await api("/api/streak/checkin", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        username: state.user.username,
+        first_name: state.user.first_name,
+      }),
+    });
+    state.streak = result;
+    if (result.golden_fish) setAquariumGoldenFish(true);
+    renderStreakCard();
+    if (result.lootbox?.amount) {
+      // Даём велком-заставке отыграть, потом — салют лутбокса.
+      window.setTimeout(() => {
+        showWinOverlay(`+${formatFire(result.lootbox.amount)}`, result.lootbox.amount, 3);
+        showToast(`Лутбокс за 7 дней подряд: +${formatFire(result.lootbox.amount)} ⚡`);
+      }, 3_400);
+      void loadMe().catch(() => undefined);
+    } else if (result.freeze_used) {
+      showToast("Заморозка спасла твой стрик ❄️");
+    } else if (result.new_day && result.current_streak > 1) {
+      showToast(`Стрик: ${result.current_streak} дн. подряд ⚡`);
+    }
+  } catch {
+    // стрик не должен мешать запуску
+  }
+}
+
+function renderStreakCard() {
+  const card = $("streakCard");
+  if (!card) return;
+  const streak = state.streak || {};
+  const dayInCycle = Number(streak.day_in_cycle || 0);
+  const bolt = $("streakBolt");
+  if (bolt && bolt.dataset.built !== "1") {
+    bolt.dataset.built = "1";
+    bolt.innerHTML = buildShareBoltParticlesSvg();
+  }
+  // Молния заряжается с каждым днём цикла и вспыхивает на седьмом.
+  if (bolt) bolt.style.opacity = String(Math.max(0.22, Math.min(1, dayInCycle / 7)));
+  card.classList.toggle("is-charged", dayInCycle >= 7);
+  const count = $("streakCount");
+  if (count) {
+    const days = Number(streak.current_streak || 0);
+    count.innerHTML = `<b>${days}</b><span>${days === 1 ? "день" : days >= 2 && days <= 4 ? "дня" : "дней"}</span>`;
+  }
+  const subtitle = $("streakSubtitle");
+  if (subtitle) {
+    subtitle.textContent = Number(streak.multiplier || 1) > 1
+      ? `Множитель наград x${streak.multiplier} · лутбокс на 7-й день`
+      : "Заходи каждый день — на 7-й лутбокс";
+  }
+  const daysBox = $("streakDays");
+  if (daysBox) {
+    daysBox.innerHTML = Array.from({ length: 7 }, (_, index) => (
+      `<i class="${index < dayInCycle ? "done" : ""}${index === dayInCycle - 1 ? " today" : ""}"></i>`
+    )).join("");
+  }
+}
+
+async function loadEngagementState() {
+  if (!state.user?.telegram_id) return;
+  try {
+    const data = await api(`/api/tasks/state?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
+    state.engagement = data;
+    if (data.streak) {
+      state.streak = { ...state.streak, ...data.streak };
+      if (data.streak.golden_fish) setAquariumGoldenFish(true);
+    }
+    // Статусы ротации вливаются в общий dailyTasks — кнопки живут по общим правилам.
+    (data.rotation || []).forEach((task) => {
+      state.dailyTasks = {
+        ...state.dailyTasks,
+        [task.key]: { ready: task.ready, claimed: task.claimed },
+      };
+    });
+    (Object.entries(data.presence || {})).forEach(([key, info]) => {
+      if (info?.claimed) state.presence.claimed[key] = true;
+    });
+    renderEngagement();
+  } catch {
+    // покажем ротацию при следующем открытии
+  }
+}
+
+function renderEngagement() {
+  renderStreakCard();
+  const list = $("dailyRotationList");
+  if (list && Array.isArray(state.engagement?.rotation)) {
+    setInnerHtmlIfChanged(list, state.engagement.rotation.map((task) => {
+      const meta = DAILY_TASK_META[task.key] || { title: task.key, desc: "", icon: "⭐" };
+      return `
+        <div class="task-item">
+          <span class="task-ic task-ic-emoji" aria-hidden="true">${meta.icon}</span>
+          <div class="task-body">
+            <strong>${meta.title}</strong>
+            <small>${meta.desc}</small>
+          </div>
+          <div class="task-act">
+            <span class="task-reward">+${formatFire(task.amount)}</span>
+            <button class="task-button" data-daily-task="${task.key}" type="button">Забрать</button>
+          </div>
+        </div>
+      `;
+    }).join(""));
+  }
+  const clanButton = $("joinClanTaskBtn");
+  const clanTask = state.engagement?.once?.join_clan;
+  if (clanButton && clanTask) {
+    setTaskButtonVisualState(clanButton, clanTask);
+    if (!clanTask.claimed && !clanTask.ready) {
+      clanButton.textContent = "Вступить";
+      clanButton.classList.remove("not-ready");
+    }
+  }
+  renderTaskButtonStates();
+  renderDailyProgress();
+  updatePresenceLadder();
+}
+
 async function claimDailyTaskByKey(taskKey, button = null) {
   if (!state.user?.telegram_id) {
     return;
@@ -7186,6 +7339,10 @@ async function claimDailyTaskByKey(taskKey, button = null) {
     const claimedRow = button?.closest(".task-item, .task-row");
     if (result.already_claimed || Number(result.awarded || 0) > 0) {
       markDailyTaskClaimed(taskKey);
+      const rotationTask = state.engagement?.rotation?.find((task) => task.key === taskKey);
+      if (rotationTask) rotationTask.claimed = true;
+      if (state.engagement?.once?.[taskKey]) state.engagement.once[taskKey].claimed = true;
+      renderDailyProgress();
     }
     renderMe();
     if (result.already_claimed) {
@@ -7197,7 +7354,13 @@ async function claimDailyTaskByKey(taskKey, button = null) {
       showToast("Дневной лимит бонусов уже достигнут.");
     }
   } catch (error) {
-    showToast(error.message === "task_not_ready" ? "Сначала выполни это задание." : "Не получилось забрать дейлик.");
+    showToast(
+      error.message === "task_not_ready"
+        ? "Сначала выполни это задание."
+        : error.message === "task_not_in_rotation"
+          ? "Это задание не из сегодняшней ротации."
+          : "Не получилось забрать дейлик.",
+    );
   } finally {
     if (button) {
       button.disabled = false;
@@ -7211,6 +7374,8 @@ function setTasksSheetOpen(open) {
   if (open) {
     renderTaskRewards();
     renderTaskTabs();
+    renderEngagement();
+    void loadEngagementState();
     openSheet(sheet);
     renderTaskStats();
   } else {
@@ -7399,9 +7564,24 @@ $("referralNudgeCloseBtn")?.addEventListener("click", () => {
   hideReferralNudge();
 });
 
-$("taskDailyPresenceBtn")?.addEventListener("click", (event) => {
+document.querySelector(".presence-ladder")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-presence-key]");
+  if (!button) return;
   triggerHaptic("selection");
-  void claimDailyPresenceTask(event.currentTarget);
+  void claimPresenceStep(button.dataset.presenceKey, button);
+});
+
+$("joinClanTaskBtn")?.addEventListener("click", (event) => {
+  triggerHaptic("selection");
+  const once = state.engagement?.once?.join_clan;
+  if (once?.claimed) return;
+  if (once?.ready) {
+    void claimDailyTaskByKey("join_clan", event.currentTarget);
+    return;
+  }
+  // Ещё не в клане — ведём в кланы, награда заберётся после вступления.
+  setTasksSheetOpen(false);
+  $("clansBtn")?.click();
 });
 
 document.querySelector(".task-list")?.addEventListener("click", (event) => {
@@ -7569,6 +7749,7 @@ $("btcMarketsBtn")?.addEventListener("click", () => {
   closeTopMoreMenu();
   setBtcMarketsSheetOpen(true);
   renderBtcMarketsList();
+  postTaskEvent("visit_btc_fast"); // дейлик «Разведка рынков»
   void runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => showToast("Маркеты пока не загрузились."));
 });
 
@@ -7598,6 +7779,7 @@ $("btcMarketsList")?.addEventListener("click", (event) => {
   const openButton = event.target.closest("[data-btc-open]");
   if (openButton) {
     triggerHaptic("selection");
+    postTaskEvent("visit_btc_slow"); // дейлик «Разведка рынков»
     selectBtcMarket(openButton.dataset.btcOpen);
   }
 });
@@ -7607,6 +7789,7 @@ $("worldCupBtn")?.addEventListener("click", () => {
   closeTopMoreMenu();
   setWorldCupSheetOpen(true);
   renderWorldCupList();
+  postTaskEvent("visit_football"); // дейлик «Разведка рынков»
   void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => showToast("Маркеты пока не загрузились."));
 });
 
@@ -7793,7 +7976,16 @@ document.addEventListener("click", (event) => {
 });
 
 setInterval(updateTimer, 250);
-setInterval(updatePresenceTaskButton, 1_000);
+// Активные минуты для лестницы присутствия: видимая вкладка + недавнее касание.
+window.addEventListener("pointerdown", () => {
+  state.presence.lastInteractionAt = Date.now();
+}, { passive: true });
+setInterval(() => {
+  if (!document.hidden && Date.now() - state.presence.lastInteractionAt < 120_000) {
+    state.presence.activeMs += 5_000;
+  }
+  updatePresenceLadder();
+}, 5_000);
 setInterval(() => {
   void runSingleFlight("market", loadMarket).catch(() => setConnection("Ошибка", "error"));
 }, ACTIVE_MARKET_POLL_MS);
@@ -7839,6 +8031,8 @@ loadPublicConfig()
       return null;
     }
     restoreUsdtIntent(); // живая депозитная заявка переживает перезаход
+    void checkinStreakDaily(); // стрик «Заряд молнии»: отметка входа + лутбокс
+    void loadEngagementState();
     return refreshAll()
       .then(() => handleClanLaunchLink().catch(() => showToast("Клан по ссылке не найден.")))
       .then(() => {

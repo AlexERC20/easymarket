@@ -140,6 +140,7 @@ function mapMarket(row) {
     end_time: row.end_time,
     status: row.status,
     winner: row.winner,
+    is_lucky: Boolean(row.is_lucky),
     created_at: row.created_at,
     resolved_at: row.resolved_at,
   };
@@ -979,12 +980,22 @@ async function getDailyBonusRemaining(client, userId) {
           'task_av_channel',
           'task_av_chat',
           'task_daily_presence',
+          'task_presence_15',
+          'task_presence_30',
           'task_daily_bet',
           'task_daily_btc_prediction',
           'task_daily_football_prediction',
           'task_daily_btc_5_predictions',
           'task_daily_win_1',
           'task_daily_win_streak_5',
+          'task_daily_win_2_row',
+          'task_daily_sniper',
+          'task_daily_no_win',
+          'task_daily_feed_fish',
+          'task_daily_comment',
+          'task_daily_explore_3',
+          'task_daily_share_story',
+          'task_join_clan',
           'referral_bet_bonus'
         )
         AND created_at >= date_trunc('day', now())
@@ -2848,20 +2859,93 @@ export async function completeVerifiedTask(input) {
   });
 }
 
+// Награды заданий. Ротируемые дейлики можно клеймить только в день, когда они
+// выпали в ротацию; лестница присутствия и разовые задания — всегда.
+const TASK_AMOUNTS = {
+  daily_presence: () => Math.round(Number(config.taskDailyPresenceFire || 0)),
+  presence_15: () => 75,
+  presence_30: () => 200,
+  daily_bet: () => Math.round(Number(config.taskDailyBetFire || 0)),
+  daily_btc_prediction: () => 50,
+  daily_football_prediction: () => 50,
+  daily_btc_5_predictions: () => 300,
+  daily_win_1: () => 50,
+  daily_win_streak_5: () => 300,
+  daily_win_2_row: () => 100,
+  daily_sniper: () => 75,
+  daily_no_win: () => 75,
+  daily_feed_fish: () => 25,
+  daily_comment: () => 25,
+  daily_explore_3: () => 25,
+  daily_share_story: () => 100,
+  join_clan: () => 200,
+};
+
+// Пул ротации: 3 задания в день, детерминированно от даты — у всех одинаковые.
+const DAILY_ROTATION_POOL = [
+  "daily_bet",
+  "daily_btc_prediction",
+  "daily_football_prediction",
+  "daily_btc_5_predictions",
+  "daily_win_1",
+  "daily_win_streak_5",
+  "daily_win_2_row",
+  "daily_sniper",
+  "daily_no_win",
+  "daily_feed_fish",
+  "daily_comment",
+  "daily_explore_3",
+  "daily_share_story",
+];
+
+const TASK_EVENT_KEYS = new Set([
+  "feed_fish",
+  "share_story",
+  "visit_btc_fast",
+  "visit_btc_slow",
+  "visit_football",
+]);
+
+const ONCE_TASK_KEYS = new Set(["join_clan"]);
+const PRESENCE_TASK_KEYS = new Set(["daily_presence", "presence_15", "presence_30"]);
+
+function hashDayKey(dayKey) {
+  let hash = 0x811c9dc5;
+  for (const ch of String(dayKey)) {
+    hash ^= ch.charCodeAt(0);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+export function getDailyRotation(dayKey = getDayKey()) {
+  // Seeded Fisher–Yates по mulberry32: одинаковая тройка на весь день у всех.
+  let seed = hashDayKey(dayKey);
+  const next = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const pool = [...DAILY_ROTATION_POOL];
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(next() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, 3);
+}
+
 async function claimDailyTaskForUser(client, user, taskKey) {
   const normalizedTaskKey = String(taskKey || "").trim();
-  const taskAmounts = {
-    daily_presence: Math.round(Number(config.taskDailyPresenceFire || 0)),
-    daily_bet: Math.round(Number(config.taskDailyBetFire || 0)),
-    daily_btc_prediction: 50,
-    daily_football_prediction: 50,
-    daily_btc_5_predictions: 300,
-    daily_win_1: 50,
-    daily_win_streak_5: 300,
-  };
-  const amount = taskAmounts[normalizedTaskKey];
+  const amount = TASK_AMOUNTS[normalizedTaskKey]?.();
   if (!amount) {
     throw new Error("invalid_task");
+  }
+  if (
+    DAILY_ROTATION_POOL.includes(normalizedTaskKey)
+    && !getDailyRotation().includes(normalizedTaskKey)
+  ) {
+    throw new Error("task_not_in_rotation");
   }
 
   const isReady = await isDailyTaskReady(client, user.id, normalizedTaskKey);
@@ -2869,7 +2953,7 @@ async function claimDailyTaskForUser(client, user, taskKey) {
     throw new Error("task_not_ready");
   }
 
-  const dayKey = getDayKey();
+  const dayKey = ONCE_TASK_KEYS.has(normalizedTaskKey) ? "once" : getDayKey();
   const claimResult = await client.query(
     `
       INSERT INTO fire_task_claims (user_id, task_key, amount, day_key, source)
@@ -2919,6 +3003,109 @@ async function claimDailyTaskForUser(client, user, taskKey) {
 }
 
 async function isDailyTaskReady(client, userId, taskKey) {
+  if (PRESENCE_TASK_KEYS.has(taskKey)) {
+    // Лестница присутствия подтверждается клиентским таймером активности,
+    // как и исходная 5-минутка (модель доверия сохранена).
+    return true;
+  }
+
+  if (taskKey === "join_clan") {
+    const result = await client.query(
+      "SELECT 1 FROM clan_members WHERE user_id = $1 LIMIT 1",
+      [userId],
+    );
+    return Boolean(result.rows[0]);
+  }
+
+  if (taskKey === "daily_win_2_row") {
+    const result = await client.query(
+      `
+        SELECT
+          p.market_id,
+          MAX(CASE WHEN p.pnl > 0 THEN 1 ELSE 0 END) AS won
+        FROM positions p
+        JOIN markets m ON m.id = p.market_id
+        WHERE p.user_id = $1
+          AND p.status = 'resolved'
+          AND m.status = 'resolved'
+        GROUP BY p.market_id
+        ORDER BY MAX(m.resolved_at) DESC
+        LIMIT 2
+      `,
+      [userId],
+    );
+    return result.rows.length >= 2 && result.rows.every((row) => Number(row.won || 0) > 0);
+  }
+
+  if (taskKey === "daily_sniper") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM trades
+        JOIN markets ON markets.id = trades.market_id
+        WHERE trades.user_id = $1
+          AND trades.action = 'BUY'
+          AND trades.created_at >= markets.end_time - interval '15 seconds'
+          AND trades.created_at <= markets.end_time
+          AND trades.created_at >= date_trunc('day', now())
+      `,
+      [userId],
+    );
+    return Number(result.rows[0]?.count || 0) >= 1;
+  }
+
+  if (taskKey === "daily_no_win") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM positions
+        WHERE user_id = $1
+          AND side = 'NO'
+          AND status = 'resolved'
+          AND pnl > 0
+          AND updated_at >= date_trunc('day', now())
+      `,
+      [userId],
+    );
+    return Number(result.rows[0]?.count || 0) >= 1;
+  }
+
+  if (taskKey === "daily_comment") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM market_comments
+        WHERE user_id = $1
+          AND created_at >= date_trunc('day', now())
+      `,
+      [userId],
+    );
+    return Number(result.rows[0]?.count || 0) >= 1;
+  }
+
+  if (taskKey === "daily_feed_fish" || taskKey === "daily_share_story") {
+    const eventKey = taskKey === "daily_feed_fish" ? "feed_fish" : "share_story";
+    const result = await client.query(
+      "SELECT count FROM user_task_events WHERE user_id = $1 AND day_key = $2 AND event_key = $3",
+      [userId, getDayKey(), eventKey],
+    );
+    return Number(result.rows[0]?.count || 0) >= 1;
+  }
+
+  if (taskKey === "daily_explore_3") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM user_task_events
+        WHERE user_id = $1
+          AND day_key = $2
+          AND event_key LIKE 'visit_%'
+      `,
+      [userId, getDayKey()],
+    );
+    return Number(result.rows[0]?.count || 0) >= 3;
+  }
+
   if (taskKey === "daily_presence") {
     return true;
   }
@@ -3047,6 +3234,228 @@ export async function claimDailyTask(input) {
   });
 
   return withTransaction(async (client) => claimDailyTaskForUser(client, user, input.task_key ?? input.taskKey));
+}
+
+// ===== Стрик входа «Заряд молнии» =====
+// День цикла 1..7; на 7-й — лутбокс звёздами с множителем за длину стрика.
+// Пропуск одного дня раз в неделю покрывается бесплатной заморозкой.
+
+const STREAK_LOOTBOX_TABLE = [
+  { amount: 50, weight: 50 },
+  { amount: 100, weight: 25 },
+  { amount: 200, weight: 15 },
+  { amount: 300, weight: 7 },
+  { amount: 500, weight: 3 },
+];
+
+function rollStreakLootbox() {
+  const total = STREAK_LOOTBOX_TABLE.reduce((sum, item) => sum + item.weight, 0);
+  let roll = Math.random() * total;
+  for (const item of STREAK_LOOTBOX_TABLE) {
+    roll -= item.weight;
+    if (roll <= 0) {
+      return item.amount;
+    }
+  }
+  return STREAK_LOOTBOX_TABLE[0].amount;
+}
+
+function getEpochWeekKey(dayKey) {
+  const days = Math.floor(Date.parse(`${dayKey}T00:00:00Z`) / 86_400_000);
+  return `w${Math.floor(days / 7)}`;
+}
+
+function streakMultiplier(streak) {
+  if (streak > 21) return 2;
+  if (streak > 7) return 1.5;
+  return 1;
+}
+
+function mapStreakState(row, extra = {}) {
+  const current = Number(row?.current_streak || 0);
+  return {
+    current_streak: current,
+    best_streak: Number(row?.best_streak || 0),
+    day_in_cycle: current > 0 ? ((current - 1) % 7) + 1 : 0,
+    multiplier: streakMultiplier(current),
+    checked_today: row?.last_day_key === getDayKey(),
+    golden_fish: Number(row?.best_streak || 0) >= 30,
+    ...extra,
+  };
+}
+
+export async function checkinStreak(input) {
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+
+  return withTransaction(async (client) => {
+    await client.query(
+      `
+        INSERT INTO user_streaks (user_id)
+        VALUES ($1)
+        ON CONFLICT (user_id) DO NOTHING
+      `,
+      [user.id],
+    );
+    const existing = await client.query(
+      "SELECT * FROM user_streaks WHERE user_id = $1 FOR UPDATE",
+      [user.id],
+    );
+    const row = existing.rows[0];
+    const today = getDayKey();
+
+    if (row.last_day_key === today) {
+      return { ok: true, ...mapStreakState(row, { new_day: false, freeze_used: false, lootbox: null }) };
+    }
+
+    const gapDays = row.last_day_key
+      ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${row.last_day_key}T00:00:00Z`)) / 86_400_000)
+      : Infinity;
+    const weekKey = getEpochWeekKey(today);
+    let freezeUsed = false;
+    let nextStreak;
+    let freezeWeekKey = row.freeze_week_key;
+
+    if (gapDays === 1) {
+      nextStreak = Number(row.current_streak || 0) + 1;
+    } else if (gapDays === 2 && freezeWeekKey !== weekKey) {
+      // Пропущен ровно один день — бесплатная заморозка спасает стрик.
+      nextStreak = Number(row.current_streak || 0) + 1;
+      freezeWeekKey = weekKey;
+      freezeUsed = true;
+    } else {
+      nextStreak = 1;
+    }
+
+    const bestStreak = Math.max(Number(row.best_streak || 0), nextStreak);
+    const dayInCycle = ((nextStreak - 1) % 7) + 1;
+    const multiplier = streakMultiplier(nextStreak);
+
+    let lootbox = null;
+    if (dayInCycle === 7) {
+      const amount = Math.round(rollStreakLootbox() * multiplier);
+      const dedupe = await client.query(
+        `
+          INSERT INTO fire_task_claims (user_id, task_key, amount, day_key, source)
+          VALUES ($1, 'streak_lootbox', $2, $3, 'streak')
+          ON CONFLICT DO NOTHING
+          RETURNING *
+        `,
+        [user.id, amount, today],
+      );
+      if (dedupe.rows[0]) {
+        await adjustBalance(client, user.id, amount, "streak_lootbox", `streak:${nextStreak}`);
+        lootbox = { amount };
+      }
+    }
+
+    await client.query(
+      `
+        UPDATE user_streaks
+        SET current_streak = $2,
+            best_streak = $3,
+            last_day_key = $4,
+            freeze_week_key = $5,
+            updated_at = now()
+        WHERE user_id = $1
+      `,
+      [user.id, nextStreak, bestStreak, today, freezeWeekKey],
+    );
+
+    return {
+      ok: true,
+      ...mapStreakState(
+        { current_streak: nextStreak, best_streak: bestStreak, last_day_key: today },
+        { new_day: true, freeze_used: freezeUsed, lootbox },
+      ),
+    };
+  });
+}
+
+// ===== События дейликов с клиента (кормление, просмотры рынков, сторис) =====
+export async function ingestTaskEvent(input) {
+  const eventKey = String(input.event_key || "").trim();
+  if (!TASK_EVENT_KEYS.has(eventKey)) {
+    throw new Error("invalid_task_event");
+  }
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+  await query(
+    `
+      INSERT INTO user_task_events (user_id, day_key, event_key, count)
+      VALUES ($1, $2, $3, 1)
+      ON CONFLICT (user_id, day_key, event_key)
+      DO UPDATE SET count = LEAST(user_task_events.count + 1, 1000), updated_at = now()
+    `,
+    [user.id, getDayKey(), eventKey],
+  );
+  return { ok: true };
+}
+
+// ===== Состояние заданий дня: ротация, лестница, разовые, стрик =====
+export async function getEngagementState(input) {
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+  const shim = { query };
+  const today = getDayKey();
+  const rotationKeys = getDailyRotation(today);
+
+  const claimsResult = await query(
+    `
+      SELECT task_key, day_key
+      FROM fire_task_claims
+      WHERE user_id = $1
+        AND day_key IN ($2, 'once')
+    `,
+    [user.id, today],
+  );
+  const claimed = new Set(claimsResult.rows.map((row) => `${row.task_key}:${row.day_key}`));
+
+  const rotation = [];
+  for (const key of rotationKeys) {
+    rotation.push({
+      key,
+      amount: TASK_AMOUNTS[key]?.() || 0,
+      ready: await isDailyTaskReady(shim, user.id, key),
+      claimed: claimed.has(`${key}:${today}`),
+    });
+  }
+
+  const presence = {};
+  for (const key of PRESENCE_TASK_KEYS) {
+    presence[key] = {
+      amount: TASK_AMOUNTS[key]?.() || 0,
+      claimed: claimed.has(`${key}:${today}`),
+    };
+  }
+
+  const once = {
+    join_clan: {
+      amount: TASK_AMOUNTS.join_clan(),
+      ready: await isDailyTaskReady(shim, user.id, "join_clan"),
+      claimed: claimed.has("join_clan:once"),
+    },
+  };
+
+  const streakResult = await query("SELECT * FROM user_streaks WHERE user_id = $1", [user.id]);
+
+  return {
+    ok: true,
+    day_key: today,
+    rotation,
+    presence,
+    once,
+    streak: mapStreakState(streakResult.rows[0] || null),
+  };
 }
 
 function mapClan(row) {
@@ -3478,6 +3887,9 @@ export async function createBtcMarket(definition = BTC_MARKET_DEFS[0], btcInput 
   const startTime = new Date();
   const durationMinutes = getBtcMarketDurationMinutes(definition);
   const endTime = new Date(startTime.getTime() + durationMinutes * 60_000);
+  // Счастливый раунд ⚡x2: ~каждая пятая 5-минутка. Выигрыш удвоится бонусом
+  // при резолве — базовые выплаты не трогаем.
+  const isLucky = definition.symbol === "BTCUSDT" && Math.random() < 0.2;
 
   const result = await query(
     `
@@ -3493,9 +3905,10 @@ export async function createBtcMarket(definition = BTC_MARKET_DEFS[0], btcInput 
         liquidity,
         start_time,
         end_time,
-        status
+        status,
+        is_lucky
       )
-      VALUES ($1, $2, $3, $3, 0.5, 0.5, 0, 0, $4, $5, $6, 'open')
+      VALUES ($1, $2, $3, $3, 0.5, 0.5, 0, 0, $4, $5, $6, 'open', $7)
       RETURNING *
     `,
     [
@@ -3505,6 +3918,7 @@ export async function createBtcMarket(definition = BTC_MARKET_DEFS[0], btcInput 
       config.marketLiquidity,
       startTime,
       endTime,
+      isLucky,
     ],
   );
 
@@ -5194,6 +5608,29 @@ export async function resolveExpiredMarkets() {
 
         if (currency === "USDT" && pnl < 0) {
           await createUsdtLossRefundOffer(client, position, pnl);
+        }
+
+        // Счастливый раунд: чистая прибыль удваивается бонусом ПОВЕРХ обычной
+        // выплаты (звёзды — на баланс, USDT — на бонусный), сами выплаты не трогаем.
+        if (currentMarket.is_lucky && pnl > 0) {
+          const luckyBonus = Math.round(pnl * 100) / 100;
+          if (currency === "USDT") {
+            await adjustUsdtBonusBalance(
+              client,
+              position.user_id,
+              luckyBonus,
+              "lucky_round_bonus",
+              `market:${currentMarket.id}:lucky`,
+            );
+          } else {
+            await adjustBalance(
+              client,
+              position.user_id,
+              luckyBonus,
+              "lucky_round_bonus",
+              `market:${currentMarket.id}:lucky`,
+            );
+          }
         }
 
         if (currency === "USDT") {
