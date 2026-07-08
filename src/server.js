@@ -986,6 +986,8 @@ app.get("/api/tasks/state", async (req, res) => {
   try {
     const result = await getEngagementState({
       telegram_id: req.query?.telegram_id,
+      username: req.query?.username,
+      first_name: req.query?.first_name,
     });
     res.status(200).json(result);
   } catch (error) {

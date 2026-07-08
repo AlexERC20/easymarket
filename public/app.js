@@ -783,6 +783,22 @@ function getTradeAvatarColor(trade) {
   return `hsl(${hash} 78% 58%)`;
 }
 
+function formatUserDisplayName(entity, { preferAt = true } = {}) {
+  const username = String(entity?.username || "").trim().replace(/^@/, "");
+  if (username && !/^user$/i.test(username)) {
+    return preferAt ? `@${username}` : username;
+  }
+  const firstName = String(entity?.first_name || entity?.firstName || "").trim();
+  if (firstName && !/^user$/i.test(firstName)) {
+    return firstName;
+  }
+  const telegramId = String(entity?.telegram_id || entity?.telegramId || "").trim();
+  if (telegramId) {
+    return `User ${telegramId.slice(-4)}`;
+  }
+  return "User";
+}
+
 function getCachedTradeAvatarImage(url) {
   if (!url) {
     return null;
@@ -2967,7 +2983,7 @@ function renderComments() {
   }
 
   const html = state.comments.slice(0, 8).map((comment) => {
-    const name = comment.username || comment.first_name || `user ${comment.telegram_id}`;
+    const name = formatUserDisplayName(comment);
     const latestBet = comment.latest_bet;
     const summary = comment.bet_summary || {};
     const isFresh = state.freshCommentIds.has(`${market.id}:${comment.id}`);
@@ -3978,7 +3994,7 @@ function renderActivity() {
 
   const visibleActivity = state.expanded.activity ? state.activity.slice(0, 16) : state.activity.slice(0, COLLAPSE_LIMIT);
   const html = visibleActivity.map((trade) => {
-    const name = trade.username || trade.first_name || `user ${trade.telegram_id}`;
+    const name = formatUserDisplayName(trade);
     const action = trade.action || "BUY";
     const marketLabel = getActivityMarketLabel(trade);
     // Въезд и глинт играют один раз — на приходе сделки. Пере-рендеры от
@@ -4108,9 +4124,7 @@ function renderLeaderboard() {
 
   const medals = ["🥇", "🥈", "🥉"];
   const rows = state.leaderboard.map((player, index) => {
-    const name = player.username
-      ? `@${player.username}`
-      : player.first_name || `user ${player.telegram_id}`;
+    const name = formatUserDisplayName(player);
     const winRate = Number(player.win_rate_pct || 0);
     const rank = index + 1;
     const isMe = state.user && String(player.telegram_id) === String(state.user.telegram_id);
@@ -4317,7 +4331,7 @@ function renderClans() {
         : "Поднимайтесь в топ-1, чтобы забрать банк";
     const memberRows = members.length
       ? members.map((member) => {
-        const name = member.username ? `@${member.username}` : member.first_name || `user ${member.telegram_id}`;
+        const name = formatUserDisplayName(member);
         return `
           <div class="clan-member-row ${String(member.telegram_id) === String(state.user?.telegram_id) ? "me" : ""}">
             <span>${member.rank || "-"}</span>
@@ -5921,7 +5935,7 @@ function showTradeBubble(trade) {
     state.bubbledActivityIds.delete(state.bubbledActivityIds.values().next().value);
   }
   const bubble = document.createElement("div");
-  const name = trade.username || trade.first_name || "user";
+  const name = formatUserDisplayName(trade);
   const action = trade.action || "BUY";
   bubble.className = `trade-bubble ${sideClass(trade.side)}`;
   bubble.textContent = `${name} ${actionLabel(action)} ${sideLabel(trade.side)} ${formatCurrencyAmount(trade.amount, trade.currency)}`;
@@ -7343,7 +7357,16 @@ function renderStreakCard() {
 async function loadEngagementState() {
   if (!state.user?.telegram_id) return;
   try {
-    const data = await api(`/api/tasks/state?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
+    const params = new URLSearchParams({
+      telegram_id: String(state.user.telegram_id),
+    });
+    if (state.user.username) {
+      params.set("username", state.user.username);
+    }
+    if (state.user.first_name) {
+      params.set("first_name", state.user.first_name);
+    }
+    const data = await api(`/api/tasks/state?${params.toString()}`);
     state.engagement = data;
     if (data.streak) {
       state.streak = { ...state.streak, ...data.streak };

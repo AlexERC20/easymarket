@@ -34,12 +34,21 @@ const BTC_MARKET_DEFS = [
 const BTC_MARKET_SYMBOLS = BTC_MARKET_DEFS.map((definition) => definition.symbol);
 const DAILY_TASK_KEYS = [
   "daily_presence",
+  "presence_15",
+  "presence_30",
   "daily_bet",
   "daily_btc_prediction",
   "daily_football_prediction",
   "daily_btc_5_predictions",
   "daily_win_1",
   "daily_win_streak_5",
+  "daily_win_2_row",
+  "daily_sniper",
+  "daily_no_win",
+  "daily_feed_fish",
+  "daily_comment",
+  "daily_explore_3",
+  "daily_share_story",
 ];
 
 const WORLD_CUP_FALLBACK_MARKETS = [
@@ -1739,8 +1748,8 @@ export async function upsertUser(input) {
         INSERT INTO users (telegram_id, username, first_name, referred_by_telegram_id, updated_at)
         VALUES ($1, $2, $3, $4, now())
         ON CONFLICT (telegram_id) DO UPDATE SET
-          username = EXCLUDED.username,
-          first_name = EXCLUDED.first_name,
+          username = COALESCE(EXCLUDED.username, users.username),
+          first_name = COALESCE(EXCLUDED.first_name, users.first_name),
           referred_by_telegram_id = COALESCE(users.referred_by_telegram_id, EXCLUDED.referred_by_telegram_id),
           updated_at = now()
         RETURNING *
