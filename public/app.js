@@ -3581,6 +3581,8 @@ function renderMarket() {
   const yesDepth = Math.max(6, Math.min(94, (yesVolume / volumeTotal) * 100));
   const canBuyMarket = isMarketOpenForBuy(market);
 
+  document.querySelector(".market-card")?.classList.toggle("top-market-card", topMarket);
+
   const marketStatus = $("marketStatus");
   marketStatus.textContent = marketStatusLabel(canBuyMarket ? market?.status : (market ? "closed" : market?.status));
   marketStatus.classList.toggle("live", canBuyMarket);
