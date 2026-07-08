@@ -21,7 +21,7 @@ import {
   setAquariumGoldenFish,
   setAquariumRuntimeAllowed,
   setAquariumShakeFeeder,
-} from "./aquarium.js?v=20260708-01";
+} from "./aquarium.js?v=20260708-02";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -710,7 +710,9 @@ function triggerHaptic(type = "light") {
 }
 
 function resizeCanvas(canvas) {
-  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  // A 3x DPR canvas inside Telegram WebView is expensive for a constantly
+  // animated mini chart. Capping at 2 keeps it crisp while cutting pixel work.
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
   const rect = canvas.getBoundingClientRect();
   const width = Math.max(1, Math.round(rect.width * dpr));
   const height = Math.max(1, Math.round(rect.height * dpr));
@@ -1412,9 +1414,9 @@ function drawMarketChartFrame(ts) {
     drawSmoothPath(ctx, pathPoints);
 
     const chartTrades = getChartTradesForMarket(market, windowStart, windowEnd);
-    // Only snapshot avatars when the aquarium is on, and at most ~3x/sec, so the
+    // Only snapshot avatars when the aquarium is on, and at most ~2x/sec, so the
     // chart's hot render loop is not allocating a fresh snapshot every frame.
-    const captureAvatars = aquariumAllowed && isAquariumEnabled() && nowMs - (state.aquariumSnapAt || 0) > 300;
+    const captureAvatars = aquariumAllowed && isAquariumEnabled() && nowMs - (state.aquariumSnapAt || 0) > 500;
     const frameAvatars = captureAvatars ? [] : null;
     chartTrades.forEach((trade) => {
       const x = scaleX(trade.at);
