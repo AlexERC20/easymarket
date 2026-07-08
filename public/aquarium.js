@@ -25,12 +25,12 @@ const DOM_FISH_SVG = `
 
 const STORAGE_KEY = "easymarket_aquarium";
 const USER_CHOICE_KEY = "easymarket_aquarium_choice_v2";
-const MAX_FOOD = 24; // latest avatar crumbs only; keeps mobile sessions cool
+const MAX_FOOD = 40; // halved to keep the phone cool
 const FISH_MIN = 2;
-const FISH_MAX = 2;
+const FISH_MAX = 3;
 const FOOD_ARM_MS = 1500; // brief settle before the hungry fish start hunting
 const EAT_MS = 3280; // a bite is gradual, never instant
-const FRAME_MS = 50; // ~20fps simulation cap; enough for fish, much cooler on phones
+const FRAME_MS = 33; // ~30fps simulation cap to stay light on the phone
 const FOOD_LIFE_MS = 16000; // uneaten food slowly fades out and vanishes
 const FOOD_FADE_MS = 2800; // fade window at the end of a crumb's life
 const FISH_LEAVE_GRACE_MS = 1600; // after the food is gone, fish linger then leave
@@ -117,11 +117,12 @@ export function setAquariumGoldenFish(enabled) {
 
 let waterGrad = null;
 let waterGradH = 0;
-// Предрендеренные спрайты водного света: рисуются один раз,
+// Предрендеренные спрайты света и свечения корма: рисуются один раз,
 // на кадре остаются только дешёвые drawImage (никакого shadowBlur).
 let lightShaftSprite = null;
 let lightShaftH = 0;
 let causticSprite = null;
+let foodGlowSprites = null;
 let domLayer = null;
 let domFish = [];
 let domFood = [];
@@ -163,9 +164,7 @@ function aquariumHaptic(style = "light") {
 function canAnimateAquarium() {
   // Telegram on iOS runs inside WKWebView. Some builds can report the document
   // as hidden while the Mini App is visibly active, which killed the fish loop.
-  // The DOM aquarium is the compatibility path for iOS/Mac Telegram; never run
-  // the canvas aquarium beside it, otherwise the phone renders two tanks at once.
-  return enabled && runtimeAllowed && !shouldUseDomAquarium() && !reducedMotion() && (!document.hidden || isTelegramMiniApp());
+  return enabled && runtimeAllowed && !reducedMotion() && (!document.hidden || isTelegramMiniApp());
 }
 
 function canAnimateDomAquarium() {
@@ -369,7 +368,7 @@ function appendDomFood(avatars) {
   if (!layer) {
     return;
   }
-  avatars.slice(-MAX_FOOD).forEach((avatar, index) => {
+  avatars.slice(-36).forEach((avatar, index) => {
     const measured = measureDomLayer();
     if (!measured) {
       return;
@@ -385,7 +384,7 @@ function appendDomFood(avatars) {
     const url = String(avatar.url || "").trim();
     const initial = String(avatar.initial || "•").slice(0, 1).toUpperCase();
     const r = rand(url ? 4.2 : 3.2, url ? 6.2 : 4.8);
-    crumb.className = `aquarium-dom-food avatar ${side === "NO" ? "side-no" : "side-yes"}`;
+    crumb.className = `aquarium-dom-food ${side === "NO" ? "no" : "yes"}`;
     // Show the bettor's initial as a fallback (like the chart dots); the avatar
     // photo is layered on top and hides the letter once it actually loads. If the
     // photo is missing or fails, the lettered disc stays — never a blank bubble.
@@ -399,15 +398,10 @@ function appendDomFood(avatars) {
       const img = document.createElement("img");
       img.alt = "";
       img.decoding = "async";
-      img.onload = () => crumb.classList.add("avatar-loaded");
-      img.onerror = () => {
-        img.remove();
-        crumb.classList.add("avatar-fallback");
-      };
+      img.onload = () => crumb.classList.add("avatar");
+      img.onerror = () => img.remove();
       img.src = url;
       crumb.appendChild(img);
-    } else {
-      crumb.classList.add("avatar-fallback");
     }
     layer.appendChild(crumb);
     const bornAt = Date.now() + Math.min(900, index * 24);
@@ -431,7 +425,7 @@ function appendDomFood(avatars) {
       side,
     });
   });
-  while (domFood.length > MAX_FOOD * 2) {
+  while (domFood.length > 72) {
     domFood.shift()?.el?.remove();
   }
   startDomLoop();
@@ -785,7 +779,7 @@ function getFoodImage(url) {
   }
   // Bounded cache: drop the oldest entry once it grows large (Maps keep
   // insertion order), so a long session with many distinct bettors can't leak.
-  if (foodImages.size > 48) {
+  if (foodImages.size > 80) {
     const oldest = foodImages.keys().next().value;
     if (oldest !== undefined) {
       foodImages.delete(oldest);
@@ -834,7 +828,7 @@ function measure() {
   if (width < 2 || height < 2) {
     return false;
   }
-  dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
   cssW = width;
   cssH = height;
   const pw = Math.round(cssW * dpr);
@@ -900,7 +894,7 @@ function summonFish() {
     });
   }
   if (!bubbles.length) {
-    for (let i = 0; i < 2; i += 1) {
+    for (let i = 0; i < 4; i += 1) {
       bubbles.push(resetBubble({}, true));
     }
   }
@@ -908,16 +902,7 @@ function summonFish() {
 }
 
 export function primeAquarium(retries = 10) {
-  const domMode = shouldUseDomAquarium();
-  if (domMode) {
-    const primed = primeDomAquarium();
-    if (!primed && retries > 0) {
-      window.setTimeout(() => {
-        primeAquarium(retries - 1);
-      }, 180);
-    }
-    return primed;
-  }
+  primeDomAquarium();
   if (!canAnimateAquarium()) {
     return false;
   }
@@ -948,6 +933,31 @@ function pickSpecies() {
     }
   }
   return FISH_SPECIES[FISH_SPECIES.length - 1];
+}
+
+function makeRadialSprite(rgb, coreAlpha = 0.55) {
+  const size = 48;
+  const sprite = document.createElement("canvas");
+  sprite.width = size;
+  sprite.height = size;
+  const g = sprite.getContext("2d");
+  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, `rgba(${rgb},${coreAlpha})`);
+  grad.addColorStop(0.55, `rgba(${rgb},${coreAlpha * 0.3})`);
+  grad.addColorStop(1, `rgba(${rgb},0)`);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  return sprite;
+}
+
+function foodGlow(side) {
+  if (!foodGlowSprites) {
+    foodGlowSprites = {
+      YES: makeRadialSprite("25,195,125"),
+      NO: makeRadialSprite("239,70,111"),
+    };
+  }
+  return side === "YES" ? foodGlowSprites.YES : foodGlowSprites.NO;
 }
 
 function buildShaftSprite(heightPx) {
@@ -1137,20 +1147,13 @@ export function spillAquariumFood(avatars, summon = false) {
   if (!enabled || !Array.isArray(avatars) || !avatars.length) {
     return;
   }
-  // Keep every recent bet as avatar food, but cap the batch so a busy market
-  // cannot flood the WebView with hundreds of moving nodes.
-  avatars = avatars.slice(-MAX_FOOD);
+  // Halve the crumbs per spill so the tank stays light on the phone.
+  avatars = avatars.filter((_, index) => index % 2 === 0);
   playAquariumFood(); // soft sprinkle as the crumbs hit the water
-
-  if (shouldUseDomAquarium()) {
-    appendDomFood(avatars);
-    if (summon) {
-      summonDomFish(); // fish swim in from off-screen only on a shake
-    }
-    startDomLoop();
-    return;
+  appendDomFood(avatars);
+  if (summon) {
+    summonDomFish(); // fish swim in from off-screen only on a shake
   }
-
   if (!measure()) {
     queuePendingFood(avatars);
     if (summon) {
@@ -1164,6 +1167,7 @@ export function spillAquariumFood(avatars, summon = false) {
     summonFish();
   }
   startLoop();
+  startDomLoop();
 }
 
 // Tilt drift, fed from W3C deviceorientation (degrees) or Telegram (converted).
@@ -1742,13 +1746,12 @@ function drawFood() {
     if (r < 0.4) {
       continue;
     }
-    // Avatar crumbs: small neutral discs/photos, not YES/NO coloured bubbles.
+    // Свечение — предрендеренный спрайт: заметно дешевле shadowBlur на 40 крошках.
     const fade = f.fade ?? 1;
-    ctx.globalAlpha = fade * 0.42;
-    ctx.fillStyle = "rgba(53,246,255,0.16)";
-    ctx.beginPath();
-    ctx.arc(f.x, f.y, r * 1.42, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.globalAlpha = fade * 0.7;
+    const glow = foodGlow(f.side);
+    ctx.drawImage(glow, f.x - r * 2.2, f.y - r * 2.2, r * 4.4, r * 4.4);
+    ctx.globalAlpha = 1;
 
     ctx.save();
     ctx.globalAlpha = fade; // fade out near end of life
@@ -1761,8 +1764,8 @@ function drawFood() {
       ctx.drawImage(image, f.x - r, f.y - r, r * 2, r * 2);
     } else {
       const g = ctx.createRadialGradient(f.x - r * 0.3, f.y - r * 0.4, 0, f.x, f.y, r * 1.4);
-      g.addColorStop(0, "rgba(255,255,255,0.72)");
-      g.addColorStop(0.42, "rgba(92,112,145,0.9)");
+      g.addColorStop(0, "rgba(255,255,255,0.85)");
+      g.addColorStop(0.35, f.color);
       g.addColorStop(1, "rgba(14,20,32,0.95)");
       ctx.fillStyle = g;
       ctx.fillRect(f.x - r, f.y - r, r * 2, r * 2);
@@ -1772,14 +1775,6 @@ function drawFood() {
       ctx.font = `${Math.max(5, r * 1.1)}px Inter, system-ui, sans-serif`;
       ctx.fillText(f.initial, f.x, f.y + r * 0.04);
     }
-    ctx.restore();
-    ctx.save();
-    ctx.globalAlpha = fade * 0.72;
-    ctx.strokeStyle = "rgba(255,255,255,0.42)";
-    ctx.lineWidth = Math.max(0.7, r * 0.14);
-    ctx.beginPath();
-    ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
-    ctx.stroke();
     ctx.restore();
     if (f.eat > 0) {
       ctx.save();

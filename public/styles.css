@@ -1099,8 +1099,8 @@ h2 {
   --fish-body: #ffb347;
   --fish-belly: #ffe2a8;
   --fish-fin: #ff8a3c;
-  --fish-glow: rgba(255, 179, 71, 0.26);
-  filter: drop-shadow(0 0 3px var(--fish-glow));
+  --fish-glow: rgba(255, 179, 71, 0.42);
+  filter: drop-shadow(0 0 5px var(--fish-glow));
 }
 
 .aquarium-dom-fish .fish-svg {
@@ -1142,28 +1142,28 @@ h2 {
   --fish-body: #46d4ff;
   --fish-belly: #bff2ff;
   --fish-fin: #2aa7ff;
-  --fish-glow: rgba(70, 212, 255, 0.26);
+  --fish-glow: rgba(70, 212, 255, 0.42);
 }
 
 .aquarium-dom-fish.fish-3 {
   --fish-body: #b07bff;
   --fish-belly: #e7d6ff;
   --fish-fin: #8a5cff;
-  --fish-glow: rgba(176, 123, 255, 0.26);
+  --fish-glow: rgba(176, 123, 255, 0.42);
 }
 
 .aquarium-dom-fish.fish-4 {
   --fish-body: #5be5a0;
   --fish-belly: #c9ffe6;
   --fish-fin: #2fc985;
-  --fish-glow: rgba(91, 229, 160, 0.26);
+  --fish-glow: rgba(91, 229, 160, 0.42);
 }
 
 .aquarium-dom-fish.fish-5 {
   --fish-body: #ff7aa8;
   --fish-belly: #ffd6e4;
   --fish-fin: #ff4f86;
-  --fish-glow: rgba(255, 122, 168, 0.26);
+  --fish-glow: rgba(255, 122, 168, 0.42);
 }
 
 .aquarium-dom-food {
@@ -1175,11 +1175,9 @@ h2 {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.82), rgba(92, 112, 145, 0.92) 44%, rgba(14, 20, 32, 0.96));
-  border: 1px solid rgba(255, 255, 255, 0.42);
-  box-shadow:
-    0 0 0 1px rgba(8, 13, 22, 0.48),
-    0 0 5px rgba(53, 246, 255, 0.18);
+  background: radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.95), rgba(25, 195, 125, 0.84) 44%, rgba(14, 20, 32, 0.92));
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  box-shadow: 0 0 8px rgba(25, 195, 125, 0.44);
   transform: translate3d(-40px, -40px, 0);
   -webkit-transform: translate3d(-40px, -40px, 0);
   will-change: transform, opacity;
@@ -1199,16 +1197,16 @@ h2 {
   border-radius: 50%;
 }
 
+.aquarium-dom-food.no {
+  background: radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.95), rgba(239, 70, 111, 0.84) 44%, rgba(14, 20, 32, 0.92));
+  box-shadow: 0 0 8px rgba(239, 70, 111, 0.42);
+}
+
 .aquarium-dom-food.avatar {
   border-color: rgba(255, 255, 255, 0.55);
   box-shadow:
     0 0 0 1px rgba(8, 13, 22, 0.55),
-    0 0 6px rgba(53, 246, 255, 0.22);
-}
-
-.aquarium-dom-food.avatar-loaded {
-  color: transparent;
-  text-shadow: none;
+    0 0 8px rgba(53, 246, 255, 0.28);
 }
 
 @keyframes aquariumDomTail {
