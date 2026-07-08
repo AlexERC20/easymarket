@@ -2859,8 +2859,8 @@ export async function completeVerifiedTask(input) {
   });
 }
 
-// Награды заданий. Ротируемые дейлики можно клеймить только в день, когда они
-// выпали в ротацию; лестница присутствия и разовые задания — всегда.
+// Награды заданий. Базовые дейлики доступны каждый день, а новая ротация
+// добавляет короткий бонусный набор поверх них.
 const TASK_AMOUNTS = {
   daily_presence: () => Math.round(Number(config.taskDailyPresenceFire || 0)),
   presence_15: () => 75,
@@ -2881,14 +2881,17 @@ const TASK_AMOUNTS = {
   join_clan: () => 200,
 };
 
-// Пул ротации: 3 задания в день, детерминированно от даты — у всех одинаковые.
-const DAILY_ROTATION_POOL = [
+const CORE_DAILY_TASK_KEYS = new Set([
   "daily_bet",
   "daily_btc_prediction",
   "daily_football_prediction",
   "daily_btc_5_predictions",
   "daily_win_1",
   "daily_win_streak_5",
+]);
+
+// Пул ротации: 3 бонусных задания в день, детерминированно от даты — у всех одинаковые.
+const DAILY_ROTATION_POOL = [
   "daily_win_2_row",
   "daily_sniper",
   "daily_no_win",
@@ -2943,6 +2946,7 @@ async function claimDailyTaskForUser(client, user, taskKey) {
   }
   if (
     DAILY_ROTATION_POOL.includes(normalizedTaskKey)
+    && !CORE_DAILY_TASK_KEYS.has(normalizedTaskKey)
     && !getDailyRotation().includes(normalizedTaskKey)
   ) {
     throw new Error("task_not_in_rotation");

@@ -833,9 +833,9 @@ function drawChartTradeAvatar(ctx, trade, x, y, radius, bounds) {
       centerY,
       safeRadius * 1.4,
     );
-    gradient.addColorStop(0, "rgba(255,255,255,0.82)");
-    gradient.addColorStop(0.32, getTradeAvatarColor(trade));
-    gradient.addColorStop(1, "rgba(14,20,32,0.96)");
+    gradient.addColorStop(0, "rgba(255,255,255,0.62)");
+    gradient.addColorStop(0.38, "rgba(92,112,145,0.9)");
+    gradient.addColorStop(1, "rgba(14,20,32,0.98)");
     ctx.fillStyle = gradient;
     ctx.fillRect(centerX - safeRadius, centerY - safeRadius, safeRadius * 2, safeRadius * 2);
     ctx.shadowBlur = 0;
@@ -1323,21 +1323,30 @@ function drawMarketChartFrame(ts) {
     ctx.stroke();
   }
 
-  // Счастливый раунд: заметная пилюля «⚡ x2» — выигрыш этого раунда удвоен.
+  // Счастливый раунд: маленькая мерцающая молния + x2 без тяжёлой плашки.
   if (market.is_lucky && market.status === "open") {
-    const luckyLabel = "⚡ ВЫИГРЫШ X2";
-    ctx.font = `${Math.max(11, width * 0.028)}px Inter, system-ui, sans-serif`;
-    const luckyWidth = ctx.measureText(luckyLabel).width + 22;
-    ctx.fillStyle = "rgba(183, 255, 77, 0.16)";
-    ctx.strokeStyle = "rgba(183, 255, 77, 0.55)";
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    roundedRectPath(ctx, left, top, luckyWidth, 26, 13);
-    ctx.fill();
-    ctx.stroke();
+    const flicker = 0.72 + 0.28 * Math.sin(nowTs * 0.018);
+    const luckyX = left + 10 * dpr;
+    const luckyY = top + 15 * dpr;
+    ctx.save();
+    ctx.globalAlpha = flicker;
+    ctx.shadowColor = "rgba(183,255,77,0.9)";
+    ctx.shadowBlur = 12 * dpr;
     ctx.fillStyle = "#b7ff4d";
+    ctx.beginPath();
+    ctx.moveTo(luckyX + 8 * dpr, luckyY - 13 * dpr);
+    ctx.lineTo(luckyX - 1 * dpr, luckyY + 1 * dpr);
+    ctx.lineTo(luckyX + 6 * dpr, luckyY + 1 * dpr);
+    ctx.lineTo(luckyX + 2 * dpr, luckyY + 13 * dpr);
+    ctx.lineTo(luckyX + 14 * dpr, luckyY - 3 * dpr);
+    ctx.lineTo(luckyX + 7 * dpr, luckyY - 3 * dpr);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 7 * dpr;
+    ctx.font = `900 ${Math.max(10, width * 0.024)}px Inter, system-ui, sans-serif`;
     ctx.textBaseline = "middle";
-    ctx.fillText(luckyLabel, left + 11, top + 14);
+    ctx.fillText("x2", luckyX + 20 * dpr, luckyY + 1 * dpr);
+    ctx.restore();
   }
 
   const openY = scaleY(openPrice);
@@ -1413,12 +1422,9 @@ function drawMarketChartFrame(ts) {
         Math.abs(point.x - x) < Math.abs(best.x - x) ? point : best
       ), pathPoints[0]);
       const own = String(trade.telegram_id || "") === String(state.user?.telegram_id || "");
-      const dotSize = own ? 4.6 : 2.5;
-      const dotY = nearest.y + (own ? -7 : 7);
-      const avatarRadius = Math.max(dotSize + 1, CHART_AVATAR_RADIUS_CSS * dpr);
-      const avatarDirection = trade.side === "YES" ? -1 : 1;
-      const avatarGap = dotSize + avatarRadius + Math.max(1.5, 1.2 * dpr);
-      const avatarY = dotY + avatarDirection * avatarGap;
+      const dotY = nearest.y + (own ? -8 : 7);
+      const avatarRadius = Math.max(own ? 5.2 : 4.2, CHART_AVATAR_RADIUS_CSS * dpr);
+      const avatarY = dotY;
       if (captureAvatars) {
         frameAvatars.push({
           xFrac: x / width,
@@ -1429,19 +1435,6 @@ function drawMarketChartFrame(ts) {
           side: trade.side === "YES" ? "YES" : "NO",
         });
       }
-      ctx.save();
-      ctx.fillStyle = trade.side === "YES" ? "rgba(25,195,125,0.95)" : "rgba(239,70,111,0.92)";
-      ctx.shadowColor = trade.side === "YES" ? "rgba(25,195,125,0.75)" : "rgba(239,70,111,0.72)";
-      ctx.shadowBlur = own ? 16 : 9;
-      ctx.beginPath();
-      ctx.arc(x, dotY, dotSize, 0, Math.PI * 2);
-      ctx.fill();
-      if (own) {
-        ctx.lineWidth = 1.4;
-        ctx.strokeStyle = "rgba(255,255,255,0.78)";
-        ctx.stroke();
-      }
-      ctx.restore();
       drawChartTradeAvatar(ctx, trade, x, avatarY, avatarRadius, {
         left,
         right: currentX - 2 * dpr,
@@ -2124,12 +2117,18 @@ function setTaskButtonVisualState(button, status) {
   if (!button) return;
   const claimed = Boolean(status?.claimed);
   const claimable = Boolean(status?.ready) && !claimed;
+  const isClaimChip = button.classList.contains("task-claim-chip");
   button.classList.toggle("claimable", claimable);
   button.classList.toggle("claimed", claimed);
   button.classList.toggle("not-ready", !claimable && !claimed);
-  // Once claimed there's nothing to tap: hide the button and mark the chip earned.
+  if (isClaimChip) {
+    const amount = Number(button.dataset.taskAmount || 0);
+    button.disabled = !claimable;
+    button.textContent = claimed ? `✓ +${formatFire(amount)}` : claimable ? "Забрать" : `+${formatFire(amount)}`;
+    return;
+  }
   button.classList.toggle("is-done", claimed);
-  button.closest(".task-item")?.querySelector(".task-reward")?.classList.toggle("claimed", claimed);
+  button.closest(".task-item")?.querySelector(".task-reward:not(.task-claim-chip)")?.classList.toggle("claimed", claimed);
   if (!claimed && button.dataset.dailyTask) {
     button.textContent = "Забрать";
   }
@@ -2167,6 +2166,10 @@ function renderDailyProgress() {
 
   const presenceReward = Math.round(Number(state.publicConfig.task_daily_presence_fire || 50));
   const entries = [
+    ...CORE_DAILY_TASK_KEYS.map((key) => ({
+      claimed: Boolean(getDailyTaskStatus(key).claimed),
+      amount: getDailyTaskAmount(key),
+    })),
     ...(state.engagement?.rotation || []).map((task) => ({
       claimed: Boolean(task.claimed || getDailyTaskStatus(task.key).claimed),
       amount: Number(task.amount || 0),
@@ -7158,21 +7161,102 @@ async function submitMarketComment() {
 }
 
 // ===== Стрик «Заряд молнии» + ротация дейликов =====
-const DAILY_TASK_META = {
-  daily_bet: { title: "Первая ставка дня", desc: "Поставь 1 ставку", icon: "🎯" },
-  daily_btc_prediction: { title: "Прогноз по BTC", desc: "1 прогноз в BTC-маркете", icon: "₿" },
-  daily_football_prediction: { title: "Прогноз на футбол", desc: "1 футбольный прогноз", icon: "⚽" },
-  daily_btc_5_predictions: { title: "5 прогнозов BTC", desc: "Пять BTC-прогнозов за день", icon: "📊" },
-  daily_win_1: { title: "Выиграй прогноз", desc: "Первая победа дня", icon: "🏆" },
-  daily_win_streak_5: { title: "5 побед подряд", desc: "Серия из пяти побед", icon: "🔥" },
-  daily_win_2_row: { title: "2 победы подряд", desc: "Выиграй два раунда подряд", icon: "⚡" },
-  daily_sniper: { title: "Снайпер", desc: "Ставка в последние 15 секунд раунда", icon: "🎯" },
-  daily_no_win: { title: "Против толпы", desc: "Выиграй ставкой на NO", icon: "🐻" },
-  daily_feed_fish: { title: "Покорми рыбок", desc: "Встряхни телефон на BTC 5m", icon: "🐟" },
-  daily_comment: { title: "Голос рынка", desc: "Оставь комментарий под рынком", icon: "💬" },
-  daily_explore_3: { title: "Разведка рынков", desc: "Открой BTC-лист, рынок из него и футбол", icon: "🧭" },
-  daily_share_story: { title: "Сторис с выигрышем", desc: "Поделись выигрышем в сторис", icon: "📣" },
+const TASK_ICON_SVG = {
+  target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.3"/><path d="M12 1.8v2.6M12 19.6v2.6M1.8 12h2.6M19.6 12h2.6"/></svg>',
+  btc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M9.8 7.8v8.4M12.2 7.6v.9M12.2 15.5v.9M9.6 8.3h4.1c1.1 0 2 .7 2 1.7s-.9 1.7-2 1.7H9.6M9.6 11.7h4.4c1.2 0 2.1.8 2.1 1.8s-.9 1.8-2.1 1.8H9.6"/></svg>',
+  ball: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 7l3.3 2.4-1.25 3.85h-4.1L8.65 9.4 12 7z"/><path d="M12 4.2v2.8M6.4 10.3l2.25.9M17.6 10.3l-2.25.9M9.85 13.25 8.3 15.6M14.15 13.25l1.55 2.35"/></svg>',
+  bars: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20.5h16M7 20.5V14M12 20.5V8.5M17 20.5v-9.5"/></svg>',
+  trophy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 4.5h9v3.4a4.5 4.5 0 0 1-9 0V4.5z"/><path d="M7.5 5.6H5.2v1.1a2.6 2.6 0 0 0 2.7 2.6M16.5 5.6h2.3v1.1a2.6 2.6 0 0 1-2.7 2.6M12 12.4V16M9 19.5h6M9.9 19.5l.5-3.5h3.2l.5 3.5"/></svg>',
+  streak: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5c.8 2.8-2.6 3.9-2.6 7a2.6 2.6 0 0 0 5.2 0c0-.7.35-1.25.35-1.25.95 1 1.65 2.4 1.65 3.9a4.6 4.6 0 0 1-9.2 0c0-3.65 3.4-5.25 4.6-9.65z"/></svg>',
+  bolt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 2.8 5.8 13h5.1l-1 8.2 8.2-11h-5.2l.6-7.4z"/></svg>',
+  bear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 9.5 5.8 6.8M16.5 9.5l1.7-2.7"/><path d="M6.2 12.8c0-3.1 2.4-5.3 5.8-5.3s5.8 2.2 5.8 5.3-2.4 5.7-5.8 5.7-5.8-2.6-5.8-5.7z"/><path d="M9.5 12.2h.01M14.5 12.2h.01M10.4 15.4c.9.6 2.3.6 3.2 0"/></svg>',
+  fish: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 8.5c3 .4 5.5 2.2 5.5 3.5s-2.5 3.1-5.5 3.5"/><path d="M14.5 8.5C10.9 5.8 4 6.2 4 12s6.9 6.2 10.5 3.5c2-1.5 2-5.5 0-7z"/><path d="M12 11.8h.01"/></svg>',
+  chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-8l-4 3.2V16.5H5A1.5 1.5 0 0 1 3.5 15V7A1.5 1.5 0 0 1 5 5.5z"/><path d="M7.5 9.5h9M7.5 12.5h6"/></svg>',
+  compass: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="m14.8 9.2-1.5 4.1-4.1 1.5 1.5-4.1 4.1-1.5z"/></svg>',
+  share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 20 4l-4.5 16-3.2-6.8L4 12.5z"/><path d="M20 4 12.3 13.2"/></svg>',
 };
+
+const CORE_DAILY_TASK_KEYS = [
+  "daily_bet",
+  "daily_btc_prediction",
+  "daily_football_prediction",
+  "daily_btc_5_predictions",
+  "daily_win_1",
+  "daily_win_streak_5",
+];
+
+const DAILY_TASK_META = {
+  daily_bet: { title: "Первая ставка дня", desc: "Поставь 1 ставку", icon: "target" },
+  daily_btc_prediction: { title: "Прогноз по BTC", desc: "1 прогноз в BTC-маркете", icon: "btc" },
+  daily_football_prediction: { title: "Прогноз на футбол", desc: "1 футбольный прогноз", icon: "ball" },
+  daily_btc_5_predictions: { title: "5 прогнозов BTC", desc: "Пять BTC-прогнозов за день", icon: "bars" },
+  daily_win_1: { title: "Выиграй прогноз", desc: "Первая победа дня", icon: "trophy" },
+  daily_win_streak_5: { title: "5 побед подряд", desc: "Серия из пяти побед", icon: "streak" },
+  daily_win_2_row: { title: "2 победы подряд", desc: "Выиграй два раунда подряд", icon: "bolt" },
+  daily_sniper: { title: "Снайпер", desc: "Ставка в последние 15 секунд раунда", icon: "target" },
+  daily_no_win: { title: "Против толпы", desc: "Выиграй ставкой на NO", icon: "bear" },
+  daily_feed_fish: { title: "Покорми рыбок", desc: "Встряхни телефон на BTC 5m", icon: "fish" },
+  daily_comment: { title: "Голос рынка", desc: "Оставь комментарий под рынком", icon: "chat" },
+  daily_explore_3: { title: "Разведка рынков", desc: "Открой BTC-лист, рынок из него и футбол", icon: "compass" },
+  daily_share_story: { title: "Сторис с выигрышем", desc: "Поделись выигрышем в сторис", icon: "share" },
+};
+
+function getDailyTaskAmount(taskKey, fallback = 0) {
+  if (taskKey === "daily_bet") {
+    return Math.round(Number(state.publicConfig.task_daily_bet_fire || 50));
+  }
+  if (taskKey === "daily_presence") {
+    return Math.round(Number(state.publicConfig.task_daily_presence_fire || 50));
+  }
+  const rotationTask = state.engagement?.rotation?.find((task) => task.key === taskKey);
+  if (rotationTask) {
+    return Number(rotationTask.amount || fallback || 0);
+  }
+  const presenceTask = state.engagement?.presence?.[taskKey];
+  if (presenceTask) {
+    return Number(presenceTask.amount || fallback || 0);
+  }
+  const fixed = {
+    daily_btc_prediction: 50,
+    daily_football_prediction: 50,
+    daily_btc_5_predictions: 300,
+    daily_win_1: 50,
+    daily_win_streak_5: 300,
+    daily_win_2_row: 100,
+    daily_sniper: 75,
+    daily_no_win: 75,
+    daily_feed_fish: 25,
+    daily_comment: 25,
+    daily_explore_3: 25,
+    daily_share_story: 100,
+    join_clan: 200,
+  };
+  return fixed[taskKey] ?? fallback;
+}
+
+function taskIconMarkup(meta) {
+  return TASK_ICON_SVG[meta?.icon] || TASK_ICON_SVG.target;
+}
+
+function taskClaimChipMarkup(taskKey, amount) {
+  return `<button class="task-reward task-claim-chip" data-daily-task="${taskKey}" data-task-amount="${Number(amount || 0)}" type="button">+${formatFire(amount)}</button>`;
+}
+
+function renderDailyTaskRow(taskKey, amount = getDailyTaskAmount(taskKey)) {
+  const meta = DAILY_TASK_META[taskKey] || { title: taskKey, desc: "", icon: "target" };
+  return `
+    <div class="task-item" data-task-row="${taskKey}">
+      <span class="task-ic" aria-hidden="true">${taskIconMarkup(meta)}</span>
+      <div class="task-body">
+        <strong>${meta.title}</strong>
+        <small>${meta.desc}</small>
+      </div>
+      <div class="task-act">
+        ${taskClaimChipMarkup(taskKey, amount)}
+      </div>
+    </div>
+  `;
+}
 
 const taskEventsSent = new Set();
 
@@ -7285,22 +7369,17 @@ function renderEngagement() {
   renderStreakCard();
   const list = $("dailyRotationList");
   if (list && Array.isArray(state.engagement?.rotation)) {
-    setInnerHtmlIfChanged(list, state.engagement.rotation.map((task) => {
-      const meta = DAILY_TASK_META[task.key] || { title: task.key, desc: "", icon: "⭐" };
-      return `
-        <div class="task-item">
-          <span class="task-ic task-ic-emoji" aria-hidden="true">${meta.icon}</span>
-          <div class="task-body">
-            <strong>${meta.title}</strong>
-            <small>${meta.desc}</small>
-          </div>
-          <div class="task-act">
-            <span class="task-reward">+${formatFire(task.amount)}</span>
-            <button class="task-button" data-daily-task="${task.key}" type="button">Забрать</button>
-          </div>
-        </div>
-      `;
-    }).join(""));
+    setInnerHtmlIfChanged(
+      list,
+      state.engagement.rotation.map((task) => renderDailyTaskRow(task.key, task.amount)).join(""),
+    );
+  }
+  const coreList = $("coreDailyList");
+  if (coreList) {
+    setInnerHtmlIfChanged(
+      coreList,
+      CORE_DAILY_TASK_KEYS.map((taskKey) => renderDailyTaskRow(taskKey)).join(""),
+    );
   }
   const clanButton = $("joinClanTaskBtn");
   const clanTask = state.engagement?.once?.join_clan;
@@ -7365,6 +7444,7 @@ async function claimDailyTaskByKey(taskKey, button = null) {
     if (button) {
       button.disabled = false;
     }
+    renderTaskButtonStates();
   }
 }
 

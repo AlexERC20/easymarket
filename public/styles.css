@@ -2730,6 +2730,7 @@ code {
 }
 
 .task-reward {
+  appearance: none;
   font-size: 12px;
   font-weight: 950;
   color: var(--fire);
@@ -2739,12 +2740,66 @@ code {
   padding: 2px 9px;
   white-space: nowrap;
   line-height: 1.5;
+  font-family: inherit;
 }
 
 .task-reward.soft {
   color: var(--muted);
   background: rgba(255, 255, 255, 0.05);
   border-color: var(--line-soft);
+}
+
+.task-claim-chip {
+  min-width: 54px;
+  cursor: default;
+  transition:
+    transform var(--motion-fast) var(--spring-soft),
+    color var(--motion-normal) var(--ease-default),
+    border-color var(--motion-normal) var(--ease-default),
+    background var(--motion-normal) var(--ease-default),
+    box-shadow var(--motion-normal) var(--ease-default);
+}
+
+.task-claim-chip.claimable {
+  cursor: pointer;
+  color: var(--neon-lime);
+  background:
+    linear-gradient(135deg, rgba(183, 255, 77, 0.24), rgba(53, 246, 255, 0.10)),
+    rgba(183, 255, 77, 0.08);
+  border-color: rgba(183, 255, 77, 0.62);
+  box-shadow:
+    0 0 0 1px rgba(183, 255, 77, 0.1) inset,
+    0 0 16px rgba(183, 255, 77, 0.2);
+  animation: taskClaimChipPulse 1.7s var(--ease-default) infinite;
+}
+
+.task-claim-chip.claimable:active {
+  transform: scale(0.96);
+}
+
+.task-claim-chip.claimed {
+  color: var(--yes);
+  background: rgba(25, 195, 125, 0.14);
+  border-color: rgba(25, 195, 125, 0.42);
+  box-shadow: none;
+}
+
+.task-claim-chip:disabled:not(.claimable) {
+  opacity: 1;
+}
+
+@keyframes taskClaimChipPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(183, 255, 77, 0.1) inset,
+      0 0 10px rgba(183, 255, 77, 0.12);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(183, 255, 77, 0.2) inset,
+      0 0 20px rgba(183, 255, 77, 0.28);
+  }
 }
 
 /* Claimed daily task: no button, the reward chip turns green "earned". */
@@ -2758,7 +2813,7 @@ code {
   border-color: rgba(25, 195, 125, 0.42);
 }
 
-.task-reward.claimed::before {
+.task-reward.claimed:not(.task-claim-chip)::before {
   content: "✓ ";
   font-weight: 950;
 }
