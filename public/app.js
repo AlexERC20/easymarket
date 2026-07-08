@@ -5238,21 +5238,25 @@ function renderTopupSheet() {
     $("withdrawReason").textContent = state.withdrawal.reason || "";
     $("withdrawReason").classList.toggle("hidden", !state.withdrawal.reason);
   }
-  // Живая сводка вывода: сколько спишем и сколько останется.
+  // Живая сводка вывода. Строка занимает место всегда (в режиме вывода),
+  // чтобы её появление не дёргало высоту шита при наборе суммы.
   if ($("withdrawSummary")) {
     const withdrawAmountRaw = String(state.withdrawal.amount || "").replace(",", ".").trim();
     const withdrawAmount = Number(withdrawAmountRaw);
     const cashBalance = Number(state.usdtCashBalance || 0);
     const hasWithdrawAmount = withdrawAmountRaw !== "" && Number.isFinite(withdrawAmount) && withdrawAmount > 0;
     const overBalance = hasWithdrawAmount && withdrawAmount > cashBalance;
-    const showSummary = !isTopupMode && !isHistoryOpen && hasWithdrawAmount;
-    $("withdrawSummary").classList.toggle("hidden", !showSummary);
+    const inWithdrawView = !isTopupMode && !isHistoryOpen;
+    $("withdrawSummary").classList.toggle("hidden", !inWithdrawView);
     $("withdrawSummary").classList.toggle("over", overBalance);
-    $("withdrawSummary").textContent = !showSummary
+    $("withdrawSummary").classList.toggle("idle", !hasWithdrawAmount);
+    $("withdrawSummary").textContent = !inWithdrawView
       ? ""
-      : overBalance
-        ? `Доступно для вывода: ${formatCurrencyAmount(cashBalance, "USDT")} (основной баланс)`
-        : `Спишем ${formatCurrencyAmount(withdrawAmount, "USDT")} · Останется ${formatCurrencyAmount(Math.max(0, cashBalance - withdrawAmount), "USDT")}`;
+      : !hasWithdrawAmount
+        ? `Доступно: ${formatCurrencyAmount(cashBalance, "USDT")}`
+        : overBalance
+          ? `Доступно для вывода: ${formatCurrencyAmount(cashBalance, "USDT")} (основной баланс)`
+          : `Спишем ${formatCurrencyAmount(withdrawAmount, "USDT")} · Останется ${formatCurrencyAmount(Math.max(0, cashBalance - withdrawAmount), "USDT")}`;
   }
   renderWithdrawAddressCheck();
   if ($("withdrawSubmitBtn")) {
