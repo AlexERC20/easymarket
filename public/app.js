@@ -5112,7 +5112,9 @@ function renderTopupSheet() {
     );
   }
   if ($("usdtDepositNetworkHint")) {
-    $("usdtDepositNetworkHint").textContent = hasPendingIntent ? "в BEP20 или ERC20. Баланс после зачисления обновится автоматически." : "";
+    $("usdtDepositNetworkHint").textContent = hasPendingIntent
+      ? "в BEP20 или ERC20. Не округляй: центы в сумме — идентификатор именно твоего перевода. Баланс обновится автоматически."
+      : "";
   }
   if ($("usdtCancelIntentBtn")) {
     $("usdtCancelIntentBtn").classList.toggle("hidden", !hasPendingIntent);
@@ -5127,7 +5129,7 @@ function renderTopupSheet() {
     const cardType = card.dataset.usdtAddressCard;
     card.classList.toggle("hidden", !(hasPendingIntent && cardType === "evm" && intent?.to_address));
   });
-  if ($("usdtEvmAddressLabel")) $("usdtEvmAddressLabel").textContent = "Шаг 1 · кошелёк для пополнения";
+  if ($("usdtEvmAddressLabel")) $("usdtEvmAddressLabel").textContent = "Кошелёк для пополнения · тапни, чтобы скопировать";
   const depositAddress = hasPendingIntent ? (intent?.to_address || "") : "";
   if ($("usdtEvmAddress")) $("usdtEvmAddress").textContent = depositAddress;
   $("usdtAddressCopy")?.setAttribute(
@@ -5185,6 +5187,8 @@ function renderTopupSheet() {
     $("topupCustomAmount").step = currency === "USDT" ? "0.01" : "1";
     $("topupCustomAmount").min = currency === "USDT" ? "15" : "1";
     $("topupCustomAmount").disabled = hasPendingIntent;
+    // Шаг 2: поле суммы убираем — точная сумма с центами живёт в заявке ниже.
+    $("topupCustomAmount").closest("label")?.classList.toggle("hidden", hasPendingIntent);
   }
   if ($("topupReason")) {
     let topupReasonText = "";
@@ -5199,6 +5203,8 @@ function renderTopupSheet() {
     $("topupReason").classList.toggle("hidden", !topupReasonText);
   }
   if ($("topupBuyBtn")) {
+    // На шаге 2 кнопка дублирует тап по карточке адреса — прячем, меньше шума.
+    $("topupBuyBtn").classList.toggle("hidden", hasPendingIntent);
     $("topupBuyBtn").disabled = !isTopupMode || state.topup.pending || !state.user || (isUsdt && !hasUsdtNetworks);
     $("topupBuyBtn").textContent = isUsdt
       ? (hasPendingIntent ? "Скопировать адрес" : "Создать заявку")
