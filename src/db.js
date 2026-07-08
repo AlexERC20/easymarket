@@ -329,6 +329,22 @@ export async function runMigrations() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS top_market_meta (
+      symbol TEXT PRIMARY KEY,
+      polymarket_id TEXT UNIQUE,
+      slug TEXT,
+      title TEXT NOT NULL,
+      icon TEXT,
+      volume NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      liquidity NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      top_rank INTEGER,
+      last_seen_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_top_market_meta_rank
+      ON top_market_meta(top_rank);
+
     CREATE TABLE IF NOT EXISTS fire_referral_bonuses (
       id BIGSERIAL PRIMARY KEY,
       inviter_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

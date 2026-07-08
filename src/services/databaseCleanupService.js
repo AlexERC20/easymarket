@@ -169,10 +169,12 @@ async function deleteOldMarketComments() {
   const oldComments = await deleteInBatches(
     `
       WITH doomed AS (
-        SELECT id
-        FROM market_comments
-        WHERE created_at < now() - ($1::int * interval '1 day')
-        ORDER BY id ASC
+        SELECT comments.id
+        FROM market_comments comments
+        JOIN markets ON markets.id = comments.market_id
+        WHERE markets.status <> 'open'
+          AND comments.created_at < now() - ($1::int * interval '1 day')
+        ORDER BY comments.id ASC
         LIMIT $2
       )
       DELETE FROM market_comments comments

@@ -40,6 +40,7 @@ import {
   getProjectEconomySettings,
   getRecentActivity,
   getRecentMarkets,
+  getTopMarkets,
   getUserSnapshot,
   getUsdtLedgerEvents,
   getWorldCupMarkets,
@@ -47,6 +48,7 @@ import {
   resetUserMarketStateByUsername,
   resolveExpiredMarkets,
   sellOutcome,
+  syncTopMarkets,
   syncFireBalanceByUsername,
   syncFireBalance,
   updateProjectEconomySettings,
@@ -632,6 +634,18 @@ app.get("/api/activity/recent", async (req, res) => {
 app.get("/api/world-cup/markets", async (_req, res) => {
   try {
     const result = await getWorldCupMarkets();
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/top/markets", async (_req, res) => {
+  try {
+    const result = await getTopMarkets();
     res.status(200).json({
       ok: true,
       ...result,
@@ -1341,6 +1355,7 @@ async function marketTick() {
   try {
     await resolveExpiredMarkets();
     await ensureActiveMarket();
+    await syncTopMarkets();
   } catch (error) {
     console.warn("[easymarket] market tick failed:", error instanceof Error ? error.message : "unknown error");
   } finally {

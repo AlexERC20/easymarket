@@ -101,6 +101,10 @@ const state = {
   worldCupListRenderedOrder: "",
   selectedWorldCupMarketId: null,
   worldCupCharts: new Map(),
+  topMarkets: [],
+  topMarketsListRenderedOrder: "",
+  selectedTopMarketId: null,
+  topMarketCharts: new Map(),
   comments: [],
   commentsMarketId: null,
   commentsOnlineCount: 0,
@@ -881,6 +885,10 @@ function getDisplayMarket() {
     return state.worldCupMarkets.find((market) => market.id === state.selectedWorldCupMarketId) || state.market;
   }
 
+  if (state.selectedTopMarketId) {
+    return state.topMarkets.find((market) => market.id === state.selectedTopMarketId) || state.market;
+  }
+
   return state.market;
 }
 
@@ -888,11 +896,20 @@ function findMarketById(marketId) {
   const id = Number(marketId);
   return state.btcMarkets.find((market) => market.id === id)
     || state.worldCupMarkets.find((market) => market.id === id)
+    || state.topMarkets.find((market) => market.id === id)
     || (state.market?.id === id ? state.market : null);
 }
 
 function isWorldCupMarket(market = getDisplayMarket()) {
   return market?.market_type === "WORLD_CUP_WINNER";
+}
+
+function isTopMarket(market = getDisplayMarket()) {
+  return market?.market_type === "TOP_MARKET";
+}
+
+function isPredictionListMarket(market = getDisplayMarket()) {
+  return isWorldCupMarket(market) || isTopMarket(market);
 }
 
 function isBtcMarket(market = getDisplayMarket()) {
@@ -942,14 +959,18 @@ function openCarouselMarkets(markets) {
 function pruneClosedLocalMarkets({ renderLists = false } = {}) {
   const beforeBtc = state.btcMarkets.map((market) => market.id).join(",");
   const beforeWorld = state.worldCupMarkets.map((market) => market.id).join(",");
+  const beforeTop = state.topMarkets.map((market) => market.id).join(",");
 
   state.btcMarkets = openCarouselMarkets(state.btcMarkets);
   state.worldCupMarkets = openCarouselMarkets(state.worldCupMarkets);
+  state.topMarkets = openCarouselMarkets(state.topMarkets);
 
   const afterBtc = state.btcMarkets.map((market) => market.id).join(",");
   const afterWorld = state.worldCupMarkets.map((market) => market.id).join(",");
+  const afterTop = state.topMarkets.map((market) => market.id).join(",");
   const btcChanged = beforeBtc !== afterBtc;
   const worldChanged = beforeWorld !== afterWorld;
+  const topChanged = beforeTop !== afterTop;
   let selectionChanged = false;
 
   if (
@@ -966,6 +987,13 @@ function pruneClosedLocalMarkets({ renderLists = false } = {}) {
     state.selectedWorldCupMarketId = null;
     selectionChanged = true;
   }
+  if (
+    state.selectedTopMarketId
+    && !state.topMarkets.some((market) => market.id === state.selectedTopMarketId)
+  ) {
+    state.selectedTopMarketId = null;
+    selectionChanged = true;
+  }
 
   if (btcChanged) {
     state.btcMarketsListRenderedOrder = "";
@@ -973,12 +1001,16 @@ function pruneClosedLocalMarkets({ renderLists = false } = {}) {
   if (worldChanged) {
     state.worldCupListRenderedOrder = "";
   }
+  if (topChanged) {
+    state.topMarketsListRenderedOrder = "";
+  }
   if (renderLists) {
     if (btcChanged) renderBtcMarketsList();
     if (worldChanged) renderWorldCupList();
+    if (topChanged) renderTopMarketsList();
   }
 
-  return { changed: btcChanged || worldChanged, selectionChanged };
+  return { changed: btcChanged || worldChanged || topChanged, selectionChanged };
 }
 
 function getMarketMinOutcomePrice(market = getDisplayMarket()) {
@@ -1016,6 +1048,9 @@ function upsertLocalMarket(market) {
   if (market.market_type === "WORLD_CUP_WINNER") {
     upsertMarketListItem("worldCupMarkets", market);
   }
+  if (market.market_type === "TOP_MARKET") {
+    upsertMarketListItem("topMarkets", market);
+  }
 }
 
 function getDisplayChartPoints(market) {
@@ -1026,7 +1061,7 @@ function getDisplayChartPoints(market) {
     }
   }
 
-  if (!isWorldCupMarket(market)) {
+  if (!isPredictionListMarket(market)) {
     const btcPoints = isBtcMarket(market) && market?.id !== state.market?.id
       ? state.btcCharts.get(market.id) || []
       : state.chartPoints;
@@ -1049,7 +1084,9 @@ function getDisplayChartPoints(market) {
     });
   }
 
-  const points = state.worldCupCharts.get(market.id) || [];
+  const points = isTopMarket(market)
+    ? state.topMarketCharts.get(market.id) || []
+    : state.worldCupCharts.get(market.id) || [];
   if (points.length) {
     return points;
   }
@@ -1237,7 +1274,7 @@ function drawMarketChartFrame(ts) {
 
   const { dpr, width, height } = resizeCanvas(canvas);
   const appBg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#080d16";
-  const worldCup = isWorldCupMarket(market);
+  const worldCup = isPredictionListMarket(market);
   const aquariumAllowed = syncAquariumRuntimeForMarket(market);
   const openPrice = worldCup
     ? Math.max(0.1, Math.min(99.9, Number(market.yes_price || 0.5) * 100))
@@ -2465,6 +2502,10 @@ function shouldRefreshWorldCupMarkets() {
   return Boolean(state.selectedWorldCupMarketId) || isSheetOpen("worldCupSheet");
 }
 
+function shouldRefreshTopMarkets() {
+  return Boolean(state.selectedTopMarketId) || isSheetOpen("topMarketsSheet");
+}
+
 function maybeLoadComments(force = false) {
   const now = Date.now();
   if (!force && now - state.lastCommentsLoadAt < COMMENTS_POLL_MS) {
@@ -2493,6 +2534,9 @@ function scheduleCoreRefresh({ delay = 120, includeLists = true, includeComments
       }
       if (shouldRefreshWorldCupMarkets()) {
         jobs.push(runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined));
+      }
+      if (shouldRefreshTopMarkets()) {
+        jobs.push(runSingleFlight("topMarkets", loadTopMarkets).catch(() => undefined));
       }
     }
 
@@ -3311,6 +3355,30 @@ function mergeWorldCupChartPoint(market) {
   state.worldCupCharts.set(market.id, points.slice(-260));
 }
 
+function mergeTopMarketChartPoint(market) {
+  if (!market?.id) {
+    return;
+  }
+
+  const existing = state.topMarketCharts.get(market.id) || [];
+  const history = (market.chart || [])
+    .map((point) => ({
+      price: normalizeChartPrice(point.price),
+      at: new Date(point.created_at).getTime(),
+    }))
+    .filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at));
+  const points = existing.length ? existing : history;
+  const nextPoint = {
+    price: Math.max(0.1, Math.min(99.9, Number(market.yes_price || 0.5) * 100)),
+    at: Date.now(),
+  };
+  const lastPoint = points[points.length - 1];
+  if (!lastPoint || nextPoint.at - lastPoint.at > 700 || Math.abs(nextPoint.price - lastPoint.price) > 0.02) {
+    points.push(nextPoint);
+  }
+  state.topMarketCharts.set(market.id, points.slice(-260));
+}
+
 function mergeBtcChartPoint(market) {
   if (!market?.id) {
     return;
@@ -3383,6 +3451,25 @@ async function loadWorldCupMarkets() {
   }
 }
 
+async function loadTopMarkets() {
+  const data = await api("/api/top/markets");
+  const incomingMarkets = openCarouselMarkets(data.markets || []);
+  state.topMarkets = incomingMarkets;
+  state.topMarkets.forEach(mergeTopMarketChartPoint);
+  if (
+    state.selectedTopMarketId
+    && !state.topMarkets.some((market) => market.id === state.selectedTopMarketId)
+  ) {
+    state.selectedTopMarketId = null;
+  }
+  renderTopMarketsList();
+  if (state.selectedTopMarketId) {
+    renderMarket();
+    renderTradeTicket();
+    renderMarketChart();
+  }
+}
+
 function getSelectedPrice() {
   const market = getDisplayMarket();
   if (!market) {
@@ -3428,7 +3515,7 @@ function estimateBuyQuote({ market, side, amount }) {
     : 0.5;
   const price = Math.max(minPrice, Math.min(1 - minPrice, rawPrice || 0.5));
   const rawLiquidity = Math.max(1, Number(market?.liquidity || state.market?.liquidity || 10_000));
-  const baseLiquidity = isWorldCupMarket(market)
+  const baseLiquidity = isPredictionListMarket(market)
     ? Math.max(1_500, Math.min(30_000, Math.sqrt(rawLiquidity) * 2.1))
     : Math.max(1_200, Math.min(24_000, rawLiquidity));
   const distanceFromCenter = Math.min(1, Math.abs(price - 0.5) / 0.5);
@@ -3454,9 +3541,18 @@ function applyBuyIntentSelection(intent) {
   if (btcMarket) {
     state.selectedBtcMarketId = btcMarket.id === state.market?.id ? null : btcMarket.id;
     state.selectedWorldCupMarketId = null;
+    state.selectedTopMarketId = null;
   } else if (worldMarket) {
     state.selectedWorldCupMarketId = worldMarket.id;
     state.selectedBtcMarketId = null;
+    state.selectedTopMarketId = null;
+  } else {
+    const topMarket = state.topMarkets.find((market) => market.id === marketId);
+    if (topMarket) {
+      state.selectedTopMarketId = topMarket.id;
+      state.selectedBtcMarketId = null;
+      state.selectedWorldCupMarketId = null;
+    }
   }
   state.selectedSide = intent.side;
   state.sideSelectedMarketId = marketId || null;
@@ -3468,7 +3564,8 @@ function renderMarket() {
   const market = getDisplayMarket();
   ensureSelectedSideForMarket(market);
   const hasMarket = Boolean(market);
-  const worldCup = isWorldCupMarket(market);
+  const worldCup = isPredictionListMarket(market);
+  const topMarket = isTopMarket(market);
   const currentPrice = worldCup
     ? Number(market?.yes_price || 0.5) * 100
     : Number(market?.current_price || market?.open_price || 0);
@@ -3488,12 +3585,12 @@ function renderMarket() {
   marketStatus.textContent = marketStatusLabel(canBuyMarket ? market?.status : (market ? "closed" : market?.status));
   marketStatus.classList.toggle("live", canBuyMarket);
   $("marketTitle").textContent = worldCup
-    ? `${market.team} Winner`
+    ? (topMarket ? (market.title || market.question) : `${market.team} Winner`)
     : (market?.title || "BTC Up or Down 5m");
   const coinBadge = document.querySelector(".coin-badge");
   if (coinBadge) {
     if (worldCup) {
-      setTeamIconElement(coinBadge, market.icon, market.team);
+      setTeamIconElement(coinBadge, market.icon, market.team || market.title || market.question);
     } else {
       coinBadge.dataset.icon = "";
       coinBadge.dataset.alt = "";
@@ -3597,7 +3694,7 @@ function updateTimer() {
     renderTradeTicket();
     scheduleCoreRefresh({ delay: 80, includeLists: true });
   }
-  if ((isWorldCupMarket(market) || isBtcMarket(market)) && seconds >= 86_400) {
+  if ((isPredictionListMarket(market) || isBtcMarket(market)) && seconds >= 86_400) {
     const days = Math.floor(seconds / 86_400);
     const hours = Math.floor((seconds % 86_400) / 3_600);
     $("timeLeftMinutes").textContent = String(days);
@@ -3640,6 +3737,7 @@ function setSectionToggle(id, total, key) {
 
 function getPositionMarket(position) {
   return state.worldCupMarkets.find((market) => market.id === position.market_id)
+    || state.topMarkets.find((market) => market.id === position.market_id)
     || state.btcMarkets.find((market) => market.id === position.market_id)
     || (position.market_id === state.market?.id ? state.market : null);
 }
@@ -3647,6 +3745,9 @@ function getPositionMarket(position) {
 function getPositionMarketLabel(position, market = getPositionMarket(position)) {
   if (market?.team || position.team) {
     return market?.team || position.team;
+  }
+  if (market?.market_type === "TOP_MARKET") {
+    return market.title || market.question || `TOP #${market.id}`;
   }
   if (market?.market_type === "BTC_UPDOWN") {
     return market.title || `BTC ${market.label || ""}`;
@@ -3662,6 +3763,9 @@ function getPositionMarketLabel(position, market = getPositionMarket(position)) 
 function getActivityMarketLabel(trade) {
   if (trade.team) {
     return trade.team;
+  }
+  if (String(trade.market_symbol || "").startsWith("TOP:")) {
+    return trade.market_question || "TOP market";
   }
   if (String(trade.market_symbol || "").startsWith("BTCUSDT")) {
     const suffix = String(trade.market_symbol).replace("BTCUSDT", "").replace(/^_/, "").toLowerCase();
@@ -3680,6 +3784,9 @@ function getRecentMarketLabel(market) {
     const suffix = String(market.symbol).replace("BTCUSDT", "").replace(/^_/, "").toLowerCase();
     return `#${market.id} · ${winner} BTC ${suffix || "5m"}`;
   }
+  if (String(market.symbol || "").startsWith("TOP:")) {
+    return `#${market.id} · ${winner} TOP`;
+  }
   return `#${market.id} · ${winner} ${market.symbol}`;
 }
 
@@ -3688,7 +3795,7 @@ function estimateSellQuote({ position, market, outcomePrice }) {
   const minPrice = getMarketMinOutcomePrice(market);
   const price = Math.max(minPrice, Number(outcomePrice || 0));
   const rawLiquidity = Math.max(1, Number(market?.liquidity || state.market?.liquidity || 10_000));
-  const baseLiquidity = isWorldCupMarket(market)
+  const baseLiquidity = isPredictionListMarket(market)
     ? Math.max(1_500, Math.min(30_000, Math.sqrt(rawLiquidity) * 2.1))
     : Math.max(1_200, Math.min(24_000, rawLiquidity));
   const distanceFromCenter = Math.min(1, Math.abs(price - 0.5) / 0.5);
@@ -3697,7 +3804,7 @@ function estimateSellQuote({ position, market, outcomePrice }) {
   const estimatedGross = shares * price;
   const impact = Math.min(0.42, (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER);
   const nextPrice = Math.max(minPrice, price - impact);
-  const extraExitPenalty = isWorldCupMarket(market) ? 0.03 : 0.015;
+  const extraExitPenalty = isPredictionListMarket(market) ? 0.03 : 0.015;
   const bidPrice = Math.max(minPrice, Math.min(price, nextPrice) * (1 - MARKET_MAKER_SPREAD_RATE - extraExitPenalty));
   const grossExitValue = shares * bidPrice;
   const spent = Number(position.spent || 0);
@@ -4708,6 +4815,58 @@ function renderWorldCupList() {
   `).join("");
 }
 
+function renderTopMarketsList() {
+  const container = $("topMarketsList");
+  if (!container) {
+    return;
+  }
+
+  if (!state.topMarkets.length) {
+    container.innerHTML = '<p class="muted">ТОП маркеты пока загружаются.</p>';
+    return;
+  }
+
+  const orderKey = state.topMarkets.map((market) => market.id).join(",");
+  if (state.topMarketsListRenderedOrder === orderKey) {
+    for (const market of state.topMarkets) {
+      const row = container.querySelector(`[data-market-id="${market.id}"]`);
+      if (!row) continue;
+      const volume = row.querySelector("[data-top-volume]");
+      const chance = row.querySelector("[data-top-chance]");
+      const yesButton = row.querySelector("[data-side='YES']");
+      const noButton = row.querySelector("[data-side='NO']");
+      if (volume) volume.textContent = `Vol. ${formatVolume(market.volume)}`;
+      if (chance) {
+        chance.textContent = `${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%`;
+      }
+      if (yesButton) yesButton.textContent = `Buy Yes ${formatCents(market.yes_price)}`;
+      if (noButton) noButton.textContent = `Buy No ${formatCents(market.no_price)}`;
+    }
+    return;
+  }
+
+  state.topMarketsListRenderedOrder = orderKey;
+  container.innerHTML = state.topMarkets.map((market) => {
+    const rankLabel = market.top_rank ? `#${market.top_rank}` : "active";
+    return `
+      <article class="world-cup-row top-market-row" data-market-id="${market.id}">
+        <button class="world-cup-main" data-top-open="${market.id}" type="button">
+          <span class="team-flag">${teamIconMarkup(market.icon, market.title || market.question)}</span>
+          <span>
+            <strong>${escapeHtml(market.title || market.question)}</strong>
+            <small><i>${rankLabel}</i> · <span data-top-volume>Vol. ${formatVolume(market.volume)}</span></small>
+          </span>
+          <b data-top-chance>${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%</b>
+        </button>
+        <div class="world-cup-actions">
+          <button class="wc-yes" data-top-buy="${market.id}" data-side="YES" type="button">Buy Yes ${formatCents(market.yes_price)}</button>
+          <button class="wc-no" data-top-buy="${market.id}" data-side="NO" type="button">Buy No ${formatCents(market.no_price)}</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
 function renderBtcMarketsList() {
   const container = $("btcMarketsList");
   if (!container) {
@@ -4779,6 +4938,7 @@ function selectBtcMarket(marketId) {
   }
   state.selectedBtcMarketId = id === state.market?.id ? null : id;
   state.selectedWorldCupMarketId = null;
+  state.selectedTopMarketId = null;
   state.smoothedPrice = null;
   state.chartYMin = null;
   state.chartYMax = null;
@@ -4808,12 +4968,43 @@ function selectWorldCupMarket(marketId) {
   }
   state.selectedWorldCupMarketId = id;
   state.selectedBtcMarketId = null;
+  state.selectedTopMarketId = null;
   state.smoothedPrice = null;
   state.chartYMin = null;
   state.chartYMax = null;
   state.commentsMarketId = null;
   state.sideSelectedMarketId = null;
   setWorldCupSheetOpen(false);
+  animateMarketSwitch();
+  renderMarket();
+  renderTradeTicket();
+  renderMarketChart();
+  maybeLoadComments(true);
+}
+
+function setTopMarketsSheetOpen(open) {
+  if (open) {
+    openSheet("topMarketsSheet");
+  } else {
+    closeSheet("topMarketsSheet");
+  }
+}
+
+function selectTopMarket(marketId) {
+  const id = Number(marketId);
+  const market = state.topMarkets.find((item) => item.id === id);
+  if (!market) {
+    return;
+  }
+  state.selectedTopMarketId = id;
+  state.selectedBtcMarketId = null;
+  state.selectedWorldCupMarketId = null;
+  state.smoothedPrice = null;
+  state.chartYMin = null;
+  state.chartYMax = null;
+  state.commentsMarketId = null;
+  state.sideSelectedMarketId = null;
+  setTopMarketsSheetOpen(false);
   animateMarketSwitch();
   renderMarket();
   renderTradeTicket();
@@ -6292,6 +6483,7 @@ async function refreshAll({ includeLists = false } = {}) {
     if (includeLists) {
       await loadBtcMarkets().catch(() => undefined);
       await loadWorldCupMarkets().catch(() => undefined);
+      await loadTopMarkets().catch(() => undefined);
     }
     await loadActivity();
     await loadMe();
@@ -7926,6 +8118,46 @@ $("worldCupList")?.addEventListener("click", (event) => {
   }
 });
 
+$("topMarketsBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  closeTopMoreMenu();
+  setTopMarketsSheetOpen(true);
+  renderTopMarketsList();
+  postTaskEvent("visit_top_markets");
+  void runSingleFlight("topMarkets", loadTopMarkets).catch(() => showToast("ТОП маркеты пока не загрузились."));
+});
+
+$("topMarketsCloseBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  setTopMarketsSheetOpen(false);
+});
+
+$("topMarketsSheet")?.addEventListener("click", (event) => {
+  if (event.target === $("topMarketsSheet")) {
+    setTopMarketsSheetOpen(false);
+  }
+});
+
+$("topMarketsList")?.addEventListener("click", (event) => {
+  const buyButton = event.target.closest("[data-top-buy]");
+  if (buyButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    const market = state.topMarkets.find((item) => item.id === Number(buyButton.dataset.topBuy));
+    if (market) {
+      requestMarketBuy(market, buyButton.dataset.side || "YES", state.selectedAmount);
+    }
+    return;
+  }
+
+  const openButton = event.target.closest("[data-top-open]");
+  if (openButton) {
+    triggerHaptic("selection");
+    postTaskEvent("visit_top_markets");
+    selectTopMarket(openButton.dataset.topOpen);
+  }
+});
+
 $("betCloseBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   closeBetSheet();
@@ -7980,9 +8212,15 @@ $("betConfirmBtn")?.addEventListener("click", async () => {
   if (isBtcMarket(market)) {
     state.selectedBtcMarketId = market.id === state.market?.id ? null : market.id;
     state.selectedWorldCupMarketId = null;
+    state.selectedTopMarketId = null;
+  } else if (isTopMarket(market)) {
+    state.selectedTopMarketId = market.id;
+    state.selectedBtcMarketId = null;
+    state.selectedWorldCupMarketId = null;
   } else {
     state.selectedWorldCupMarketId = market.id;
     state.selectedBtcMarketId = null;
+    state.selectedTopMarketId = null;
   }
   state.selectedSide = side;
   state.selectedAmount = amount;
@@ -8004,7 +8242,7 @@ document.querySelector(".market-card")?.addEventListener("touchend", (event) => 
   if (touchStartX === null || touchStartY === null) {
     return;
   }
-  if (!state.worldCupMarkets.length && !state.btcMarkets.length) {
+  if (!state.worldCupMarkets.length && !state.btcMarkets.length && !state.topMarkets.length) {
     touchStartX = null;
     touchStartY = null;
     return;
@@ -8027,11 +8265,16 @@ document.querySelector(".market-card")?.addEventListener("touchend", (event) => 
     ...state.worldCupMarkets
       .filter((market) => !isMarketClosedForCarousel(market))
       .map((market) => ({ type: "world", id: market.id })),
+    ...state.topMarkets
+      .filter((market) => !isMarketClosedForCarousel(market))
+      .map((market) => ({ type: "top", id: market.id })),
   ];
   if (markets.length <= 1) {
     return;
   }
-  const currentKey = state.selectedWorldCupMarketId
+  const currentKey = state.selectedTopMarketId
+    ? `top:${state.selectedTopMarketId}`
+    : state.selectedWorldCupMarketId
     ? `world:${state.selectedWorldCupMarketId}`
     : state.selectedBtcMarketId
       ? `btc:${state.selectedBtcMarketId}`
@@ -8043,6 +8286,7 @@ document.querySelector(".market-card")?.addEventListener("touchend", (event) => 
   const nextMarket = markets[nextIndex];
   state.selectedWorldCupMarketId = nextMarket.type === "world" ? nextMarket.id : null;
   state.selectedBtcMarketId = nextMarket.type === "btc" ? nextMarket.id : null;
+  state.selectedTopMarketId = nextMarket.type === "top" ? nextMarket.id : null;
   state.smoothedPrice = null;
   state.chartYMin = null;
   state.chartYMax = null;
@@ -8102,6 +8346,11 @@ setInterval(() => {
     void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined);
   }
 }, MARKET_LIST_POLL_MS);
+setInterval(() => {
+  if (shouldRefreshTopMarkets()) {
+    void runSingleFlight("topMarkets", loadTopMarkets).catch(() => undefined);
+  }
+}, MARKET_LIST_POLL_MS);
 setInterval(() => maybeLoadComments(true), COMMENTS_POLL_MS);
 setInterval(() => {
   void runSingleFlight("activity", loadActivity).catch(() => undefined);
@@ -8145,6 +8394,9 @@ loadPublicConfig()
         window.setTimeout(() => {
           void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined);
         }, 1_200);
+        window.setTimeout(() => {
+          void runSingleFlight("topMarkets", loadTopMarkets).catch(() => undefined);
+        }, 1_800);
         window.setTimeout(showReferralNudge, 150_000);
       })
       .finally(hideLightningLoader);

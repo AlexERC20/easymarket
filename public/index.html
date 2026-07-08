@@ -72,6 +72,15 @@
                 </svg>
                 <span>Футбол</span>
               </button>
+              <button id="topMarketsBtn" class="top-more-item top-market-action" type="button" role="menuitem" aria-label="Top markets">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4.5 17.8 9 13.3l3.3 3.3 6.9-8" />
+                  <path d="M15.5 8.6h3.7v3.7" />
+                  <path d="M4.5 6.3h6" />
+                  <path d="M4.5 10.5h3.7" />
+                </svg>
+                <span>ТОП</span>
+              </button>
               <button id="leaderboardBtn" class="top-more-item leaderboard-action" type="button" role="menuitem">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M6.5 19V11" />
@@ -563,6 +572,17 @@
         </div>
       </section>
 
+      <section id="topMarketsSheet" class="task-sheet hidden" aria-label="Top markets">
+        <div class="task-panel world-cup-panel">
+          <div class="task-head sheet-close-only">
+            <button id="topMarketsCloseBtn" class="icon-button" type="button" aria-label="Закрыть TOP markets">×</button>
+          </div>
+          <div id="topMarketsList" class="world-cup-list">
+            <p class="muted">Загружаю топ...</p>
+          </div>
+        </div>
+      </section>
+
       <section id="betSheet" class="task-sheet hidden" aria-label="Ставка">
         <div class="bet-panel">
           <div class="sheet-grabber"></div>
@@ -787,6 +807,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260708-12" type="module"></script>
+    <script src="/app.js?v=20260708-13" type="module"></script>
   </body>
 </html>
