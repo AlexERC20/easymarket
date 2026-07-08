@@ -383,10 +383,14 @@ const formatCents = (value) => {
   }
   return `${Math.round(cents)}¢`;
 };
+const yesNoSideLabel = (side) => (side === "YES" ? "Yes" : "No");
 const sideLabel = (side) => (side === "YES" ? "UP" : "DOWN");
 const marketSideLabel = (market, side) => (
   market?.market_type === "WORLD_CUP_WINNER"
-    ? (side === "YES" ? "Yes" : "No")
+    || market?.market_type === "TOP_MARKET"
+    || String(market?.symbol || "").startsWith("TOP:")
+    || Boolean(market?.team)
+    ? yesNoSideLabel(side)
     : sideLabel(side)
 );
 const sideClass = (side) => (side === "YES" ? "yes" : "no");
@@ -2970,6 +2974,28 @@ function formatDurationShort(secondsInput) {
   return `${seconds}s`;
 }
 
+function getCalendarMonthDayDiff(endTime, nowTime = Date.now()) {
+  const start = new Date(nowTime);
+  const end = new Date(endTime);
+  const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  if (!Number.isFinite(endDay.getTime()) || endDay <= startDay) {
+    return { months: 0, days: 0 };
+  }
+
+  let months = (endDay.getFullYear() - startDay.getFullYear()) * 12
+    + endDay.getMonth() - startDay.getMonth();
+  const anchor = new Date(startDay);
+  anchor.setMonth(anchor.getMonth() + months);
+  if (anchor > endDay) {
+    months -= 1;
+    anchor.setMonth(anchor.getMonth() - 1);
+  }
+
+  const days = Math.max(0, Math.floor((endDay - anchor) / 86_400_000));
+  return { months: Math.max(0, months), days };
+}
+
 async function loadComments() {
   const market = getDisplayMarket();
   if (!market?.id) {
@@ -3262,8 +3288,16 @@ function renderOrderbookPanel() {
   form.classList.toggle("hidden", showBook);
   $("marketPanelChatBtn")?.classList.toggle("active", !showBook);
   $("marketPanelBookBtn")?.classList.toggle("active", showBook);
-  $("orderbookYesBtn")?.classList.toggle("active", state.orderbookSide === "YES");
-  $("orderbookNoBtn")?.classList.toggle("active", state.orderbookSide === "NO");
+  const yesBookButton = $("orderbookYesBtn");
+  const noBookButton = $("orderbookNoBtn");
+  if (yesBookButton) {
+    yesBookButton.textContent = marketSideLabel(market, "YES");
+    yesBookButton.classList.toggle("active", state.orderbookSide === "YES");
+  }
+  if (noBookButton) {
+    noBookButton.textContent = marketSideLabel(market, "NO");
+    noBookButton.classList.toggle("active", state.orderbookSide === "NO");
+  }
 
   if (!showBook || !market) {
     return;
@@ -3663,7 +3697,8 @@ function updateTimer() {
     return;
   }
 
-  const remainingMs = new Date(market.end_time).getTime() - Date.now();
+  const endAt = new Date(market.end_time).getTime();
+  const remainingMs = endAt - Date.now();
   const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
   // Build tension in the final seconds of a round (pulse + red on the counter).
   const finalPhase = market.status === "open" && remainingMs > 0;
@@ -3696,7 +3731,17 @@ function updateTimer() {
     renderTradeTicket();
     scheduleCoreRefresh({ delay: 80, includeLists: true });
   }
-  if ((isPredictionListMarket(market) || isBtcMarket(market)) && seconds >= 86_400) {
+  if (seconds >= 30 * 86_400) {
+    const { months, days } = getCalendarMonthDayDiff(endAt);
+    if (months > 0) {
+      $("timeLeftMinutes").textContent = String(months);
+      $("timeLeftSeconds").textContent = String(days).padStart(2, "0");
+      if (minuteLabel) minuteLabel.textContent = "MON";
+      if (secondLabel) secondLabel.textContent = "DAYS";
+      return;
+    }
+  }
+  if (seconds >= 86_400) {
     const days = Math.floor(seconds / 86_400);
     const hours = Math.floor((seconds % 86_400) / 3_600);
     $("timeLeftMinutes").textContent = String(days);
@@ -3705,7 +3750,7 @@ function updateTimer() {
     if (secondLabel) secondLabel.textContent = "HRS";
     return;
   }
-  if (isBtcMarket(market) && seconds >= 3_600) {
+  if (seconds >= 3_600) {
     const hours = Math.floor(seconds / 3_600);
     const minutes = Math.floor((seconds % 3_600) / 60);
     $("timeLeftMinutes").textContent = String(hours).padStart(2, "0");
@@ -3776,12 +3821,20 @@ function getActivityMarketLabel(trade) {
   return trade.market_symbol || `#${trade.market_id}`;
 }
 
+function isPredictionTrade(trade) {
+  const symbol = String(trade?.market_symbol || "");
+  return Boolean(trade?.team)
+    || trade?.market_type === "WORLD_CUP_WINNER"
+    || trade?.market_type === "TOP_MARKET"
+    || symbol.startsWith("TOP:");
+}
+
 function getActivitySideLabel(trade) {
-  return trade.team ? (trade.side === "YES" ? "Yes" : "No") : sideLabel(trade.side);
+  return isPredictionTrade(trade) ? yesNoSideLabel(trade.side) : sideLabel(trade.side);
 }
 
 function getRecentMarketLabel(market) {
-  const winner = market.winner ? sideLabel(market.winner) : marketStatusLabel(market.status);
+  const winner = market.winner ? marketSideLabel(market, market.winner) : marketStatusLabel(market.status);
   if (String(market.symbol || "").startsWith("BTCUSDT")) {
     const suffix = String(market.symbol).replace("BTCUSDT", "").replace(/^_/, "").toLowerCase();
     return `#${market.id} · ${winner} BTC ${suffix || "5m"}`;
@@ -4245,7 +4298,7 @@ function renderLeaderboard() {
         ? Number(player.total_pnl_24h || 0)
         : Number(player.balance || 0);
     const meta = mode === "BEST_24H"
-      ? `${escapeHtml(player.market_label || player.market_title || "market")} · ${escapeHtml(sideLabel(player.side || ""))} · всего +${formatCurrencyAmount(player.total_pnl_24h || player.best_pnl_24h || 0, player.currency || state.leaderboardCurrency)}`
+      ? `${escapeHtml(player.market_label || player.market_title || "market")} · ${escapeHtml(isPredictionTrade(player) ? yesNoSideLabel(player.side || "") : sideLabel(player.side || ""))} · всего +${formatCurrencyAmount(player.total_pnl_24h || player.best_pnl_24h || 0, player.currency || state.leaderboardCurrency)}`
       : mode === "WINS_24H"
         ? `${formatFire(player.wins_24h)} побед · лучший ${formatCurrencyAmount(player.best_pnl_24h || 0, player.currency || state.leaderboardCurrency)}`
         : `${formatFire(player.bet_count)} ставок · WR ${winRate.toFixed(0)}%`;
@@ -6131,7 +6184,7 @@ function showTradeBubble(trade) {
   const name = formatUserDisplayName(trade);
   const action = trade.action || "BUY";
   bubble.className = `trade-bubble ${sideClass(trade.side)}`;
-  bubble.textContent = `${name} ${actionLabel(action)} ${sideLabel(trade.side)} ${formatCurrencyAmount(trade.amount, trade.currency)}`;
+  bubble.textContent = `${name} ${actionLabel(action)} ${marketSideLabel(market, trade.side)} ${formatCurrencyAmount(trade.amount, trade.currency)}`;
   const duration = 3900 + Math.random() * 1400;
   const delay = Math.random() * 420;
   const rise = -(86 + Math.random() * 84);
@@ -6413,7 +6466,8 @@ async function sellPosition({ side, positionId, marketId, shares }) {
     triggerHaptic("success");
     triggerLightningFlash("success", getTierForAmount(result.trade?.amount || result.sale?.exit_value || 0, result.currency || state.currency));
     const pnl = Number(result.sale?.pnl || 0);
-    showToast(`Продано ${sideLabel(side)}: ${formatSignedCurrencyAmount(pnl, result.currency || state.currency)}`);
+    const sellMarket = result.market || findMarketById(marketId) || getDisplayMarket();
+    showToast(`Продано ${marketSideLabel(sellMarket, side)}: ${formatSignedCurrencyAmount(pnl, result.currency || state.currency)}`);
     renderMarket();
     renderMe();
     renderActivity();
