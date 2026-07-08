@@ -1140,6 +1140,32 @@ async function getTopFeedMarkets() {
   };
 }
 
+async function ensureTopMarketSchema(db = { query }) {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS top_market_meta (
+      symbol TEXT PRIMARY KEY,
+      polymarket_id TEXT,
+      slug TEXT,
+      title TEXT NOT NULL,
+      icon TEXT,
+      volume NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      liquidity NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      top_rank INTEGER,
+      last_seen_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    ALTER TABLE top_market_meta
+      DROP CONSTRAINT IF EXISTS top_market_meta_polymarket_id_key;
+
+    CREATE INDEX IF NOT EXISTS idx_top_market_meta_rank
+      ON top_market_meta(top_rank);
+
+    CREATE INDEX IF NOT EXISTS idx_top_market_meta_polymarket_id
+      ON top_market_meta(polymarket_id);
+  `);
+}
+
 function getDayKey() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -4684,6 +4710,7 @@ async function performTopMarketSync() {
   const now = new Date();
 
   await withTransaction(async (client) => {
+    await ensureTopMarketSchema(client);
     await client.query("UPDATE top_market_meta SET top_rank = NULL WHERE top_rank IS NOT NULL");
 
     for (let index = 0; index < feed.markets.length; index += 1) {
@@ -4817,6 +4844,7 @@ export async function syncTopMarkets({ force = false } = {}) {
 }
 
 export async function getTopMarkets() {
+  await ensureTopMarketSchema();
   const source = await syncTopMarkets();
   const result = await query(
     `

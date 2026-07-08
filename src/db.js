@@ -331,7 +331,7 @@ export async function runMigrations() {
 
     CREATE TABLE IF NOT EXISTS top_market_meta (
       symbol TEXT PRIMARY KEY,
-      polymarket_id TEXT UNIQUE,
+      polymarket_id TEXT,
       slug TEXT,
       title TEXT NOT NULL,
       icon TEXT,
@@ -344,6 +344,12 @@ export async function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_top_market_meta_rank
       ON top_market_meta(top_rank);
+
+    ALTER TABLE top_market_meta
+      DROP CONSTRAINT IF EXISTS top_market_meta_polymarket_id_key;
+
+    CREATE INDEX IF NOT EXISTS idx_top_market_meta_polymarket_id
+      ON top_market_meta(polymarket_id);
 
     CREATE TABLE IF NOT EXISTS fire_referral_bonuses (
       id BIGSERIAL PRIMARY KEY,
