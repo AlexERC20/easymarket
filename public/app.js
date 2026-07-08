@@ -5058,7 +5058,7 @@ function renderTopupSheet() {
   $("walletModeWithdrawBtn")?.classList.toggle("active", !isHistoryOpen && !isTopupMode);
   $("walletHistoryBtn")?.classList.toggle("active", isHistoryOpen);
   document.querySelector(".wallet-mode-toggle")?.classList.toggle("hidden", isHistoryOpen);
-  document.querySelector(".wallet-currency-toggle")?.classList.toggle("hidden", isHistoryOpen || !isTopupMode);
+  document.querySelector(".wallet-currency-toggle")?.classList.toggle("hidden", isHistoryOpen || !isTopupMode || hasPendingIntent);
   document.querySelectorAll("[data-wallet-currency]").forEach((button) => {
     button.classList.toggle("active", normalizeCurrency(button.dataset.walletCurrency) === currency);
   });
@@ -5113,7 +5113,7 @@ function renderTopupSheet() {
   }
   if ($("usdtDepositNetworkHint")) {
     $("usdtDepositNetworkHint").textContent = hasPendingIntent
-      ? "в BEP20 или ERC20. Не округляй: центы в сумме — идентификатор именно твоего перевода. Баланс обновится автоматически."
+      ? "BEP20 или ERC20 · зачислится автоматически"
       : "";
   }
   if ($("usdtCancelIntentBtn")) {
@@ -5129,12 +5129,22 @@ function renderTopupSheet() {
     const cardType = card.dataset.usdtAddressCard;
     card.classList.toggle("hidden", !(hasPendingIntent && cardType === "evm" && intent?.to_address));
   });
-  if ($("usdtEvmAddressLabel")) $("usdtEvmAddressLabel").textContent = "Кошелёк для пополнения · тапни, чтобы скопировать";
   const depositAddress = hasPendingIntent ? (intent?.to_address || "") : "";
-  if ($("usdtEvmAddress")) $("usdtEvmAddress").textContent = depositAddress;
+  if ($("usdtEvmAddress")) {
+    // Показываем сокращённо — полный адрес уходит в буфер по тапу и в QR.
+    $("usdtEvmAddress").textContent = depositAddress
+      ? `${depositAddress.slice(0, 10)}…${depositAddress.slice(-8)}`
+      : "";
+    $("usdtEvmAddress").dataset.full = depositAddress;
+  }
   $("usdtAddressCopy")?.setAttribute(
     "aria-label",
     depositAddress ? `Скопировать адрес для пополнения ${depositAddress}` : "Скопировать адрес"
+  );
+  // Шаг 2: баланс и переключатель валюты не нужны — остаётся платёжная карточка.
+  document.querySelector(".wallet-balance-line")?.classList.toggle(
+    "hidden",
+    hasPendingIntent && isTopupMode && !isHistoryOpen,
   );
 
   // QR адреса: рисуем один раз на адрес; при любом сбое просто прячем бокс.
@@ -6646,7 +6656,8 @@ $("usdtDepositAmountCopy")?.addEventListener("click", () => {
 
 $("usdtAddressCopy")?.addEventListener("click", () => {
   triggerHaptic("selection");
-  const value = state.topup.intent?.to_address || $("usdtEvmAddress")?.textContent || "";
+  // На экране адрес сокращён — копируем всегда полный.
+  const value = state.topup.intent?.to_address || $("usdtEvmAddress")?.dataset.full || "";
   void copyWalletField($("usdtAddressCopy"), value, "Адрес для пополнения скопирован.");
 });
 

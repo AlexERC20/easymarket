@@ -3272,28 +3272,76 @@ code {
   50% { box-shadow: 0 0 14px rgba(53, 246, 255, 0.45); }
 }
 
+/* Компактная платёжная карточка шага 2: QR слева, сумма и адрес справа. */
+.usdt-pay-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
 .usdt-qr-box {
+  flex: 0 0 auto;
   display: grid;
-  justify-items: center;
-  gap: 8px;
-  padding: 14px 12px 12px;
-  border: 1px solid rgba(183, 255, 77, 0.18);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.03);
+  padding: 5px;
+  border-radius: 12px;
+  background: #f2f6fb;
   animation: qrReveal 420ms var(--ease-default) both;
 }
 
 .usdt-qr-box canvas {
-  width: 172px;
-  height: 172px;
-  border-radius: 12px;
+  width: 118px;
+  height: 118px;
+  border-radius: 8px;
   image-rendering: pixelated;
 }
 
-.usdt-qr-box small {
+.usdt-pay-info {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  align-content: center;
+}
+
+.usdt-pay-info > small {
   color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.usdt-cents-note {
+  color: rgba(183, 255, 77, 0.75) !important;
+  font-size: 11px !important;
+}
+
+.usdt-deposit-panel button.usdt-address-mini {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 0;
+  width: 100%;
+  border: 1px dashed rgba(94, 161, 255, 0.4);
+  border-radius: 10px;
+  background: rgba(94, 161, 255, 0.08);
+  color: var(--text);
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.usdt-address-mini code {
   font-size: 12px;
-  text-align: center;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.usdt-net-note {
+  font-size: 10.5px !important;
 }
 
 @keyframes qrReveal {
