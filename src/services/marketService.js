@@ -1062,6 +1062,189 @@ function isExcludedTopMarket(market) {
   return mentionsBtc && isTimedBtcMarket;
 }
 
+const TOP_MARKET_NAME_TRANSLATIONS = new Map([
+  ["France", "Франция"],
+  ["Morocco", "Марокко"],
+  ["Norway", "Норвегия"],
+  ["Spain", "Испания"],
+  ["England", "Англия"],
+  ["Switzerland", "Швейцария"],
+  ["Portugal", "Португалия"],
+  ["Brazil", "Бразилия"],
+  ["Germany", "Германия"],
+  ["Netherlands", "Нидерланды"],
+  ["Italy", "Италия"],
+  ["Mexico", "Мексика"],
+  ["Canada", "Канада"],
+  ["Japan", "Япония"],
+  ["Colombia", "Колумбия"],
+  ["Croatia", "Хорватия"],
+  ["Uruguay", "Уругвай"],
+  ["Turkey", "Турция"],
+  ["Denmark", "Дания"],
+  ["Sweden", "Швеция"],
+  ["Serbia", "Сербия"],
+  ["Austria", "Австрия"],
+  ["Poland", "Польша"],
+  ["Australia", "Австралия"],
+  ["Ukraine", "Украина"],
+  ["Argentina", "Аргентина"],
+  ["Belgium", "Бельгия"],
+  ["USA", "США"],
+  ["United States", "США"],
+  ["U.S.", "США"],
+  ["US", "США"],
+  ["Iran", "Иран"],
+  ["Israel", "Израиль"],
+  ["China", "Китай"],
+  ["Russia", "Россия"],
+  ["Putin", "Путин"],
+  ["Vladimir Putin", "Владимир Путин"],
+  ["Strait of Hormuz", "Ормузский пролив"],
+  ["Kharg Island", "остров Харк"],
+  ["Fed", "ФРС"],
+  ["Federal Reserve", "ФРС"],
+  ["Arthur Fery", "Артур Фери"],
+]);
+
+const TOP_MARKET_MONTHS = new Map([
+  ["january", "января"],
+  ["february", "февраля"],
+  ["march", "марта"],
+  ["april", "апреля"],
+  ["may", "мая"],
+  ["june", "июня"],
+  ["july", "июля"],
+  ["august", "августа"],
+  ["september", "сентября"],
+  ["october", "октября"],
+  ["november", "ноября"],
+  ["december", "декабря"],
+]);
+
+const TOP_MARKET_MONTHS_PREPOSITIONAL = new Map([
+  ["january", "январе"],
+  ["february", "феврале"],
+  ["march", "марте"],
+  ["april", "апреле"],
+  ["may", "мае"],
+  ["june", "июне"],
+  ["july", "июле"],
+  ["august", "августе"],
+  ["september", "сентябре"],
+  ["october", "октябре"],
+  ["november", "ноябре"],
+  ["december", "декабре"],
+]);
+
+function localizeTopMarketName(value) {
+  const input = String(value || "").trim();
+  return TOP_MARKET_NAME_TRANSLATIONS.get(input) || input;
+}
+
+function localizeIsoDate(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return String(value || "").trim();
+  }
+  return `${match[3]}.${match[2]}.${match[1]}`;
+}
+
+function localizeEnglishDate(value) {
+  const input = String(value || "").trim();
+  const match = input.match(/^([A-Za-z]+)\s+(\d{1,2})(?:,\s*(\d{4}))?$/);
+  if (!match) {
+    return input;
+  }
+  const month = TOP_MARKET_MONTHS.get(match[1].toLowerCase()) || match[1];
+  return `${Number(match[2])} ${month}${match[3] ? ` ${match[3]}` : ""}`;
+}
+
+function localizeMeetingDate(value) {
+  const input = String(value || "").trim();
+  const match = input.match(/^([A-Za-z]+)\s+(\d{4})$/);
+  if (!match) {
+    return localizeEnglishDate(input);
+  }
+  const month = TOP_MARKET_MONTHS_PREPOSITIONAL.get(match[1].toLowerCase()) || match[1];
+  return `${month} ${match[2]}`;
+}
+
+function localizeTopMarketTitle(title) {
+  const input = String(title || "").trim();
+  if (!input) {
+    return input;
+  }
+
+  let match = input.match(/^Will\s+(.+?)\s+win on\s+(\d{4}-\d{2}-\d{2})\?$/i);
+  if (match) {
+    return `${localizeTopMarketName(match[1])} победит ${localizeIsoDate(match[2])}?`;
+  }
+
+  match = input.match(/^Will\s+(.+?)\s+vs\.?\s+(.+?)\s+end in a draw\?$/i);
+  if (match) {
+    return `Матч ${localizeTopMarketName(match[1])} - ${localizeTopMarketName(match[2])} закончится вничью?`;
+  }
+
+  match = input.match(/^Will there be no change in Fed interest rates after the\s+(.+?)\s+meeting\?$/i);
+  if (match) {
+    return `ФРС оставит ставку без изменений после заседания в ${localizeMeetingDate(match[1])}?`;
+  }
+
+  match = input.match(/^Will the Fed\s+(increase|decrease)\s+interest rates by\s+(.+?)\s+bps after the\s+(.+?)\s+meeting\?$/i);
+  if (match) {
+    const action = match[1].toLowerCase() === "increase" ? "повысит" : "понизит";
+    return `ФРС ${action} ставку на ${match[2]} б.п. после заседания в ${localizeMeetingDate(match[3])}?`;
+  }
+
+  match = input.match(/^(.+?)\s+out as President of Russia by\s+(.+?)\?$/i);
+  if (match) {
+    return `${localizeTopMarketName(match[1])} уйдет с поста президента России до ${localizeEnglishDate(match[2])}?`;
+  }
+
+  match = input.match(/^Strait of Hormuz traffic returns to normal by\s+(.+?)\?$/i);
+  if (match) {
+    return `Трафик через Ормузский пролив вернется к норме до ${localizeEnglishDate(match[1])}?`;
+  }
+
+  match = input.match(/^US-Iran Final Nuclear Deal by\s+(.+?)\?$/i);
+  if (match) {
+    return `Финальная ядерная сделка США и Ирана будет до ${localizeEnglishDate(match[1])}?`;
+  }
+
+  match = input.match(/^Will the U\.?S\.?\s+invade Iran before\s+(\d{4})\?$/i);
+  if (match) {
+    return `США вторгнутся в Иран до ${match[1]} года?`;
+  }
+
+  match = input.match(/^Will Iran announce withdrawal from MOU negotiations by\s+(.+?)\?$/i);
+  if (match) {
+    return `Иран объявит выход из переговоров по MOU до ${localizeEnglishDate(match[1])}?`;
+  }
+
+  match = input.match(/^Will the US announce a blockade on Iran by\s+(.+?)\?$/i);
+  if (match) {
+    return `США объявят блокаду Ирана до ${localizeEnglishDate(match[1])}?`;
+  }
+
+  match = input.match(/^Kharg Island no longer under Iranian control by\s+(.+?)\?$/i);
+  if (match) {
+    return `Остров Харк выйдет из-под контроля Ирана до ${localizeEnglishDate(match[1])}?`;
+  }
+
+  match = input.match(/^Will\s+(.+?)\s+be head of state in Iran end of\s+(\d{4})\?$/i);
+  if (match) {
+    return `${localizeTopMarketName(match[1])} будет главой государства в Иране в конце ${match[2]} года?`;
+  }
+
+  match = input.match(/^Will\s+(.+?)\s+be the\s+(\d{4})\s+Men.s Wimbledon winner\?$/i);
+  if (match) {
+    return `${localizeTopMarketName(match[1])} выиграет мужской Уимблдон ${match[2]}?`;
+  }
+
+  return input;
+}
+
 function normalizeTopFeedMarket(market) {
   if (market?.closed || market?.archived || market?.active === false || market?.acceptingOrders === false) {
     return null;
@@ -1093,10 +1276,11 @@ function normalizeTopFeedMarket(market) {
   }
 
   const event = Array.isArray(market.events) ? market.events[0] : null;
-  const title = String(market.question || event?.title || market.slug || "Top market").trim();
-  if (!title) {
+  const originalTitle = String(market.question || event?.title || market.slug || "Top market").trim();
+  if (!originalTitle) {
     return null;
   }
+  const title = localizeTopMarketTitle(originalTitle);
 
   const yesPrice = clamp(rawYesPrice, MIN_PRICE, MAX_PRICE);
   const icon = market.icon || market.image || event?.icon || event?.image || "";
@@ -1108,6 +1292,7 @@ function normalizeTopFeedMarket(market) {
     polymarketId: String(market.id || market.conditionId || market.slug || title),
     slug: market.slug || "",
     title,
+    originalTitle,
     icon,
     yesPrice,
     volume: volume24h || toNumber(market.volumeNum ?? market.volume),
