@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260709-03" />
+    <link rel="stylesheet" href="/styles.css?v=20260709-04" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260708-01" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -691,18 +691,14 @@
             <h2 id="ticketTitle">Выбери сумму</h2>
           </div>
           <button id="quickBetToggle" class="quick-bet-toggle" type="button" aria-pressed="true" aria-label="Режим ставки в один клик">
+            <svg class="qbt-hint qbt-hint-tap" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.4 2 5 13.7h5.4L8.9 22l9.6-13h-5.8L13.4 2Z"/></svg>
+            <svg class="qbt-hint qbt-hint-confirm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.6 5.2 5.3v5.5c0 4.3 2.8 8.4 6.8 10 4-1.6 6.8-5.7 6.8-10V5.3L12 2.6Z"/><path d="m8.9 11.6 2.2 2.2 4-4.2"/></svg>
             <span class="qbt-thumb" aria-hidden="true">
               <i class="qbt-face qbt-face-tap"></i>
               <i class="qbt-face qbt-face-confirm"></i>
               <i class="qbt-sheen"></i>
-            </span>
-            <span class="qbt-option qbt-option-tap" aria-hidden="true">
-              <svg class="qbt-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M13.4 2 5 13.7h5.4L8.9 22l9.6-13h-5.8L13.4 2Z"/></svg>
-              <b>1 tap</b>
-            </span>
-            <span class="qbt-option qbt-option-confirm" aria-hidden="true">
-              <svg class="qbt-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.6 5.2 5.3v5.5c0 4.3 2.8 8.4 6.8 10 4-1.6 6.8-5.7 6.8-10V5.3L12 2.6Z"/><path d="m8.9 11.6 2.2 2.2 4-4.2"/></svg>
-              <b>Confirm</b>
+              <svg class="qbt-ico qbt-ico-tap" viewBox="0 0 24 24" fill="currentColor"><path d="M13.4 2 5 13.7h5.4L8.9 22l9.6-13h-5.8L13.4 2Z"/></svg>
+              <svg class="qbt-ico qbt-ico-confirm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.6 5.2 5.3v5.5c0 4.3 2.8 8.4 6.8 10 4-1.6 6.8-5.7 6.8-10V5.3L12 2.6Z"/><path d="m8.9 11.6 2.2 2.2 4-4.2"/></svg>
             </span>
           </button>
           <span id="ticketPrice" class="price-chip hidden">UP 50¢</span>

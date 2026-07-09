@@ -1767,33 +1767,40 @@ h2 {
   color: var(--text);
 }
 
-/* Тумблер режима ставки: слева "1 tap" (лайм), справа "Confirm" (циан).
-   Бегунок скользит с пружиной и squash-and-stretch, лица бегунка кроссфейдятся,
-   по пилюле периодически пробегает глянцевый блик. */
+/* Тумблер режима ставки: компактный свитч. Шайба несёт иконку активного
+   режима — молния (1 tap, лайм) или щит (confirm, циан) — и едет с пружиной
+   и squash-and-stretch. На треке призрачные подсказки обеих сторон. */
 .quick-bet-toggle {
   --qbt-pad: 3px;
+  --qbt-knob: 20px;
   position: relative;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  align-items: stretch;
   flex: 0 0 auto;
-  width: 134px;
-  min-width: 134px;
-  height: 36px;
-  padding: var(--qbt-pad);
-  border: 1px solid rgba(183, 255, 77, 0.3);
+  width: 48px;
+  min-width: 48px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(183, 255, 77, 0.32);
   border-radius: 999px;
   background: linear-gradient(180deg, #05080f, #0d1420 60%, #121b28);
   box-shadow:
-    inset 0 2px 7px rgba(0, 0, 0, 0.62),
+    inset 0 2px 5px rgba(0, 0, 0, 0.62),
     inset 0 -1px 0 rgba(255, 255, 255, 0.05),
-    0 1px 0 rgba(255, 255, 255, 0.04);
+    0 0 10px rgba(25, 195, 125, 0.15);
   overflow: hidden;
   isolation: isolate;
   transition:
     border-color var(--motion-slow) var(--ease-default),
+    box-shadow var(--motion-slow) var(--ease-default),
     transform var(--motion-fast) var(--spring-soft),
     filter var(--motion-fast) var(--ease-default);
+}
+
+.quick-bet-toggle.confirm-mode {
+  border-color: rgba(94, 161, 255, 0.38);
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.62),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05),
+    0 0 10px rgba(94, 161, 255, 0.2);
 }
 
 .quick-bet-toggle:focus-visible {
@@ -1801,15 +1808,11 @@ h2 {
   outline-offset: 2px;
 }
 
-.quick-bet-toggle.confirm-mode {
-  border-color: rgba(94, 161, 255, 0.36);
-}
-
 .quick-bet-toggle.confirm-mode:focus-visible {
   outline-color: rgba(94, 161, 255, 0.75);
 }
 
-/* Дыхание трека: зелёная подсветка у левого края, синяя у правого. */
+/* Заливка трека дышит цветом активной стороны. */
 .quick-bet-toggle::before,
 .quick-bet-toggle::after {
   content: "";
@@ -1822,12 +1825,12 @@ h2 {
 }
 
 .quick-bet-toggle::before {
-  background: radial-gradient(90% 150% at 10% 50%, rgba(183, 255, 77, 0.22), transparent 56%);
+  background: radial-gradient(120% 160% at 16% 50%, rgba(183, 255, 77, 0.2), transparent 62%);
   opacity: 1;
 }
 
 .quick-bet-toggle::after {
-  background: radial-gradient(90% 150% at 90% 50%, rgba(94, 161, 255, 0.26), transparent 56%);
+  background: radial-gradient(120% 160% at 84% 50%, rgba(94, 161, 255, 0.24), transparent 62%);
   opacity: 0;
 }
 
@@ -1839,24 +1842,45 @@ h2 {
   opacity: 1;
 }
 
+/* Призрачные иконки на треке: шайба накрывает активную, свободная подсказывает
+   соседний режим. */
+.quick-bet-toggle .qbt-hint {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  transform: translateY(-50%);
+  color: rgba(141, 152, 170, 0.6);
+  transition: color var(--motion-normal) var(--ease-default);
+}
+
+.quick-bet-toggle .qbt-hint-tap {
+  left: 7px;
+}
+
+.quick-bet-toggle .qbt-hint-confirm {
+  right: 7px;
+}
+
 .quick-bet-toggle .qbt-thumb {
   position: absolute;
   top: var(--qbt-pad);
-  bottom: var(--qbt-pad);
   left: var(--qbt-pad);
-  width: calc(50% - var(--qbt-pad));
-  z-index: 1;
+  z-index: 2;
+  width: var(--qbt-knob);
+  height: var(--qbt-knob);
   pointer-events: none;
   will-change: transform;
-  transition: transform 340ms cubic-bezier(0.3, 1.55, 0.4, 1);
+  transition: transform 320ms cubic-bezier(0.3, 1.55, 0.4, 1);
 }
 
 .quick-bet-toggle.confirm-mode .qbt-thumb {
-  transform: translateX(100%);
+  transform: translateX(20px);
 }
 
-/* Два лица пилюли: squash-and-stretch играет на них, поэтому не дерётся
-   с translateX самого бегунка. */
+/* Два лица шайбы: squash-and-stretch играет на них и не дерётся с translateX
+   самого бегунка. */
 .quick-bet-toggle .qbt-face {
   position: absolute;
   inset: 0;
@@ -1866,25 +1890,25 @@ h2 {
 
 .quick-bet-toggle .qbt-face-tap {
   background:
-    radial-gradient(130% 170% at 26% -14%, rgba(255, 255, 255, 0.6), transparent 46%),
+    radial-gradient(130% 170% at 30% -10%, rgba(255, 255, 255, 0.62), transparent 48%),
     linear-gradient(135deg, var(--neon-lime), var(--yes) 66%, #0e9a62);
   box-shadow:
-    0 1px 8px rgba(25, 195, 125, 0.5),
-    0 0 16px rgba(183, 255, 77, 0.4),
+    0 1px 6px rgba(25, 195, 125, 0.55),
+    0 0 12px rgba(183, 255, 77, 0.42),
     inset 0 1px 1px rgba(255, 255, 255, 0.55),
-    inset 0 -2px 5px rgba(3, 34, 19, 0.42);
+    inset 0 -2px 4px rgba(3, 34, 19, 0.42);
   opacity: 1;
 }
 
 .quick-bet-toggle .qbt-face-confirm {
   background:
-    radial-gradient(130% 170% at 26% -14%, rgba(255, 255, 255, 0.6), transparent 46%),
+    radial-gradient(130% 170% at 30% -10%, rgba(255, 255, 255, 0.62), transparent 48%),
     linear-gradient(135deg, var(--neon-cyan), var(--blue) 66%, #3a5bf2);
   box-shadow:
-    0 1px 8px rgba(94, 161, 255, 0.52),
-    0 0 16px rgba(53, 246, 255, 0.38),
+    0 1px 6px rgba(94, 161, 255, 0.55),
+    0 0 12px rgba(53, 246, 255, 0.4),
     inset 0 1px 1px rgba(255, 255, 255, 0.55),
-    inset 0 -2px 5px rgba(6, 21, 52, 0.45);
+    inset 0 -2px 4px rgba(6, 21, 52, 0.45);
   opacity: 0;
 }
 
@@ -1896,10 +1920,40 @@ h2 {
   opacity: 1;
 }
 
-/* Глянцевый блик, изредка пробегающий по пилюле. */
+/* Иконка на шайбе: тёмная на неоне, кроссфейд молния <-> щит. */
+.quick-bet-toggle .qbt-ico {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 11px;
+  height: 11px;
+  margin: auto;
+  transition: opacity var(--motion-normal) var(--ease-default);
+}
+
+.quick-bet-toggle .qbt-ico-tap {
+  color: #062712;
+  opacity: 1;
+}
+
+.quick-bet-toggle .qbt-ico-confirm {
+  color: #041430;
+  opacity: 0;
+}
+
+.quick-bet-toggle.confirm-mode .qbt-ico-tap {
+  opacity: 0;
+}
+
+.quick-bet-toggle.confirm-mode .qbt-ico-confirm {
+  opacity: 1;
+}
+
+/* Одиночный глянцевый блик по шайбе в момент переключения. */
 .quick-bet-toggle .qbt-sheen {
   position: absolute;
   inset: 0;
+  z-index: 1;
   border-radius: 999px;
   overflow: hidden;
 }
@@ -1907,74 +1961,32 @@ h2 {
 .quick-bet-toggle .qbt-sheen::before {
   content: "";
   position: absolute;
-  top: -45%;
-  bottom: -45%;
+  top: -40%;
+  bottom: -40%;
   left: 0;
-  width: 36%;
-  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.6) 50%, transparent);
-  transform: skewX(-18deg) translateX(-180%);
-  animation: qbtSheen 4.2s var(--ease-default) infinite;
+  width: 46%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.72) 50%, transparent);
+  transform: skewX(-18deg) translateX(-170%);
+  opacity: 0;
+}
+
+.quick-bet-toggle.qbt-anim .qbt-sheen::before {
+  animation: qbtSheen 460ms var(--ease-default) 100ms both;
 }
 
 @keyframes qbtSheen {
-  0%,
-  58% {
-    transform: skewX(-18deg) translateX(-180%);
+  0% {
+    transform: skewX(-18deg) translateX(-170%);
+    opacity: 1;
   }
 
-  76%,
   100% {
-    transform: skewX(-18deg) translateX(500%);
+    transform: skewX(-18deg) translateX(340%);
+    opacity: 1;
   }
 }
 
-.quick-bet-toggle .qbt-option {
-  position: relative;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-width: 0;
-  color: rgba(141, 152, 170, 0.8);
-  font-size: 9px;
-  font-weight: 950;
-  line-height: 1;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  transition:
-    color var(--motion-normal) var(--ease-default),
-    transform var(--motion-normal) var(--spring-soft);
-}
-
-.quick-bet-toggle .qbt-option b {
-  font-weight: inherit;
-}
-
-.quick-bet-toggle .qbt-ico {
-  width: 11px;
-  height: 11px;
-  flex: 0 0 auto;
-}
-
-/* Активная подпись — тёмная на неоновой пилюле, чуть крупнее. */
-.quick-bet-toggle .qbt-option-tap {
-  color: #062712;
-  transform: scale(1.04);
-}
-
-.quick-bet-toggle.confirm-mode .qbt-option-tap {
-  color: rgba(141, 152, 170, 0.8);
-  transform: scale(1);
-}
-
-.quick-bet-toggle.confirm-mode .qbt-option-confirm {
-  color: #041430;
-  transform: scale(1.04);
-}
-
-/* Приезд бегунка: squash-and-stretch + вспышка яркости. */
+/* Приезд шайбы: squash-and-stretch + вспышка яркости. */
 .quick-bet-toggle.qbt-anim .qbt-face {
   animation: qbtSquash 460ms var(--spring-soft);
 }
@@ -1986,7 +1998,7 @@ h2 {
   }
 
   30% {
-    transform: scale(1.26, 0.76);
+    transform: scale(1.24, 0.78);
   }
 
   62% {
@@ -2001,11 +2013,11 @@ h2 {
 }
 
 /* Иконка приехавшей стороны празднует: молния дёргается, щит пружинит. */
-.quick-bet-toggle.qbt-anim:not(.confirm-mode) .qbt-option-tap .qbt-ico {
+.quick-bet-toggle.qbt-anim:not(.confirm-mode) .qbt-ico-tap {
   animation: qbtBoltKick 620ms var(--ease-default);
 }
 
-.quick-bet-toggle.qbt-anim.confirm-mode .qbt-option-confirm .qbt-ico {
+.quick-bet-toggle.qbt-anim.confirm-mode .qbt-ico-confirm {
   animation: qbtShieldKick 620ms var(--ease-default);
 }
 
@@ -2050,7 +2062,7 @@ h2 {
     transition-duration: 1ms;
   }
 
-  .quick-bet-toggle .qbt-sheen::before,
+  .quick-bet-toggle.qbt-anim .qbt-sheen::before,
   .quick-bet-toggle.qbt-anim .qbt-face,
   .quick-bet-toggle.qbt-anim .qbt-ico {
     animation: none !important;
