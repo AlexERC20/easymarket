@@ -66,7 +66,6 @@ const DAILY_TASK_KEYS = [
   "daily_bet",
   "daily_topup_stars",
   "daily_topup_usdt",
-  "daily_btc_prediction",
   "daily_football_prediction",
   "daily_btc_5_predictions",
   "daily_win_1",
@@ -3189,10 +3188,17 @@ export async function claimShareTask(input) {
     first_name: input.first_name,
   });
   const taskKey = "share_friend";
-  const dayKey = getDayKey();
-  const amount = Math.round(Number(config.taskShareFire || 0));
 
   return withTransaction(async (client) => {
+    const claimPlan = await getDailyTaskClaimPlan(client, user.id, taskKey);
+    const amount = claimPlan.amount;
+    if (!amount) {
+      throw new Error("invalid_task");
+    }
+    if (!claimPlan.ready) {
+      throw new Error("task_not_ready");
+    }
+
     const claimResult = await client.query(
       `
         INSERT INTO fire_task_claims (user_id, task_key, amount, day_key, source)
@@ -3200,7 +3206,7 @@ export async function claimShareTask(input) {
         ON CONFLICT DO NOTHING
         RETURNING *
       `,
-      [user.id, taskKey, amount, dayKey],
+      [user.id, claimPlan.claimTaskKey, amount, claimPlan.dayKey],
     );
 
     let bonus = {
@@ -3214,9 +3220,16 @@ export async function claimShareTask(input) {
         user.id,
         amount,
         getTaskReason(taskKey),
-        `task:${taskKey}:${dayKey}`,
+        `task:${claimPlan.claimTaskKey}:${claimPlan.dayKey}`,
       );
-      await awardClanPoints(client, user.id, null, getClanTaskPoints(taskKey), `task:${taskKey}:${dayKey}`, "STAR");
+      await awardClanPoints(
+        client,
+        user.id,
+        null,
+        getClanTaskPoints(taskKey),
+        `task:${claimPlan.claimTaskKey}:${claimPlan.dayKey}`,
+        "STAR",
+      );
     }
 
     const balanceResult = await client.query(
@@ -3228,8 +3241,10 @@ export async function claimShareTask(input) {
       ok: true,
       user,
       task_key: taskKey,
+      claim_task_key: claimPlan.claimTaskKey,
       already_claimed: !claimResult.rows[0],
       ...bonus,
+      progress: await getDailyTaskProgress(client, user.id, taskKey),
       balance: toNumber(balanceResult.rows[0]?.balance),
     };
   });
@@ -3314,6 +3329,7 @@ export async function completeVerifiedTask(input) {
 // Награды заданий. Базовые дейлики доступны каждый день, а новая ротация
 // добавляет короткий бонусный набор поверх них.
 const TASK_AMOUNTS = {
+  share_friend: () => Math.round(Number(config.taskShareFire || 0)),
   daily_presence: () => Math.round(Number(config.taskDailyPresenceFire || 0)),
   presence_15: () => 75,
   presence_30: () => 200,
@@ -3339,7 +3355,6 @@ const CORE_DAILY_TASK_KEYS = new Set([
   "daily_bet",
   "daily_topup_stars",
   "daily_topup_usdt",
-  "daily_btc_prediction",
   "daily_football_prediction",
   "daily_btc_5_predictions",
   "daily_win_1",
@@ -3395,7 +3410,8 @@ export function getDailyRotation(dayKey = getDayKey()) {
 }
 
 async function claimDailyTaskForUser(client, user, taskKey) {
-  const normalizedTaskKey = String(taskKey || "").trim();
+  const rawTaskKey = String(taskKey || "").trim();
+  const normalizedTaskKey = rawTaskKey === "daily_btc_prediction" ? "daily_btc_5_predictions" : rawTaskKey;
   const claimPlan = await getDailyTaskClaimPlan(client, user.id, normalizedTaskKey);
   const amount = claimPlan.amount;
   if (!amount) {
@@ -3466,6 +3482,17 @@ async function claimDailyTaskForUser(client, user, taskKey) {
 }
 
 const DAILY_PROGRESS_TASKS = {
+  share_friend: {
+    unit: "друзей",
+    claimDayKey: "once",
+    levels: [
+      { target: 3, amount: () => Math.max(100, Math.round(Number(config.taskShareFire || 0) * 3)) },
+      { target: 5, amount: 500 },
+      { target: 10, amount: 1200 },
+      { target: 30, amount: 4000 },
+      { target: 50, amount: 8000 },
+    ],
+  },
   daily_bet: {
     unit: "ставок",
     levels: [
@@ -3513,11 +3540,11 @@ const DAILY_PROGRESS_TASKS = {
   daily_btc_5_predictions: {
     unit: "BTC",
     levels: [
+      { target: 1, amount: 50 },
       { target: 5, amount: 300 },
       { target: 15, amount: 600 },
       { target: 30, amount: 1000 },
       { target: 50, amount: 1500 },
-      { target: 100, amount: 2500 },
     ],
   },
   daily_win_1: {
@@ -3614,20 +3641,30 @@ function getTaskLevelFromClaimKey(taskKey, claimKey) {
   return Number.isSafeInteger(level) && level > 0 ? level : null;
 }
 
+function getProgressTaskDayKey(taskKey) {
+  return DAILY_PROGRESS_TASKS[taskKey]?.claimDayKey || getDayKey();
+}
+
 async function getClaimedTaskLevels(client, userId, taskKey, dayKey = getDayKey()) {
+  const includesLegacyBtcTask = taskKey === "daily_btc_5_predictions";
   const result = await client.query(
     `
       SELECT task_key
       FROM fire_task_claims
       WHERE user_id = $1
         AND day_key = $2
-        AND (task_key = $3 OR task_key LIKE $4)
+        AND (task_key = $3 OR task_key LIKE $4 OR ($5::boolean AND task_key = 'daily_btc_prediction'))
     `,
-    [userId, dayKey, taskKey, `${taskKey}_lvl_%`],
+    [userId, dayKey, taskKey, `${taskKey}_lvl_%`, includesLegacyBtcTask],
   );
   return new Set(
     result.rows
-      .map((row) => getTaskLevelFromClaimKey(taskKey, row.task_key))
+      .map((row) => {
+        if (includesLegacyBtcTask && row.task_key === "daily_btc_prediction") {
+          return 1;
+        }
+        return getTaskLevelFromClaimKey(taskKey, row.task_key);
+      })
       .filter((level) => level !== null),
   );
 }
@@ -3664,6 +3701,18 @@ async function getConsecutiveWinCount(client, userId, limit = 25) {
 }
 
 async function getDailyTaskValue(client, userId, taskKey) {
+  if (taskKey === "share_friend") {
+    const result = await client.query(
+      `
+        SELECT COUNT(DISTINCT referred_user_id)::int AS count
+        FROM fire_referral_bonuses
+        WHERE inviter_user_id = $1
+      `,
+      [userId],
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
   if (taskKey === "daily_topup_usdt") {
     const result = await client.query(
       `
@@ -3854,7 +3903,7 @@ async function getDailyTaskProgress(client, userId, taskKey) {
     return null;
   }
 
-  const dayKey = getDayKey();
+  const dayKey = getProgressTaskDayKey(taskKey);
   const claimedLevels = await getClaimedTaskLevels(client, userId, taskKey, dayKey);
   const activeIndex = task.levels.findIndex((_, index) => !claimedLevels.has(index + 1));
   const allClaimed = activeIndex === -1;
@@ -3884,7 +3933,7 @@ async function getDailyTaskClaimPlan(client, userId, taskKey) {
     return {
       amount: progress.amount,
       ready: progress.ready,
-      dayKey: getDayKey(),
+      dayKey: getProgressTaskDayKey(taskKey),
       claimTaskKey: progress.claim_task_key || getTaskLevelClaimKey(taskKey, progress.level || 1),
       progress,
     };
@@ -4184,6 +4233,7 @@ export async function getEngagementState(input) {
 
   const progress = {};
   const progressKeys = new Set([
+    "share_friend",
     ...CORE_DAILY_TASK_KEYS,
     ...rotationKeys,
   ]);

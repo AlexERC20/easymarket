@@ -2135,6 +2135,7 @@ function renderTaskRewards() {
   renderAquariumToggle();
   renderTaskSettings();
   renderTaskButtonStates();
+  renderShareFriendTask();
 }
 
 function renderSoundToggle() {
@@ -7231,19 +7232,23 @@ async function claimShareTask(sourceElement = null) {
       }),
     });
     state.balance = result.balance ?? state.balance;
+    if (result.progress) {
+      applyDailyTaskProgress("share_friend", result.progress);
+    }
     renderMe();
+    renderShareFriendTask();
     if (result.already_claimed) {
-      showToast("Share-бонус сегодня уже забран.");
+      showToast("Этот уровень уже забран.");
       return;
     }
     if (Number(result.awarded || 0) > 0) {
       playTaskRewardAnimation(sourceElement);
-      showToast(`+${formatFire(result.awarded)} за share.`);
+      showToast(`+${formatFire(result.awarded)} за друзей.`);
       return;
     }
     showToast("Дневной лимит бонусов уже достигнут.");
-  } catch {
-    showToast("Share отправлен. Бонус начислим после обновления.");
+  } catch (error) {
+    showToast(error.message === "task_not_ready" ? "Прогресс ещё не дошёл до награды." : "Не получилось забрать награду.");
   }
 }
 
@@ -7353,11 +7358,7 @@ async function shareInvite({ awardShareTask = false, sourceElement = null } = {}
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
-    if (awardShareTask) {
-      await claimShareTask(sourceElement);
-    } else {
-      showToast(`+${formatFire(usdtBonus)} USDT и 1% с побед друга.`);
-    }
+    showToast(awardShareTask ? "Ссылка для друзей готова." : `+${formatFire(usdtBonus)} USDT и 1% с побед друга.`);
     return;
   }
 
@@ -7368,9 +7369,7 @@ async function shareInvite({ awardShareTask = false, sourceElement = null } = {}
         text,
         url: inviteUrl,
       });
-      if (awardShareTask) {
-        await claimShareTask(sourceElement);
-      }
+      if (awardShareTask) showToast("Ссылка для друзей готова.");
       return;
     }
   } catch {
@@ -7378,11 +7377,7 @@ async function shareInvite({ awardShareTask = false, sourceElement = null } = {}
   }
 
   window.open(shareUrl, "_blank", "noopener,noreferrer");
-  if (awardShareTask) {
-    await claimShareTask(sourceElement);
-  } else {
-    showToast(`+${formatFire(usdtBonus)} USDT и 1% с побед друга.`);
-  }
+  showToast(awardShareTask ? "Ссылка для друзей готова." : `+${formatFire(usdtBonus)} USDT и 1% с побед друга.`);
 }
 
 async function submitMarketComment() {
@@ -7447,7 +7442,6 @@ const CORE_DAILY_TASK_KEYS = [
   "daily_bet",
   "daily_topup_stars",
   "daily_topup_usdt",
-  "daily_btc_prediction",
   "daily_football_prediction",
   "daily_btc_5_predictions",
   "daily_win_1",
@@ -7455,12 +7449,13 @@ const CORE_DAILY_TASK_KEYS = [
 ];
 
 const DAILY_TASK_META = {
+  share_friend: { title: "Рассказать друзьям", desc: "Зови людей в EasyMarket", icon: "share" },
   daily_bet: { title: "Первая ставка дня", desc: "Поставь 1 ставку", icon: "target" },
   daily_topup_stars: { title: "Пополнить звёзды", desc: "Зачисли минимум 500 звёзд", icon: "wallet" },
   daily_topup_usdt: { title: "Пополнить USDT", desc: "Зачисли минимум 50 USDT", icon: "dollar" },
   daily_btc_prediction: { title: "Прогноз по BTC", desc: "1 прогноз в BTC-маркете", icon: "btc" },
   daily_football_prediction: { title: "Прогноз на футбол", desc: "1 футбольный прогноз", icon: "ball" },
-  daily_btc_5_predictions: { title: "5 прогнозов BTC", desc: "Пять BTC-прогнозов за день", icon: "bars" },
+  daily_btc_5_predictions: { title: "BTC-прогнозы", desc: "Лестница прогнозов по BTC", icon: "bars" },
   daily_win_1: { title: "Выиграй прогноз", desc: "Первая победа дня", icon: "trophy" },
   daily_win_streak_5: { title: "5 побед подряд", desc: "Серия из пяти побед", icon: "streak" },
   daily_win_2_row: { title: "2 победы подряд", desc: "Выиграй два раунда подряд", icon: "bolt" },
@@ -7492,11 +7487,12 @@ function getDailyTaskAmount(taskKey, fallback = 0) {
     return Number(presenceTask.amount || fallback || 0);
   }
   const fixed = {
+    share_friend: Math.round(Number(state.publicConfig.task_share_fire || 100)),
     daily_topup_stars: 100,
     daily_topup_usdt: 300,
     daily_btc_prediction: 50,
     daily_football_prediction: 50,
-    daily_btc_5_predictions: 300,
+    daily_btc_5_predictions: 50,
     daily_win_1: 50,
     daily_win_streak_5: 300,
     daily_win_2_row: 100,
@@ -7550,6 +7546,25 @@ function taskProgressMarkup(taskKey) {
   `;
 }
 
+function renderShareFriendTask() {
+  const progress = getTaskProgress("share_friend");
+  const amount = getDailyTaskAmount("share_friend", state.publicConfig.task_share_fire || 100);
+  const reward = $("shareTaskReward");
+  if (reward) reward.textContent = formatFire(amount);
+  const progressSlot = $("shareTaskProgressSlot");
+  if (progressSlot) {
+    progressSlot.innerHTML = taskProgressMarkup("share_friend");
+  }
+  const button = $("taskShareBtn");
+  if (!button) return;
+  const ready = Boolean(progress?.ready) && !progress?.claimed;
+  const claimed = Boolean(progress?.claimed);
+  button.classList.toggle("claimable", ready);
+  button.classList.toggle("claimed", claimed);
+  button.disabled = claimed;
+  button.textContent = claimed ? "Готово" : ready ? "Забрать" : "Share";
+}
+
 function getDailyTaskDisplayMeta(taskKey) {
   const base = DAILY_TASK_META[taskKey] || { title: taskKey, desc: "", icon: "target" };
   const progress = getTaskProgress(taskKey);
@@ -7565,12 +7580,13 @@ function getDailyTaskDisplayMeta(taskKey) {
   const claimedText = progress.claimed ? "Все уровни забраны" : levelText;
 
   const titleByTask = {
+    share_friend: `${targetText} друзей`,
     daily_bet: `${targetText} ставок за день`,
     daily_topup_stars: `Пополнить ${targetText} звёзд`,
     daily_topup_usdt: `Пополнить ${targetText} USDT`,
     daily_btc_prediction: `${targetText} BTC-прогноз`,
     daily_football_prediction: `${targetText} футбольных прогнозов`,
-    daily_btc_5_predictions: `${targetText} BTC-прогнозов`,
+    daily_btc_5_predictions: target === 1 ? "1 BTC-прогноз" : `${targetText} BTC-прогнозов`,
     daily_win_1: `${targetText} побед за день`,
     daily_win_streak_5: `${targetText} побед подряд`,
     daily_win_2_row: `${targetText} победы подряд`,
@@ -7782,6 +7798,7 @@ function renderEngagement() {
   }
   renderTaskButtonStates();
   renderDailyProgress();
+  renderShareFriendTask();
   updatePresenceLadder();
 }
 
@@ -8050,6 +8067,11 @@ $("taskPrivateChatBtn").addEventListener("click", () => {
 });
 
 $("taskShareBtn").addEventListener("click", (event) => {
+  const progress = getTaskProgress("share_friend");
+  if (progress?.ready && !progress?.claimed) {
+    void claimShareTask(event.currentTarget);
+    return;
+  }
   void shareInvite({ awardShareTask: true, sourceElement: event.currentTarget });
 });
 
