@@ -2373,20 +2373,31 @@ function renderTaskStats() {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  const data = await response.json();
-  if (!response.ok || data.ok === false) {
-    const error = new Error(data.message || data.status || "request_failed");
-    error.detail = data.detail || "";
-    throw error;
+  // Таймаут обязателен: зависший fetch держал кнопку задания disabled и
+  // runSingleFlight-ключ занятым навсегда — моргнула мобильная сеть, и
+  // кнопка «залипала» без анимации и начисления до перезапуска.
+  const { timeoutMs = 15_000, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(path, {
+      ...fetchOptions,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(fetchOptions.headers || {}),
+      },
+    });
+    const data = await response.json();
+    if (!response.ok || data.ok === false) {
+      const error = new Error(data.message || data.status || "request_failed");
+      error.detail = data.detail || "";
+      throw error;
+    }
+    return data;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
-  return data;
 }
 
 async function runSingleFlight(key, task) {
@@ -7845,7 +7856,48 @@ async function loadEngagementState() {
   }
 }
 
+// Тап живёт между pointerdown и click. Если в этом окне заменить innerHTML
+// списка заданий (loadMe обновил прогресс дейликов), click улетает в уже
+// отсоединённый узел и пропадает — ни начисления, ни тоста, ни вспышки.
+// Поэтому пока палец на списке, пере-рендер откладываем до отпускания.
+let taskListPointerHeld = false;
+let engagementRenderDeferred = false;
+let engagementDeferSafetyTimer = 0;
+
+function flushDeferredEngagementRender() {
+  taskListPointerHeld = false;
+  if (!engagementRenderDeferred) {
+    return;
+  }
+  engagementRenderDeferred = false;
+  window.clearTimeout(engagementDeferSafetyTimer);
+  // Небольшая пауза, чтобы click успел дойти до обработчика раньше замены DOM.
+  window.setTimeout(() => renderEngagement(), 90);
+}
+
+document.addEventListener("pointerdown", (event) => {
+  if (event.target instanceof Element && event.target.closest(".task-list")) {
+    taskListPointerHeld = true;
+  }
+}, { capture: true, passive: true });
+document.addEventListener("pointerup", flushDeferredEngagementRender, { capture: true, passive: true });
+document.addEventListener("pointercancel", flushDeferredEngagementRender, { capture: true, passive: true });
+
 function renderEngagement() {
+  if (taskListPointerHeld) {
+    engagementRenderDeferred = true;
+    // Страховка: если pointerup потерялся (свернули апп с пальцем на экране),
+    // через полторы секунды рендерим принудительно.
+    window.clearTimeout(engagementDeferSafetyTimer);
+    engagementDeferSafetyTimer = window.setTimeout(() => {
+      taskListPointerHeld = false;
+      if (engagementRenderDeferred) {
+        engagementRenderDeferred = false;
+        renderEngagement();
+      }
+    }, 1_500);
+    return;
+  }
   renderStreakCard();
   const list = $("dailyRotationList");
   if (list && Array.isArray(state.engagement?.rotation)) {
