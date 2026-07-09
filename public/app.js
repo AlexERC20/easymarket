@@ -2333,7 +2333,6 @@ function renderTaskStats() {
   const stats = state.marketStats || [];
   const referralStats = state.referralStats || {};
   const referralTotal = Number(referralStats.total_referrals || 0);
-  const referralActivated = Number(referralStats.activated_referrals || 0);
   const referralStarTotal = Number(referralStats.star_total || 0);
   const referralUsdtTotal = Number(referralStats.usdt_total || 0);
   const referralStarProfit = Number(referralStats.star_profit_share || 0);
@@ -2366,7 +2365,7 @@ function renderTaskStats() {
       <div class="task-referral-summary">
         <div class="task-referral-head">
           <strong>Рефералы</strong>
-          <span>${formatFire(referralTotal)} ${friendsWord(referralTotal)} · ${formatFire(referralActivated)} со ставкой</span>
+          <span>${formatFire(referralTotal)} ${friendsWord(referralTotal)}</span>
         </div>
         <div class="task-referral-rows">
           <div class="task-referral-row">
@@ -2374,7 +2373,7 @@ function renderTaskStats() {
             <b>${referralMoney(referralStarTotal, referralUsdtTotal)}</b>
           </div>
           <div class="task-referral-row">
-            <span>1% с побед друзей</span>
+            <span>Прибыль за их победы</span>
             <b>${referralMoney(referralStarProfit, referralUsdtProfit)}</b>
           </div>
         </div>
