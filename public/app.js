@@ -7473,6 +7473,10 @@ const DAILY_TASK_META = {
 };
 
 function getDailyTaskAmount(taskKey, fallback = 0) {
+  const progress = getTaskProgress(taskKey);
+  if (progress?.amount != null) {
+    return Number(progress.amount || fallback || 0);
+  }
   if (taskKey === "daily_bet") {
     return Math.round(Number(state.publicConfig.task_daily_bet_fire || 50));
   }
@@ -7546,8 +7550,47 @@ function taskProgressMarkup(taskKey) {
   `;
 }
 
+function getDailyTaskDisplayMeta(taskKey) {
+  const base = DAILY_TASK_META[taskKey] || { title: taskKey, desc: "", icon: "target" };
+  const progress = getTaskProgress(taskKey);
+  if (!progress) {
+    return base;
+  }
+
+  const target = Math.max(1, Number(progress.target || 1));
+  const levels = Math.max(1, Number(progress.levels || 1));
+  const level = Math.max(1, Number(progress.level || 1));
+  const levelText = levels > 1 ? `Уровень ${level}/${levels}` : base.desc;
+  const targetText = formatTaskProgressValue(target, progress.unit);
+  const claimedText = progress.claimed ? "Все уровни забраны" : levelText;
+
+  const titleByTask = {
+    daily_bet: `${targetText} ставок за день`,
+    daily_topup_stars: `Пополнить ${targetText} звёзд`,
+    daily_topup_usdt: `Пополнить ${targetText} USDT`,
+    daily_btc_prediction: `${targetText} BTC-прогноз`,
+    daily_football_prediction: `${targetText} футбольных прогнозов`,
+    daily_btc_5_predictions: `${targetText} BTC-прогнозов`,
+    daily_win_1: `${targetText} побед за день`,
+    daily_win_streak_5: `${targetText} побед подряд`,
+    daily_win_2_row: `${targetText} победы подряд`,
+    daily_sniper: `${targetText} снайперских ставок`,
+    daily_no_win: `${targetText} NO-побед`,
+    daily_feed_fish: `${targetText} кормление рыбок`,
+    daily_comment: `${targetText} сообщений в чат`,
+    daily_explore_3: `${targetText} рынков разведать`,
+    daily_share_story: `${targetText} сторис с выигрышем`,
+  };
+
+  return {
+    ...base,
+    title: titleByTask[taskKey] || base.title,
+    desc: claimedText,
+  };
+}
+
 function renderDailyTaskRow(taskKey, amount = getDailyTaskAmount(taskKey)) {
-  const meta = DAILY_TASK_META[taskKey] || { title: taskKey, desc: "", icon: "target" };
+  const meta = getDailyTaskDisplayMeta(taskKey);
   return `
     <div class="task-item" data-task-row="${taskKey}">
       <span class="task-ic" aria-hidden="true">${taskIconMarkup(meta)}</span>
@@ -7645,6 +7688,32 @@ function renderStreakCard() {
   }
 }
 
+function applyDailyTaskProgress(taskKey, progress) {
+  if (!taskKey || !progress) return;
+  state.dailyTasks = {
+    ...state.dailyTasks,
+    [taskKey]: {
+      ...(state.dailyTasks?.[taskKey] || {}),
+      ready: Boolean(progress.ready),
+      claimed: Boolean(progress.claimed),
+      progress,
+    },
+  };
+  if (state.engagement) {
+    state.engagement.progress = {
+      ...(state.engagement.progress || {}),
+      [taskKey]: progress,
+    };
+  }
+  const rotationTask = state.engagement?.rotation?.find((task) => task.key === taskKey);
+  if (rotationTask) {
+    rotationTask.ready = Boolean(progress.ready);
+    rotationTask.claimed = Boolean(progress.claimed);
+    rotationTask.amount = Number(progress.amount || rotationTask.amount || 0);
+    rotationTask.progress = progress;
+  }
+}
+
 async function loadEngagementState() {
   if (!state.user?.telegram_id) return;
   try {
@@ -7671,13 +7740,7 @@ async function loadEngagementState() {
       };
     });
     Object.entries(data.progress || {}).forEach(([key, progress]) => {
-      state.dailyTasks = {
-        ...state.dailyTasks,
-        [key]: {
-          ...(state.dailyTasks?.[key] || {}),
-          progress,
-        },
-      };
+      applyDailyTaskProgress(key, progress);
     });
     (Object.entries(data.presence || {})).forEach(([key, info]) => {
       if (info?.claimed) state.presence.claimed[key] = true;
@@ -7744,11 +7807,15 @@ async function claimDailyTaskByKey(taskKey, button = null) {
     const claimOrigin = captureAnimationOrigin(button);
     const claimedRow = button?.closest(".task-item, .task-row");
     if (result.already_claimed || Number(result.awarded || 0) > 0) {
-      markDailyTaskClaimed(taskKey);
-      const rotationTask = state.engagement?.rotation?.find((task) => task.key === taskKey);
-      if (rotationTask) rotationTask.claimed = true;
-      if (state.engagement?.once?.[taskKey]) state.engagement.once[taskKey].claimed = true;
-      renderDailyProgress();
+      if (result.progress) {
+        applyDailyTaskProgress(taskKey, result.progress);
+      } else {
+        markDailyTaskClaimed(taskKey);
+        const rotationTask = state.engagement?.rotation?.find((task) => task.key === taskKey);
+        if (rotationTask) rotationTask.claimed = true;
+        if (state.engagement?.once?.[taskKey]) state.engagement.once[taskKey].claimed = true;
+      }
+      renderEngagement();
     }
     renderMe();
     if (result.already_claimed) {

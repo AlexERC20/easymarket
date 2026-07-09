@@ -3396,7 +3396,8 @@ export function getDailyRotation(dayKey = getDayKey()) {
 
 async function claimDailyTaskForUser(client, user, taskKey) {
   const normalizedTaskKey = String(taskKey || "").trim();
-  const amount = TASK_AMOUNTS[normalizedTaskKey]?.();
+  const claimPlan = await getDailyTaskClaimPlan(client, user.id, normalizedTaskKey);
+  const amount = claimPlan.amount;
   if (!amount) {
     throw new Error("invalid_task");
   }
@@ -3408,12 +3409,11 @@ async function claimDailyTaskForUser(client, user, taskKey) {
     throw new Error("task_not_in_rotation");
   }
 
-  const isReady = await isDailyTaskReady(client, user.id, normalizedTaskKey);
-  if (!isReady) {
+  if (!claimPlan.ready) {
     throw new Error("task_not_ready");
   }
 
-  const dayKey = ONCE_TASK_KEYS.has(normalizedTaskKey) ? "once" : getDayKey();
+  const dayKey = claimPlan.dayKey;
   const claimResult = await client.query(
     `
       INSERT INTO fire_task_claims (user_id, task_key, amount, day_key, source)
@@ -3421,7 +3421,7 @@ async function claimDailyTaskForUser(client, user, taskKey) {
       ON CONFLICT DO NOTHING
       RETURNING *
     `,
-    [user.id, normalizedTaskKey, amount, dayKey],
+    [user.id, claimPlan.claimTaskKey, amount, dayKey],
   );
 
   let bonus = {
@@ -3451,35 +3451,220 @@ async function claimDailyTaskForUser(client, user, taskKey) {
     "SELECT balance FROM fire_balances WHERE user_id = $1",
     [user.id],
   );
+  const nextProgress = await getDailyTaskProgress(client, user.id, normalizedTaskKey);
 
   return {
     ok: true,
     user,
     task_key: normalizedTaskKey,
+    claim_task_key: claimPlan.claimTaskKey,
     already_claimed: !claimResult.rows[0],
     ...bonus,
+    progress: nextProgress,
     balance: toNumber(balanceResult.rows[0]?.balance),
   };
 }
 
-const DAILY_TOPUP_TASKS = {
+const DAILY_PROGRESS_TASKS = {
+  daily_bet: {
+    unit: "ставок",
+    levels: [
+      { target: 1, amount: () => Math.round(Number(config.taskDailyBetFire || 0)) },
+      { target: 3, amount: 75 },
+      { target: 5, amount: 125 },
+      { target: 10, amount: 250 },
+      { target: 20, amount: 500 },
+    ],
+  },
   daily_topup_stars: {
-    target: 500,
     unit: "STAR",
+    levels: [
+      { target: 500, amount: 100 },
+      { target: 1000, amount: 200 },
+      { target: 2500, amount: 450 },
+      { target: 5000, amount: 900 },
+      { target: 10000, amount: 1800 },
+    ],
   },
   daily_topup_usdt: {
-    target: 50,
     unit: "USDT",
+    levels: [
+      { target: 50, amount: 300 },
+      { target: 100, amount: 600 },
+      { target: 250, amount: 1200 },
+      { target: 500, amount: 2500 },
+      { target: 1000, amount: 5000 },
+    ],
+  },
+  daily_btc_prediction: {
+    unit: "BTC",
+    levels: [{ target: 1, amount: 50 }],
+  },
+  daily_football_prediction: {
+    unit: "футбол",
+    levels: [
+      { target: 1, amount: 50 },
+      { target: 3, amount: 100 },
+      { target: 5, amount: 180 },
+      { target: 10, amount: 350 },
+      { target: 20, amount: 700 },
+    ],
+  },
+  daily_btc_5_predictions: {
+    unit: "BTC",
+    levels: [
+      { target: 5, amount: 300 },
+      { target: 15, amount: 600 },
+      { target: 30, amount: 1000 },
+      { target: 50, amount: 1500 },
+      { target: 100, amount: 2500 },
+    ],
+  },
+  daily_win_1: {
+    unit: "побед",
+    levels: [
+      { target: 1, amount: 50 },
+      { target: 3, amount: 150 },
+      { target: 5, amount: 300 },
+      { target: 10, amount: 700 },
+      { target: 20, amount: 1500 },
+    ],
+  },
+  daily_win_streak_5: {
+    unit: "серия",
+    levels: [
+      { target: 2, amount: 100 },
+      { target: 3, amount: 180 },
+      { target: 5, amount: 300 },
+      { target: 7, amount: 600 },
+      { target: 10, amount: 1200 },
+    ],
+  },
+  daily_win_2_row: {
+    unit: "серия",
+    levels: [{ target: 2, amount: 100 }],
+  },
+  daily_sniper: {
+    unit: "снайпер",
+    levels: [
+      { target: 1, amount: 75 },
+      { target: 3, amount: 150 },
+      { target: 5, amount: 300 },
+      { target: 10, amount: 650 },
+      { target: 20, amount: 1400 },
+    ],
+  },
+  daily_no_win: {
+    unit: "NO",
+    levels: [
+      { target: 1, amount: 75 },
+      { target: 3, amount: 150 },
+      { target: 5, amount: 300 },
+      { target: 10, amount: 650 },
+      { target: 20, amount: 1400 },
+    ],
+  },
+  daily_comment: {
+    unit: "чат",
+    levels: [
+      { target: 1, amount: 25 },
+      { target: 3, amount: 75 },
+      { target: 5, amount: 150 },
+      { target: 10, amount: 300 },
+      { target: 20, amount: 700 },
+    ],
+  },
+  daily_feed_fish: {
+    unit: "рыбки",
+    levels: [{ target: 1, amount: 25 }],
+  },
+  daily_explore_3: {
+    unit: "рынки",
+    levels: [
+      { target: 3, amount: 25 },
+      { target: 5, amount: 75 },
+      { target: 8, amount: 150 },
+      { target: 12, amount: 300 },
+      { target: 20, amount: 700 },
+    ],
+  },
+  daily_share_story: {
+    unit: "сторис",
+    levels: [{ target: 1, amount: 100 }],
   },
 };
 
-async function getDailyTopupTaskProgress(client, userId, taskKey) {
-  const task = DAILY_TOPUP_TASKS[taskKey];
-  if (!task) {
+function resolveTaskAmount(level) {
+  return typeof level?.amount === "function" ? level.amount() : Number(level?.amount || 0);
+}
+
+function getTaskLevelClaimKey(taskKey, level) {
+  return `${taskKey}_lvl_${level}`;
+}
+
+function getTaskLevelFromClaimKey(taskKey, claimKey) {
+  if (claimKey === taskKey) {
+    return 1;
+  }
+  const prefix = `${taskKey}_lvl_`;
+  if (!String(claimKey || "").startsWith(prefix)) {
     return null;
   }
+  const level = Number(String(claimKey).slice(prefix.length));
+  return Number.isSafeInteger(level) && level > 0 ? level : null;
+}
 
-  if (task.unit === "USDT") {
+async function getClaimedTaskLevels(client, userId, taskKey, dayKey = getDayKey()) {
+  const result = await client.query(
+    `
+      SELECT task_key
+      FROM fire_task_claims
+      WHERE user_id = $1
+        AND day_key = $2
+        AND (task_key = $3 OR task_key LIKE $4)
+    `,
+    [userId, dayKey, taskKey, `${taskKey}_lvl_%`],
+  );
+  return new Set(
+    result.rows
+      .map((row) => getTaskLevelFromClaimKey(taskKey, row.task_key))
+      .filter((level) => level !== null),
+  );
+}
+
+async function getConsecutiveWinCount(client, userId, limit = 25) {
+  const result = await client.query(
+    `
+      SELECT won
+      FROM (
+        SELECT
+          p.market_id,
+          MAX(CASE WHEN p.pnl > 0 THEN 1 ELSE 0 END) AS won,
+          MAX(m.resolved_at) AS resolved_at
+        FROM positions p
+        JOIN markets m ON m.id = p.market_id
+        WHERE p.user_id = $1
+          AND p.status = 'resolved'
+          AND m.status = 'resolved'
+        GROUP BY p.market_id
+        ORDER BY MAX(m.resolved_at) DESC
+        LIMIT $2
+      ) recent
+    `,
+    [userId, limit],
+  );
+  let streak = 0;
+  for (const row of result.rows) {
+    if (Number(row.won || 0) <= 0) {
+      break;
+    }
+    streak += 1;
+  }
+  return streak;
+}
+
+async function getDailyTaskValue(client, userId, taskKey) {
+  if (taskKey === "daily_topup_usdt") {
     const result = await client.query(
       `
         SELECT COALESCE(SUM(amount), 0) AS total
@@ -3494,51 +3679,224 @@ async function getDailyTopupTaskProgress(client, userId, taskKey) {
       `,
       [userId],
     );
-    const value = Math.max(0, toNumber(result.rows[0]?.total));
-    return {
-      value: Math.round(value * 100) / 100,
-      target: task.target,
-      unit: task.unit,
-      ready: value >= task.target,
-    };
+    return Math.max(0, toNumber(result.rows[0]?.total));
   }
 
-  const result = await client.query(
-    `
-      SELECT COALESCE(SUM(amount), 0) AS total
-      FROM fire_ledger
-      WHERE user_id = $1
-        AND amount > 0
-        AND created_at >= date_trunc('day', now())
-        AND (
-          reason IN (
-            'stars_fire_topup',
-            'stars_topup',
-            'star_topup',
-            'fire_topup',
-            'dev_topup'
+  if (taskKey === "daily_topup_stars") {
+    const result = await client.query(
+      `
+        SELECT COALESCE(SUM(amount), 0) AS total
+        FROM fire_ledger
+        WHERE user_id = $1
+          AND amount > 0
+          AND created_at >= date_trunc('day', now())
+          AND (
+            reason IN (
+              'stars_fire_topup',
+              'stars_topup',
+              'star_topup',
+              'fire_topup',
+              'dev_topup'
+            )
+            OR reason LIKE '%topup%'
           )
-          OR reason LIKE '%topup%'
-        )
-        AND reason NOT LIKE 'task_%'
-        AND reason NOT LIKE 'referral_%'
-        AND reason NOT LIKE 'market_%'
-        AND reason NOT LIKE '%payout%'
-        AND reason NOT LIKE '%refund%'
-    `,
-    [userId],
-  );
-  const value = Math.max(0, toNumber(result.rows[0]?.total));
-  return {
-    value: Math.round(value),
-    target: task.target,
-    unit: task.unit,
-    ready: value >= task.target,
-  };
+          AND reason NOT LIKE 'task_%'
+          AND reason NOT LIKE 'referral_%'
+          AND reason NOT LIKE 'market_%'
+          AND reason NOT LIKE '%payout%'
+          AND reason NOT LIKE '%refund%'
+      `,
+      [userId],
+    );
+    return Math.max(0, toNumber(result.rows[0]?.total));
+  }
+
+  if (taskKey === "daily_bet") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM trades
+        WHERE user_id = $1
+          AND action = 'BUY'
+          AND created_at >= date_trunc('day', now())
+      `,
+      [userId],
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  if (taskKey === "daily_btc_prediction" || taskKey === "daily_btc_5_predictions") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM trades
+        JOIN markets ON markets.id = trades.market_id
+        WHERE trades.user_id = $1
+          AND trades.action = 'BUY'
+          AND markets.symbol = ANY($2)
+          AND trades.created_at >= date_trunc('day', now())
+      `,
+      [userId, BTC_MARKET_SYMBOLS],
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  if (taskKey === "daily_football_prediction") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM trades
+        JOIN markets ON markets.id = trades.market_id
+        WHERE trades.user_id = $1
+          AND trades.action = 'BUY'
+          AND markets.symbol LIKE $2
+          AND trades.created_at >= date_trunc('day', now())
+      `,
+      [userId, `${WORLD_CUP_SYMBOL_PREFIX}%`],
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  if (taskKey === "daily_win_1") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM positions
+        WHERE user_id = $1
+          AND status = 'resolved'
+          AND pnl > 0
+          AND updated_at >= date_trunc('day', now())
+      `,
+      [userId],
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  if (taskKey === "daily_win_streak_5" || taskKey === "daily_win_2_row") {
+    return getConsecutiveWinCount(client, userId);
+  }
+
+  if (taskKey === "daily_sniper") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM trades
+        JOIN markets ON markets.id = trades.market_id
+        WHERE trades.user_id = $1
+          AND trades.action = 'BUY'
+          AND trades.created_at >= markets.end_time - interval '15 seconds'
+          AND trades.created_at <= markets.end_time
+          AND trades.created_at >= date_trunc('day', now())
+      `,
+      [userId],
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  if (taskKey === "daily_no_win") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM positions
+        WHERE user_id = $1
+          AND side = 'NO'
+          AND status = 'resolved'
+          AND pnl > 0
+          AND updated_at >= date_trunc('day', now())
+      `,
+      [userId],
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  if (taskKey === "daily_comment") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM market_comments
+        WHERE user_id = $1
+          AND created_at >= date_trunc('day', now())
+      `,
+      [userId],
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  if (taskKey === "daily_feed_fish" || taskKey === "daily_share_story") {
+    const eventKey = taskKey === "daily_feed_fish" ? "feed_fish" : "share_story";
+    const result = await client.query(
+      "SELECT count FROM user_task_events WHERE user_id = $1 AND day_key = $2 AND event_key = $3",
+      [userId, getDayKey(), eventKey],
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  if (taskKey === "daily_explore_3") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM user_task_events
+        WHERE user_id = $1
+          AND day_key = $2
+          AND event_key LIKE 'visit_%'
+      `,
+      [userId, getDayKey()],
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  return null;
 }
 
 async function getDailyTaskProgress(client, userId, taskKey) {
-  return getDailyTopupTaskProgress(client, userId, taskKey);
+  const task = DAILY_PROGRESS_TASKS[taskKey];
+  if (!task) {
+    return null;
+  }
+
+  const dayKey = getDayKey();
+  const claimedLevels = await getClaimedTaskLevels(client, userId, taskKey, dayKey);
+  const activeIndex = task.levels.findIndex((_, index) => !claimedLevels.has(index + 1));
+  const allClaimed = activeIndex === -1;
+  const levelIndex = allClaimed ? task.levels.length - 1 : activeIndex;
+  const level = task.levels[levelIndex];
+  const value = await getDailyTaskValue(client, userId, taskKey);
+  const roundedValue = task.unit === "USDT"
+    ? Math.round(Number(value || 0) * 100) / 100
+    : Math.floor(Number(value || 0));
+
+  return {
+    value: roundedValue,
+    target: Number(level.target || 1),
+    unit: task.unit,
+    level: levelIndex + 1,
+    levels: task.levels.length,
+    amount: resolveTaskAmount(level),
+    claim_task_key: allClaimed ? null : getTaskLevelClaimKey(taskKey, levelIndex + 1),
+    ready: !allClaimed && Number(value || 0) >= Number(level.target || 1),
+    claimed: allClaimed,
+  };
+}
+
+async function getDailyTaskClaimPlan(client, userId, taskKey) {
+  const progress = await getDailyTaskProgress(client, userId, taskKey);
+  if (progress) {
+    return {
+      amount: progress.amount,
+      ready: progress.ready,
+      dayKey: getDayKey(),
+      claimTaskKey: progress.claim_task_key || getTaskLevelClaimKey(taskKey, progress.level || 1),
+      progress,
+    };
+  }
+
+  return {
+    amount: TASK_AMOUNTS[taskKey]?.() || 0,
+    ready: await isDailyTaskReady(client, userId, taskKey),
+    dayKey: ONCE_TASK_KEYS.has(taskKey) ? "once" : getDayKey(),
+    claimTaskKey: taskKey,
+    progress: null,
+  };
 }
 
 async function isDailyTaskReady(client, userId, taskKey) {
@@ -3556,185 +3914,13 @@ async function isDailyTaskReady(client, userId, taskKey) {
     return Boolean(result.rows[0]);
   }
 
-  if (taskKey === "daily_win_2_row") {
-    const result = await client.query(
-      `
-        SELECT
-          p.market_id,
-          MAX(CASE WHEN p.pnl > 0 THEN 1 ELSE 0 END) AS won
-        FROM positions p
-        JOIN markets m ON m.id = p.market_id
-        WHERE p.user_id = $1
-          AND p.status = 'resolved'
-          AND m.status = 'resolved'
-        GROUP BY p.market_id
-        ORDER BY MAX(m.resolved_at) DESC
-        LIMIT 2
-      `,
-      [userId],
-    );
-    return result.rows.length >= 2 && result.rows.every((row) => Number(row.won || 0) > 0);
-  }
-
-  if (taskKey === "daily_sniper") {
-    const result = await client.query(
-      `
-        SELECT COUNT(*)::int AS count
-        FROM trades
-        JOIN markets ON markets.id = trades.market_id
-        WHERE trades.user_id = $1
-          AND trades.action = 'BUY'
-          AND trades.created_at >= markets.end_time - interval '15 seconds'
-          AND trades.created_at <= markets.end_time
-          AND trades.created_at >= date_trunc('day', now())
-      `,
-      [userId],
-    );
-    return Number(result.rows[0]?.count || 0) >= 1;
-  }
-
-  if (taskKey === "daily_no_win") {
-    const result = await client.query(
-      `
-        SELECT COUNT(*)::int AS count
-        FROM positions
-        WHERE user_id = $1
-          AND side = 'NO'
-          AND status = 'resolved'
-          AND pnl > 0
-          AND updated_at >= date_trunc('day', now())
-      `,
-      [userId],
-    );
-    return Number(result.rows[0]?.count || 0) >= 1;
-  }
-
-  if (taskKey === "daily_comment") {
-    const result = await client.query(
-      `
-        SELECT COUNT(*)::int AS count
-        FROM market_comments
-        WHERE user_id = $1
-          AND created_at >= date_trunc('day', now())
-      `,
-      [userId],
-    );
-    return Number(result.rows[0]?.count || 0) >= 1;
-  }
-
-  if (taskKey === "daily_feed_fish" || taskKey === "daily_share_story") {
-    const eventKey = taskKey === "daily_feed_fish" ? "feed_fish" : "share_story";
-    const result = await client.query(
-      "SELECT count FROM user_task_events WHERE user_id = $1 AND day_key = $2 AND event_key = $3",
-      [userId, getDayKey(), eventKey],
-    );
-    return Number(result.rows[0]?.count || 0) >= 1;
-  }
-
-  if (taskKey === "daily_explore_3") {
-    const result = await client.query(
-      `
-        SELECT COUNT(*)::int AS count
-        FROM user_task_events
-        WHERE user_id = $1
-          AND day_key = $2
-          AND event_key LIKE 'visit_%'
-      `,
-      [userId, getDayKey()],
-    );
-    return Number(result.rows[0]?.count || 0) >= 3;
-  }
-
   if (taskKey === "daily_presence") {
     return true;
   }
 
-  if (taskKey === "daily_bet") {
-    const result = await client.query(
-      `
-        SELECT COUNT(*)::int AS count
-        FROM trades
-        WHERE user_id = $1
-          AND action = 'BUY'
-          AND created_at >= date_trunc('day', now())
-      `,
-      [userId],
-    );
-    return Number(result.rows[0]?.count || 0) >= 1;
-  }
-
-  if (taskKey === "daily_topup_stars" || taskKey === "daily_topup_usdt") {
-    const progress = await getDailyTopupTaskProgress(client, userId, taskKey);
-    return Boolean(progress?.ready);
-  }
-
-  if (taskKey === "daily_btc_prediction" || taskKey === "daily_btc_5_predictions") {
-    const result = await client.query(
-      `
-        SELECT COUNT(*)::int AS count
-        FROM trades
-        JOIN markets ON markets.id = trades.market_id
-        WHERE trades.user_id = $1
-          AND trades.action = 'BUY'
-          AND markets.symbol = ANY($2)
-          AND trades.created_at >= date_trunc('day', now())
-      `,
-      [userId, BTC_MARKET_SYMBOLS],
-    );
-    return Number(result.rows[0]?.count || 0) >= (taskKey === "daily_btc_5_predictions" ? 5 : 1);
-  }
-
-  if (taskKey === "daily_football_prediction") {
-    const result = await client.query(
-      `
-        SELECT COUNT(*)::int AS count
-        FROM trades
-        JOIN markets ON markets.id = trades.market_id
-        WHERE trades.user_id = $1
-          AND trades.action = 'BUY'
-          AND markets.symbol LIKE $2
-          AND trades.created_at >= date_trunc('day', now())
-      `,
-      [userId, `${WORLD_CUP_SYMBOL_PREFIX}%`],
-    );
-    return Number(result.rows[0]?.count || 0) >= 1;
-  }
-
-  if (taskKey === "daily_win_1") {
-    const result = await client.query(
-      `
-        SELECT COUNT(*)::int AS count
-        FROM positions
-        WHERE user_id = $1
-          AND status = 'resolved'
-          AND pnl > 0
-          AND updated_at >= date_trunc('day', now())
-      `,
-      [userId],
-    );
-    return Number(result.rows[0]?.count || 0) >= 1;
-  }
-
-  if (taskKey === "daily_win_streak_5") {
-    const streakResult = await client.query(
-      `
-        SELECT
-          p.market_id,
-          MAX(CASE WHEN p.pnl > 0 THEN 1 ELSE 0 END) AS won,
-          MAX(m.resolved_at) AS resolved_at
-        FROM positions p
-        JOIN markets m ON m.id = p.market_id
-        WHERE p.user_id = $1
-          AND p.status = 'resolved'
-          AND m.status = 'resolved'
-        GROUP BY p.market_id
-        ORDER BY MAX(m.resolved_at) DESC
-        LIMIT 5
-      `,
-      [userId],
-    );
-    return streakResult.rows.length >= 5
-      && streakResult.rows.every((row) => Number(row.won || 0) > 0);
+  const progress = await getDailyTaskProgress(client, userId, taskKey);
+  if (progress) {
+    return progress.ready;
   }
 
   return false;
@@ -3759,14 +3945,14 @@ async function getUserDailyTaskStatus(userId) {
     let progress = null;
     try {
       progress = await getDailyTaskProgress(queryClient, userId, taskKey);
-      ready = await isDailyTaskReady(queryClient, userId, taskKey);
+      ready = progress ? progress.ready : await isDailyTaskReady(queryClient, userId, taskKey);
     } catch {
       ready = false;
       progress = null;
     }
     return [taskKey, {
       ready,
-      claimed: claimedTasks.has(taskKey),
+      claimed: progress ? progress.claimed : claimedTasks.has(taskKey),
       ...(progress ? { progress } : {}),
     }];
   }));
@@ -3973,9 +4159,9 @@ export async function getEngagementState(input) {
     const progress = await getDailyTaskProgress(shim, user.id, key);
     rotation.push({
       key,
-      amount: TASK_AMOUNTS[key]?.() || 0,
-      ready: await isDailyTaskReady(shim, user.id, key),
-      claimed: claimed.has(`${key}:${today}`),
+      amount: progress?.amount ?? TASK_AMOUNTS[key]?.() ?? 0,
+      ready: progress ? progress.ready : await isDailyTaskReady(shim, user.id, key),
+      claimed: progress ? progress.claimed : claimed.has(`${key}:${today}`),
       ...(progress ? { progress } : {}),
     });
   }
