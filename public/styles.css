@@ -3107,11 +3107,6 @@ code {
   text-transform: uppercase;
 }
 
-.daily-progress + .task-section {
-  margin-top: 0;
-}
-
-/* Daily progress header */
 /* ===== Стрик «Заряд молнии» ===== */
 .streak-card {
   display: flex;
@@ -3225,10 +3220,50 @@ code {
   font-weight: 900;
 }
 
+/* Живой таймер: пульсирующая точка записи + MM:SS. На паузе (нет касаний
+   2 минуты или вкладка скрыта) точка гаснет и цифры тускнеют. */
 .presence-ladder-top span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: #35f6ff;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
+  transition: color var(--motion-normal) var(--ease-default);
+}
+
+.presence-ladder-top span::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #35f6ff;
+  box-shadow: 0 0 8px rgba(53, 246, 255, 0.85);
+  animation: presenceLiveDot 1.6s ease-in-out infinite;
+  transition: background var(--motion-normal) var(--ease-default), box-shadow var(--motion-normal) var(--ease-default);
+}
+
+.presence-ladder.is-paused .presence-ladder-top span {
+  color: rgba(141, 152, 170, 0.9);
+}
+
+.presence-ladder.is-paused .presence-ladder-top span::before {
+  background: rgba(141, 152, 170, 0.7);
+  box-shadow: none;
+  animation: none;
+}
+
+@keyframes presenceLiveDot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.4;
+    transform: scale(0.78);
+  }
 }
 
 .presence-ladder-track {
@@ -3238,13 +3273,44 @@ code {
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* Заполнение ползёт линейно между секундными тиками, по нему пробегает блик. */
 .presence-ladder-track span {
+  position: relative;
   display: block;
   height: 100%;
   width: calc(var(--progress, 0) * 100%);
   border-radius: 999px;
+  overflow: hidden;
   background: linear-gradient(90deg, #b7ff4d, #35f6ff);
-  transition: width 600ms var(--ease-default);
+  transition: width 1s linear;
+}
+
+.presence-ladder-track span::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 46%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6) 50%, transparent);
+  transform: translateX(-130%);
+  animation: presenceShimmer 2.6s ease-in-out infinite;
+}
+
+.presence-ladder.is-paused .presence-ladder-track span::after {
+  animation: none;
+  opacity: 0;
+}
+
+@keyframes presenceShimmer {
+  0% {
+    transform: translateX(-130%);
+  }
+
+  62%,
+  100% {
+    transform: translateX(280%);
+  }
 }
 
 .presence-ladder-steps {
@@ -3308,61 +3374,11 @@ code {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .presence-step.claimable {
+  .presence-step.claimable,
+  .presence-ladder-top span::before,
+  .presence-ladder-track span::after {
     animation: none !important;
   }
-}
-
-.daily-progress {
-  border: 1px solid rgba(183, 255, 77, 0.24);
-  border-radius: 14px;
-  background:
-    radial-gradient(circle at 12% 0%, rgba(183, 255, 77, 0.1), transparent 42%),
-    rgba(255, 255, 255, 0.04);
-  padding: 11px 13px;
-  display: grid;
-  gap: 9px;
-}
-
-.daily-progress.is-complete {
-  border-color: rgba(183, 255, 77, 0.5);
-}
-
-.daily-progress-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.daily-progress-top span {
-  font-size: 12px;
-  font-weight: 900;
-  color: var(--muted);
-}
-
-.daily-progress-top b {
-  font-size: 13px;
-  font-weight: 950;
-  color: var(--neon-lime, #b7ff4d);
-}
-
-.daily-progress-track {
-  position: relative;
-  height: 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-}
-
-.daily-progress-track span {
-  position: absolute;
-  inset: 0;
-  transform-origin: left center;
-  transform: scaleX(var(--progress, 0));
-  border-radius: 999px;
-  background: linear-gradient(90deg, #35f6ff, #b7ff4d);
-  transition: transform 520ms var(--ease-default, cubic-bezier(0.22, 1, 0.36, 1));
 }
 
 .task-stats-panel {

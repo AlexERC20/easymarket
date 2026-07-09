@@ -2216,45 +2216,11 @@ function isTaskClaimedLocally(key) {
   return Boolean(state.presence.claimed[key] || getDailyTaskStatus(key).claimed);
 }
 
-function renderDailyProgress() {
-  const countEl = $("dailyProgressCount");
-  const sumEl = $("dailyProgressSum");
-  const bar = $("dailyProgressBar");
-  if (!countEl && !sumEl && !bar) return;
-
-  const presenceReward = Math.round(Number(state.publicConfig.task_daily_presence_fire || 50));
-  const entries = [
-    ...CORE_DAILY_TASK_KEYS.map((key) => ({
-      claimed: Boolean(getDailyTaskStatus(key).claimed),
-      amount: getDailyTaskAmount(key),
-    })),
-    ...(state.engagement?.rotation || []).map((task) => ({
-      claimed: Boolean(task.claimed || getDailyTaskStatus(task.key).claimed),
-      amount: Number(task.amount || 0),
-    })),
-    ...PRESENCE_LADDER.map((step) => ({
-      claimed: isTaskClaimedLocally(step.key),
-      amount: step.key === "daily_presence"
-        ? presenceReward
-        : Number(state.engagement?.presence?.[step.key]?.amount || (step.key === "presence_15" ? 75 : 200)),
-    })),
-  ];
-  const total = entries.length || 6;
-  const claimed = entries.filter((entry) => entry.claimed).length;
-  const sum = entries.reduce((acc, entry) => acc + (entry.claimed ? entry.amount : 0), 0);
-
-  if (countEl) countEl.textContent = `${claimed}/${total}`;
-  if (sumEl) sumEl.textContent = formatFire(sum);
-  if (bar) bar.style.setProperty("--progress", String(total ? claimed / total : 0));
-  $("dailyProgressCard")?.classList.toggle("is-complete", claimed >= total);
-}
-
 function renderTaskButtonStates() {
   document.querySelectorAll("[data-daily-task]").forEach((button) => {
     setTaskButtonVisualState(button, getDailyTaskStatus(button.dataset.dailyTask));
   });
   updatePresenceLadder();
-  renderDailyProgress();
 }
 
 function getMarketStatTitle(stat) {
@@ -7296,12 +7262,39 @@ async function claimSimpleTask(taskKey, sourceElement = null) {
 }
 
 // Активные минуты: вкладка видима и было взаимодействие за последние 2 минуты.
+function isPresenceAccruing() {
+  return !document.hidden && Date.now() - state.presence.lastInteractionAt < 120_000;
+}
+
+// Полоска выровнена по трём равным ячейкам чекпоинтов: каждая треть
+// заполняется ровно к своему порогу (5 / 15 / 30 минут).
+function presenceLadderProgress(minutes) {
+  let progress = 0;
+  let from = 0;
+  for (const step of PRESENCE_LADDER) {
+    if (minutes >= step.minutes) {
+      progress += 1 / PRESENCE_LADDER.length;
+    } else {
+      progress += ((minutes - from) / (step.minutes - from)) / PRESENCE_LADDER.length;
+      break;
+    }
+    from = step.minutes;
+  }
+  return Math.min(1, Math.max(0, progress));
+}
+
 function updatePresenceLadder() {
   const minutes = state.presence.activeMs / 60_000;
   const label = $("presenceLadderTime");
   const bar = $("presenceLadderBar");
-  if (label) label.textContent = `${Math.floor(minutes)} мин`;
-  if (bar) bar.style.setProperty("--progress", String(Math.min(1, minutes / 30)));
+  if (label) {
+    const totalSeconds = Math.floor(state.presence.activeMs / 1000);
+    const mm = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
+    const ss = String(totalSeconds % 60).padStart(2, "0");
+    label.textContent = `${mm}:${ss}`;
+  }
+  if (bar) bar.style.setProperty("--progress", String(presenceLadderProgress(minutes)));
+  $("presenceLadder")?.classList.toggle("is-paused", !isPresenceAccruing());
   document.querySelectorAll("[data-presence-key]").forEach((button) => {
     const step = PRESENCE_LADDER.find((item) => item.key === button.dataset.presenceKey);
     if (!step) return;
@@ -7353,7 +7346,6 @@ async function claimPresenceStep(key, button = null) {
   } finally {
     state.presence.pending = false;
     updatePresenceLadder();
-    renderDailyProgress();
   }
 }
 
@@ -7809,7 +7801,6 @@ function renderEngagement() {
     }
   }
   renderTaskButtonStates();
-  renderDailyProgress();
   renderShareFriendTask();
   updatePresenceLadder();
 }
@@ -8566,12 +8557,13 @@ setInterval(updateTimer, 250);
 window.addEventListener("pointerdown", () => {
   state.presence.lastInteractionAt = Date.now();
 }, { passive: true });
+// Тик раз в секунду: таймер "Время в игре" идёт вживую, полоска ползёт плавно.
 setInterval(() => {
-  if (!document.hidden && Date.now() - state.presence.lastInteractionAt < 120_000) {
-    state.presence.activeMs += 5_000;
+  if (isPresenceAccruing()) {
+    state.presence.activeMs += 1_000;
   }
   updatePresenceLadder();
-}, 5_000);
+}, 1_000);
 setInterval(() => {
   void runSingleFlight("market", loadMarket).catch(() => setConnection("Ошибка", "error"));
 }, ACTIVE_MARKET_POLL_MS);
