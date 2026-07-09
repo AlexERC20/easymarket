@@ -42,6 +42,7 @@ const CHART_FRAME_MS = 33; // ~30fps cap for the chart loop (was uncapped 60fps)
 let lastChartDrawTs = 0;
 let chartSnapshotCanvas = null; // offscreen copy of the previous market's frame
 let chartBetLabelCache = null; // cached measureText widths for the "your bet" pill
+let chartTickerLabelCache = null; // cached measureText widths for the live ticker pill
 const ACTIVE_MARKET_POLL_MS = 1_500;
 const MARKET_LIST_POLL_MS = 10_000;
 const COMMENTS_POLL_MS = 10_000;
@@ -1642,6 +1643,24 @@ function drawMarketChartFrame(ts) {
     ctx.fillText(seg3, tx, cy);
   }
 
+  // Live-тикер в правом нижнем углу: та же высота и шрифт, что у плашки
+  // "Твоя ставка" слева. Крутит последние сделки из ленты активности;
+  // крупная ставка получает мерцающую молнию и золотую рамку. Дёшево:
+  // одна плашка + два текста на кадр, замеры текста кэшируются, blur нет.
+  // Только на открытом раунде: иначе последний статичный кадр застынет
+  // с полупрозрачной плашкой посреди фейда.
+  if (market.status === "open") {
+    drawLiveTickerPill(ctx, {
+      width,
+      height,
+      right,
+      nowTs,
+      myBetPillEnd: myBet && chartBetLabelCache
+        ? left + chartBetLabelCache.w1 + chartBetLabelCache.w2 + chartBetLabelCache.w3 + Math.max(8, width * 0.018) * 2
+        : left,
+    });
+  }
+
   // Dissolve the previous market's snapshot on top of the new chart so the switch
   // reads as a smooth crossfade instead of an abrupt cut + ragged redraw.
   if (intro < 1 && chartSnapshotCanvas) {
@@ -1687,6 +1706,108 @@ function getSortedChartPoints(market) {
       .sort((a, b) => a.at - b.at);
   }
   return chartPointsCacheList;
+}
+
+// Live-тикер сделок в правом нижнем углу графика. Показывает по очереди
+// последние ставки (~3.2с на запись) с плавным появлением/уходом; крупные
+// выделяются молнией с альфа-мерцанием — без shadowBlur, чтобы кадр
+// оставался дешёвым.
+const CHART_TICKER_SLOT_MS = 3_200;
+const CHART_TICKER_MAX_ENTRIES = 8;
+
+function drawLiveTickerPill(ctx, { width, height, right, nowTs, myBetPillEnd }) {
+  const feed = state.activity;
+  if (!Array.isArray(feed) || !feed.length) {
+    return;
+  }
+
+  const pool = Math.min(feed.length, CHART_TICKER_MAX_ENTRIES);
+  const slot = Math.floor(nowTs / CHART_TICKER_SLOT_MS);
+  const trade = feed[slot % pool];
+  if (!trade) {
+    return;
+  }
+
+  // Плавный вход/выход внутри слота.
+  const phase = (nowTs % CHART_TICKER_SLOT_MS) / CHART_TICKER_SLOT_MS;
+  const alpha = Math.min(1, phase / 0.09, (1 - phase) / 0.09);
+  if (alpha <= 0.01) {
+    return;
+  }
+
+  const isBig = Number(trade.amount || 0) >= (normalizeCurrency(trade.currency) === "STAR" ? 500 : 50);
+  const rawName = formatUserDisplayName(trade, { preferAt: false });
+  const name = rawName.length > 12 ? `${rawName.slice(0, 11)}…` : rawName;
+  const seg1 = `${name} `;
+  const verb = (trade.action || "BUY") === "SELL" ? "продал" : "ставит";
+  const seg2 = `${verb} ${getActivitySideLabel(trade)} ${formatCurrencyAmount(trade.amount, trade.currency)}`;
+  const fontPx = Math.max(11, width * 0.024);
+  ctx.font = `${fontPx}px Inter, system-ui, sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+
+  const labelKey = `${trade.id}|${seg1}|${seg2}|${fontPx.toFixed(1)}`;
+  if (!chartTickerLabelCache || chartTickerLabelCache.key !== labelKey) {
+    chartTickerLabelCache = {
+      key: labelKey,
+      w1: ctx.measureText(seg1).width,
+      w2: ctx.measureText(seg2).width,
+    };
+  }
+  const { w1, w2 } = chartTickerLabelCache;
+
+  const padX = Math.max(8, width * 0.018);
+  const pillH = Math.max(22, height * 0.105);
+  const boltW = isBig ? pillH * 0.52 : 0;
+  const pillW = boltW + w1 + w2 + padX * 2;
+  const pillX = right - pillW;
+  const pillY = height - pillH - Math.max(4, height * 0.02);
+
+  // Не наезжаем на плашку своей ставки слева: если тесно, тикер не рисуем.
+  if (pillX < myBetPillEnd + Math.max(6, width * 0.012)) {
+    return;
+  }
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = "rgba(8, 13, 22, 0.74)";
+  ctx.beginPath();
+  roundedRectPath(ctx, pillX, pillY, pillW, pillH, Math.max(8, height * 0.05));
+  ctx.fill();
+  ctx.strokeStyle = isBig ? "rgba(255, 214, 92, 0.55)" : "rgba(255, 255, 255, 0.08)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  const cy = pillY + pillH / 2;
+  let tx = pillX + padX;
+
+  if (isBig) {
+    // Молния мерцанием альфы (как у lucky-раунда), заливка без теней.
+    const flicker = 0.66 + 0.34 * Math.sin(nowTs * 0.018);
+    const bs = pillH * 0.26;
+    const bx = tx + boltW * 0.4;
+    ctx.save();
+    ctx.globalAlpha = alpha * flicker;
+    ctx.fillStyle = "#b7ff4d";
+    ctx.beginPath();
+    ctx.moveTo(bx + bs * 0.55, cy - bs);
+    ctx.lineTo(bx - bs * 0.35, cy + bs * 0.1);
+    ctx.lineTo(bx + bs * 0.15, cy + bs * 0.1);
+    ctx.lineTo(bx - bs * 0.15, cy + bs);
+    ctx.lineTo(bx + bs * 0.75, cy - bs * 0.2);
+    ctx.lineTo(bx + bs * 0.25, cy - bs * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    tx += boltW;
+  }
+
+  ctx.fillStyle = isBig ? "rgba(255, 224, 130, 0.98)" : "rgba(141, 152, 170, 0.95)";
+  ctx.fillText(seg1, tx, cy);
+  tx += w1;
+  ctx.fillStyle = trade.side === "YES" ? "#19c37d" : "#ef466f";
+  ctx.fillText(seg2, tx, cy);
+  ctx.restore();
 }
 
 // pathPoints отсортированы по x: ближайшую к аватарке точку линии ищем
