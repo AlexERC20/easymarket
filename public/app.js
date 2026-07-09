@@ -1624,13 +1624,17 @@ function drawMarketChartFrame(ts) {
     const pillW = w1 + w2 + w3 + padX * 2;
     const pillX = left;
     const pillY = height - pillH - Math.max(4, height * 0.02);
-    ctx.fillStyle = "rgba(8, 13, 22, 0.74)";
+    // Без рамки-обводки, в пару к live-тикеру справа: форму держит чуть более
+    // контрастная заливка + волна цвета своей стороны.
+    ctx.fillStyle = "rgba(13, 19, 30, 0.88)";
     ctx.beginPath();
     roundedRectPath(ctx, pillX, pillY, pillW, pillH, Math.max(8, height * 0.05));
     ctx.fill();
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    const myWash = ctx.createLinearGradient(pillX, 0, pillX + pillW * 0.64, 0);
+    myWash.addColorStop(0, myBet.side === "YES" ? "rgba(25, 195, 125, 0.18)" : "rgba(239, 70, 111, 0.16)");
+    myWash.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = myWash;
+    ctx.fill();
     const cy = pillY + pillH / 2;
     let tx = pillX + padX;
     ctx.fillStyle = "rgba(141, 152, 170, 0.95)";
@@ -1717,11 +1721,12 @@ const CHART_TICKER_MAX_ENTRIES = 8;
 
 // Уровни тикера = уровни кнопок ставок (getTierForAmount): минимальная —
 // просто ник без молнии, дальше молния крупнее и ярче, максимальная ($100 /
-// топ по звёздам) — золотая с мягким свечением.
+// топ по звёздам) — золотая с мягким свечением. Вместо рамок-обводок уровень
+// подсвечивает мягкая заливка-волна изнутри плашки (язык карточек приложения).
 const CHART_TICKER_TIER_SPEC = {
-  2: { bolt: 0.42, flick: 0.2, border: "rgba(183, 255, 77, 0.28)", name: "rgba(141, 152, 170, 0.95)", boltColor: "#93d94e", glow: false },
-  3: { bolt: 0.54, flick: 0.28, border: "rgba(183, 255, 77, 0.5)", name: "rgba(221, 255, 229, 0.96)", boltColor: "#b7ff4d", glow: false },
-  4: { bolt: 0.66, flick: 0.34, border: "rgba(255, 214, 92, 0.62)", name: "rgba(255, 224, 130, 0.98)", boltColor: "#ffe66d", glow: true },
+  2: { bolt: 0.42, flick: 0.2, wash: "rgba(147, 217, 78, 0.14)", name: "rgba(141, 152, 170, 0.95)", boltColor: "#93d94e", glow: false },
+  3: { bolt: 0.54, flick: 0.28, wash: "rgba(183, 255, 77, 0.2)", name: "rgba(221, 255, 229, 0.96)", boltColor: "#b7ff4d", glow: false },
+  4: { bolt: 0.66, flick: 0.34, wash: "rgba(255, 214, 92, 0.26)", name: "rgba(255, 224, 130, 0.98)", boltColor: "#ffe66d", glow: true },
 };
 
 // Свечение топ-уровня — пререндеренный радиальный спрайт: один drawImage
@@ -1802,13 +1807,18 @@ function drawLiveTickerPill(ctx, { width, height, right, nowTs, myBetPillEnd }) 
 
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.fillStyle = "rgba(8, 13, 22, 0.74)";
+  ctx.fillStyle = "rgba(13, 19, 30, 0.88)";
   ctx.beginPath();
   roundedRectPath(ctx, pillX, pillY, pillW, pillH, Math.max(8, height * 0.05));
   ctx.fill();
-  ctx.strokeStyle = spec ? spec.border : "rgba(255, 255, 255, 0.08)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
+  if (spec) {
+    // Волна цвета уровня от молнии в сторону текста; путь плашки ещё активен.
+    const washGradient = ctx.createLinearGradient(pillX, 0, pillX + pillW * 0.64, 0);
+    washGradient.addColorStop(0, spec.wash);
+    washGradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = washGradient;
+    ctx.fill();
+  }
 
   const cy = pillY + pillH / 2;
   let tx = pillX + padX;
