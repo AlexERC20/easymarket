@@ -7656,7 +7656,11 @@ function renderEngagement() {
   const clanTask = state.engagement?.once?.join_clan;
   if (clanButton && clanTask) {
     setTaskButtonVisualState(clanButton, clanTask);
-    if (!clanTask.claimed && !clanTask.ready) {
+    if (clanTask.claimed) {
+      clanButton.textContent = "Кланы";
+    } else if (clanTask.ready) {
+      clanButton.textContent = "Забрать";
+    } else {
       clanButton.textContent = "Вступить";
       clanButton.classList.remove("not-ready");
     }
@@ -7779,11 +7783,17 @@ function stopClanWarPoll() {
   }
 }
 
-function setClansSheetOpen(open) {
+function setClansSheetOpen(open, options = {}) {
   const sheet = $("clansSheet");
   if (!sheet) return;
   if (open) {
-    state.clanView = "leaderboard";
+    const requestedView = options.view || "leaderboard";
+    state.clanView = requestedView;
+    if (options.selectedClanId) {
+      state.selectedClanId = Number(options.selectedClanId);
+    } else if (requestedView === "detail" && state.userClan?.id) {
+      state.selectedClanId = state.userClan.id;
+    }
     state.clanWarBankShown = null;
     void loadClans().catch(() => showToast("Кланы пока не загрузились."));
     openSheet(sheet);
@@ -7792,6 +7802,24 @@ function setClansSheetOpen(open) {
     stopClanWarPoll();
     closeSheet(sheet);
   }
+}
+
+function openClansFromJoinTask() {
+  closeTopMoreMenu();
+  const openClans = () => {
+    const hasClan = Boolean(state.userClan?.id);
+    setClansSheetOpen(true, {
+      view: hasClan ? "detail" : "leaderboard",
+      selectedClanId: hasClan ? state.userClan.id : state.selectedClanId,
+    });
+  };
+
+  if (isSheetOpen("tasksSheet")) {
+    closeSheet("tasksSheet", { duration: 180, afterClose: openClans });
+    return;
+  }
+
+  openClans();
 }
 
 function showReferralNudge() {
@@ -7925,14 +7953,16 @@ document.querySelector(".presence-ladder")?.addEventListener("click", (event) =>
 $("joinClanTaskBtn")?.addEventListener("click", (event) => {
   triggerHaptic("selection");
   const once = state.engagement?.once?.join_clan;
-  if (once?.claimed) return;
+  if (once?.claimed) {
+    openClansFromJoinTask();
+    return;
+  }
   if (once?.ready) {
     void claimDailyTaskByKey("join_clan", event.currentTarget);
     return;
   }
   // Ещё не в клане — ведём в кланы, награда заберётся после вступления.
-  setTasksSheetOpen(false);
-  $("clansBtn")?.click();
+  openClansFromJoinTask();
 });
 
 document.querySelector(".task-list")?.addEventListener("click", (event) => {
