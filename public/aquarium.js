@@ -162,9 +162,11 @@ function aquariumHaptic(style = "light") {
 }
 
 function canAnimateAquarium() {
+  // Canvas-движок работает только на своих платформах (Android/браузер):
+  // на DOM-платформах он не стартует вовсе, чтобы не было двух аквариумов.
   // Telegram on iOS runs inside WKWebView. Some builds can report the document
   // as hidden while the Mini App is visibly active, which killed the fish loop.
-  return enabled && runtimeAllowed && !reducedMotion() && (!document.hidden || isTelegramMiniApp());
+  return enabled && runtimeAllowed && !shouldUseDomAquarium() && !reducedMotion() && (!document.hidden || isTelegramMiniApp());
 }
 
 function canAnimateDomAquarium() {
@@ -236,16 +238,42 @@ export function setAquariumRuntimeAllowed(next) {
   return runtimeAllowed;
 }
 
-function shouldUseDomAquarium() {
-  if (!isTelegramMiniApp()) {
-    return false;
-  }
-  const platform = String(window.Telegram?.WebApp?.platform || "").toLowerCase();
+// Платформа аквариума: ios / android / desktop (Telegram Desktop, macOS) / web.
+function getAquariumPlatform() {
+  const tgPlatform = String(window.Telegram?.WebApp?.platform || "").toLowerCase();
   const ua = String(window.navigator?.userAgent || "").toLowerCase();
-  return platform.includes("ios")
-    || platform.includes("mac")
-    || platform.includes("tdesktop")
-    || /iphone|ipad|ipod|macintosh|mac os/.test(ua);
+  // iPadOS маскируется под Macintosh, но выдаёт себя тач-поинтами.
+  const isIosUa = /iphone|ipad|ipod/.test(ua)
+    || (/macintosh|mac os/.test(ua) && (window.navigator?.maxTouchPoints || 0) > 1);
+  if (tgPlatform.includes("ios") || isIosUa) {
+    return "ios";
+  }
+  if (tgPlatform.includes("android") || /android/.test(ua)) {
+    return "android";
+  }
+  if (tgPlatform.includes("tdesktop") || tgPlatform.includes("mac") || /macintosh|mac os/.test(ua)) {
+    return "desktop";
+  }
+  // Неизвестные Telegram-платформы (webk/weba) — это обычный браузер: canvas.
+  return "web";
+}
+
+// Ровно один движок на платформу — «аквариум в аквариуме» запрещён.
+// iOS -> DOM-рыбки (WKWebView в Telegram душит canvas rAF), Telegram
+// Desktop/macOS -> DOM, Android и обычный браузер -> canvas.
+function aquariumEngine() {
+  const platform = getAquariumPlatform();
+  if (platform === "ios") {
+    return "dom";
+  }
+  if (platform === "desktop" && isTelegramMiniApp()) {
+    return "dom";
+  }
+  return "canvas";
+}
+
+function shouldUseDomAquarium() {
+  return aquariumEngine() === "dom";
 }
 
 function ensureDomLayer() {
@@ -902,7 +930,10 @@ function summonFish() {
 }
 
 export function primeAquarium(retries = 10) {
-  primeDomAquarium();
+  // На DOM-платформах поднимаем только DOM-слой; canvas-ветка ниже не нужна.
+  if (shouldUseDomAquarium()) {
+    return primeDomAquarium();
+  }
   if (!canAnimateAquarium()) {
     return false;
   }
@@ -1150,10 +1181,16 @@ export function spillAquariumFood(avatars, summon = false) {
   // Halve the crumbs per spill so the tank stays light on the phone.
   avatars = avatars.filter((_, index) => index % 2 === 0);
   playAquariumFood(); // soft sprinkle as the crumbs hit the water
-  appendDomFood(avatars);
-  if (summon) {
-    summonDomFish(); // fish swim in from off-screen only on a shake
+
+  // Кормим только движок своей платформы, второй не трогаем вообще.
+  if (shouldUseDomAquarium()) {
+    appendDomFood(avatars);
+    if (summon) {
+      summonDomFish(); // fish swim in from off-screen only on a shake
+    }
+    return;
   }
+
   if (!measure()) {
     queuePendingFood(avatars);
     if (summon) {
@@ -1167,7 +1204,6 @@ export function spillAquariumFood(avatars, summon = false) {
     summonFish();
   }
   startLoop();
-  startDomLoop();
 }
 
 // Tilt drift, fed from W3C deviceorientation (degrees) or Telegram (converted).

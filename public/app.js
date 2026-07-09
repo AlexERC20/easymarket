@@ -21,7 +21,7 @@ import {
   setAquariumGoldenFish,
   setAquariumRuntimeAllowed,
   setAquariumShakeFeeder,
-} from "./aquarium.js?v=20260708-01";
+} from "./aquarium.js?v=20260709-01";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
