@@ -2248,7 +2248,9 @@ function setTaskButtonVisualState(button, status) {
   if (isClaimChip) {
     const amount = Number(button.dataset.taskAmount || 0);
     button.disabled = !claimable;
-    button.textContent = claimed ? `✓ +${formatFire(amount)}` : claimable ? "Забрать" : `+${formatFire(amount)}`;
+    // Забранный дейлик не светит суммой — только галочка, чтобы цифры
+    // оставались лишь у невыполненных заданий.
+    button.textContent = claimed ? "✓" : claimable ? "Забрать" : `+${formatFire(amount)}`;
     return;
   }
   button.classList.toggle("is-done", claimed);

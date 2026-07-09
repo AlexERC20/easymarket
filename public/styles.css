@@ -3092,9 +3092,22 @@ code {
   border-color: rgba(25, 195, 125, 0.42);
 }
 
+/* Забранная награда не показывает сумму — только галочку: цифры остаются
+   лишь у невыполненных заданий. Текст суммы живёт в DOM (font-size: 0) и
+   возвращается сам, когда claimed снимается дневным сбросом. */
+.task-reward.claimed:not(.task-claim-chip) {
+  font-size: 0;
+}
+
 .task-reward.claimed:not(.task-claim-chip)::before {
-  content: "✓ ";
+  content: "✓";
+  font-size: 12px;
   font-weight: 950;
+  line-height: 1.5;
+}
+
+.presence-step.claimed span {
+  display: none;
 }
 
 /* Lightweight section labels (replace the accordions) */
