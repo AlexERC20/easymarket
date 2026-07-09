@@ -2338,21 +2338,48 @@ function renderTaskStats() {
   const referralUsdtTotal = Number(referralStats.usdt_total || 0);
   const referralStarProfit = Number(referralStats.star_profit_share || 0);
   const referralUsdtProfit = Number(referralStats.usdt_profit_share || 0);
-  const referralSummary = `
-    <div class="task-referral-summary">
-      <div class="task-referral-head">
-        <strong>Рефералы</strong>
-        <span>${formatFire(referralActivated)}/${formatFire(referralTotal)} активных</span>
+  // Деньги в одну подпись: пустые валюты не показываем, чтобы не плодить нули.
+  const referralMoney = (star, usdt) => {
+    const parts = [];
+    if (star > 0) parts.push(`★ ${formatCurrencyAmount(star, "STAR")}`);
+    if (usdt > 0) parts.push(formatCurrencyAmount(usdt, "USDT"));
+    return parts.length ? parts.join(" · ") : "0";
+  };
+  const friendsWord = (count) => {
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 === 1 && mod100 !== 11) return "друг";
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "друга";
+    return "друзей";
+  };
+  const referralSummary = referralTotal === 0
+    ? `
+      <div class="task-referral-summary">
+        <div class="task-referral-head">
+          <strong>Рефералы</strong>
+          <span>пока никого</span>
+        </div>
+        <small>Пригласи друга: тебе $30 после его первой ставки и 1% с каждой его победы.</small>
       </div>
-      <div class="task-referral-grid">
-        <div><b>${formatFire(referralTotal)}</b><span>приглашено</span></div>
-        <div><b>${formatFire(referralActivated)}</b><span>со ставкой</span></div>
-        <div><b>${formatCurrencyAmount(referralStarTotal, "STAR")}</b><span>звёзды</span></div>
-        <div><b>${formatCurrencyAmount(referralUsdtTotal, "USDT")}</b><span>USDT</span></div>
+    `
+    : `
+      <div class="task-referral-summary">
+        <div class="task-referral-head">
+          <strong>Рефералы</strong>
+          <span>${formatFire(referralTotal)} ${friendsWord(referralTotal)} · ${formatFire(referralActivated)} со ставкой</span>
+        </div>
+        <div class="task-referral-rows">
+          <div class="task-referral-row">
+            <span>Бонусы за приглашения</span>
+            <b>${referralMoney(referralStarTotal, referralUsdtTotal)}</b>
+          </div>
+          <div class="task-referral-row">
+            <span>1% с побед друзей</span>
+            <b>${referralMoney(referralStarProfit, referralUsdtProfit)}</b>
+          </div>
+        </div>
       </div>
-      <small>1% с побед: ${formatCurrencyAmount(referralStarProfit, "STAR")} / ${formatCurrencyAmount(referralUsdtProfit, "USDT")}</small>
-    </div>
-  `;
+    `;
   if (!stats.length) {
     setInnerHtmlIfChanged(list, `
       ${referralSummary}
