@@ -6348,8 +6348,15 @@ export async function resolveExpiredMarkets() {
         const grossPayout = position.side === winner ? shares : 0;
         const grossProfit = grossPayout - spent;
         const fee = calculateProfitFeeFromSettings(grossProfit, economySettings);
-        const payout = Math.max(0, Math.round((grossPayout - fee) * 100) / 100);
-        const pnl = payout - spent;
+        const basePayout = Math.max(0, roundMoney(grossPayout - fee));
+        const basePnl = roundMoney(basePayout - spent);
+        // Lucky x2 is a promo boost for net profit only: stake is not doubled.
+        // Example: spent 100, shares 140, fee 2.8 -> base pnl 37.2 -> final pnl 74.4.
+        const luckyBonus = currentMarket.is_lucky && basePnl > 0
+          ? roundMoney(basePnl)
+          : 0;
+        const payout = roundMoney(basePayout + luckyBonus);
+        const pnl = roundMoney(basePnl + luckyBonus);
 
         await client.query(
           `
@@ -6363,12 +6370,12 @@ export async function resolveExpiredMarkets() {
           [position.id, payout, pnl],
         );
 
-        if (payout > 0) {
+        if (basePayout > 0) {
           await creditCurrencyBalance(
             client,
             position.user_id,
             currency,
-            payout,
+            basePayout,
             `market_payout${reasonSuffix}`,
             `market:${currentMarket.id}`,
             getBonusRatioForAmount(position.bonus_spent, position.spent),
@@ -6394,10 +6401,10 @@ export async function resolveExpiredMarkets() {
           await createUsdtLossRefundOffer(client, position, pnl);
         }
 
-        // Счастливый раунд: чистая прибыль удваивается бонусом ПОВЕРХ обычной
-        // выплаты (звёзды — на баланс, USDT — на бонусный), сами выплаты не трогаем.
-        if (currentMarket.is_lucky && pnl > 0) {
-          const luckyBonus = Math.round(pnl * 100) / 100;
+        // Счастливый раунд: удваивает только чистую прибыль, не всю ставку.
+        // Бонус начисляется отдельной строкой, а positions.pnl/payout выше
+        // уже включают итоговый x2, чтобы статистика и баланс совпадали.
+        if (luckyBonus > 0) {
           if (currency === "USDT") {
             await adjustUsdtBonusBalance(
               client,
