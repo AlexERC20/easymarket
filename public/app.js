@@ -2121,14 +2121,12 @@ function renderTaskRewards() {
   const share = Math.round(Number(state.publicConfig.task_share_fire || 100));
   const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 500));
   const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 15000));
-  const ref = Math.round(Number(state.publicConfig.referral_bonus_fire || 500));
   const refUsdt = Math.round(Number(state.publicConfig.referral_bet_bonus_usdt || 30));
   const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 50));
   if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
   if ($("channelTaskReward")) $("channelTaskReward").textContent = formatFire(sub);
   if ($("chatTaskReward")) $("chatTaskReward").textContent = formatFire(sub);
   if ($("privateChatTaskReward")) $("privateChatTaskReward").textContent = formatFire(privateChat);
-  if ($("refTaskReward")) $("refTaskReward").textContent = formatFire(ref);
   if ($("refTaskUsdtReward")) $("refTaskUsdtReward").textContent = formatFire(refUsdt);
   if ($("dailyPresenceTaskReward")) $("dailyPresenceTaskReward").textContent = formatFire(dailyPresence);
   renderSoundToggle();
