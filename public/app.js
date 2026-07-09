@@ -2856,6 +2856,9 @@ async function loadMe() {
   handleSettlements(state.positions);
   renderMe();
   renderTaskStats();
+  if (isSheetOpen("tasksSheet")) {
+    renderEngagement();
+  }
   renderTaskButtonStates();
 }
 
@@ -7346,14 +7349,14 @@ async function shareInvite({ awardShareTask = false, sourceElement = null } = {}
 
   const usdtBonus = Math.round(Number(state.publicConfig.referral_bet_bonus_usdt || 30));
   const inviteUrl = buildInviteUrl(state.user.telegram_id);
-  const text = `Залетай в EasyMarket. После первой ставки мне дадут ${formatFire(usdtBonus)} USDT.`;
+  const text = `Залетай в EasyMarket. После первой ставки мне дадут ${formatFire(usdtBonus)} USDT и 1% с твоих побед.`;
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
     if (awardShareTask) {
       await claimShareTask(sourceElement);
     } else {
-      showToast(`+${formatFire(usdtBonus)} USDT после первой ставки друга.`);
+      showToast(`+${formatFire(usdtBonus)} USDT и 1% с побед друга.`);
     }
     return;
   }
@@ -7378,7 +7381,7 @@ async function shareInvite({ awardShareTask = false, sourceElement = null } = {}
   if (awardShareTask) {
     await claimShareTask(sourceElement);
   } else {
-    showToast(`+${formatFire(usdtBonus)} USDT после первой ставки друга.`);
+    showToast(`+${formatFire(usdtBonus)} USDT и 1% с побед друга.`);
   }
 }
 
@@ -7436,10 +7439,14 @@ const TASK_ICON_SVG = {
   chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-8l-4 3.2V16.5H5A1.5 1.5 0 0 1 3.5 15V7A1.5 1.5 0 0 1 5 5.5z"/><path d="M7.5 9.5h9M7.5 12.5h6"/></svg>',
   compass: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="m14.8 9.2-1.5 4.1-4.1 1.5 1.5-4.1 4.1-1.5z"/></svg>',
   share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 20 4l-4.5 16-3.2-6.8L4 12.5z"/><path d="M20 4 12.3 13.2"/></svg>',
+  wallet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7.5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6.2a2.7 2.7 0 0 1-2.7-2.7V7.5z"/><path d="m4.8 7.4 10.4-3a2 2 0 0 1 2.6 1.9v1.2"/><path d="M16.4 13.2h4.1"/></svg>',
+  dollar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 6.8v10.4M15 8.7c-.7-.7-1.6-1.1-2.8-1.1-1.5 0-2.5.7-2.5 1.8s.9 1.6 2.6 2.1c1.9.6 2.9 1.1 2.9 2.6 0 1.3-1.1 2.2-3 2.2-1.3 0-2.5-.4-3.4-1.3"/></svg>',
 };
 
 const CORE_DAILY_TASK_KEYS = [
   "daily_bet",
+  "daily_topup_stars",
+  "daily_topup_usdt",
   "daily_btc_prediction",
   "daily_football_prediction",
   "daily_btc_5_predictions",
@@ -7449,6 +7456,8 @@ const CORE_DAILY_TASK_KEYS = [
 
 const DAILY_TASK_META = {
   daily_bet: { title: "Первая ставка дня", desc: "Поставь 1 ставку", icon: "target" },
+  daily_topup_stars: { title: "Пополнить звёзды", desc: "Зачисли минимум 500 звёзд", icon: "wallet" },
+  daily_topup_usdt: { title: "Пополнить USDT", desc: "Зачисли минимум 50 USDT", icon: "dollar" },
   daily_btc_prediction: { title: "Прогноз по BTC", desc: "1 прогноз в BTC-маркете", icon: "btc" },
   daily_football_prediction: { title: "Прогноз на футбол", desc: "1 футбольный прогноз", icon: "ball" },
   daily_btc_5_predictions: { title: "5 прогнозов BTC", desc: "Пять BTC-прогнозов за день", icon: "bars" },
@@ -7479,6 +7488,8 @@ function getDailyTaskAmount(taskKey, fallback = 0) {
     return Number(presenceTask.amount || fallback || 0);
   }
   const fixed = {
+    daily_topup_stars: 100,
+    daily_topup_usdt: 300,
     daily_btc_prediction: 50,
     daily_football_prediction: 50,
     daily_btc_5_predictions: 300,
@@ -7504,6 +7515,37 @@ function taskClaimChipMarkup(taskKey, amount) {
   return `<button class="task-reward task-claim-chip" data-daily-task="${taskKey}" data-task-amount="${Number(amount || 0)}" type="button">+${formatFire(amount)}</button>`;
 }
 
+function getTaskProgress(taskKey) {
+  return state.engagement?.progress?.[taskKey]
+    || state.dailyTasks?.[taskKey]?.progress
+    || state.engagement?.rotation?.find((task) => task.key === taskKey)?.progress
+    || null;
+}
+
+function formatTaskProgressValue(value, unit) {
+  const numeric = Number(value || 0);
+  if (unit === "USDT") {
+    return numeric.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+  }
+  return formatFire(numeric);
+}
+
+function taskProgressMarkup(taskKey) {
+  const progress = getTaskProgress(taskKey);
+  if (!progress) return "";
+  const value = Math.max(0, Number(progress.value || 0));
+  const target = Math.max(1, Number(progress.target || 1));
+  const unit = String(progress.unit || "").toUpperCase();
+  const percent = Math.max(0, Math.min(100, (value / target) * 100));
+  const label = `${formatTaskProgressValue(Math.min(value, target), unit)}/${formatTaskProgressValue(target, unit)}${unit === "USDT" ? " USDT" : ""}`;
+  return `
+    <span class="task-progress-mini" style="--progress:${percent}%">
+      <i></i>
+      <em>${label}</em>
+    </span>
+  `;
+}
+
 function renderDailyTaskRow(taskKey, amount = getDailyTaskAmount(taskKey)) {
   const meta = DAILY_TASK_META[taskKey] || { title: taskKey, desc: "", icon: "target" };
   return `
@@ -7512,6 +7554,7 @@ function renderDailyTaskRow(taskKey, amount = getDailyTaskAmount(taskKey)) {
       <div class="task-body">
         <strong>${meta.title}</strong>
         <small>${meta.desc}</small>
+        ${taskProgressMarkup(taskKey)}
       </div>
       <div class="task-act">
         ${taskClaimChipMarkup(taskKey, amount)}
@@ -7624,7 +7667,16 @@ async function loadEngagementState() {
     (data.rotation || []).forEach((task) => {
       state.dailyTasks = {
         ...state.dailyTasks,
-        [task.key]: { ready: task.ready, claimed: task.claimed },
+        [task.key]: { ready: task.ready, claimed: task.claimed, progress: task.progress },
+      };
+    });
+    Object.entries(data.progress || {}).forEach(([key, progress]) => {
+      state.dailyTasks = {
+        ...state.dailyTasks,
+        [key]: {
+          ...(state.dailyTasks?.[key] || {}),
+          progress,
+        },
       };
     });
     (Object.entries(data.presence || {})).forEach(([key, info]) => {

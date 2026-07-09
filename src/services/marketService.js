@@ -64,6 +64,8 @@ const DAILY_TASK_KEYS = [
   "presence_15",
   "presence_30",
   "daily_bet",
+  "daily_topup_stars",
+  "daily_topup_usdt",
   "daily_btc_prediction",
   "daily_football_prediction",
   "daily_btc_5_predictions",
@@ -1398,6 +1400,8 @@ function getClanTaskPoints(taskKey) {
     private_chat: 10,
     daily_presence: 2,
     daily_bet: 3,
+    daily_topup_stars: 3,
+    daily_topup_usdt: 5,
     daily_btc_prediction: 3,
     daily_football_prediction: 3,
     daily_btc_5_predictions: 8,
@@ -1422,6 +1426,8 @@ async function getDailyBonusRemaining(client, userId) {
           'task_presence_15',
           'task_presence_30',
           'task_daily_bet',
+          'task_daily_topup_stars',
+          'task_daily_topup_usdt',
           'task_daily_btc_prediction',
           'task_daily_football_prediction',
           'task_daily_btc_5_predictions',
@@ -3312,6 +3318,8 @@ const TASK_AMOUNTS = {
   presence_15: () => 75,
   presence_30: () => 200,
   daily_bet: () => Math.round(Number(config.taskDailyBetFire || 0)),
+  daily_topup_stars: () => 100,
+  daily_topup_usdt: () => 300,
   daily_btc_prediction: () => 50,
   daily_football_prediction: () => 50,
   daily_btc_5_predictions: () => 300,
@@ -3329,6 +3337,8 @@ const TASK_AMOUNTS = {
 
 const CORE_DAILY_TASK_KEYS = new Set([
   "daily_bet",
+  "daily_topup_stars",
+  "daily_topup_usdt",
   "daily_btc_prediction",
   "daily_football_prediction",
   "daily_btc_5_predictions",
@@ -3450,6 +3460,85 @@ async function claimDailyTaskForUser(client, user, taskKey) {
     ...bonus,
     balance: toNumber(balanceResult.rows[0]?.balance),
   };
+}
+
+const DAILY_TOPUP_TASKS = {
+  daily_topup_stars: {
+    target: 500,
+    unit: "STAR",
+  },
+  daily_topup_usdt: {
+    target: 50,
+    unit: "USDT",
+  },
+};
+
+async function getDailyTopupTaskProgress(client, userId, taskKey) {
+  const task = DAILY_TOPUP_TASKS[taskKey];
+  if (!task) {
+    return null;
+  }
+
+  if (task.unit === "USDT") {
+    const result = await client.query(
+      `
+        SELECT COALESCE(SUM(amount), 0) AS total
+        FROM usdt_ledger
+        WHERE user_id = $1
+          AND amount > 0
+          AND created_at >= date_trunc('day', now())
+          AND reason IN (
+            'usdt_onchain_deposit',
+            'dev_usdt_topup'
+          )
+      `,
+      [userId],
+    );
+    const value = Math.max(0, toNumber(result.rows[0]?.total));
+    return {
+      value: Math.round(value * 100) / 100,
+      target: task.target,
+      unit: task.unit,
+      ready: value >= task.target,
+    };
+  }
+
+  const result = await client.query(
+    `
+      SELECT COALESCE(SUM(amount), 0) AS total
+      FROM fire_ledger
+      WHERE user_id = $1
+        AND amount > 0
+        AND created_at >= date_trunc('day', now())
+        AND (
+          reason IN (
+            'stars_fire_topup',
+            'stars_topup',
+            'star_topup',
+            'fire_topup',
+            'dev_topup'
+          )
+          OR reason LIKE '%topup%'
+        )
+        AND reason NOT LIKE 'task_%'
+        AND reason NOT LIKE 'referral_%'
+        AND reason NOT LIKE 'market_%'
+        AND reason NOT LIKE '%payout%'
+        AND reason NOT LIKE '%refund%'
+    `,
+    [userId],
+  );
+  const value = Math.max(0, toNumber(result.rows[0]?.total));
+  return {
+    value: Math.round(value),
+    target: task.target,
+    unit: task.unit,
+    ready: value >= task.target,
+  };
+}
+
+async function getDailyTaskProgress(client, userId, taskKey) {
+  return getDailyTopupTaskProgress(client, userId, taskKey);
 }
 
 async function isDailyTaskReady(client, userId, taskKey) {
@@ -3574,6 +3663,11 @@ async function isDailyTaskReady(client, userId, taskKey) {
     return Number(result.rows[0]?.count || 0) >= 1;
   }
 
+  if (taskKey === "daily_topup_stars" || taskKey === "daily_topup_usdt") {
+    const progress = await getDailyTopupTaskProgress(client, userId, taskKey);
+    return Boolean(progress?.ready);
+  }
+
   if (taskKey === "daily_btc_prediction" || taskKey === "daily_btc_5_predictions") {
     const result = await client.query(
       `
@@ -3662,14 +3756,18 @@ async function getUserDailyTaskStatus(userId) {
   const queryClient = { query };
   const entries = await Promise.all(DAILY_TASK_KEYS.map(async (taskKey) => {
     let ready = false;
+    let progress = null;
     try {
+      progress = await getDailyTaskProgress(queryClient, userId, taskKey);
       ready = await isDailyTaskReady(queryClient, userId, taskKey);
     } catch {
       ready = false;
+      progress = null;
     }
     return [taskKey, {
       ready,
       claimed: claimedTasks.has(taskKey),
+      ...(progress ? { progress } : {}),
     }];
   }));
 
@@ -3872,11 +3970,13 @@ export async function getEngagementState(input) {
 
   const rotation = [];
   for (const key of rotationKeys) {
+    const progress = await getDailyTaskProgress(shim, user.id, key);
     rotation.push({
       key,
       amount: TASK_AMOUNTS[key]?.() || 0,
       ready: await isDailyTaskReady(shim, user.id, key),
       claimed: claimed.has(`${key}:${today}`),
+      ...(progress ? { progress } : {}),
     });
   }
 
@@ -3896,6 +3996,18 @@ export async function getEngagementState(input) {
     },
   };
 
+  const progress = {};
+  const progressKeys = new Set([
+    ...CORE_DAILY_TASK_KEYS,
+    ...rotationKeys,
+  ]);
+  for (const key of progressKeys) {
+    const taskProgress = await getDailyTaskProgress(shim, user.id, key);
+    if (taskProgress) {
+      progress[key] = taskProgress;
+    }
+  }
+
   const streakResult = await query("SELECT * FROM user_streaks WHERE user_id = $1", [user.id]);
 
   return {
@@ -3904,6 +4016,7 @@ export async function getEngagementState(input) {
     rotation,
     presence,
     once,
+    progress,
     streak: mapStreakState(streakResult.rows[0] || null),
   };
 }

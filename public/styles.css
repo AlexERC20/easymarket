@@ -2722,6 +2722,39 @@ code {
   text-overflow: ellipsis;
 }
 
+.task-progress-mini {
+  position: relative;
+  display: block;
+  height: 14px;
+  margin-top: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.task-progress-mini i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--progress, 0%);
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(183, 255, 77, 0.55), rgba(53, 246, 255, 0.5));
+  box-shadow: 0 0 12px rgba(53, 246, 255, 0.18);
+}
+
+.task-progress-mini em {
+  position: relative;
+  z-index: 1;
+  display: block;
+  padding: 0 6px;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 850;
+  line-height: 12px;
+  color: rgba(240, 246, 255, 0.78);
+  text-align: right;
+}
+
 .task-act {
   display: flex;
   flex-direction: column;
