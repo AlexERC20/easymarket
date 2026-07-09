@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260710-06" />
+    <link rel="stylesheet" href="/styles.css?v=20260710-07" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260708-01" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -589,7 +589,7 @@
           </div>
           <div class="bet-amount-display">
             <strong><span id="betAmountValue">0</span></strong>
-            <small>To win <span id="betWinValue">0</span> · <span id="betPriceValue">0¢</span></small>
+            <small>Payout <span id="betWinValue">0</span> · <span id="betPriceValue">0¢</span></small>
           </div>
           <div class="bet-side-toggle">
             <button id="betSideYesBtn" class="active" type="button">Yes</button>
@@ -697,10 +697,10 @@
         </div>
 
         <div id="amountGrid" class="amount-grid">
-          <button class="amount-button active" data-amount="5" type="button"><strong>$5</strong><small>win <b>$10</b></small></button>
-          <button class="amount-button" data-amount="10" type="button"><strong>$10</strong><small>win <b>$20</b></small></button>
-          <button class="amount-button" data-amount="25" type="button"><strong>$25</strong><small>win <b>$50</b></small></button>
-          <button class="amount-button" data-amount="100" type="button"><strong>$100</strong><small>win <b>$200</b></small></button>
+          <button class="amount-button active" data-amount="5" type="button"><strong>$5</strong><small>payout <b>$10</b></small></button>
+          <button class="amount-button" data-amount="10" type="button"><strong>$10</strong><small>payout <b>$20</b></small></button>
+          <button class="amount-button" data-amount="25" type="button"><strong>$25</strong><small>payout <b>$50</b></small></button>
+          <button class="amount-button" data-amount="100" type="button"><strong>$100</strong><small>payout <b>$200</b></small></button>
         </div>
       </section>
 
@@ -756,9 +756,7 @@
 
       <section id="activitySection" class="card feed-section active">
         <div class="section-title">
-          <h2>Моя позиция</h2>
           <div class="section-actions">
-            <span class="subtle">потенциальная выплата</span>
             <button id="positionToggle" class="section-toggle hidden" type="button">Все</button>
           </div>
         </div>
@@ -769,9 +767,7 @@
 
       <section id="recentSection" class="card feed-section hidden">
         <div class="section-title">
-          <h2>Live сделки</h2>
           <div class="section-actions">
-            <span class="subtle">все рынки</span>
             <button id="activityToggle" class="section-toggle hidden" type="button">Все</button>
           </div>
         </div>
@@ -782,9 +778,7 @@
 
       <section id="marketResultsSection" class="card feed-section hidden">
         <div class="section-title">
-          <h2>Последние рынки</h2>
           <div class="section-actions">
-            <span class="subtle">результаты</span>
             <button id="recentToggle" class="section-toggle hidden" type="button">Все</button>
           </div>
         </div>
@@ -807,6 +801,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260710-08" type="module"></script>
+    <script src="/app.js?v=20260710-10" type="module"></script>
   </body>
 </html>

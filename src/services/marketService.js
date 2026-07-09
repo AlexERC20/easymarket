@@ -417,6 +417,10 @@ function mapFireLedgerEvent(row) {
     username: row.username,
     first_name: row.first_name,
     amount: toNumber(row.amount),
+    market_id: row.market_id === null || row.market_id === undefined ? null : Number(row.market_id),
+    stake_amount: toNumber(row.stake_amount),
+    payout_amount: toNumber(row.payout_amount),
+    pnl_amount: toNumber(row.pnl_amount),
     reason: row.reason,
     source: row.source,
     created_at: row.created_at,
@@ -432,6 +436,10 @@ function mapUsdtLedgerEvent(row) {
     username: row.username,
     first_name: row.first_name,
     amount: toNumber(row.amount),
+    market_id: row.market_id === null || row.market_id === undefined ? null : Number(row.market_id),
+    stake_amount: toNumber(row.stake_amount),
+    payout_amount: toNumber(row.payout_amount),
+    pnl_amount: toNumber(row.pnl_amount),
     reason: row.reason,
     source: row.source,
     created_at: row.created_at,
@@ -1889,6 +1897,61 @@ async function distributeProfitFee(client, input) {
   const source = String(input.source || `market:${input.marketId || "unknown"}`);
   const eventKey = String(input.eventKey || `${reason}:${input.positionId || "-"}:${input.tradeId || "-"}`);
 
+  const reservationResult = await client.query(
+    `
+      INSERT INTO profit_fee_distributions (
+        event_key,
+        position_id,
+        trade_id,
+        market_id,
+        user_id,
+        currency,
+        gross_profit,
+        total_fee,
+        project_fee,
+        referral_fee,
+        clan_fee,
+        reason
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $8::numeric, 0, 0, $9)
+      ON CONFLICT (event_key) DO NOTHING
+      RETURNING id
+    `,
+    [
+      eventKey,
+      input.positionId || null,
+      input.tradeId || null,
+      input.marketId || null,
+      input.userId || null,
+      currency,
+      grossProfit,
+      totalFee,
+      reason,
+    ],
+  );
+  if (!reservationResult.rows[0]) {
+    const existingResult = await client.query(
+      `
+        SELECT total_fee, project_fee, referral_fee, clan_fee, referrer_user_id, clan_id
+        FROM profit_fee_distributions
+        WHERE event_key = $1
+        LIMIT 1
+      `,
+      [eventKey],
+    );
+    const existing = existingResult.rows[0] || {};
+    return {
+      total_fee: toNumber(existing.total_fee),
+      project_fee: toNumber(existing.project_fee),
+      referral_fee: toNumber(existing.referral_fee),
+      clan_fee: toNumber(existing.clan_fee),
+      referrer_user_id: existing.referrer_user_id ? Number(existing.referrer_user_id) : null,
+      clan_id: existing.clan_id ? Number(existing.clan_id) : null,
+      already_distributed: true,
+    };
+  }
+  const distributionId = reservationResult.rows[0].id;
+
   let referrer = null;
   if (referralFee > 0) {
     referrer = await getReferrerForUser(client, input.userId);
@@ -1944,34 +2007,19 @@ async function distributeProfitFee(client, input) {
 
   await client.query(
     `
-      INSERT INTO profit_fee_distributions (
-        event_key,
-        position_id,
-        trade_id,
-        market_id,
-        user_id,
-        currency,
-        gross_profit,
-        total_fee,
+      UPDATE profit_fee_distributions
+      SET (
         project_fee,
         referral_fee,
         clan_fee,
         referrer_user_id,
         clan_id,
         reason
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::numeric, $12, $13, $14)
-      ON CONFLICT (event_key) DO NOTHING
+      ) = ROW($2::numeric, $3::numeric, $4::numeric, $5, $6, $7)
+      WHERE id = $1
     `,
     [
-      eventKey,
-      input.positionId || null,
-      input.tradeId || null,
-      input.marketId || null,
-      input.userId || null,
-      currency,
-      grossProfit,
-      totalFee,
+      distributionId,
       projectFee,
       referralFee,
       clanFee,
@@ -1989,6 +2037,80 @@ async function distributeProfitFee(client, input) {
     referrer_user_id: referrer ? Number(referrer.id) : null,
     clan_id: topClan ? Number(topClan.id) : null,
   };
+}
+
+async function distributeLimitSellOrderProfitFee(client, order, settings = null) {
+  if (!order || String(order.order_side || "").toUpperCase() !== "SELL" || order.status !== "filled") {
+    return null;
+  }
+
+  const grossProfit = roundMoney(toNumber(order.reserved_amount) - toNumber(order.reserved_spent));
+  if (grossProfit <= 0) {
+    return null;
+  }
+
+  const economySettings = settings || await getEconomySettingsWithClient(client);
+  const fee = calculateProfitFeeFromSettings(grossProfit, economySettings);
+  if (fee <= 0) {
+    return null;
+  }
+
+  return distributeProfitFee(client, {
+    settings: economySettings,
+    userId: order.user_id,
+    marketId: order.market_id,
+    positionId: order.position_id,
+    currency: normalizeCurrency(order.currency),
+    grossProfit,
+    totalFee: fee,
+    reason: "limit_sell_profit_fee",
+    source: `limit_order:${order.id}`,
+    eventKey: `limit_order:${order.id}:profit_fee`,
+  });
+}
+
+async function reconcileFilledSellLimitOrderProfitFeesForUser(userId, limit = 200) {
+  const safeUserId = Number(userId);
+  if (!Number.isSafeInteger(safeUserId) || safeUserId <= 0) {
+    return [];
+  }
+
+  const safeLimit = Math.max(1, Math.min(500, Number(limit) || 200));
+  return withTransaction(async (client) => {
+    const ordersResult = await client.query(
+      `
+        SELECT lo.*
+        FROM limit_orders lo
+        WHERE lo.user_id = $1
+          AND lo.order_side = 'SELL'
+          AND lo.status = 'filled'
+          AND lo.reserved_amount > lo.reserved_spent
+          AND NOT EXISTS (
+            SELECT 1
+            FROM profit_fee_distributions p
+            WHERE p.event_key = 'limit_order:' || lo.id::text || ':profit_fee'
+          )
+        ORDER BY COALESCE(lo.filled_at, lo.updated_at, lo.created_at) DESC
+        LIMIT $2
+        FOR UPDATE
+      `,
+      [safeUserId, safeLimit],
+    );
+
+    if (!ordersResult.rows.length) {
+      return [];
+    }
+
+    const settings = await getEconomySettingsWithClient(client);
+    const distributions = [];
+    for (const order of ordersResult.rows) {
+      const distribution = await distributeLimitSellOrderProfitFee(client, order, settings);
+      if (distribution) {
+        distributions.push(distribution);
+      }
+    }
+    return distributions;
+  });
 }
 
 // Only the most active members share the monthly bank so inactive "dead souls"
@@ -2624,6 +2746,7 @@ function getBonusRatioForAmount(bonusAmount, totalAmount) {
 
 async function getUserMarketStats(userId, limit = 40) {
   const safeLimit = Math.max(1, Math.min(100, Number(limit) || 40));
+  await reconcileFilledSellLimitOrderProfitFeesForUser(userId);
   const result = await query(
     `
       WITH market_keys AS (
@@ -4736,11 +4859,32 @@ export async function getFireLedgerEvents(input = {}) {
         users.username,
         users.first_name,
         ledger.amount,
+        payout_meta.market_id,
+        payout_meta.stake_amount,
+        payout_meta.payout_amount,
+        payout_meta.pnl_amount,
         ledger.reason,
         ledger.source,
         ledger.created_at
       FROM fire_ledger ledger
       JOIN users ON users.id = ledger.user_id
+      LEFT JOIN LATERAL (
+        SELECT substring(ledger.source from '^market:([0-9]+)')::bigint AS market_id
+      ) source_market ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          p.market_id,
+          SUM(p.spent) AS stake_amount,
+          SUM(p.payout) AS payout_amount,
+          SUM(p.pnl) AS pnl_amount
+        FROM positions p
+        WHERE p.user_id = ledger.user_id
+          AND p.market_id = source_market.market_id
+          AND p.currency = 'STAR'
+          AND p.status = 'resolved'
+          AND p.pnl > 0
+        GROUP BY p.market_id
+      ) payout_meta ON ledger.reason LIKE 'market_payout%'
       WHERE ledger.id > $1
       ORDER BY ledger.id ASC
       LIMIT $2
@@ -4760,10 +4904,25 @@ export async function getUsdtLedgerEvents(input = {}) {
   const safeAfterDate = Number.isFinite(afterDate.getTime()) ? afterDate : new Date(0);
   const result = await query(
     `
-      SELECT *
+      SELECT
+        ledger_events.id,
+        ledger_events.event_id,
+        ledger_events.ledger_type,
+        ledger_events.telegram_id,
+        ledger_events.username,
+        ledger_events.first_name,
+        ledger_events.amount,
+        payout_meta.market_id,
+        payout_meta.stake_amount,
+        payout_meta.payout_amount,
+        payout_meta.pnl_amount,
+        ledger_events.reason,
+        ledger_events.source,
+        ledger_events.created_at
       FROM (
         SELECT
           ledger.id,
+          ledger.user_id,
           'cash:' || ledger.id::text AS event_id,
           'cash' AS ledger_type,
           users.telegram_id,
@@ -4781,6 +4940,7 @@ export async function getUsdtLedgerEvents(input = {}) {
 
         SELECT
           ledger.id,
+          ledger.user_id,
           'bonus:' || ledger.id::text AS event_id,
           'bonus' AS ledger_type,
           users.telegram_id,
@@ -4794,6 +4954,23 @@ export async function getUsdtLedgerEvents(input = {}) {
         JOIN users ON users.id = ledger.user_id
         WHERE ledger.created_at > $1
       ) ledger_events
+      LEFT JOIN LATERAL (
+        SELECT substring(ledger_events.source from '^market:([0-9]+)')::bigint AS market_id
+      ) source_market ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          p.market_id,
+          SUM(p.spent) AS stake_amount,
+          SUM(p.payout) AS payout_amount,
+          SUM(p.pnl) AS pnl_amount
+        FROM positions p
+        WHERE p.user_id = ledger_events.user_id
+          AND p.market_id = source_market.market_id
+          AND p.currency = 'USDT'
+          AND p.status = 'resolved'
+          AND p.pnl > 0
+        GROUP BY p.market_id
+      ) payout_meta ON ledger_events.reason LIKE 'market_payout%'
       ORDER BY created_at ASC, event_id ASC
       LIMIT $2
     `,
@@ -6087,6 +6264,7 @@ export async function createLimitOrder(input) {
 
     // Limit orders are passive. The internal market maker must not fill them;
     // execution will be added later through a user-to-user matcher.
+    const referralBonus = await awardReferralBetBonus(client, user, marketId);
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
     return {
@@ -6097,6 +6275,7 @@ export async function createLimitOrder(input) {
       currency_cash_balance: finalBalance.cash,
       currency_bonus_balance: finalBalance.bonus,
       order: mapLimitOrder(orderResult.rows[0]),
+      referral_bonus: referralBonus,
     };
   });
 }

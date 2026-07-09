@@ -1523,7 +1523,12 @@ h2 {
 
 .feed-section .section-title {
   flex: 0 0 auto;
-  min-height: 34px;
+  justify-content: flex-end;
+  min-height: 0;
+}
+
+.feed-section .section-title.hidden {
+  display: none;
 }
 
 .feed-tabs {

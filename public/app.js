@@ -1602,7 +1602,7 @@ function drawMarketChartFrame(ts) {
     const sideColor = myBet.side === "YES" ? "#19c37d" : "#ef466f";
     const seg1 = "Твоя ставка: ";
     const seg2 = `${marketSideLabel(market, myBet.side)} ${formatCurrencyAmount(myBet.spent, myBet.currency)}`;
-    const seg3 = ` Win ${formatCurrencyAmount(myBet.shares, myBet.currency)}`;
+    const seg3 = ` Payout ${formatCurrencyAmount(myBet.shares, myBet.currency)}`;
     const fontPx = Math.max(11, width * 0.024);
     ctx.font = `${fontPx}px Inter, system-ui, sans-serif`;
     ctx.textBaseline = "middle";
@@ -2594,7 +2594,7 @@ function renderTaskStats() {
         </div>
         <div class="task-stat-numbers">
           <strong class="${pnl >= 0 ? "profit" : "loss"}">${formatSignedCurrencyAmount(pnl, currency)}</strong>
-          <small>${formatCurrencyAmount(stat.spent || 0, currency)} → ${formatCurrencyAmount(stat.payout || 0, currency)}</small>
+          <small>ставка ${formatCurrencyAmount(stat.spent || 0, currency)} · выплата ${formatCurrencyAmount(stat.payout || 0, currency)}</small>
         </div>
       </div>
     `;
@@ -4062,9 +4062,11 @@ function setSectionToggle(id, total, key) {
 
   if (total <= COLLAPSE_LIMIT) {
     button.classList.add("hidden");
+    button.closest(".section-title")?.classList.add("hidden");
     return;
   }
 
+  button.closest(".section-title")?.classList.remove("hidden");
   button.classList.remove("hidden");
   button.textContent = state.expanded[key] ? "Скрыть" : `Все ${total}`;
 }
@@ -4389,7 +4391,7 @@ function renderTradeTicket() {
       button.dataset.win = nextWin;
       button.innerHTML = `
         <strong>${nextLabel}</strong>
-        <small>win <b>${nextWin}</b></small>
+        <small>payout <b>${nextWin}</b></small>
       `;
     }
   });
