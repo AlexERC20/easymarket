@@ -3409,7 +3409,11 @@ code {
 .task-stats-list {
   display: grid;
   gap: 8px;
-  max-height: 390px;
+  align-content: start;
+  /* Ровно та же высота, что у списка заданий (.task-list: 62vh): панель не
+     меняет размер при переключении вкладок. Раньше кап 390px сжимал вкладку
+     статистики, и шит прыгал. Список скроллится внутри. */
+  height: 62vh;
   overflow: auto;
   padding-right: 2px;
 }
