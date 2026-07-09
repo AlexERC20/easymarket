@@ -453,6 +453,9 @@ function mapUserMarketStat(row) {
     currency: normalizeCurrency(row.currency),
     positions_count: Number(row.positions_count || 0),
     open_positions_count: Number(row.open_positions_count || 0),
+    limit_orders_count: Number(row.limit_orders_count || 0),
+    open_limit_orders_count: Number(row.open_limit_orders_count || 0),
+    filled_limit_orders_count: Number(row.filled_limit_orders_count || 0),
     spent: toNumber(row.spent),
     payout: toNumber(row.payout),
     pnl: toNumber(row.pnl),
@@ -2623,10 +2626,71 @@ async function getUserMarketStats(userId, limit = 40) {
   const safeLimit = Math.max(1, Math.min(100, Number(limit) || 40));
   const result = await query(
     `
-      WITH grouped_stats AS (
+      WITH market_keys AS (
+        SELECT market_id, currency
+        FROM positions
+        WHERE user_id = $1
+        UNION
+        SELECT market_id, currency
+        FROM limit_orders
+        WHERE user_id = $1
+          AND order_side = 'SELL'
+      ),
+      economy_settings AS (
+        SELECT COALESCE(
+          (SELECT profit_fee_bps FROM project_economy_settings WHERE id = 1),
+          700
+        ) AS profit_fee_bps
+      ),
+      position_stats AS (
         SELECT
           p.market_id,
           p.currency,
+          COUNT(*) AS positions_count,
+          COUNT(*) FILTER (WHERE p.status = 'open') AS open_positions_count,
+          SUM(p.spent) AS spent,
+          SUM(p.payout) AS payout,
+          SUM(p.pnl) AS pnl,
+          MAX(p.updated_at) AS updated_at
+        FROM positions p
+        WHERE p.user_id = $1
+        GROUP BY p.market_id, p.currency
+      ),
+      limit_sell_stats AS (
+        SELECT
+          market_id,
+          currency,
+          COUNT(*) AS limit_orders_count,
+          COUNT(*) FILTER (WHERE status = 'open') AS open_limit_orders_count,
+          COUNT(*) FILTER (WHERE status = 'filled') AS filled_limit_orders_count,
+          SUM(CASE WHEN status IN ('open', 'filled') THEN reserved_spent ELSE 0 END) AS reserved_spent,
+          SUM(
+            CASE
+              WHEN status = 'filled' THEN
+                reserved_amount - ROUND(GREATEST(reserved_amount - reserved_spent, 0) * economy_settings.profit_fee_bps / 10000.0, 2)
+              ELSE 0
+            END
+          ) AS payout,
+          SUM(
+            CASE
+              WHEN status = 'filled' THEN
+                reserved_amount
+                - ROUND(GREATEST(reserved_amount - reserved_spent, 0) * economy_settings.profit_fee_bps / 10000.0, 2)
+                - reserved_spent
+              ELSE 0
+            END
+          ) AS pnl,
+          MAX(COALESCE(filled_at, cancelled_at, updated_at, created_at)) AS updated_at
+        FROM limit_orders
+        CROSS JOIN economy_settings
+        WHERE user_id = $1
+          AND order_side = 'SELL'
+        GROUP BY market_id, currency
+      ),
+      grouped_stats AS (
+        SELECT
+          k.market_id,
+          k.currency,
           m.symbol,
           CASE
             WHEN m.symbol = ANY($2) THEN 'BTC_UPDOWN'
@@ -2640,28 +2704,25 @@ async function getUserMarketStats(userId, limit = 40) {
           m.question,
           m.status AS market_status,
           m.winner,
-          COUNT(*) AS positions_count,
-          COUNT(*) FILTER (WHERE p.status = 'open') AS open_positions_count,
-          SUM(p.spent) AS spent,
-          SUM(p.payout) AS payout,
-          SUM(p.pnl) AS pnl,
-          MAX(p.updated_at) AS updated_at
-        FROM positions p
-        JOIN markets m ON m.id = p.market_id
+          COALESCE(position_stats.positions_count, 0) AS positions_count,
+          COALESCE(position_stats.open_positions_count, 0) + COALESCE(limit_sell_stats.open_limit_orders_count, 0) AS open_positions_count,
+          COALESCE(limit_sell_stats.limit_orders_count, 0) AS limit_orders_count,
+          COALESCE(limit_sell_stats.open_limit_orders_count, 0) AS open_limit_orders_count,
+          COALESCE(limit_sell_stats.filled_limit_orders_count, 0) AS filled_limit_orders_count,
+          COALESCE(position_stats.spent, 0) + COALESCE(limit_sell_stats.reserved_spent, 0) AS spent,
+          COALESCE(position_stats.payout, 0) + COALESCE(limit_sell_stats.payout, 0) AS payout,
+          COALESCE(position_stats.pnl, 0) + COALESCE(limit_sell_stats.pnl, 0) AS pnl,
+          GREATEST(
+            COALESCE(position_stats.updated_at, '-infinity'::timestamptz),
+            COALESCE(limit_sell_stats.updated_at, '-infinity'::timestamptz),
+            COALESCE(m.resolved_at, m.created_at)
+          ) AS updated_at
+        FROM market_keys k
+        JOIN markets m ON m.id = k.market_id
+        LEFT JOIN position_stats ON position_stats.market_id = k.market_id AND position_stats.currency = k.currency
+        LEFT JOIN limit_sell_stats ON limit_sell_stats.market_id = k.market_id AND limit_sell_stats.currency = k.currency
         LEFT JOIN world_cup_market_meta meta ON meta.symbol = m.symbol
         LEFT JOIN top_market_meta top_meta ON top_meta.symbol = m.symbol
-        WHERE p.user_id = $1
-        GROUP BY
-          p.market_id,
-          p.currency,
-          m.symbol,
-          meta.team,
-          meta.icon,
-          top_meta.title,
-          top_meta.icon,
-          m.question,
-          m.status,
-          m.winner
       ),
       ranked_stats AS (
         SELECT

@@ -2581,11 +2581,16 @@ function renderTaskStats() {
     const currency = normalizeCurrency(stat.currency);
     const pnl = Number(stat.pnl || 0);
     const status = stat.open_positions_count > 0 ? "LIVE" : (stat.status === "resolved" ? "CLOSED" : String(stat.status || "").toUpperCase());
+    const limitCount = Number(stat.limit_orders_count || 0);
+    const filledLimitCount = Number(stat.filled_limit_orders_count || 0);
+    const limitText = limitCount > 0
+      ? ` · limit ${filledLimitCount ? `${filledLimitCount}/${limitCount}` : limitCount}`
+      : "";
     return `
       <div class="task-stat-row pnl-${pnl >= 0 ? "up" : "down"}">
         <div class="task-stat-main">
           <strong>${escapeHtml(getMarketStatTitle(stat))}</strong>
-          <small>${escapeHtml(status)} · ${stat.positions_count || 0} поз. · ${escapeHtml(currency)}</small>
+          <small>${escapeHtml(status)} · ${stat.positions_count || 0} поз.${escapeHtml(limitText)} · ${escapeHtml(currency)}</small>
         </div>
         <div class="task-stat-numbers">
           <strong class="${pnl >= 0 ? "profit" : "loss"}">${formatSignedCurrencyAmount(pnl, currency)}</strong>
