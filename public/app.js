@@ -2120,8 +2120,10 @@ function getTelegramUser() {
       document.body.classList.toggle("telegram-ios-shell", platform === "ios" || /iPhone|iPad|iPod/i.test(navigator.userAgent || ""));
       document.body.classList.toggle("telegram-desktop-shell", !mobileShell);
       tg.ready();
+      // expand() нужен на всех платформах: Telegram Desktop (Windows/Linux)
+      // без него открывает мини-апп сжатой панелью, которую тянут вручную.
+      tg.expand();
       if (mobileShell) {
-        tg.expand();
         tg.requestFullscreen?.();
         tg.disableVerticalSwipes?.();
       } else {

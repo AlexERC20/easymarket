@@ -125,8 +125,10 @@ body.telegram-desktop-shell {
 
 .telegram-desktop-shell .app-shell {
   width: min(430px, calc(100vw - 32px));
-  min-height: min(820px, calc(100dvh - 32px));
-  height: min(820px, calc(100dvh - 32px));
+  /* Высота следует за окном без жёсткого капа: раньше оболочка застывала на
+     820px и не растягивалась вместе с окном Telegram Desktop. */
+  min-height: calc(100dvh - 32px);
+  height: calc(100dvh - 32px);
   margin: 16px auto;
   padding-top: 24px;
   padding-bottom: 18px;
