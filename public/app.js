@@ -83,6 +83,7 @@ const state = {
   positions: [],
   recentTrades: [],
   marketStats: [],
+  referralStats: null,
   recentMarkets: [],
   leaderboard: [],
   leaderboardClans: [],
@@ -2330,8 +2331,31 @@ function renderTaskStats() {
   }
 
   const stats = state.marketStats || [];
+  const referralStats = state.referralStats || {};
+  const referralTotal = Number(referralStats.total_referrals || 0);
+  const referralActivated = Number(referralStats.activated_referrals || 0);
+  const referralStarTotal = Number(referralStats.star_total || 0);
+  const referralUsdtTotal = Number(referralStats.usdt_total || 0);
+  const referralStarProfit = Number(referralStats.star_profit_share || 0);
+  const referralUsdtProfit = Number(referralStats.usdt_profit_share || 0);
+  const referralSummary = `
+    <div class="task-referral-summary">
+      <div class="task-referral-head">
+        <strong>Рефералы</strong>
+        <span>${formatFire(referralActivated)}/${formatFire(referralTotal)} активных</span>
+      </div>
+      <div class="task-referral-grid">
+        <div><b>${formatFire(referralTotal)}</b><span>приглашено</span></div>
+        <div><b>${formatFire(referralActivated)}</b><span>со ставкой</span></div>
+        <div><b>${formatCurrencyAmount(referralStarTotal, "STAR")}</b><span>звёзды</span></div>
+        <div><b>${formatCurrencyAmount(referralUsdtTotal, "USDT")}</b><span>USDT</span></div>
+      </div>
+      <small>1% с побед: ${formatCurrencyAmount(referralStarProfit, "STAR")} / ${formatCurrencyAmount(referralUsdtProfit, "USDT")}</small>
+    </div>
+  `;
   if (!stats.length) {
     setInnerHtmlIfChanged(list, `
+      ${referralSummary}
       <div class="task-stat-empty">
         Пока нет рассчитанных рынков. Сделай ставку и дождись закрытия маркета.
       </div>
@@ -2373,7 +2397,7 @@ function renderTaskStats() {
       </div>
     `;
   }).join("");
-  setInnerHtmlIfChanged(list, summary + rows);
+  setInnerHtmlIfChanged(list, referralSummary + summary + rows);
 }
 
 async function api(path, options = {}) {
@@ -2628,6 +2652,7 @@ async function upsertMe() {
   state.usdtBonusBalance = data.usdt_bonus_balance || 0;
   state.positions = data.positions || [];
   state.marketStats = data.market_stats || [];
+  state.referralStats = data.referral_stats || null;
   state.dailyTasks = data.daily_tasks || {};
   state.lossRefundOffers = data.loss_refund_offers || [];
   document.body.classList.remove("auth-only");
@@ -2899,6 +2924,7 @@ async function loadMe() {
   state.positions = data.positions || [];
   state.recentTrades = data.recent_trades || [];
   state.marketStats = data.market_stats || [];
+  state.referralStats = data.referral_stats || null;
   state.dailyTasks = data.daily_tasks || {};
   state.lossRefundOffers = data.loss_refund_offers || [];
   handleSettlements(state.positions);

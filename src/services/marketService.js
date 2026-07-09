@@ -2696,6 +2696,70 @@ async function getUserMarketStats(userId, limit = 40) {
   });
 }
 
+async function getUserReferralStats(userId, telegramId) {
+  const result = await query(
+    `
+      WITH invited AS (
+        SELECT COUNT(*)::int AS total
+        FROM users
+        WHERE referred_by_telegram_id = $2
+      ),
+      activated AS (
+        SELECT COUNT(DISTINCT referred_user_id)::int AS total
+        FROM fire_referral_bonuses
+        WHERE inviter_user_id = $1
+      ),
+      star_rewards AS (
+        SELECT
+          COALESCE(SUM(amount) FILTER (WHERE reason = 'referral_bet_bonus'), 0) AS first_bet_bonus,
+          COALESCE(SUM(amount) FILTER (WHERE reason = 'profit_fee_referral'), 0) AS profit_share
+        FROM fire_ledger
+        WHERE user_id = $1
+          AND amount > 0
+          AND reason IN ('referral_bet_bonus', 'profit_fee_referral')
+      ),
+      usdt_bonus_rewards AS (
+        SELECT COALESCE(SUM(amount), 0) AS first_bet_bonus
+        FROM usdt_bonus_ledger
+        WHERE user_id = $1
+          AND amount > 0
+          AND reason = 'referral_bet_bonus_usdt'
+      ),
+      usdt_profit_rewards AS (
+        SELECT COALESCE(SUM(amount), 0) AS profit_share
+        FROM usdt_ledger
+        WHERE user_id = $1
+          AND amount > 0
+          AND reason = 'profit_fee_referral_usdt'
+      )
+      SELECT
+        invited.total AS total_referrals,
+        activated.total AS activated_referrals,
+        star_rewards.first_bet_bonus AS star_first_bet_bonus,
+        star_rewards.profit_share AS star_profit_share,
+        usdt_bonus_rewards.first_bet_bonus AS usdt_first_bet_bonus,
+        usdt_profit_rewards.profit_share AS usdt_profit_share
+      FROM invited, activated, star_rewards, usdt_bonus_rewards, usdt_profit_rewards
+    `,
+    [userId, String(telegramId || "")],
+  );
+  const row = result.rows[0] || {};
+  const starFirstBetBonus = toNumber(row.star_first_bet_bonus);
+  const starProfitShare = toNumber(row.star_profit_share);
+  const usdtFirstBetBonus = toNumber(row.usdt_first_bet_bonus);
+  const usdtProfitShare = toNumber(row.usdt_profit_share);
+  return {
+    total_referrals: Number(row.total_referrals || 0),
+    activated_referrals: Number(row.activated_referrals || 0),
+    star_first_bet_bonus: starFirstBetBonus,
+    star_profit_share: starProfitShare,
+    star_total: Math.round((starFirstBetBonus + starProfitShare) * 100) / 100,
+    usdt_first_bet_bonus: usdtFirstBetBonus,
+    usdt_profit_share: usdtProfitShare,
+    usdt_total: Math.round((usdtFirstBetBonus + usdtProfitShare) * 100) / 100,
+  };
+}
+
 export async function getUserSnapshot(telegramId) {
   const user = await getUserByTelegramId(telegramId);
   if (!user) {
@@ -2711,7 +2775,7 @@ export async function getUserSnapshot(telegramId) {
     [user.id],
   );
 
-  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, dailyTasks, lossRefundOffersResult] = await Promise.all([
+  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, lossRefundOffersResult] = await Promise.all([
     getBalanceByUserId(user.id),
     getUsdtBalanceByUserId(user.id),
     getUsdtBonusBalanceByUserId(user.id),
@@ -2767,6 +2831,7 @@ export async function getUserSnapshot(telegramId) {
       [user.id],
     ),
     getUserMarketStats(user.id),
+    getUserReferralStats(user.id, user.telegram_id),
     getUserDailyTaskStatus(user.id),
     query(
       `
@@ -2792,6 +2857,7 @@ export async function getUserSnapshot(telegramId) {
     positions: positionsResult.rows.map(mapPosition),
     recent_trades: tradesResult.rows.map(mapTrade),
     market_stats: marketStats,
+    referral_stats: referralStats,
     daily_tasks: dailyTasks,
     loss_refund_offers: lossRefundOffersResult.rows.map((row) => ({
       id: Number(row.id),

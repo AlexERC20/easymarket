@@ -3419,6 +3419,65 @@ code {
   padding-right: 2px;
 }
 
+.task-referral-summary {
+  display: grid;
+  gap: 9px;
+  border: 1px solid rgba(75, 213, 255, 0.22);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(75, 213, 255, 0.13), transparent 32%),
+    linear-gradient(135deg, rgba(18, 28, 44, 0.92), rgba(12, 17, 27, 0.95));
+  padding: 12px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.task-referral-head,
+.task-referral-grid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.task-referral-head strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: 0.01em;
+}
+
+.task-referral-head span,
+.task-referral-summary small,
+.task-referral-grid span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.task-referral-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.task-referral-grid div {
+  min-width: 0;
+}
+
+.task-referral-grid b {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 950;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-referral-summary small {
+  display: block;
+}
+
 .task-stat-row {
   display: flex;
   align-items: center;
