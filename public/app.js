@@ -1715,6 +1715,37 @@ function getSortedChartPoints(market) {
 const CHART_TICKER_SLOT_MS = 3_200;
 const CHART_TICKER_MAX_ENTRIES = 8;
 
+// Уровни тикера = уровни кнопок ставок (getTierForAmount): минимальная —
+// просто ник без молнии, дальше молния крупнее и ярче, максимальная ($100 /
+// топ по звёздам) — золотая с мягким свечением.
+const CHART_TICKER_TIER_SPEC = {
+  2: { bolt: 0.42, flick: 0.2, border: "rgba(183, 255, 77, 0.28)", name: "rgba(141, 152, 170, 0.95)", boltColor: "#93d94e", glow: false },
+  3: { bolt: 0.54, flick: 0.28, border: "rgba(183, 255, 77, 0.5)", name: "rgba(221, 255, 229, 0.96)", boltColor: "#b7ff4d", glow: false },
+  4: { bolt: 0.66, flick: 0.34, border: "rgba(255, 214, 92, 0.62)", name: "rgba(255, 224, 130, 0.98)", boltColor: "#ffe66d", glow: true },
+};
+
+// Свечение топ-уровня — пререндеренный радиальный спрайт: один drawImage
+// на кадр вместо дорогого shadowBlur.
+let tickerGlowSprite = null;
+
+function getTickerGlowSprite() {
+  if (!tickerGlowSprite) {
+    const size = 64;
+    const sprite = document.createElement("canvas");
+    sprite.width = size;
+    sprite.height = size;
+    const g = sprite.getContext("2d");
+    const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0, "rgba(255, 230, 109, 0.55)");
+    grad.addColorStop(0.6, "rgba(255, 214, 92, 0.16)");
+    grad.addColorStop(1, "rgba(255, 214, 92, 0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+    tickerGlowSprite = sprite;
+  }
+  return tickerGlowSprite;
+}
+
 function drawLiveTickerPill(ctx, { width, height, right, nowTs, myBetPillEnd }) {
   const feed = state.activity;
   if (!Array.isArray(feed) || !feed.length) {
@@ -1735,7 +1766,8 @@ function drawLiveTickerPill(ctx, { width, height, right, nowTs, myBetPillEnd }) 
     return;
   }
 
-  const isBig = Number(trade.amount || 0) >= (normalizeCurrency(trade.currency) === "STAR" ? 500 : 50);
+  const tier = getTierForAmount(trade.amount, trade.currency);
+  const spec = CHART_TICKER_TIER_SPEC[tier] || null;
   const rawName = formatUserDisplayName(trade, { preferAt: false });
   const name = rawName.length > 12 ? `${rawName.slice(0, 11)}…` : rawName;
   const seg1 = `${name} `;
@@ -1758,7 +1790,7 @@ function drawLiveTickerPill(ctx, { width, height, right, nowTs, myBetPillEnd }) 
 
   const padX = Math.max(8, width * 0.018);
   const pillH = Math.max(22, height * 0.105);
-  const boltW = isBig ? pillH * 0.52 : 0;
+  const boltW = spec ? pillH * spec.bolt : 0;
   const pillW = boltW + w1 + w2 + padX * 2;
   const pillX = right - pillW;
   const pillY = height - pillH - Math.max(4, height * 0.02);
@@ -1774,21 +1806,29 @@ function drawLiveTickerPill(ctx, { width, height, right, nowTs, myBetPillEnd }) 
   ctx.beginPath();
   roundedRectPath(ctx, pillX, pillY, pillW, pillH, Math.max(8, height * 0.05));
   ctx.fill();
-  ctx.strokeStyle = isBig ? "rgba(255, 214, 92, 0.55)" : "rgba(255, 255, 255, 0.08)";
+  ctx.strokeStyle = spec ? spec.border : "rgba(255, 255, 255, 0.08)";
   ctx.lineWidth = 1;
   ctx.stroke();
 
   const cy = pillY + pillH / 2;
   let tx = pillX + padX;
 
-  if (isBig) {
+  if (spec) {
     // Молния мерцанием альфы (как у lucky-раунда), заливка без теней.
-    const flicker = 0.66 + 0.34 * Math.sin(nowTs * 0.018);
-    const bs = pillH * 0.26;
+    // Чем выше уровень — тем крупнее молния и глубже мерцание.
+    const flicker = (1 - spec.flick) + spec.flick * Math.sin(nowTs * 0.018);
+    const bs = pillH * spec.bolt * 0.5;
     const bx = tx + boltW * 0.4;
+    if (spec.glow) {
+      const glowR = pillH * 0.62;
+      ctx.save();
+      ctx.globalAlpha = alpha * (0.45 + 0.55 * flicker);
+      ctx.drawImage(getTickerGlowSprite(), bx - glowR, cy - glowR, glowR * 2, glowR * 2);
+      ctx.restore();
+    }
     ctx.save();
     ctx.globalAlpha = alpha * flicker;
-    ctx.fillStyle = "#b7ff4d";
+    ctx.fillStyle = spec.boltColor;
     ctx.beginPath();
     ctx.moveTo(bx + bs * 0.55, cy - bs);
     ctx.lineTo(bx - bs * 0.35, cy + bs * 0.1);
@@ -1802,7 +1842,7 @@ function drawLiveTickerPill(ctx, { width, height, right, nowTs, myBetPillEnd }) 
     tx += boltW;
   }
 
-  ctx.fillStyle = isBig ? "rgba(255, 224, 130, 0.98)" : "rgba(141, 152, 170, 0.95)";
+  ctx.fillStyle = spec ? spec.name : "rgba(141, 152, 170, 0.95)";
   ctx.fillText(seg1, tx, cy);
   tx += w1;
   ctx.fillStyle = trade.side === "YES" ? "#19c37d" : "#ef466f";
