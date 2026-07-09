@@ -1511,8 +1511,9 @@ h2 {
 .feed-section {
   display: flex;
   flex-direction: column;
-  height: clamp(218px, 30dvh, 286px);
-  min-height: 218px;
+  /* +20% от clamp(218px, 30dvh, 286px): в футере-слайдере видно больше строк. */
+  height: clamp(262px, 36dvh, 343px);
+  min-height: 262px;
   overflow: hidden;
 }
 
