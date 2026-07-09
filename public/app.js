@@ -718,7 +718,9 @@ function triggerHaptic(type = "light") {
 }
 
 function resizeCanvas(canvas) {
-  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  // dpr-кэп 2: на dpr-3 телефонах канвас ворочал в 2.25 раза больше пикселей,
+  // а на линии графика разница неразличима. Меньше растра — холоднее телефон.
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
   const rect = canvas.getBoundingClientRect();
   const width = Math.max(1, Math.round(rect.width * dpr));
   const height = Math.max(1, Math.round(rect.height * dpr));
@@ -832,52 +834,77 @@ function getCachedTradeAvatarImage(url) {
   return null;
 }
 
+// Пре-рендер аватарки (тень + клип + кольцо) в offscreen-спрайт: в кадре
+// остаётся один drawImage вместо самых дорогих операций 2D-канваса
+// (shadowBlur + clip), которые раньше платились до 80 раз на каждый кадр.
+const chartAvatarSpriteCache = new Map();
+
+function getChartAvatarSprite(trade, radius) {
+  const url = getTradeAvatarUrl(trade);
+  const image = getCachedTradeAvatarImage(url);
+  const r = Math.max(2, Math.round(radius * 2) / 2);
+  const side = trade.side === "YES" ? "YES" : "NO";
+  const face = image ? `u:${url}` : `i:${getTradeAvatarInitial(trade)}`;
+  const key = `${face}|${side}|${r}`;
+  const cached = chartAvatarSpriteCache.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const shadow = Math.max(3, r * 1.2);
+  const pad = Math.ceil(shadow + Math.max(0.8, r * 0.26) + 2);
+  const size = Math.ceil(r * 2 + pad * 2);
+  const sprite = { canvas: document.createElement("canvas"), half: size / 2 };
+  sprite.canvas.width = size;
+  sprite.canvas.height = size;
+  const sctx = sprite.canvas.getContext("2d");
+  const c = size / 2;
+
+  sctx.save();
+  sctx.shadowColor = side === "YES" ? "rgba(25,195,125,0.34)" : "rgba(239,70,111,0.32)";
+  sctx.shadowBlur = shadow;
+  sctx.beginPath();
+  sctx.arc(c, c, r, 0, Math.PI * 2);
+  sctx.clip();
+
+  if (image) {
+    sctx.drawImage(image, c - r, c - r, r * 2, r * 2);
+  } else {
+    const gradient = sctx.createRadialGradient(c - r * 0.35, c - r * 0.4, 0, c, c, r * 1.4);
+    gradient.addColorStop(0, "rgba(255,255,255,0.62)");
+    gradient.addColorStop(0.38, "rgba(92,112,145,0.9)");
+    gradient.addColorStop(1, "rgba(14,20,32,0.98)");
+    sctx.fillStyle = gradient;
+    sctx.fillRect(c - r, c - r, r * 2, r * 2);
+    sctx.shadowBlur = 0;
+    sctx.fillStyle = "rgba(255,255,255,0.92)";
+    sctx.textAlign = "center";
+    sctx.textBaseline = "middle";
+    sctx.font = `${Math.max(5, r * 1.15)}px Inter, system-ui, sans-serif`;
+    sctx.fillText(getTradeAvatarInitial(trade), c, c + r * 0.04);
+  }
+  sctx.restore();
+
+  sctx.lineWidth = Math.max(0.8, r * 0.26);
+  sctx.strokeStyle = side === "YES" ? "rgba(25,195,125,0.86)" : "rgba(239,70,111,0.84)";
+  sctx.beginPath();
+  sctx.arc(c, c, r, 0, Math.PI * 2);
+  sctx.stroke();
+
+  // Кэш ограничен, чтобы за долгую сессию не копить составы старых раундов.
+  if (chartAvatarSpriteCache.size > 240) {
+    chartAvatarSpriteCache.delete(chartAvatarSpriteCache.keys().next().value);
+  }
+  chartAvatarSpriteCache.set(key, sprite);
+  return sprite;
+}
+
 function drawChartTradeAvatar(ctx, trade, x, y, radius, bounds) {
   const safeRadius = Math.max(2, radius);
   const centerX = Math.max(bounds.left + safeRadius, Math.min(bounds.right - safeRadius, x));
   const centerY = Math.max(bounds.top + safeRadius, Math.min(bounds.bottom - safeRadius, y));
-  const avatarUrl = getTradeAvatarUrl(trade);
-  const image = getCachedTradeAvatarImage(avatarUrl);
-
-  ctx.save();
-  ctx.shadowColor = trade.side === "YES" ? "rgba(25,195,125,0.34)" : "rgba(239,70,111,0.32)";
-  ctx.shadowBlur = Math.max(3, safeRadius * 1.2);
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, safeRadius, 0, Math.PI * 2);
-  ctx.clip();
-
-  if (image) {
-    ctx.drawImage(image, centerX - safeRadius, centerY - safeRadius, safeRadius * 2, safeRadius * 2);
-  } else {
-    const gradient = ctx.createRadialGradient(
-      centerX - safeRadius * 0.35,
-      centerY - safeRadius * 0.4,
-      0,
-      centerX,
-      centerY,
-      safeRadius * 1.4,
-    );
-    gradient.addColorStop(0, "rgba(255,255,255,0.62)");
-    gradient.addColorStop(0.38, "rgba(92,112,145,0.9)");
-    gradient.addColorStop(1, "rgba(14,20,32,0.98)");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(centerX - safeRadius, centerY - safeRadius, safeRadius * 2, safeRadius * 2);
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = "rgba(255,255,255,0.92)";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = `${Math.max(5, safeRadius * 1.15)}px Inter, system-ui, sans-serif`;
-    ctx.fillText(getTradeAvatarInitial(trade), centerX, centerY + safeRadius * 0.04);
-  }
-  ctx.restore();
-
-  ctx.save();
-  ctx.lineWidth = Math.max(0.8, safeRadius * 0.26);
-  ctx.strokeStyle = trade.side === "YES" ? "rgba(25,195,125,0.86)" : "rgba(239,70,111,0.84)";
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, safeRadius, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.restore();
+  const sprite = getChartAvatarSprite(trade, safeRadius);
+  ctx.drawImage(sprite.canvas, centerX - sprite.half, centerY - sprite.half);
 }
 
 function getDisplayMarket() {
@@ -1277,7 +1304,7 @@ function drawMarketChartFrame(ts) {
   lastChartDrawTs = nowTs;
 
   const { dpr, width, height } = resizeCanvas(canvas);
-  const appBg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#080d16";
+  const appBg = getAppBgColor();
   const worldCup = isPredictionListMarket(market);
   const aquariumAllowed = syncAquariumRuntimeForMarket(market);
   const openPrice = worldCup
@@ -1295,10 +1322,7 @@ function drawMarketChartFrame(ts) {
     detectTargetCross(market, openPrice);
   }
 
-  const sourcePoints = getDisplayChartPoints(market)
-    .filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at))
-    .map((point) => ({ ...point }))
-    .sort((a, b) => a.at - b.at);
+  const sourcePoints = getSortedChartPoints(market);
   const endTime = new Date(market.end_time).getTime();
   const nowMs = Date.now();
   const historyStart = sourcePoints[0]?.at;
@@ -1475,9 +1499,7 @@ function drawMarketChartFrame(ts) {
     const frameAvatars = captureAvatars ? [] : null;
     chartTrades.forEach((trade) => {
       const x = scaleX(trade.at);
-      const nearest = pathPoints.reduce((best, point) => (
-        Math.abs(point.x - x) < Math.abs(best.x - x) ? point : best
-      ), pathPoints[0]);
+      const nearest = nearestPathPoint(pathPoints, x);
       const own = String(trade.telegram_id || "") === String(state.user?.telegram_id || "");
       const dotY = nearest.y + (own ? -8 : 7);
       const avatarRadius = Math.max(own ? 5.2 : 4.2, CHART_AVATAR_RADIUS_CSS * dpr);
@@ -1634,6 +1656,52 @@ function drawMarketChartFrame(ts) {
   }
 
   state.chartRaf = null;
+}
+
+// --bg статичен, а getComputedStyle в кадре — это принудительный пересчёт
+// стилей 30 раз в секунду. Читаем один раз и запоминаем.
+let cachedAppBgColor = "";
+
+function getAppBgColor() {
+  if (!cachedAppBgColor) {
+    cachedAppBgColor = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#080d16";
+  }
+  return cachedAppBgColor;
+}
+
+// Отсортированные точки графика кэшируются между обновлениями данных: раньше
+// filter+map+sort пересобирали массив в каждом кадре и кормили GC. Данные
+// приходят раз в ~1.5с, ключ (id, длина, крайние at) ловит каждое обновление.
+let chartPointsCacheKey = "";
+let chartPointsCacheList = [];
+
+function getSortedChartPoints(market) {
+  const source = getDisplayChartPoints(market);
+  const length = source.length;
+  const key = `${market.id}:${length}:${length ? source[0].at : 0}:${length ? source[length - 1].at : 0}`;
+  if (chartPointsCacheKey !== key) {
+    chartPointsCacheKey = key;
+    chartPointsCacheList = source
+      .filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at))
+      .sort((a, b) => a.at - b.at);
+  }
+  return chartPointsCacheList;
+}
+
+// pathPoints отсортированы по x: ближайшую к аватарке точку линии ищем
+// бинарным поиском вместо полного reduce-перебора на каждый трейд в кадре.
+function nearestPathPoint(points, x) {
+  let lo = 0;
+  let hi = points.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].x < x) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return Math.abs(points[lo].x - x) <= Math.abs(points[hi].x - x) ? points[lo] : points[hi];
 }
 
 // A full-screen sheet (tasks/wallet/clans/etc.) covers the chart, so there's no
@@ -3653,15 +3721,23 @@ function renderMarket() {
   renderOrderbookPanel();
 }
 
+// Пишем в DOM только при реальной смене значения: тик 250мс раньше делал
+// 4 мутации текста в секунду на одно и то же, будя MutationObserver моушена.
+function setCountdownText(el, value) {
+  if (el && el.textContent !== value) {
+    el.textContent = value;
+  }
+}
+
 function updateTimer() {
   const market = getDisplayMarket();
   const minuteLabel = $("timeLeftMinutes")?.nextElementSibling;
   const secondLabel = $("timeLeftSeconds")?.nextElementSibling;
   if (!market?.end_time) {
-    $("timeLeftMinutes").textContent = "--";
-    $("timeLeftSeconds").textContent = "--";
-    if (minuteLabel) minuteLabel.textContent = "MINS";
-    if (secondLabel) secondLabel.textContent = "SECS";
+    setCountdownText($("timeLeftMinutes"), "--");
+    setCountdownText($("timeLeftSeconds"), "--");
+    setCountdownText(minuteLabel, "MINS");
+    setCountdownText(secondLabel, "SECS");
     return;
   }
 
@@ -3702,37 +3778,37 @@ function updateTimer() {
   if (seconds >= 30 * 86_400) {
     const { months, days } = getCalendarMonthDayDiff(endAt);
     if (months > 0) {
-      $("timeLeftMinutes").textContent = String(months);
-      $("timeLeftSeconds").textContent = String(days).padStart(2, "0");
-      if (minuteLabel) minuteLabel.textContent = "MON";
-      if (secondLabel) secondLabel.textContent = "DAYS";
+      setCountdownText($("timeLeftMinutes"), String(months));
+      setCountdownText($("timeLeftSeconds"), String(days).padStart(2, "0"));
+      setCountdownText(minuteLabel, "MON");
+      setCountdownText(secondLabel, "DAYS");
       return;
     }
   }
   if (seconds >= 86_400) {
     const days = Math.floor(seconds / 86_400);
     const hours = Math.floor((seconds % 86_400) / 3_600);
-    $("timeLeftMinutes").textContent = String(days);
-    $("timeLeftSeconds").textContent = String(hours).padStart(2, "0");
-    if (minuteLabel) minuteLabel.textContent = "DAYS";
-    if (secondLabel) secondLabel.textContent = "HRS";
+    setCountdownText($("timeLeftMinutes"), String(days));
+    setCountdownText($("timeLeftSeconds"), String(hours).padStart(2, "0"));
+    setCountdownText(minuteLabel, "DAYS");
+    setCountdownText(secondLabel, "HRS");
     return;
   }
   if (seconds >= 3_600) {
     const hours = Math.floor(seconds / 3_600);
     const minutes = Math.floor((seconds % 3_600) / 60);
-    $("timeLeftMinutes").textContent = String(hours).padStart(2, "0");
-    $("timeLeftSeconds").textContent = String(minutes).padStart(2, "0");
-    if (minuteLabel) minuteLabel.textContent = "HRS";
-    if (secondLabel) secondLabel.textContent = "MINS";
+    setCountdownText($("timeLeftMinutes"), String(hours).padStart(2, "0"));
+    setCountdownText($("timeLeftSeconds"), String(minutes).padStart(2, "0"));
+    setCountdownText(minuteLabel, "HRS");
+    setCountdownText(secondLabel, "MINS");
     return;
   }
   const minutesPart = String(Math.floor(seconds / 60)).padStart(2, "0");
   const secondsPart = String(seconds % 60).padStart(2, "0");
-  $("timeLeftMinutes").textContent = minutesPart;
-  $("timeLeftSeconds").textContent = secondsPart;
-  if (minuteLabel) minuteLabel.textContent = "MINS";
-  if (secondLabel) secondLabel.textContent = "SECS";
+  setCountdownText($("timeLeftMinutes"), minutesPart);
+  setCountdownText($("timeLeftSeconds"), secondsPart);
+  setCountdownText(minuteLabel, "MINS");
+  setCountdownText(secondLabel, "SECS");
 }
 
 function setSectionToggle(id, total, key) {
@@ -8550,44 +8626,92 @@ document.addEventListener("click", (event) => {
   });
 });
 
-setInterval(updateTimer, 250);
+// Фоновая пауза: пока мини-апп/вкладка реально скрыты, сетевые поллы и
+// DOM-тики стоят — радиомодуль и CPU спят, телефон не греется в кармане.
+// В Telegram document.hidden бывает ложно-положительным (iOS WKWebView),
+// поэтому скрытость подтверждаем сигналом самого Telegram (isActive,
+// Bot API 8.0+). Старые клиенты без isActive ведут себя как раньше.
+function isAppInBackground() {
+  if (!document.hidden) {
+    return false;
+  }
+  const webApp = window.Telegram?.WebApp;
+  if (webApp) {
+    return webApp.isActive === false;
+  }
+  return true;
+}
+
+// На возврате из фона сразу освежаем рынок и баланс, не дожидаясь интервалов.
+function resumeForegroundPolling() {
+  if (isAppInBackground()) {
+    return;
+  }
+  void runSingleFlight("market", loadMarket).catch(() => undefined);
+  void runSingleFlight("me", loadMe).catch(() => undefined);
+}
+document.addEventListener("visibilitychange", resumeForegroundPolling);
+try {
+  window.Telegram?.WebApp?.onEvent?.("activated", resumeForegroundPolling);
+} catch {
+  // клиенты без события activated
+}
+
+setInterval(() => {
+  if (!isAppInBackground()) {
+    updateTimer();
+  }
+}, 250);
 // Активные минуты для лестницы присутствия: видимая вкладка + недавнее касание.
 window.addEventListener("pointerdown", () => {
   state.presence.lastInteractionAt = Date.now();
 }, { passive: true });
-// Тик раз в секунду: таймер "Время в игре" идёт вживую, полоска ползёт плавно.
+// Тик раз в секунду: время копится всегда, но DOM лестницы обновляем только
+// когда шит заданий открыт — закрытый шит не красим впустую.
 setInterval(() => {
   if (isPresenceAccruing()) {
     state.presence.activeMs += 1_000;
   }
-  updatePresenceLadder();
+  if ($("tasksSheet")?.classList.contains("sheet-open")) {
+    updatePresenceLadder();
+  }
 }, 1_000);
 setInterval(() => {
+  if (isAppInBackground()) return;
   void runSingleFlight("market", loadMarket).catch(() => setConnection("Ошибка", "error"));
 }, ACTIVE_MARKET_POLL_MS);
 setInterval(() => {
+  if (isAppInBackground()) return;
   if (shouldRefreshBtcMarkets()) {
     void runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => undefined);
   }
 }, MARKET_LIST_POLL_MS);
 setInterval(() => {
+  if (isAppInBackground()) return;
   if (shouldRefreshWorldCupMarkets()) {
     void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined);
   }
 }, MARKET_LIST_POLL_MS);
 setInterval(() => {
+  if (isAppInBackground()) return;
   if (shouldRefreshTopMarkets()) {
     void runSingleFlight("topMarkets", loadTopMarkets).catch(() => undefined);
   }
 }, MARKET_LIST_POLL_MS);
-setInterval(() => maybeLoadComments(true), COMMENTS_POLL_MS);
 setInterval(() => {
+  if (isAppInBackground()) return;
+  maybeLoadComments(true);
+}, COMMENTS_POLL_MS);
+setInterval(() => {
+  if (isAppInBackground()) return;
   void runSingleFlight("activity", loadActivity).catch(() => undefined);
 }, 4_000);
 setInterval(() => {
+  if (isAppInBackground()) return;
   void runSingleFlight("me", loadMe).catch(() => undefined);
 }, 3_500);
 setInterval(() => {
+  if (isAppInBackground()) return;
   void runSingleFlight("recentMarkets", loadRecentMarkets).catch(() => undefined);
 }, 12_000);
 
