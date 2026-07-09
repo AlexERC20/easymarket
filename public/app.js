@@ -4121,19 +4121,31 @@ function renderTradeTicket() {
   renderQuickBetToggle();
 }
 
+let quickBetToggleAnimTimer = 0;
+
 function renderQuickBetToggle() {
   const button = $("quickBetToggle");
   if (!button) return;
   const confirmMode = state.quickBetMode === "confirm";
+  const wasConfirm = button.classList.contains("confirm-mode");
+  const wasRendered = button.dataset.qbtReady === "1";
   button.classList.toggle("confirm-mode", confirmMode);
   button.setAttribute("aria-pressed", confirmMode ? "false" : "true");
   button.setAttribute(
     "aria-label",
     confirmMode ? "Режим подтверждения ставки" : "Режим ставки в один клик",
   );
-  const label = button.querySelector("b");
-  if (label) {
-    label.textContent = confirmMode ? "Confirm" : "1 tap";
+  button.dataset.qbtReady = "1";
+  // Squash-and-stretch и вспышка иконки играют только на реальной смене
+  // режима: рендер тикета дёргает эту функцию на каждом обновлении рынка.
+  if (wasRendered && wasConfirm !== confirmMode) {
+    button.classList.remove("qbt-anim");
+    void button.offsetWidth;
+    button.classList.add("qbt-anim");
+    window.clearTimeout(quickBetToggleAnimTimer);
+    quickBetToggleAnimTimer = window.setTimeout(() => {
+      button.classList.remove("qbt-anim");
+    }, 700);
   }
 }
 
