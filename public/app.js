@@ -1657,7 +1657,6 @@ function drawMarketChartFrame(ts) {
     drawLiveTickerPill(ctx, {
       width,
       height,
-      right,
       nowTs,
       myBetPillEnd: myBet && chartBetLabelCache
         ? left + chartBetLabelCache.w1 + chartBetLabelCache.w2 + chartBetLabelCache.w3 + Math.max(8, width * 0.018) * 2
@@ -1751,7 +1750,7 @@ function getTickerGlowSprite() {
   return tickerGlowSprite;
 }
 
-function drawLiveTickerPill(ctx, { width, height, right, nowTs, myBetPillEnd }) {
+function drawLiveTickerPill(ctx, { width, height, nowTs, myBetPillEnd }) {
   const feed = state.activity;
   if (!Array.isArray(feed) || !feed.length) {
     return;
@@ -1797,7 +1796,9 @@ function drawLiveTickerPill(ctx, { width, height, right, nowTs, myBetPillEnd }) 
   const pillH = Math.max(22, height * 0.105);
   const boltW = spec ? pillH * spec.bolt : 0;
   const pillW = boltW + w1 + w2 + padX * 2;
-  const pillX = right - pillW;
+  // Отступ от правого края зеркален левой плашке (4% ширины): кромка графика
+  // (2%) слишком близко — плашка липла к стенке.
+  const pillX = width * 0.96 - pillW;
   const pillY = height - pillH - Math.max(4, height * 0.02);
 
   // Не наезжаем на плашку своей ставки слева: если тесно, тикер не рисуем.
