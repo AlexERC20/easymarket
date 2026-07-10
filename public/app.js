@@ -2578,7 +2578,13 @@ function renderTaskStats() {
     </div>
   `;
 
-  const rows = stats.slice(0, 30).map((stat) => {
+  const visibleStats = [...stats].sort((left, right) => {
+    const leftTime = Date.parse(left.updated_at || "") || 0;
+    const rightTime = Date.parse(right.updated_at || "") || 0;
+    return rightTime - leftTime;
+  });
+
+  const rows = visibleStats.slice(0, 30).map((stat) => {
     const currency = normalizeCurrency(stat.currency);
     const pnl = Number(stat.pnl || 0);
     const status = stat.open_positions_count > 0 ? "LIVE" : (stat.status === "resolved" ? "CLOSED" : String(stat.status || "").toUpperCase());

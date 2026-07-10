@@ -2859,12 +2859,12 @@ async function getUserMarketStats(userId, limit = 40) {
         OR market_status NOT IN ('resolved', 'price_error', 'superseded')
         OR recent_rank <= $3
       ORDER BY
+        updated_at DESC,
         CASE
           WHEN open_positions_count > 0 AND market_status = 'open' THEN 0
           WHEN market_status NOT IN ('resolved', 'price_error', 'superseded') THEN 1
           ELSE 2
-        END,
-        updated_at DESC
+        END
       LIMIT 120
     `,
     [userId, BTC_MARKET_SYMBOLS, safeLimit],
