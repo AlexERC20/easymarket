@@ -222,12 +222,12 @@ const state = {
     referral_bonus_fire: 500,
     referral_signup_bonus_usdt: 5,
     referral_bet_bonus_usdt: 30,
-    task_share_fire: 100,
-    task_subscribe_fire: 500,
-    task_private_chat_fire: 15000,
-    task_daily_presence_fire: 50,
-    task_daily_bet_fire: 50,
-    task_daily_cap_fire: 10000,
+    task_share_fire: 50,
+    task_subscribe_fire: 125,
+    task_private_chat_fire: 7500,
+    task_daily_presence_fire: 13,
+    task_daily_bet_fire: 25,
+    task_daily_cap_fire: 5000,
     av_channel_url: "https://t.me/erc20coin",
     av_chat_url: "https://t.me/thedaomaker",
     private_chat_url: "https://t.me/tribute/app?startapp=stKL",
@@ -2361,11 +2361,11 @@ async function loadPublicConfig() {
 }
 
 function renderTaskRewards() {
-  const share = Math.round(Number(state.publicConfig.task_share_fire || 100));
-  const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 500));
-  const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 15000));
+  const share = Math.round(Number(state.publicConfig.task_share_fire || 50));
+  const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 125));
+  const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 7500));
   const refUsdt = Math.round(Number(state.publicConfig.referral_bet_bonus_usdt || 30));
-  const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 50));
+  const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 13));
   if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
   if ($("channelTaskReward")) $("channelTaskReward").textContent = formatFire(sub);
   if ($("chatTaskReward")) $("chatTaskReward").textContent = formatFire(sub);
@@ -7807,10 +7807,10 @@ function getDailyTaskAmount(taskKey, fallback = 0) {
     return Number(progress.amount || fallback || 0);
   }
   if (taskKey === "daily_bet") {
-    return Math.round(Number(state.publicConfig.task_daily_bet_fire || 50));
+    return Math.round(Number(state.publicConfig.task_daily_bet_fire || 25));
   }
   if (taskKey === "daily_presence") {
-    return Math.round(Number(state.publicConfig.task_daily_presence_fire || 50));
+    return Math.round(Number(state.publicConfig.task_daily_presence_fire || 13));
   }
   const rotationTask = state.engagement?.rotation?.find((task) => task.key === taskKey);
   if (rotationTask) {
@@ -7821,22 +7821,22 @@ function getDailyTaskAmount(taskKey, fallback = 0) {
     return Number(presenceTask.amount || fallback || 0);
   }
   const fixed = {
-    share_friend: Math.round(Number(state.publicConfig.task_share_fire || 100)),
-    daily_topup_stars: 100,
-    daily_topup_usdt: 300,
-    daily_btc_prediction: 50,
-    daily_football_prediction: 50,
-    daily_btc_5_predictions: 50,
-    daily_win_1: 50,
-    daily_win_streak_5: 300,
-    daily_win_2_row: 100,
-    daily_sniper: 75,
-    daily_no_win: 75,
-    daily_feed_fish: 25,
-    daily_comment: 25,
-    daily_explore_3: 25,
-    daily_share_story: 100,
-    join_clan: 200,
+    share_friend: Math.round(Number(state.publicConfig.task_share_fire || 50)),
+    daily_topup_stars: 50,
+    daily_topup_usdt: 150,
+    daily_btc_prediction: 25,
+    daily_football_prediction: 25,
+    daily_btc_5_predictions: 25,
+    daily_win_1: 25,
+    daily_win_streak_5: 50,
+    daily_win_2_row: 50,
+    daily_sniper: 38,
+    daily_no_win: 38,
+    daily_feed_fish: 6,
+    daily_comment: 6,
+    daily_explore_3: 6,
+    daily_share_story: 25,
+    join_clan: 100,
   };
   return fixed[taskKey] ?? fallback;
 }
@@ -7882,7 +7882,7 @@ function taskProgressMarkup(taskKey) {
 
 function renderShareFriendTask() {
   const progress = getTaskProgress("share_friend");
-  const amount = getDailyTaskAmount("share_friend", state.publicConfig.task_share_fire || 100);
+  const amount = getDailyTaskAmount("share_friend", state.publicConfig.task_share_fire || 50);
   const reward = $("shareTaskReward");
   if (reward) reward.textContent = formatFire(amount);
   const progressSlot = $("shareTaskProgressSlot");
@@ -8437,7 +8437,7 @@ $("taskChatBtn").addEventListener("click", (event) => {
 $("taskPrivateChatBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   openTelegramUrl(state.publicConfig.private_chat_url || state.publicConfig.av_bot_url);
-  showToast(`После подписки на приватку AV-бот начислит аванс ${formatFire(Number(state.publicConfig.task_private_chat_fire || 15000))}.`);
+  showToast(`После подписки на приватку AV-бот начислит аванс ${formatFire(Number(state.publicConfig.task_private_chat_fire || 7500))}.`);
 });
 
 $("taskShareBtn").addEventListener("click", (event) => {

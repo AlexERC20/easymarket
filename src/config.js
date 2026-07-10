@@ -86,6 +86,8 @@ export const config = {
   taskDailyPresenceFire: parseNumber(process.env.TASK_DAILY_PRESENCE_FIRE, 50, 0),
   taskDailyBetFire: parseNumber(process.env.TASK_DAILY_BET_FIRE, 50, 0),
   taskDailyCapFire: parseNumber(process.env.TASK_DAILY_CAP_FIRE, 10_000, 0),
+  taskRewardScale: parseNumber(process.env.TASK_REWARD_SCALE, 0.5, 0),
+  taskEasyRewardScale: parseNumber(process.env.TASK_EASY_REWARD_SCALE, 0.25, 0),
   publicAvChannelUrl: (
     process.env.PUBLIC_AV_CHANNEL_URL
       || "https://t.me/erc20coin"

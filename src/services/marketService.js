@@ -1402,6 +1402,34 @@ function getTaskReason(taskKey) {
   return `task_${String(taskKey || "").replace(/[^a-z0-9_]/gi, "_").toLowerCase()}`;
 }
 
+const EASY_TASK_KEYS = new Set([
+  "av_channel",
+  "av_chat",
+  "daily_presence",
+  "presence_15",
+  "presence_30",
+  "daily_feed_fish",
+  "daily_comment",
+  "daily_explore_3",
+  "daily_share_story",
+]);
+
+function scaleTaskReward(amount, taskKey) {
+  const numericAmount = Math.max(0, Number(amount || 0));
+  if (numericAmount <= 0) {
+    return 0;
+  }
+  const scale = EASY_TASK_KEYS.has(String(taskKey || ""))
+    ? Number(config.taskEasyRewardScale ?? 0.25)
+    : Number(config.taskRewardScale ?? 0.5);
+  const scaledAmount = Math.round(numericAmount * Math.max(0, scale));
+  return scaledAmount > 0 ? Math.max(1, scaledAmount) : 0;
+}
+
+function getTaskDailyCap() {
+  return scaleTaskReward(config.taskDailyCapFire, "daily_cap");
+}
+
 function getClanTaskPoints(taskKey) {
   const points = {
     share_friend: 2,
@@ -1458,7 +1486,7 @@ async function getDailyBonusRemaining(client, userId) {
     [userId],
   );
   const used = Math.max(0, toNumber(result.rows[0]?.total));
-  return Math.max(0, Math.round((config.taskDailyCapFire - used) * 100) / 100);
+  return Math.max(0, Math.round((getTaskDailyCap() - used) * 100) / 100);
 }
 
 async function awardBonusWithDailyCap(client, userId, amount, reason, source) {
@@ -3512,10 +3540,10 @@ export async function completeVerifiedTask(input) {
     username: input.username,
     first_name: input.first_name,
   });
-  const defaultAmount = taskKey === "private_chat"
+  const configuredAmount = taskKey === "private_chat"
     ? config.taskPrivateChatFire
     : config.taskSubscribeFire;
-  const amount = Math.round(Number(input.amount ?? defaultAmount ?? 0));
+  const amount = scaleTaskReward(configuredAmount, taskKey);
   const dayKey = "once";
 
   return withTransaction(async (client) => {
@@ -3579,26 +3607,26 @@ export async function completeVerifiedTask(input) {
 // Награды заданий. Базовые дейлики доступны каждый день, а новая ротация
 // добавляет короткий бонусный набор поверх них.
 const TASK_AMOUNTS = {
-  share_friend: () => Math.round(Number(config.taskShareFire || 0)),
-  daily_presence: () => Math.round(Number(config.taskDailyPresenceFire || 0)),
-  presence_15: () => 75,
-  presence_30: () => 200,
-  daily_bet: () => Math.round(Number(config.taskDailyBetFire || 0)),
-  daily_topup_stars: () => 100,
-  daily_topup_usdt: () => 300,
-  daily_btc_prediction: () => 50,
-  daily_football_prediction: () => 50,
-  daily_btc_5_predictions: () => 300,
-  daily_win_1: () => 50,
-  daily_win_streak_5: () => 300,
-  daily_win_2_row: () => 100,
-  daily_sniper: () => 75,
-  daily_no_win: () => 75,
-  daily_feed_fish: () => 25,
-  daily_comment: () => 25,
-  daily_explore_3: () => 25,
-  daily_share_story: () => 100,
-  join_clan: () => 200,
+  share_friend: () => scaleTaskReward(config.taskShareFire, "share_friend"),
+  daily_presence: () => scaleTaskReward(config.taskDailyPresenceFire, "daily_presence"),
+  presence_15: () => scaleTaskReward(75, "presence_15"),
+  presence_30: () => scaleTaskReward(200, "presence_30"),
+  daily_bet: () => scaleTaskReward(config.taskDailyBetFire, "daily_bet"),
+  daily_topup_stars: () => scaleTaskReward(100, "daily_topup_stars"),
+  daily_topup_usdt: () => scaleTaskReward(300, "daily_topup_usdt"),
+  daily_btc_prediction: () => scaleTaskReward(50, "daily_btc_prediction"),
+  daily_football_prediction: () => scaleTaskReward(50, "daily_football_prediction"),
+  daily_btc_5_predictions: () => scaleTaskReward(300, "daily_btc_5_predictions"),
+  daily_win_1: () => scaleTaskReward(50, "daily_win_1"),
+  daily_win_streak_5: () => scaleTaskReward(300, "daily_win_streak_5"),
+  daily_win_2_row: () => scaleTaskReward(100, "daily_win_2_row"),
+  daily_sniper: () => scaleTaskReward(75, "daily_sniper"),
+  daily_no_win: () => scaleTaskReward(75, "daily_no_win"),
+  daily_feed_fish: () => scaleTaskReward(25, "daily_feed_fish"),
+  daily_comment: () => scaleTaskReward(25, "daily_comment"),
+  daily_explore_3: () => scaleTaskReward(25, "daily_explore_3"),
+  daily_share_story: () => scaleTaskReward(100, "daily_share_story"),
+  join_clan: () => scaleTaskReward(200, "join_clan"),
 };
 
 const CORE_DAILY_TASK_KEYS = new Set([
@@ -3871,8 +3899,9 @@ const DAILY_PROGRESS_TASKS = {
   },
 };
 
-function resolveTaskAmount(level) {
-  return typeof level?.amount === "function" ? level.amount() : Number(level?.amount || 0);
+function resolveTaskAmount(level, taskKey) {
+  const amount = typeof level?.amount === "function" ? level.amount() : Number(level?.amount || 0);
+  return scaleTaskReward(amount, taskKey);
 }
 
 function getTaskLevelClaimKey(taskKey, level) {
@@ -4170,7 +4199,7 @@ async function getDailyTaskProgress(client, userId, taskKey) {
     unit: task.unit,
     level: levelIndex + 1,
     levels: task.levels.length,
-    amount: resolveTaskAmount(level),
+    amount: resolveTaskAmount(level, taskKey),
     claim_task_key: allClaimed ? null : getTaskLevelClaimKey(taskKey, levelIndex + 1),
     ready: !allClaimed && Number(value || 0) >= Number(level.target || 1),
     claimed: allClaimed,
@@ -4274,11 +4303,11 @@ export async function claimDailyTask(input) {
 // Пропуск одного дня раз в неделю покрывается бесплатной заморозкой.
 
 const STREAK_LOOTBOX_TABLE = [
-  { amount: 50, weight: 50 },
-  { amount: 100, weight: 25 },
-  { amount: 200, weight: 15 },
-  { amount: 300, weight: 7 },
-  { amount: 500, weight: 3 },
+  { amount: scaleTaskReward(50, "daily_streak"), weight: 50 },
+  { amount: scaleTaskReward(100, "daily_streak"), weight: 25 },
+  { amount: scaleTaskReward(200, "daily_streak"), weight: 15 },
+  { amount: scaleTaskReward(300, "daily_streak"), weight: 7 },
+  { amount: scaleTaskReward(500, "daily_streak"), weight: 3 },
 ];
 
 function rollStreakLootbox() {

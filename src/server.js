@@ -253,17 +253,21 @@ app.get("/api/status", async (_req, res) => {
 });
 
 app.get("/api/public/config", (_req, res) => {
+  const scaleTaskReward = (amount, easy = false) => Math.max(
+    0,
+    Math.round(Number(amount || 0) * Number(easy ? config.taskEasyRewardScale : config.taskRewardScale)),
+  );
   res.status(200).json({
     ok: true,
     av_bot_url: config.publicAvBotUrl,
     mini_app_url: config.publicMiniAppUrl,
     referral_bonus_fire: config.referralBetBonusFire,
-    task_share_fire: config.taskShareFire,
-    task_subscribe_fire: config.taskSubscribeFire,
-    task_private_chat_fire: config.taskPrivateChatFire,
-    task_daily_presence_fire: config.taskDailyPresenceFire,
-    task_daily_bet_fire: config.taskDailyBetFire,
-    task_daily_cap_fire: config.taskDailyCapFire,
+    task_share_fire: scaleTaskReward(config.taskShareFire),
+    task_subscribe_fire: scaleTaskReward(config.taskSubscribeFire, true),
+    task_private_chat_fire: scaleTaskReward(config.taskPrivateChatFire),
+    task_daily_presence_fire: scaleTaskReward(config.taskDailyPresenceFire, true),
+    task_daily_bet_fire: scaleTaskReward(config.taskDailyBetFire),
+    task_daily_cap_fire: scaleTaskReward(config.taskDailyCapFire),
     referral_signup_bonus_usdt: config.referralSignupBonusUsdt,
     referral_bet_bonus_usdt: config.referralBetBonusUsdt,
     av_channel_url: config.publicAvChannelUrl,
