@@ -1602,7 +1602,7 @@ function drawMarketChartFrame(ts) {
     const sideColor = myBet.side === "YES" ? "#19c37d" : "#ef466f";
     const seg1 = "Твоя ставка: ";
     const seg2 = `${marketSideLabel(market, myBet.side)} ${formatCurrencyAmount(myBet.spent, myBet.currency)}`;
-    const seg3 = ` Payout ${formatCurrencyAmount(myBet.shares, myBet.currency)}`;
+    const seg3 = ` Win ${formatCurrencyAmount(myBet.shares, myBet.currency)}`;
     const fontPx = Math.max(11, width * 0.024);
     ctx.font = `${fontPx}px Inter, system-ui, sans-serif`;
     ctx.textBaseline = "middle";
@@ -4391,7 +4391,7 @@ function renderTradeTicket() {
       button.dataset.win = nextWin;
       button.innerHTML = `
         <strong>${nextLabel}</strong>
-        <small>payout <b>${nextWin}</b></small>
+        <small>win <b>${nextWin}</b></small>
       `;
     }
   });
