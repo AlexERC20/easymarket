@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { renderStoryCardPng, formatStoryAmount } from "./services/shareCardService.js";
+import { renderStoryCardJpeg, formatStoryAmount } from "./services/shareCardService.js";
 
 import { config } from "./config.js";
 import { getPool, getSafeDatabaseErrorMessage, query, runMigrations } from "./db.js";
@@ -684,10 +684,11 @@ app.get("/api/share/story", async (req, res) => {
   try {
     const label = formatStoryAmount(req.query.value, req.query.currency)
       || String(req.query.amount || "");
-    const png = await renderStoryCardPng(label);
-    res.setHeader("Content-Type", "image/png");
-    res.setHeader("Cache-Control", "public, max-age=300");
-    res.status(200).end(png);
+    const jpeg = await renderStoryCardJpeg(label);
+    res.setHeader("Content-Type", "image/jpeg");
+    // Картинка детерминирована суммой в query — можно кэшировать надолго.
+    res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+    res.status(200).end(jpeg);
   } catch (error) {
     // Fall back to the static branded card so shareToStory still gets valid media.
     res.sendFile(path.join(publicDir, "share", "story-win.png"), (sendError) => {

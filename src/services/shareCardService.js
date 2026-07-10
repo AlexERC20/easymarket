@@ -288,7 +288,25 @@ export function buildStoryCardSvg(amountLabel) {
 </svg>`;
 }
 
-export async function renderStoryCardPng(amountLabel) {
+// JPEG вместо PNG: карточка из градиентов и свечений сжимается в ~150-300 КБ
+// против 2-4 МБ полноцветного PNG (у sharp png.quality без палитры вообще
+// игнорируется) — Telegram скачивает картинку в разы быстрее. Готовые буферы
+// кэшируются по подписи суммы: сид рисунка детерминирован от неё же, так что
+// одна сумма — навсегда одна и та же картинка.
+const storyCardCache = new Map();
+const STORY_CARD_CACHE_MAX = 60;
+
+export async function renderStoryCardJpeg(amountLabel) {
+  const key = normalizeAmount(amountLabel);
+  const cached = storyCardCache.get(key);
+  if (cached) {
+    return cached;
+  }
   const svg = buildStoryCardSvg(amountLabel);
-  return sharp(Buffer.from(svg)).png({ quality: 92 }).toBuffer();
+  const buffer = await sharp(Buffer.from(svg)).jpeg({ quality: 88, mozjpeg: true }).toBuffer();
+  if (storyCardCache.size >= STORY_CARD_CACHE_MAX) {
+    storyCardCache.delete(storyCardCache.keys().next().value);
+  }
+  storyCardCache.set(key, buffer);
+  return buffer;
 }

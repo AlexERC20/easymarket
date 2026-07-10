@@ -5057,6 +5057,10 @@ function openShareWinSheet() {
   if (!win || !sheet) {
     return;
   }
+  // Прогреваем серверный рендер сторис-карточки заранее: пока юзер смотрит
+  // шит, картинка рендерится и оседает в серверном кэше — тап "В сторис"
+  // получает её мгновенно, а не ждёт генерацию.
+  fetch(getStoryMediaUrl()).catch(() => undefined);
   const bolt = $("shareCardBolt");
   if (bolt && bolt.dataset.particled !== "1") {
     bolt.dataset.particled = "1";
