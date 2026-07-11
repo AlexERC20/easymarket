@@ -2985,7 +2985,7 @@ export async function getUserSnapshot(telegramId) {
     [user.id],
   );
 
-  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, lossRefundOffersResult] = await Promise.all([
+  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, premiumFishResult, lossRefundOffersResult] = await Promise.all([
     getBalanceByUserId(user.id),
     getUsdtBalanceByUserId(user.id),
     getUsdtBonusBalanceByUserId(user.id),
@@ -3045,6 +3045,18 @@ export async function getUserSnapshot(telegramId) {
     getUserDailyTaskStatus(user.id),
     query(
       `
+        SELECT EXISTS (
+          SELECT 1
+          FROM usdt_deposit_intents
+          WHERE user_id = $1
+            AND status = 'credited'
+            AND COALESCE(credited_amount, 0) > 0
+        ) AS unlocked
+      `,
+      [user.id],
+    ),
+    query(
+      `
         SELECT *
         FROM usdt_loss_refund_offers
         WHERE user_id = $1
@@ -3069,6 +3081,7 @@ export async function getUserSnapshot(telegramId) {
     market_stats: marketStats,
     referral_stats: referralStats,
     daily_tasks: dailyTasks,
+    aquarium_premium_fish_unlocked: Boolean(premiumFishResult.rows[0]?.unlocked),
     loss_refund_offers: lossRefundOffersResult.rows.map((row) => ({
       id: Number(row.id),
       position_id: Number(row.position_id),

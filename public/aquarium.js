@@ -7,6 +7,7 @@
 // falling onto the next round's fresh screen where the fish are already living.
 
 import { playAquariumFood, playAquariumEat } from "./lightning-motion.js?v=20260707-01";
+import { PREMIUM_DOM_FISH_SVG, drawPremiumFish } from "./premium-fish.js?v=20260711-01";
 
 // Realistic little fish drawn as inline SVG (iOS DOM path). Faces +x; colours
 // come from CSS custom properties set per .fish-N class.
@@ -54,6 +55,17 @@ const FISH_SPECIES = [
   { key: "fancy", weight: 0.25, bodyH: 0.6, tailLen: 1.92, tailSpread: 0.72, dorsal: 1.12, veil: 1, size: [12, 17], speed: [13, 20] },
 ];
 
+const PREMIUM_FISH_SPECIES = {
+  key: "mandarin",
+  bodyH: 0.48,
+  tailLen: 2.02,
+  tailSpread: 0.82,
+  dorsal: 1.18,
+  veil: 1,
+  size: [18.5, 21.5],
+  speed: [15, 19],
+};
+
 const DEBRIS_MAX = 26; // крошки, разлетающиеся при укусе
 const MOUTH_BUBBLES_MAX = 14; // пузырьки изо рта после укуса
 
@@ -93,6 +105,7 @@ let lastAccZ = null;
 let lastShakeFeedAt = 0;
 let lastScatterAt = 0;
 let feedProvider = null;
+let premiumFishUnlocked = false;
 // Telegram Mini App sensor API (Bot API 8.0+). iOS Telegram blocks the W3C
 // devicemotion/deviceorientation events, so we drive tilt/shake from these.
 let tgAccelStarted = false;
@@ -113,6 +126,41 @@ const GOLDEN_FISH_PALETTE = { body: "#ffd24d", belly: "#fff3c2", fin: "#ffb347" 
 
 export function setAquariumGoldenFish(enabled) {
   goldenFishUnlocked = Boolean(enabled);
+}
+
+export function setAquariumPremiumFish(enabled) {
+  const next = Boolean(enabled);
+  if (premiumFishUnlocked === next) {
+    return premiumFishUnlocked;
+  }
+  premiumFishUnlocked = next;
+  if (!next) {
+    fish = fish.filter((item) => !item.premium);
+    domFish = domFish.filter((item) => {
+      if (item.premium) {
+        item.el?.remove();
+        return false;
+      }
+      return true;
+    });
+    return premiumFishUnlocked;
+  }
+
+  // If food is already in the water, let the unlocked fish join immediately;
+  // otherwise it waits off-screen until the next shake with the base school.
+  if (enabled && runtimeAllowed && (food.length || fish.length || domFood.length || domFish.length)) {
+    if (shouldUseDomAquarium()) {
+      const measured = measureDomLayer();
+      if (measured) {
+        appendPremiumDomFish(measured.layer, measured.width, measured.height);
+        startDomLoop();
+      }
+    } else if (measure()) {
+      appendPremiumCanvasFish();
+      startLoop();
+    }
+  }
+  return premiumFishUnlocked;
 }
 
 let waterGrad = null;
@@ -324,6 +372,37 @@ function primeDomAquarium() {
   return true;
 }
 
+function appendPremiumDomFish(layer, width, height) {
+  if (!premiumFishUnlocked || domFish.some((item) => item.premium)) {
+    return false;
+  }
+  const el = document.createElement("span");
+  el.className = "aquarium-dom-fish aquarium-premium-fish";
+  el.innerHTML = PREMIUM_DOM_FISH_SVG;
+  layer.appendChild(el);
+  const fromLeft = Math.random() > 0.5;
+  domFish.push({
+    el,
+    x: fromLeft ? -52 : width + 52,
+    y: rand(domBandTop(height) + 14, domBandBottom(height) - 14),
+    vx: (fromLeft ? 1 : -1) * rand(30, 42),
+    vy: rand(-3, 3),
+    scale: rand(0.94, 1.04),
+    speed: rand(15, 19),
+    dir: fromLeft ? 1 : -1,
+    facing: fromLeft ? 1 : -1,
+    premium: true,
+    target: null,
+    satietyUntil: 0,
+    wanderUntil: 0,
+    wanderVx: rand(-1, 1),
+    wanderVy: rand(-0.3, 0.3),
+    leaving: false,
+    leaveAt: 0,
+  });
+  return true;
+}
+
 // Summon fish to swim IN from off-screen to chase freshly shaken-in food.
 function summonDomFish() {
   if (!enabled) {
@@ -340,6 +419,7 @@ function summonDomFish() {
     f.leaveAt = 0;
   });
   if (domFish.length && layer.querySelector(".aquarium-dom-fish")) {
+    appendPremiumDomFish(layer, width, height);
     startDomLoop();
     return true;
   }
@@ -372,6 +452,7 @@ function summonDomFish() {
       leaveAt: 0,
     });
   }
+  appendPremiumDomFish(layer, width, height);
   startDomLoop();
   return true;
 }
@@ -601,8 +682,9 @@ function updateDomFish(dt, width, height) {
       const dy = f.target.y - f.y;
       const dist = Math.hypot(dx, dy) || 1;
       // Hungry, eager dash toward the crumb.
-      ax = (dx / dist) * f.speed * 2.6;
-      ay = (dy / dist) * f.speed * 2.6;
+      const huntForce = f.premium ? 2.18 : 2.6;
+      ax = (dx / dist) * f.speed * huntForce;
+      ay = (dy / dist) * f.speed * huntForce;
       if (dist < 12 + f.target.r) {
         f.target.biteX = f.x; // crumb gets gulped toward the mouth
         f.target.biteY = f.y;
@@ -621,12 +703,12 @@ function updateDomFish(dt, width, height) {
       if (f.heading === undefined) {
         f.heading = Math.atan2(f.vy, f.vx || f.dir || 1);
       }
-      f.heading += (Math.random() - 0.5) * 1.6 * dt;
+      f.heading += (Math.random() - 0.5) * (f.premium ? 0.62 : 1.6) * dt;
       if (now > f.wanderUntil) {
-        f.wanderUntil = now + rand(1500, 3400);
-        f.heading += (Math.random() - 0.5) * 1.1; // occasional sharper turn
+        f.wanderUntil = now + (f.premium ? rand(2600, 5200) : rand(1500, 3400));
+        f.heading += (Math.random() - 0.5) * (f.premium ? 0.68 : 1.1);
       }
-      const cruise = f.speed * 0.82;
+      const cruise = f.speed * (f.premium ? 0.72 : 0.82);
       ax = Math.cos(f.heading) * cruise + tilt * 12;
       ay = Math.sin(f.heading) * cruise * 0.55;
     }
@@ -684,7 +766,7 @@ function updateDomFish(dt, width, height) {
       f.dir = f.vx >= 0 ? 1 : -1;
     }
     // Плавный разворот и для DOM-рыбок (iOS/десктоп).
-    f.facing = (f.facing ?? f.dir) + (f.dir - (f.facing ?? f.dir)) * Math.min(1, dt * 6.5);
+    f.facing = (f.facing ?? f.dir) + (f.dir - (f.facing ?? f.dir)) * Math.min(1, dt * (f.premium ? 3.8 : 6.5));
   }
 
   // Remove fish that have fully left the frame so the loop can wind down.
@@ -705,14 +787,18 @@ function renderDomAquarium() {
       f.bobRate = rand(1.6, 2.6);
     }
     const sp = Math.hypot(f.vx, f.vy);
-    const bob = Math.sin((tNow / 1000) * f.bobRate + f.bobPhase) * 1.4;
-    const angle = Math.max(-0.2, Math.min(0.2, f.vy * 0.018));
+    const bob = Math.sin((tNow / 1000) * f.bobRate + f.bobPhase) * (f.premium ? 0.85 : 1.4);
+    const angleLimit = f.premium ? 0.14 : 0.2;
+    const angle = Math.max(-angleLimit, Math.min(angleLimit, f.vy * (f.premium ? 0.014 : 0.018)));
     const facingRaw = f.facing ?? f.dir;
     const facing = Math.abs(facingRaw) < 0.08 ? (facingRaw < 0 ? -0.08 : 0.08) : facingRaw;
     f.el.style.transform = `translate3d(${f.x.toFixed(1)}px, ${(f.y + bob).toFixed(1)}px, 0) translate(-50%, -50%) scaleX(${facing.toFixed(3)}) scale(${f.scale}) rotate(${angle.toFixed(3)}rad)`;
     // Tail beats faster as the fish speeds up / darts.
-    const tailMs = Math.max(250, 720 - sp * 9);
+    const tailMs = f.premium ? Math.max(420, 940 - sp * 10) : Math.max(250, 720 - sp * 9);
     f.el.style.setProperty("--tail-ms", `${tailMs.toFixed(0)}ms`);
+    if (f.premium) {
+      f.el.style.setProperty("--tail-tip-ms", `${Math.round(tailMs * 0.68)}ms`);
+    }
   }
   const now = Date.now();
   for (const crumb of domFood) {
@@ -876,6 +962,37 @@ function bandBottom() {
   return cssH * 0.985;
 }
 
+function appendPremiumCanvasFish() {
+  if (!premiumFishUnlocked || fish.some((item) => item.premium) || !cssW || !cssH) {
+    return false;
+  }
+  const size = rand(PREMIUM_FISH_SPECIES.size[0], PREMIUM_FISH_SPECIES.size[1]);
+  const fromLeft = Math.random() > 0.5;
+  fish.push({
+    x: fromLeft ? -size * 2.5 : cssW + size * 2.5,
+    y: rand(bandTop() + size, bandBottom() - size),
+    vx: (fromLeft ? 1 : -1) * rand(30, 42),
+    vy: rand(-3, 3),
+    size,
+    palette: FISH_PALETTES[3],
+    species: PREMIUM_FISH_SPECIES,
+    speed: rand(PREMIUM_FISH_SPECIES.speed[0], PREMIUM_FISH_SPECIES.speed[1]),
+    tailPhase: Math.random() * Math.PI * 2,
+    dir: fromLeft ? 1 : -1,
+    facing: fromLeft ? 1 : -1,
+    premium: true,
+    mouth: 0,
+    target: null,
+    satietyUntil: 0,
+    wanderUntil: 0,
+    wanderVx: rand(-1, 1),
+    wanderVy: rand(-0.3, 0.3),
+    leaving: false,
+    leaveAt: 0,
+  });
+  return true;
+}
+
 // Summon fish to swim IN from off-screen (only on a shake). Wakes any that were
 // swimming away.
 function summonFish() {
@@ -887,6 +1004,7 @@ function summonFish() {
     f.leaveAt = 0;
   });
   if (fish.length) {
+    appendPremiumCanvasFish();
     return true;
   }
   const count = Math.round(rand(FISH_MIN, FISH_MAX));
@@ -921,6 +1039,7 @@ function summonFish() {
       leaveAt: 0,
     });
   }
+  appendPremiumCanvasFish();
   if (!bubbles.length) {
     for (let i = 0; i < 4; i += 1) {
       bubbles.push(resetBubble({}, true));
@@ -1573,8 +1692,9 @@ function updateFish(dt) {
       const dy = f.target.y - f.y;
       const dist = Math.hypot(dx, dy) || 1;
       // Hungry, eager dash toward the crumb.
-      ax = (dx / dist) * f.speed * 2.6;
-      ay = (dy / dist) * f.speed * 2.6;
+      const huntForce = f.premium ? 2.18 : 2.6;
+      ax = (dx / dist) * f.speed * huntForce;
+      ay = (dy / dist) * f.speed * huntForce;
       if (dist < f.size * 0.9 + f.target.r) {
         f.target.biteX = f.x; // crumb gets gulped toward the mouth
         f.target.biteY = f.y;
@@ -1595,12 +1715,12 @@ function updateFish(dt) {
       if (f.heading === undefined) {
         f.heading = Math.atan2(f.vy, f.vx || f.dir || 1);
       }
-      f.heading += (Math.random() - 0.5) * 1.6 * dt;
+      f.heading += (Math.random() - 0.5) * (f.premium ? 0.62 : 1.6) * dt;
       if (now > f.wanderUntil) {
-        f.wanderUntil = now + rand(1500, 3400);
-        f.heading += (Math.random() - 0.5) * 1.1;
+        f.wanderUntil = now + (f.premium ? rand(2600, 5200) : rand(1500, 3400));
+        f.heading += (Math.random() - 0.5) * (f.premium ? 0.68 : 1.1);
       }
-      const cruise = f.speed * 0.74;
+      const cruise = f.speed * (f.premium ? 0.68 : 0.74);
       ax = Math.cos(f.heading) * cruise + tilt * 10;
       ay = Math.sin(f.heading) * cruise * 0.55;
     }
@@ -1676,11 +1796,11 @@ function updateFish(dt) {
     }
     // Плавный разворот: facing скользит к dir, рыба сжимается в профиль и
     // разжимается уже в другую сторону вместо мгновенного зеркала.
-    f.facing = (f.facing ?? f.dir) + (f.dir - (f.facing ?? f.dir)) * Math.min(1, dt * 6.5);
+    f.facing = (f.facing ?? f.dir) + (f.dir - (f.facing ?? f.dir)) * Math.min(1, dt * (f.premium ? 3.8 : 6.5));
     // Рот приоткрывается на подходе к еде и в момент укуса.
     const mouthWant = (f.target && Math.hypot(f.target.x - f.x, f.target.y - f.y) < f.size * 2.6) || now < (f.mouthUntil || 0) ? 1 : 0;
     f.mouth = (f.mouth || 0) + (mouthWant - (f.mouth || 0)) * Math.min(1, dt * 9);
-    f.tailPhase += dt * (5 + Math.min(12, sp * 0.25));
+    f.tailPhase += dt * ((f.premium ? 3.8 : 5) + Math.min(f.premium ? 9 : 12, sp * (f.premium ? 0.2 : 0.25)));
   }
 
   // Remove fish that have fully left the frame so the loop can wind down.
@@ -2010,7 +2130,11 @@ function frame(ts) {
     drawWater();
     drawFood();
     for (const f of fish) {
-      drawFish(f);
+      if (f.premium) {
+        drawPremiumFish(ctx, f, simT);
+      } else {
+        drawFish(f);
+      }
     }
   }
 

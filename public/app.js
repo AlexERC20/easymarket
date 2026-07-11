@@ -19,9 +19,10 @@ import {
   primeAquarium,
   setAquariumEnabled,
   setAquariumGoldenFish,
+  setAquariumPremiumFish,
   setAquariumRuntimeAllowed,
   setAquariumShakeFeeder,
-} from "./aquarium.js?v=20260709-01";
+} from "./aquarium.js?v=20260711-02";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -194,6 +195,7 @@ const state = {
   aquariumSnapshot: null,
   aquariumSnapAt: 0,
   aquariumRuntimeAllowed: false,
+  aquariumPremiumFishUnlocked: false,
   freshActivityIds: new Set(),
   playedActivityAnimIds: new Set(), // въезд/глинт уже проигран — не повторять на пере-рендерах
   lastPositionPnl: {},
@@ -968,6 +970,12 @@ function syncAquariumRuntimeForMarket(market = getDisplayMarket()) {
     }
   }
   return allowed;
+}
+
+function applyAquariumEntitlements(data) {
+  const unlocked = Boolean(data?.aquarium_premium_fish_unlocked);
+  state.aquariumPremiumFishUnlocked = unlocked;
+  setAquariumPremiumFish(unlocked);
 }
 
 function isMarketOpenForBuy(market, bufferMs = MARKET_BUY_CLOSE_BUFFER_MS) {
@@ -2872,6 +2880,7 @@ async function upsertMe() {
   state.referralStats = data.referral_stats || null;
   state.dailyTasks = data.daily_tasks || {};
   state.lossRefundOffers = data.loss_refund_offers || [];
+  applyAquariumEntitlements(data);
   document.body.classList.remove("auth-only");
   $("authCard").classList.add("hidden");
   setConnection("LIVE", "online");
@@ -3144,6 +3153,7 @@ async function loadMe() {
   state.referralStats = data.referral_stats || null;
   state.dailyTasks = data.daily_tasks || {};
   state.lossRefundOffers = data.loss_refund_offers || [];
+  applyAquariumEntitlements(data);
   handleSettlements(state.positions);
   renderMe();
   renderTaskStats();
