@@ -15,6 +15,7 @@ import {
   cancelLimitOrder,
   checkinStreak,
   claimDailyTask,
+  claimDepositBonus,
   claimLossRefundWithStars,
   claimShareTask,
   completeVerifiedTask,
@@ -964,6 +965,20 @@ app.post("/api/tasks/claim", async (req, res) => {
       first_name: req.body?.first_name,
       task_key: taskKey,
       source: "mini_app_task",
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+// Бонусы за суммарный депозит: забирает все достигнутые уровни разом.
+app.post("/api/deposit-bonus/claim", async (req, res) => {
+  try {
+    const result = await claimDepositBonus({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
     });
     res.status(200).json(result);
   } catch (error) {

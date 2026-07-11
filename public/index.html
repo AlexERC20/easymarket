@@ -172,6 +172,20 @@
             <button id="tasksTabStats" type="button" data-task-tab="stats">Моя статистика</button>
           </div>
           <div class="task-list">
+            <div id="depositBonusTask" class="task-item featured hidden">
+              <span class="task-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.4"/><path d="M12 7.2v9.6"/><path d="M14.8 9.3c-.5-1-1.5-1.6-2.8-1.6-1.6 0-2.9.9-2.9 2.2 0 2.9 5.8 1.5 5.8 4.4 0 1.3-1.3 2.2-2.9 2.2-1.3 0-2.3-.6-2.8-1.6"/></svg></span>
+              <div class="task-body">
+                <strong>Бонус за депозит</strong>
+                <div class="legend-progress">
+                  <div class="legend-progress-track"><i id="depositBonusBar"></i></div>
+                  <small><span id="depositBonusCur">$0</span><span id="depositBonusGoal">$100</span></small>
+                </div>
+              </div>
+              <div class="task-act">
+                <span id="depositBonusReward" class="task-reward">+$30</span>
+                <button id="depositBonusBtn" class="task-button gold" type="button">Пополнить</button>
+              </div>
+            </div>
             <div class="streak-card" id="streakCard">
               <div class="streak-bolt" id="streakBolt" aria-hidden="true"></div>
               <div class="streak-info">
@@ -823,6 +837,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260711-09" type="module"></script>
+    <script src="/app.js?v=20260711-10" type="module"></script>
   </body>
 </html>

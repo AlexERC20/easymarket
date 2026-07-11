@@ -2976,6 +2976,86 @@ async function getUserReferralStats(userId, telegramId) {
 const LEGEND_SCENE_DEPOSIT_GOAL = 1000;
 const LEGEND_SCENE_TESTER_USERNAMES = new Set(["ownagez"]);
 
+// Лесенка бонусов за суммарный зачисленный депозит: достиг порога — забирай
+// бонус на бонусный счёт. Каждый уровень начисляется один раз
+// (UNIQUE(user_id, task_key) в usdt_bonus_claims).
+const DEPOSIT_BONUS_LEVELS = [
+  { goal: 100, bonus: 30 },
+  { goal: 300, bonus: 60 },
+  { goal: 500, bonus: 90 },
+  { goal: 1000, bonus: 100 },
+  { goal: 5000, bonus: 300 },
+  { goal: 10000, bonus: 500 },
+  { goal: 20000, bonus: 1000 },
+];
+
+function depositBonusTaskKey(goal) {
+  return `deposit_bonus_${goal}`;
+}
+
+function buildDepositBonusStatus(total, claimedKeys) {
+  return {
+    total,
+    levels: DEPOSIT_BONUS_LEVELS.map(({ goal, bonus }) => {
+      const claimed = claimedKeys.has(depositBonusTaskKey(goal));
+      return {
+        goal,
+        bonus,
+        claimed,
+        ready: !claimed && total >= goal,
+      };
+    }),
+  };
+}
+
+// Забирает разом все достигнутые и ещё не полученные уровни.
+export async function claimDepositBonus(input) {
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+
+  return withTransaction(async (client) => {
+    const totalResult = await client.query(
+      `
+        SELECT COALESCE(SUM(credited_amount), 0) AS total
+        FROM usdt_deposit_intents
+        WHERE user_id = $1
+          AND status = 'credited'
+      `,
+      [user.id],
+    );
+    const total = toNumber(totalResult.rows[0]?.total);
+    let credited = 0;
+    const claimedGoals = [];
+    for (const { goal, bonus } of DEPOSIT_BONUS_LEVELS) {
+      if (total < goal) {
+        break;
+      }
+      const inserted = await client.query(
+        `
+          INSERT INTO usdt_bonus_claims (user_id, task_key, amount, source)
+          VALUES ($1, $2, $3::numeric, 'deposit_total')
+          ON CONFLICT DO NOTHING
+          RETURNING id
+        `,
+        [user.id, depositBonusTaskKey(goal), bonus],
+      );
+      if (inserted.rows[0]) {
+        await adjustUsdtBonusBalance(client, user.id, bonus, "deposit_bonus", `goal:${goal}`);
+        credited += bonus;
+        claimedGoals.push(goal);
+      }
+    }
+    return {
+      credited: Math.round(credited * 100) / 100,
+      goals: claimedGoals,
+      deposit_total: total,
+    };
+  });
+}
+
 function isLegendSceneTester(user) {
   const username = String(user?.username || "").replace(/^@/, "").toLowerCase();
   if (LEGEND_SCENE_TESTER_USERNAMES.has(username)) {
@@ -2999,7 +3079,7 @@ export async function getUserSnapshot(telegramId) {
     [user.id],
   );
 
-  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, premiumFishResult, lossRefundOffersResult, depositTotalResult] = await Promise.all([
+  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, premiumFishResult, lossRefundOffersResult, depositTotalResult, depositBonusClaimsResult] = await Promise.all([
     getBalanceByUserId(user.id),
     getUsdtBalanceByUserId(user.id),
     getUsdtBonusBalanceByUserId(user.id),
@@ -3090,9 +3170,19 @@ export async function getUserSnapshot(telegramId) {
       `,
       [user.id],
     ),
+    query(
+      `
+        SELECT task_key
+        FROM usdt_bonus_claims
+        WHERE user_id = $1
+          AND task_key LIKE 'deposit_bonus_%'
+      `,
+      [user.id],
+    ),
   ]);
   const usdtTotalBalance = Math.round((usdtCashBalance + usdtBonusBalance) * 100) / 100;
   const depositTotal = Math.round(toNumber(depositTotalResult.rows[0]?.total) * 100) / 100;
+  const depositBonusClaimedKeys = new Set(depositBonusClaimsResult.rows.map((row) => row.task_key));
   const sceneTester = isLegendSceneTester(user);
 
   return {
@@ -3115,6 +3205,7 @@ export async function getUserSnapshot(telegramId) {
       deposit_total: depositTotal,
       deposit_goal: LEGEND_SCENE_DEPOSIT_GOAL,
     },
+    deposit_bonus: buildDepositBonusStatus(depositTotal, depositBonusClaimedKeys),
     loss_refund_offers: lossRefundOffersResult.rows.map((row) => ({
       id: Number(row.id),
       position_id: Number(row.position_id),

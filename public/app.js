@@ -199,6 +199,7 @@ const state = {
   aquariumRuntimeAllowed: false,
   aquariumPremiumFishUnlocked: false,
   legendScene: null,
+  depositBonus: null,
   freshActivityIds: new Set(),
   playedActivityAnimIds: new Set(), // въезд/глинт уже проигран — не повторять на пере-рендерах
   lastPositionPnl: {},
@@ -985,6 +986,89 @@ function applyAquariumEntitlements(data) {
   state.aquariumPremiumFishUnlocked = unlocked;
   setAquariumPremiumFish(unlocked);
   applyLegendSceneEntitlements(data);
+  state.depositBonus = data?.deposit_bonus || state.depositBonus;
+  renderDepositBonusTask();
+}
+
+// Лесенка бонусов за суммарный депозит: прогресс-бар до следующего уровня,
+// достигнутые уровни забираются одной кнопкой.
+function renderDepositBonusTask() {
+  const row = $("depositBonusTask");
+  if (!row) {
+    return;
+  }
+  const levels = Array.isArray(state.depositBonus?.levels) ? state.depositBonus.levels : [];
+  row.classList.toggle("hidden", levels.length === 0);
+  if (!levels.length) {
+    return;
+  }
+  const total = Math.max(0, Number(state.depositBonus.total) || 0);
+  const readySum = levels
+    .filter((level) => level.ready)
+    .reduce((sum, level) => sum + (Number(level.bonus) || 0), 0);
+  const nextIdx = levels.findIndex((level) => !level.claimed && !level.ready);
+  const next = nextIdx >= 0 ? levels[nextIdx] : null;
+  const prevGoal = nextIdx > 0 ? Number(levels[nextIdx - 1].goal) || 0 : 0;
+  const lastGoal = Number(levels[levels.length - 1].goal) || 1;
+
+  const bar = $("depositBonusBar");
+  if (bar) {
+    const fill = next
+      ? (total - prevGoal) / Math.max(1, (Number(next.goal) || 1) - prevGoal)
+      : 1;
+    bar.style.width = `${Math.round(Math.min(1, Math.max(0, fill)) * 100)}%`;
+  }
+  if ($("depositBonusCur")) {
+    $("depositBonusCur").textContent = `$${Math.floor(total).toLocaleString("ru-RU")}`;
+  }
+  if ($("depositBonusGoal")) {
+    $("depositBonusGoal").textContent = `$${Math.floor(next ? next.goal : lastGoal).toLocaleString("ru-RU")}`;
+  }
+  const reward = $("depositBonusReward");
+  if (reward) {
+    const rewardValue = readySum > 0 ? readySum : Number(next?.bonus) || 0;
+    reward.textContent = `+$${Math.floor(rewardValue).toLocaleString("ru-RU")}`;
+    reward.classList.toggle("hidden", rewardValue <= 0);
+  }
+  const button = $("depositBonusBtn");
+  if (button) {
+    if (readySum > 0) {
+      button.textContent = `Забрать $${Math.floor(readySum).toLocaleString("ru-RU")}`;
+      button.disabled = false;
+    } else if (next) {
+      button.textContent = "Пополнить";
+      button.disabled = false;
+    } else {
+      button.textContent = "Собрано";
+      button.disabled = true;
+    }
+  }
+}
+
+async function claimDepositBonusLevels(sourceElement = null) {
+  if (!state.user?.telegram_id) {
+    return;
+  }
+  try {
+    const result = await api("/api/deposit-bonus/claim", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        username: state.user.username,
+        first_name: state.user.first_name,
+      }),
+    });
+    const credited = Number(result?.credited || 0);
+    if (credited > 0) {
+      playTaskRewardAnimation(sourceElement);
+      showToast(`+$${credited} на бонусный счёт.`);
+      void runSingleFlight("me", loadMe).catch(() => undefined);
+    } else {
+      showToast("Пока нечего забирать — пополни ещё.");
+    }
+  } catch {
+    showToast("Не получилось забрать бонус, попробуй ещё раз.");
+  }
 }
 
 // Сцена «Легенда 24»: сервер решает, кому открыто (депозит $1000 или админ).
@@ -8631,6 +8715,23 @@ $("legendSceneTaskBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   closeSheet("tasksSheet");
   openTopupSheet(1000, "", "topup", "USDT");
+});
+
+$("depositBonusBtn")?.addEventListener("click", (event) => {
+  triggerHaptic("selection");
+  const levels = Array.isArray(state.depositBonus?.levels) ? state.depositBonus.levels : [];
+  const hasReady = levels.some((level) => level.ready);
+  if (hasReady) {
+    void claimDepositBonusLevels(event.currentTarget);
+    return;
+  }
+  const next = levels.find((level) => !level.claimed && !level.ready);
+  if (!next) {
+    return;
+  }
+  const total = Math.max(0, Number(state.depositBonus?.total) || 0);
+  closeSheet("tasksSheet");
+  openTopupSheet(Math.max(1, Math.ceil(Number(next.goal) - total)), "", "topup", "USDT");
 });
 
 $("taskShareBtn").addEventListener("click", (event) => {
