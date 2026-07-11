@@ -2597,6 +2597,29 @@ code {
   max-height: 62vh;
   overflow-y: auto;
   padding-right: 2px;
+  contain: layout paint style;
+}
+
+#tasksSheet .task-item,
+#tasksSheet .streak-card,
+#tasksSheet .presence-ladder {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 56px;
+}
+
+/* An open sheet covers the market. Pause decorative work underneath instead
+   of spending mobile GPU time on pixels hidden by the backdrop. */
+body.sheet-overlay-active .app-shell > :not(.task-sheet),
+body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
+  animation-play-state: paused !important;
+}
+
+#tasksSheet.sheet-open .task-button.claimable::after,
+#tasksSheet.sheet-open .task-claim-chip.claimable,
+#tasksSheet.sheet-open .presence-step.claimable,
+#tasksSheet.sheet-open .presence-ladder-top span::before,
+#tasksSheet.sheet-open .presence-ladder-track span::after {
+  animation-iteration-count: 2 !important;
 }
 
 .task-list.hidden {

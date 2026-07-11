@@ -1403,8 +1403,6 @@ function getTaskReason(taskKey) {
 }
 
 const EASY_TASK_KEYS = new Set([
-  "av_channel",
-  "av_chat",
   "daily_presence",
   "presence_15",
   "presence_30",
@@ -3543,7 +3541,9 @@ export async function completeVerifiedTask(input) {
   const configuredAmount = taskKey === "private_chat"
     ? config.taskPrivateChatFire
     : config.taskSubscribeFire;
-  const amount = scaleTaskReward(configuredAmount, taskKey);
+  const amount = taskKey === "private_chat"
+    ? scaleTaskReward(configuredAmount, taskKey)
+    : Math.max(0, Math.round(Number(configuredAmount || 0)));
   const dayKey = "once";
 
   return withTransaction(async (client) => {

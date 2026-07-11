@@ -263,7 +263,7 @@ app.get("/api/public/config", (_req, res) => {
     mini_app_url: config.publicMiniAppUrl,
     referral_bonus_fire: config.referralBetBonusFire,
     task_share_fire: scaleTaskReward(config.taskShareFire),
-    task_subscribe_fire: scaleTaskReward(config.taskSubscribeFire, true),
+    task_subscribe_fire: Math.max(0, Math.round(Number(config.taskSubscribeFire || 0))),
     task_private_chat_fire: scaleTaskReward(config.taskPrivateChatFire),
     task_daily_presence_fire: scaleTaskReward(config.taskDailyPresenceFire, true),
     task_daily_bet_fire: scaleTaskReward(config.taskDailyBetFire),

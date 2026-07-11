@@ -223,7 +223,7 @@ const state = {
     referral_signup_bonus_usdt: 5,
     referral_bet_bonus_usdt: 30,
     task_share_fire: 50,
-    task_subscribe_fire: 125,
+    task_subscribe_fire: 300,
     task_private_chat_fire: 7500,
     task_daily_presence_fire: 13,
     task_daily_bet_fire: 25,
@@ -2362,7 +2362,7 @@ async function loadPublicConfig() {
 
 function renderTaskRewards() {
   const share = Math.round(Number(state.publicConfig.task_share_fire || 50));
-  const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 125));
+  const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 300));
   const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 7500));
   const refUsdt = Math.round(Number(state.publicConfig.referral_bet_bonus_usdt || 30));
   const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 13));
@@ -2664,6 +2664,11 @@ function prefersReducedMotion() {
   return reduced && !isTelegramWebApp();
 }
 
+function syncSheetOverlayState() {
+  const overlayActive = Boolean(document.querySelector(".task-sheet.sheet-open, .task-sheet.sheet-closing"));
+  document.body.classList.toggle("sheet-overlay-active", overlayActive);
+}
+
 function openSheet(sheetOrId) {
   const sheet = typeof sheetOrId === "string" ? $(sheetOrId) : sheetOrId;
   if (!sheet) return;
@@ -2675,6 +2680,7 @@ function openSheet(sheetOrId) {
   sheet.classList.remove("hidden", "sheet-open", "sheet-closing");
   void sheet.offsetWidth;
   sheet.classList.add("sheet-open", "is-revealing");
+  syncSheetOverlayState();
   // One-shot content stagger on open; drop the flag so list polls don't replay it.
   window.setTimeout(() => sheet.classList.remove("is-revealing"), 950);
 }
@@ -2686,6 +2692,7 @@ function closeSheet(sheetOrId, options = {}) {
     sheet.classList.add("hidden");
     sheet.classList.remove("sheet-open", "sheet-closing");
     sheetCloseTimers.delete(sheet);
+    syncSheetOverlayState();
     // Resume the chart loop now that the sheet no longer covers it.
     renderMarketChart();
     options.afterClose?.();
@@ -2700,6 +2707,7 @@ function closeSheet(sheetOrId, options = {}) {
   }
   sheet.classList.add("sheet-closing");
   sheet.classList.remove("sheet-open");
+  syncSheetOverlayState();
   const timer = window.setTimeout(finish, options.duration || SHEET_CLOSE_MS);
   sheetCloseTimers.set(sheet, timer);
 }
@@ -9003,7 +9011,7 @@ try {
 }
 
 setInterval(() => {
-  if (!isAppInBackground()) {
+  if (!isAppInBackground() && !isBlockingSheetOpen()) {
     updateTimer();
   }
 }, 250);
@@ -9022,41 +9030,41 @@ setInterval(() => {
   }
 }, 1_000);
 setInterval(() => {
-  if (isAppInBackground()) return;
+  if (isAppInBackground() || isBlockingSheetOpen()) return;
   void runSingleFlight("market", loadMarket).catch(() => setConnection("Ошибка", "error"));
 }, ACTIVE_MARKET_POLL_MS);
 setInterval(() => {
-  if (isAppInBackground()) return;
+  if (isAppInBackground() || isBlockingSheetOpen()) return;
   if (shouldRefreshBtcMarkets()) {
     void runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => undefined);
   }
 }, MARKET_LIST_POLL_MS);
 setInterval(() => {
-  if (isAppInBackground()) return;
+  if (isAppInBackground() || isBlockingSheetOpen()) return;
   if (shouldRefreshWorldCupMarkets()) {
     void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined);
   }
 }, MARKET_LIST_POLL_MS);
 setInterval(() => {
-  if (isAppInBackground()) return;
+  if (isAppInBackground() || isBlockingSheetOpen()) return;
   if (shouldRefreshTopMarkets()) {
     void runSingleFlight("topMarkets", loadTopMarkets).catch(() => undefined);
   }
 }, MARKET_LIST_POLL_MS);
 setInterval(() => {
-  if (isAppInBackground()) return;
+  if (isAppInBackground() || isBlockingSheetOpen()) return;
   maybeLoadComments(true);
 }, COMMENTS_POLL_MS);
 setInterval(() => {
-  if (isAppInBackground()) return;
+  if (isAppInBackground() || isBlockingSheetOpen()) return;
   void runSingleFlight("activity", loadActivity).catch(() => undefined);
 }, 4_000);
 setInterval(() => {
-  if (isAppInBackground()) return;
+  if (isAppInBackground() || isBlockingSheetOpen()) return;
   void runSingleFlight("me", loadMe).catch(() => undefined);
 }, 3_500);
 setInterval(() => {
-  if (isAppInBackground()) return;
+  if (isAppInBackground() || isBlockingSheetOpen()) return;
   void runSingleFlight("recentMarkets", loadRecentMarkets).catch(() => undefined);
 }, 12_000);
 

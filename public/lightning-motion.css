@@ -35,6 +35,10 @@
 .lm-energy-bg span:nth-child(5) { left: 92%; top: 68%; animation-delay: -2.1s; }
 .lm-energy-bg span:nth-child(6) { left: 42%; top: 18%; animation-delay: -6.2s; height: 180px; }
 
+body.sheet-overlay-active .lm-energy-bg span {
+  animation-play-state: paused;
+}
+
 .lm-loader {
   position: fixed;
   inset: 0;
