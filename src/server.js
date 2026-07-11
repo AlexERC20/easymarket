@@ -17,6 +17,8 @@ import {
   claimDailyTask,
   claimDepositBonus,
   claimLossRefundWithStars,
+  claimShakeFeedBonus,
+  ingestShakeFeed,
   claimShareTask,
   completeVerifiedTask,
   getEngagementState,
@@ -976,6 +978,34 @@ app.post("/api/tasks/claim", async (req, res) => {
 app.post("/api/deposit-bonus/claim", async (req, res) => {
   try {
     const result = await claimDepositBonus({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+// «Шейк, шейк!»: пачка встрясок (кормлений) с клиента + сбор бонусов.
+app.post("/api/shake-feed/ingest", async (req, res) => {
+  try {
+    const result = await ingestShakeFeed({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      count: req.body?.count,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/shake-feed/claim", async (req, res) => {
+  try {
+    const result = await claimShakeFeedBonus({
       telegram_id: req.body?.telegram_id,
       username: req.body?.username,
       first_name: req.body?.first_name,

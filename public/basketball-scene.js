@@ -12,7 +12,7 @@
 // соблюдены: ~30fps, без shadowBlur и per-frame фильтров, свечение — только
 // предрендеренными спрайтами, частицы жёстко капнуты.
 
-import { registerScene } from "./shake-scenes.js?v=20260711-02";
+import { registerScene } from "./shake-scenes.js?v=20260712-01";
 import { playMotionSound } from "./lightning-motion.js?v=20260707-01";
 
 const INK = "#0a1322"; // тело силуэта

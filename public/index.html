@@ -185,6 +185,20 @@
                 <button id="depositBonusBtn" class="task-button gold" type="button">Пополнить</button>
               </div>
             </div>
+            <div id="shakeFeedTask" class="task-item featured hidden">
+              <span class="task-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 8.5c3 .4 5.5 2.2 5.5 3.5s-2.5 3.1-5.5 3.5"/><path d="M14.5 8.5C10.9 5.8 4 6.2 4 12s6.9 6.2 10.5 3.5c2-1.5 2-5.5 0-7z"/><path d="M12 11.8h.01"/></svg></span>
+              <div class="task-body">
+                <strong>Шейк, шейк!</strong>
+                <small>Покорми рыбок — тряси телефон на графике</small>
+                <div class="legend-progress">
+                  <div class="legend-progress-track"><i id="shakeFeedBar"></i></div>
+                  <small><span id="shakeFeedCur">0 из 100</span><span id="shakeFeedNext" class="deposit-bonus-next">+$1</span></small>
+                </div>
+              </div>
+              <div class="task-act">
+                <button id="shakeFeedBtn" class="task-button gold" type="button" disabled>Тряси!</button>
+              </div>
+            </div>
             <div class="streak-card" id="streakCard">
               <div class="streak-bolt" id="streakBolt" aria-hidden="true"></div>
               <div class="streak-info">
@@ -831,6 +845,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260712-02" type="module"></script>
+    <script src="/app.js?v=20260712-03" type="module"></script>
   </body>
 </html>

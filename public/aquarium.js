@@ -20,7 +20,7 @@ import {
   setShakeScenesRuntimeAllowed,
   stopActiveSceneLoop,
   wakeActiveScene,
-} from "./shake-scenes.js?v=20260711-02";
+} from "./shake-scenes.js?v=20260712-01";
 
 // Realistic little fish drawn as inline SVG (iOS DOM path). Faces +x; colours
 // come from CSS custom properties set per .fish-N class.

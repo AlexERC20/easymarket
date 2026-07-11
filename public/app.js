@@ -22,9 +22,9 @@ import {
   setAquariumPremiumFish,
   setAquariumRuntimeAllowed,
   setAquariumShakeFeeder,
-} from "./aquarium.js?v=20260711-04";
-import { getActiveSceneKey, setActiveScene } from "./shake-scenes.js?v=20260711-02";
-import "./basketball-scene.js?v=20260712-02"; // регистрирует сцену «Легенда 24»
+} from "./aquarium.js?v=20260712-01";
+import { getActiveSceneKey, setActiveScene, setShakeSceneListener } from "./shake-scenes.js?v=20260712-01";
+import "./basketball-scene.js?v=20260712-03"; // регистрирует сцену «Легенда 24»
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -200,6 +200,7 @@ const state = {
   aquariumPremiumFishUnlocked: false,
   legendScene: null,
   depositBonus: null,
+  shakeFeed: null,
   freshActivityIds: new Set(),
   playedActivityAnimIds: new Set(), // въезд/глинт уже проигран — не повторять на пере-рендерах
   lastPositionPnl: {},
@@ -281,6 +282,8 @@ function markTelegramShellEarly() {
 markTelegramShellEarly();
 initLightningMotion();
 initAquarium();
+// «Шейк, шейк!»: каждая встряска-кормление засчитывается в задание.
+setShakeSceneListener(onShakeFeedShake);
 // Let a phone shake feed the fish on demand, mid-round, from the current chart.
 setAquariumShakeFeeder(() => {
   const market = getDisplayMarket();
@@ -988,6 +991,127 @@ function applyAquariumEntitlements(data) {
   applyLegendSceneEntitlements(data);
   state.depositBonus = data?.deposit_bonus || state.depositBonus;
   renderDepositBonusTask();
+  state.shakeFeed = data?.shake_feed || state.shakeFeed;
+  renderShakeFeedTask();
+}
+
+// «Шейк, шейк!»: встряски копятся локально и улетают на сервер пачками —
+// не больше одного запроса раз в несколько секунд.
+let pendingShakeFeeds = 0;
+let shakeFeedFlushTimer = 0;
+
+async function flushShakeFeeds() {
+  shakeFeedFlushTimer = 0;
+  const count = Math.min(6, pendingShakeFeeds);
+  pendingShakeFeeds = 0;
+  if (!count || !state.user?.telegram_id) {
+    return;
+  }
+  try {
+    const result = await api("/api/shake-feed/ingest", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        username: state.user.username,
+        first_name: state.user.first_name,
+        count,
+      }),
+    });
+    if (result?.shake_feed) {
+      state.shakeFeed = result.shake_feed;
+      renderShakeFeedTask();
+    }
+  } catch {
+    pendingShakeFeeds += count; // не потеряли — доотправим со следующей встряской
+  }
+}
+
+function onShakeFeedShake() {
+  if (!state.user?.telegram_id) {
+    return;
+  }
+  pendingShakeFeeds += 1;
+  if (!shakeFeedFlushTimer) {
+    shakeFeedFlushTimer = window.setTimeout(() => {
+      void flushShakeFeeds();
+    }, 4000);
+  }
+}
+
+function renderShakeFeedTask() {
+  const row = $("shakeFeedTask");
+  if (!row) {
+    return;
+  }
+  const levels = Array.isArray(state.shakeFeed?.levels) ? state.shakeFeed.levels : [];
+  row.classList.toggle("hidden", levels.length === 0);
+  if (!levels.length) {
+    return;
+  }
+  const total = Math.max(0, Number(state.shakeFeed.total) || 0);
+  const readySum = levels
+    .filter((level) => level.ready)
+    .reduce((sum, level) => sum + (Number(level.bonus) || 0), 0);
+  const nextIdx = levels.findIndex((level) => !level.claimed && !level.ready);
+  const next = nextIdx >= 0 ? levels[nextIdx] : null;
+  const prevGoal = nextIdx > 0 ? Number(levels[nextIdx - 1].goal) || 0 : 0;
+  const lastGoal = Number(levels[levels.length - 1].goal) || 1;
+
+  const bar = $("shakeFeedBar");
+  if (bar) {
+    const fill = next
+      ? (total - prevGoal) / Math.max(1, (Number(next.goal) || 1) - prevGoal)
+      : 1;
+    bar.style.width = `${Math.round(Math.min(1, Math.max(0, fill)) * 100)}%`;
+  }
+  if ($("shakeFeedCur")) {
+    $("shakeFeedCur").textContent = `${Math.floor(total)} из ${Math.floor(next ? next.goal : lastGoal)}`;
+  }
+  const nextLabel = $("shakeFeedNext");
+  if (nextLabel) {
+    const nextBonus = Number(next?.bonus) || 0;
+    nextLabel.textContent = `+$${nextBonus}`;
+    nextLabel.classList.toggle("hidden", nextBonus <= 0);
+  }
+  const button = $("shakeFeedBtn");
+  if (button) {
+    if (readySum > 0) {
+      button.textContent = `Забрать $${readySum}`;
+      button.disabled = false;
+    } else if (next) {
+      button.textContent = "Тряси!";
+      button.disabled = true;
+    } else {
+      button.textContent = "Собрано";
+      button.disabled = true;
+    }
+  }
+}
+
+async function claimShakeFeedLevels(sourceElement = null) {
+  if (!state.user?.telegram_id) {
+    return;
+  }
+  try {
+    const result = await api("/api/shake-feed/claim", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        username: state.user.username,
+        first_name: state.user.first_name,
+      }),
+    });
+    const credited = Number(result?.credited || 0);
+    if (credited > 0) {
+      playTaskRewardAnimation(sourceElement);
+      showToast(`+$${credited} на бонусный счёт. Рыбки сыты!`);
+      void runSingleFlight("me", loadMe).catch(() => undefined);
+    } else {
+      showToast("Пока нечего забирать — тряси ещё.");
+    }
+  } catch {
+    showToast("Не получилось забрать бонус, попробуй ещё раз.");
+  }
 }
 
 // Лесенка бонусов за суммарный депозит: прогресс-бар до следующего уровня,
@@ -8713,6 +8837,11 @@ $("legendSceneTaskBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   closeSheet("tasksSheet");
   openTopupSheet(1000, "", "topup", "USDT");
+});
+
+$("shakeFeedBtn")?.addEventListener("click", (event) => {
+  triggerHaptic("selection");
+  void claimShakeFeedLevels(event.currentTarget);
 });
 
 $("depositBonusBtn")?.addEventListener("click", (event) => {

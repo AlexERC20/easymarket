@@ -323,12 +323,25 @@ function ingestOrientationGamma(gammaDeg) {
   }
 }
 
+// Наблюдатель встрясок: задание «Шейк, шейк!» считает кормления отсюда —
+// единая точка для любой активной сцены.
+let shakeListener = null;
+
+export function setShakeSceneListener(fn) {
+  shakeListener = typeof fn === "function" ? fn : null;
+}
+
 function triggerActiveScene(strength = 1) {
   const scene = activeScene();
   if (!canRunScene(scene)) {
     return false;
   }
   scene.summon?.(strength);
+  try {
+    shakeListener?.(strength);
+  } catch {
+    // счётчик заданий не должен ронять сцену
+  }
   if (sceneIsAlive(scene)) {
     wakeActiveScene();
   }

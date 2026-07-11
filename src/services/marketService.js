@@ -2993,6 +2993,123 @@ function depositBonusTaskKey(goal) {
   return `deposit_bonus_${goal}`;
 }
 
+// «Шейк, шейк!» — покорми рыбок встряской телефона. Суммарные встряски
+// открывают уровни бонуса на бонусный счёт: 100 -> $1, 300 -> $2, 500 -> $2
+// (тотал $5 — ровно на одну ставку). Анти-фарм: не больше 6 встрясок за
+// один репорт и жёсткий дневной кап в user_task_events.
+const SHAKE_FEED_LEVELS = [
+  { goal: 100, bonus: 1 },
+  { goal: 300, bonus: 2 },
+  { goal: 500, bonus: 2 },
+];
+const SHAKE_FEED_EVENT_KEY = "shake_feed";
+const SHAKE_FEED_DAILY_CAP = 300;
+const SHAKE_FEED_MAX_PER_REPORT = 6;
+
+function shakeFeedTaskKey(goal) {
+  return `shake_feed_${goal}`;
+}
+
+function buildShakeFeedStatus(total, claimedKeys) {
+  return {
+    total,
+    levels: SHAKE_FEED_LEVELS.map(({ goal, bonus }) => {
+      const claimed = claimedKeys.has(shakeFeedTaskKey(goal));
+      return {
+        goal,
+        bonus,
+        claimed,
+        ready: !claimed && total >= goal,
+      };
+    }),
+  };
+}
+
+async function getShakeFeedTotal(client, userId) {
+  const result = await client.query(
+    `
+      SELECT COALESCE(SUM(count), 0) AS total
+      FROM user_task_events
+      WHERE user_id = $1
+        AND event_key = $2
+    `,
+    [userId, SHAKE_FEED_EVENT_KEY],
+  );
+  return Number(result.rows[0]?.total || 0);
+}
+
+export async function ingestShakeFeed(input) {
+  const count = Math.max(1, Math.min(SHAKE_FEED_MAX_PER_REPORT, Math.round(Number(input.count) || 1)));
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+  await query(
+    `
+      INSERT INTO user_task_events (user_id, day_key, event_key, count)
+      VALUES ($1, $2, $3, LEAST($4, $5))
+      ON CONFLICT (user_id, day_key, event_key)
+      DO UPDATE SET count = LEAST(user_task_events.count + $4, $5), updated_at = now()
+    `,
+    [user.id, getDayKey(), SHAKE_FEED_EVENT_KEY, count, SHAKE_FEED_DAILY_CAP],
+  );
+  const [total, claimsResult] = await Promise.all([
+    getShakeFeedTotal({ query }, user.id),
+    query(
+      `
+        SELECT task_key
+        FROM usdt_bonus_claims
+        WHERE user_id = $1
+          AND task_key LIKE 'shake_feed_%'
+      `,
+      [user.id],
+    ),
+  ]);
+  return {
+    shake_feed: buildShakeFeedStatus(total, new Set(claimsResult.rows.map((row) => row.task_key))),
+  };
+}
+
+// Забирает разом все достигнутые и не полученные уровни «Шейк, шейк!».
+export async function claimShakeFeedBonus(input) {
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+
+  return withTransaction(async (client) => {
+    const total = await getShakeFeedTotal(client, user.id);
+    let credited = 0;
+    const claimedGoals = [];
+    for (const { goal, bonus } of SHAKE_FEED_LEVELS) {
+      if (total < goal) {
+        break;
+      }
+      const inserted = await client.query(
+        `
+          INSERT INTO usdt_bonus_claims (user_id, task_key, amount, source)
+          VALUES ($1, $2, $3::numeric, 'shake_feed')
+          ON CONFLICT DO NOTHING
+          RETURNING id
+        `,
+        [user.id, shakeFeedTaskKey(goal), bonus],
+      );
+      if (inserted.rows[0]) {
+        await adjustUsdtBonusBalance(client, user.id, bonus, "shake_feed_bonus", `goal:${goal}`);
+        credited += bonus;
+        claimedGoals.push(goal);
+      }
+    }
+    return {
+      credited: Math.round(credited * 100) / 100,
+      goals: claimedGoals,
+      shake_total: total,
+    };
+  });
+}
+
 function buildDepositBonusStatus(total, claimedKeys) {
   return {
     total,
@@ -3079,7 +3196,7 @@ export async function getUserSnapshot(telegramId) {
     [user.id],
   );
 
-  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, premiumFishResult, lossRefundOffersResult, depositTotalResult, depositBonusClaimsResult] = await Promise.all([
+  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, premiumFishResult, lossRefundOffersResult, depositTotalResult, depositBonusClaimsResult, shakeFeedTotal] = await Promise.all([
     getBalanceByUserId(user.id),
     getUsdtBalanceByUserId(user.id),
     getUsdtBonusBalanceByUserId(user.id),
@@ -3175,14 +3292,15 @@ export async function getUserSnapshot(telegramId) {
         SELECT task_key
         FROM usdt_bonus_claims
         WHERE user_id = $1
-          AND task_key LIKE 'deposit_bonus_%'
+          AND (task_key LIKE 'deposit_bonus_%' OR task_key LIKE 'shake_feed_%')
       `,
       [user.id],
     ),
+    getShakeFeedTotal({ query }, user.id),
   ]);
   const usdtTotalBalance = Math.round((usdtCashBalance + usdtBonusBalance) * 100) / 100;
   const depositTotal = Math.round(toNumber(depositTotalResult.rows[0]?.total) * 100) / 100;
-  const depositBonusClaimedKeys = new Set(depositBonusClaimsResult.rows.map((row) => row.task_key));
+  const bonusClaimedKeys = new Set(depositBonusClaimsResult.rows.map((row) => row.task_key));
   const sceneTester = isLegendSceneTester(user);
 
   return {
@@ -3205,7 +3323,8 @@ export async function getUserSnapshot(telegramId) {
       deposit_total: depositTotal,
       deposit_goal: LEGEND_SCENE_DEPOSIT_GOAL,
     },
-    deposit_bonus: buildDepositBonusStatus(depositTotal, depositBonusClaimedKeys),
+    deposit_bonus: buildDepositBonusStatus(depositTotal, bonusClaimedKeys),
+    shake_feed: buildShakeFeedStatus(shakeFeedTotal, bonusClaimedKeys),
     loss_refund_offers: lossRefundOffersResult.rows.map((row) => ({
       id: Number(row.id),
       position_id: Number(row.position_id),
