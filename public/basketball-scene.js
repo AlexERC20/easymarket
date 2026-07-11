@@ -38,6 +38,7 @@ let balls = [];
 let particles = [];
 let popups = [];
 let streaks = []; // световые росчерки за игроком на входе
+let floorFlashes = []; // блики пола в точках отскока мяча
 let combo = 0; // свищи подряд — живёт всю сессию
 let flashTint = 0; // полноэкранная вспышка на комбо 24
 let slowmoLeft = 0; // реального времени осталось в slow-mo
@@ -46,7 +47,6 @@ let shotsSinceSignature = 0;
 let pendingSummonStrength = 0;
 
 let ballGlowSprite = null;
-let playerGlowSprite = null;
 
 // ---------------------------------------------------------------------------
 // Спрайты свечения (рисуются один раз)
@@ -68,7 +68,6 @@ function makeGlow(rgb, coreAlpha = 0.5) {
 
 function ensureSprites() {
   ballGlowSprite ||= makeGlow("255, 157, 63", 0.42);
-  playerGlowSprite ||= makeGlow("53, 246, 255", 0.26);
 }
 
 function rand(min, max) {
@@ -118,6 +117,13 @@ const POSES = {
   backHold: { crouch: 0.24, lean: 0.1, shF: 0.5, elF: -1.05, shB: 0.42, elB: -1.1, hipF: -0.16, kneeF: 0.34, hipB: 0.14, kneeB: 0.26, run: 0 },
   land: { crouch: 0.36, lean: 0.12, shF: 0.6, elF: 0.5, shB: -0.5, elB: 0.5, hipF: -0.4, kneeF: 0.8, hipB: 0.36, kneeB: 0.6, run: 0 },
   celebrate: { crouch: 0.03, lean: -0.08, shF: -3.05, elF: -0.06, shB: 0.4, elB: 0.5, hipF: -0.1, kneeF: 0.2, hipB: 0.1, kneeB: 0.16, run: 0 },
+  // Follow-through: рука остаётся вытянутой после выпуска — фирменный жест.
+  followThrough: { crouch: 0.05, lean: -0.1, shF: -2.98, elF: -0.05, shB: -0.5, elB: 0.35, hipF: -0.25, kneeF: 0.4, hipB: 0.28, kneeB: 0.25, run: 0 },
+  fadeFollow: { crouch: 0.04, lean: -0.32, shF: -2.92, elF: -0.06, shB: -0.6, elB: 0.4, hipF: -0.5, kneeF: 0.7, hipB: 0.2, kneeB: 0.5, run: 0 },
+  // Защитник: стойка, контест с вытянутой рукой и поникший уход.
+  defense: { crouch: 0.42, lean: 0.18, shF: -1.15, elF: -0.6, shB: 0.95, elB: 0.55, hipF: -0.55, kneeF: 0.95, hipB: 0.5, kneeB: 0.7, run: 0 },
+  contest: { crouch: 0.06, lean: -0.05, shF: -3.1, elF: -0.02, shB: 0.5, elB: 0.4, hipF: -0.45, kneeF: 0.9, hipB: 0.2, kneeB: 0.45, run: 0 },
+  dejected: { crouch: 0.22, lean: 0.34, shF: 0.35, elF: 0.15, shB: -0.3, elB: 0.15, hipF: -0.1, kneeF: 0.25, hipB: 0.1, kneeB: 0.2, run: 0 },
 };
 
 function lerpPose(a, b, t) {
@@ -128,70 +134,102 @@ function lerpPose(a, b, t) {
   return out;
 }
 
-const player = {
-  active: false,
-  x: 0,
-  facing: 1, // визуальный (скользит), 1 = лицом к кольцу
-  facingTarget: 1,
-  airY: 0,
-  airX: 0,
-  pose: { ...POSES.stand },
-  from: { ...POSES.stand },
-  to: { ...POSES.stand },
-  t: 0,
-  dur: 0.001,
-  ease: easeInOut,
-  queue: [], // очередь действий {to, dur, ease, hold, onStart, onDone}
-  onDone: null,
-  runPhase: 0,
+function makeActor() {
+  return {
+    active: false,
+    x: 0,
+    facing: 1, // визуальный (скользит), 1 = лицом к кольцу
+    facingTarget: 1,
+    airY: 0,
+    airX: 0,
+    sway: 0, // покачивание корпуса на дриблинге
+    pose: { ...POSES.stand },
+    from: { ...POSES.stand },
+    to: { ...POSES.stand },
+    t: 0,
+    dur: 0.001,
+    ease: easeInOut,
+    queue: [], // очередь действий {to, dur, ease, onStart, onDone}
+    onDone: null,
+    runPhase: Math.random() * Math.PI * 2,
+    jump: null,
+  };
+}
+
+// Звезда: неоново-лаймовое ядро, номер 24, мяч.
+const player = Object.assign(makeActor(), {
   heldBall: null,
-  jump: null,
   wants24: false, // замах коронки: просим «24» на спину
   show24: 0, // альфа номера на спине
   celebrating24: 0,
+});
+
+// Защитник: розовое ядро, выбегает на коронку и получает бросок через себя.
+const defender = Object.assign(makeActor(), {
+  mode: null, // enter | guard | jump | sad | exit
+});
+
+const PLAYER_STYLE = {
+  coreLimb: "rgba(183, 255, 77, 0.85)",
+  coreBack: "rgba(53, 246, 255, 0.34)",
+  coreTorso: "rgba(183, 255, 77, 0.75)",
+  head: "rgba(53, 246, 255, 0.8)",
+  glowRgb: "53, 246, 255",
 };
 
-function playerAct(actions) {
-  player.queue.push(...actions);
+const DEFENDER_STYLE = {
+  coreLimb: "rgba(255, 92, 138, 0.8)",
+  coreBack: "rgba(255, 92, 138, 0.3)",
+  coreTorso: "rgba(255, 92, 138, 0.7)",
+  head: "rgba(255, 130, 165, 0.8)",
+  glowRgb: "255, 92, 138",
+};
+
+function actorAct(actor, actions) {
+  actor.queue.push(...actions);
 }
 
-function stepPlayer(dt) {
-  if (!player.active) {
+function playerAct(actions) {
+  actorAct(player, actions);
+}
+
+function stepActor(actor, dt) {
+  if (!actor.active) {
     return;
   }
-  player.runPhase += dt * 9;
-  player.facing += (player.facingTarget - player.facing) * Math.min(1, dt * 7);
-  player.t += dt;
-  if (player.t >= player.dur) {
-    const done = player.queue.length === 0;
+  actor.runPhase += dt * 9;
+  actor.facing += (actor.facingTarget - actor.facing) * Math.min(1, dt * 7);
+  actor.t += dt;
+  if (actor.t >= actor.dur) {
+    const done = actor.queue.length === 0;
     if (!done) {
-      const next = player.queue.shift();
-      player.from = { ...player.pose };
-      player.to = { ...POSES[next.to] };
-      player.dur = Math.max(0.05, next.dur);
-      player.ease = next.ease || easeInOut;
-      player.t = 0;
-      player.onDone = next.onDone || null;
+      const next = actor.queue.shift();
+      actor.from = { ...actor.pose };
+      actor.to = { ...POSES[next.to] };
+      actor.dur = Math.max(0.05, next.dur);
+      actor.ease = next.ease || easeInOut;
+      actor.t = 0;
+      actor.onDone = next.onDone || null;
       next.onStart?.();
-    } else if (player.onDone) {
-      const cb = player.onDone;
-      player.onDone = null;
+    } else if (actor.onDone) {
+      const cb = actor.onDone;
+      actor.onDone = null;
       cb();
     }
   } else {
-    const k = player.ease(Math.min(1, player.t / player.dur));
-    player.pose = lerpPose(player.from, player.to, k);
+    const k = actor.ease(Math.min(1, actor.t / actor.dur));
+    actor.pose = lerpPose(actor.from, actor.to, k);
   }
-  if (player.onDone && player.t >= player.dur) {
-    const cb = player.onDone;
-    player.onDone = null;
+  if (actor.onDone && actor.t >= actor.dur) {
+    const cb = actor.onDone;
+    actor.onDone = null;
     cb();
   }
 }
 
-// FK: joints в локальных координатах игрока (x вперёд, y вниз, ноги на 0).
-function joints(m) {
-  const p = player.pose;
+// FK: joints в локальных координатах актёра (x вперёд, y вниз, ноги на 0).
+function joints(actor, m) {
+  const p = actor.pose;
   const s = m.ph;
   const legL = s * 0.41;
   const torso = s * 0.31;
@@ -200,13 +238,16 @@ function joints(m) {
   const thigh = s * 0.215;
   const shin = s * 0.2;
 
-  const hipY = -legL * (1 - p.crouch * 0.34) - player.airY;
-  const hip = { x: player.airX, y: hipY };
-  const lean = p.lean;
+  // «Дыхание» на месте: едва заметный вертикальный ход корпуса, гаснет в беге
+  // и прыжке — силуэт никогда не стоит замороженным.
+  const breathe = Math.sin(actor.runPhase * 0.6) * s * 0.012 * (1 - p.run) * (actor.jump ? 0 : 1);
+  const hipY = -legL * (1 - p.crouch * 0.34) - actor.airY + breathe;
+  const hip = { x: actor.airX + actor.sway, y: hipY };
+  const lean = p.lean + actor.sway * 0.01;
   const neck = { x: hip.x + Math.sin(lean) * torso, y: hip.y - Math.cos(lean) * torso };
   const head = { x: neck.x + Math.sin(lean) * s * 0.09, y: neck.y - Math.cos(lean) * s * 0.115 };
 
-  const runSwing = p.run * Math.sin(player.runPhase) * 0.55;
+  const runSwing = p.run * Math.sin(actor.runPhase) * 0.55;
   const limb = (root, a1, l1, a2, l2) => {
     const mid = { x: root.x + Math.sin(a1) * l1, y: root.y + Math.cos(a1) * l1 };
     const tip = { x: mid.x + Math.sin(a1 + a2) * l2, y: mid.y + Math.cos(a1 + a2) * l2 };
@@ -222,7 +263,7 @@ function joints(m) {
 }
 
 function handWorld(m) {
-  const j = joints(m);
+  const j = joints(player, m);
   return {
     x: player.x + j.armF.tip.x * player.facing,
     y: m.floorY + j.armF.tip.y,
@@ -374,6 +415,7 @@ function startShow(m) {
   player.onDone = null;
   player.jump = null;
   player.wants24 = false;
+  player.sway = 0;
   player.t = 0;
   player.dur = 0.001;
   hoop.netPhase = 0;
@@ -426,29 +468,40 @@ function releaseHeld(ball, m, slow) {
 
 function regularShot(ball, m) {
   playerAct([
-    { to: "dribble", dur: 0.24, onStart: () => { ball.dribble = { t: 0, n: 2 }; } },
-    { to: "dribble", dur: 0.52 },
+    // Кроссовер: три удара с переносом мяча с руки на руку и покачиванием.
+    { to: "dribble", dur: 0.22, onStart: () => { ball.dribble = { t: 0, n: 3, cross: true }; } },
+    { to: "dribble", dur: 0.72 },
     { to: "gather", dur: 0.2 },
-    { to: "rise", dur: 0.16, ease: easeOutCubic, onStart: () => { player.jump = { t: 0, dur: 0.62, h: m.ph * 0.5, drift: 0 }; } },
+    { to: "rise", dur: 0.16, ease: easeOutCubic, onStart: () => { player.jump = { t: 0, dur: 0.66, h: m.ph * 0.5, drift: 0 }; } },
     {
       to: "release",
-      dur: 0.16,
+      dur: 0.14,
       ease: easeOutCubic,
       onStart: () => {
-        window.setTimeout(() => releaseHeld(ball, m, false), 90);
+        window.setTimeout(() => releaseHeld(ball, m, false), 80);
       },
     },
-    { to: "land", dur: 0.34, ease: easeInCubic },
+    // Рука держит follow-through, пока мяч летит — читается как класс.
+    { to: "followThrough", dur: 0.3 },
+    { to: "land", dur: 0.3, ease: easeOutBack },
     { to: "stand", dur: 0.24, onDone: () => phase === "play" && nextShot(m) },
   ]);
 }
 
 function signatureShot(ball, m) {
-  // Turnaround fadeaway: спина к кольцу (номер 24 виден), пауза, разворот,
-  // отклонение назад и зависание в slow-mo.
+  // Turnaround fadeaway через защитника: соперник выбегает в стойку, звезда
+  // показывает спину с «24», разворот, отклонение назад — бросок через
+  // вытянутую руку в slow-mo.
   playerAct([
-    { to: "dribble", dur: 0.24, onStart: () => { ball.dribble = { t: 0, n: 1 }; } },
-    { to: "dribble", dur: 0.34 },
+    {
+      to: "dribble",
+      dur: 0.22,
+      onStart: () => {
+        ball.dribble = { t: 0, n: 2, cross: true };
+        summonDefender(m);
+      },
+    },
+    { to: "dribble", dur: 0.5 },
     {
       to: "backHold",
       dur: 0.3,
@@ -457,7 +510,7 @@ function signatureShot(ball, m) {
         player.wants24 = true;
       },
     },
-    { to: "backHold", dur: 0.34 }, // пауза: спина с «24» на камеру
+    { to: "backHold", dur: 0.38 }, // пауза: спина с «24», защитник в стойке
     {
       to: "fadeRise",
       dur: 0.24,
@@ -466,6 +519,7 @@ function signatureShot(ball, m) {
         player.facingTarget = 1;
         player.wants24 = false;
         player.jump = { t: 0, dur: 0.94, h: m.ph * 0.62, drift: -m.ph * 0.34 };
+        defenderContest(m);
       },
     },
     {
@@ -476,8 +530,50 @@ function signatureShot(ball, m) {
         window.setTimeout(() => releaseHeld(ball, m, true), 140);
       },
     },
-    { to: "land", dur: 0.4, ease: easeInCubic, onStart: () => { player.celebrating24 = 1; } },
+    // Зависание с вытянутой рукой над защитником — момент для скриншота.
+    { to: "fadeFollow", dur: 0.34 },
+    { to: "land", dur: 0.34, ease: easeOutBack, onStart: () => { player.celebrating24 = 1; } },
     { to: "stand", dur: 0.26, onDone: () => phase === "play" && nextShot(m) },
+  ]);
+}
+
+// ---------------------------------------------------------------------------
+// Защитник
+
+function summonDefender(m) {
+  if (defender.active) {
+    return;
+  }
+  defender.active = true;
+  defender.mode = "enter";
+  defender.x = m.width + m.ph;
+  defender.facing = -1; // лицом к звезде
+  defender.facingTarget = -1;
+  defender.airY = 0;
+  defender.airX = 0;
+  defender.sway = 0;
+  defender.jump = null;
+  defender.queue = [];
+  defender.onDone = null;
+  defender.pose = { ...POSES.run };
+  defender.from = { ...POSES.run };
+  defender.to = { ...POSES.run };
+  defender.t = 0;
+  defender.dur = 0.001;
+}
+
+function defenderContest(m) {
+  if (!defender.active) {
+    return;
+  }
+  defender.mode = "jump";
+  defender.jump = { t: 0, dur: 0.8, h: m.ph * 0.52, drift: -m.ph * 0.1 };
+  actorAct(defender, [
+    { to: "contest", dur: 0.2, ease: easeOutCubic },
+    { to: "contest", dur: 0.42 },
+    { to: "land", dur: 0.3, ease: easeInCubic },
+    // Поник: бросили через него. Пауза — и грустный уход.
+    { to: "dejected", dur: 0.36, onDone: () => { defender.mode = "sad"; } },
   ]);
 }
 
@@ -500,19 +596,54 @@ function finishShow(m) {
 // ---------------------------------------------------------------------------
 // Update
 
-function stepJump(dt) {
-  if (!player.jump) {
+function stepJump(actor, dt) {
+  if (!actor.jump) {
     return;
   }
-  const j = player.jump;
+  const j = actor.jump;
   j.t += dt;
   const k = Math.min(1, j.t / j.dur);
-  player.airY = Math.sin(k * Math.PI) * j.h;
-  player.airX = Math.sin(k * Math.PI) * (j.drift || 0);
+  actor.airY = Math.sin(k * Math.PI) * j.h;
+  actor.airX = Math.sin(k * Math.PI) * (j.drift || 0);
   if (k >= 1) {
-    player.jump = null;
-    player.airY = 0;
-    player.airX = 0;
+    actor.jump = null;
+    actor.airY = 0;
+    actor.airX = 0;
+  }
+}
+
+// Движение защитника между фазами (позы гоняет общий stepActor).
+function stepDefender(dt, rdt, m) {
+  if (!defender.active) {
+    return;
+  }
+  const guardX = player.x + m.ph * 1.05;
+  if (defender.mode === "enter") {
+    defender.x += (guardX - defender.x) * Math.min(1, dt * 5);
+    defender.pose = lerpPose(defender.pose, POSES.run, Math.min(1, dt * 8));
+    if (defender.x - guardX < m.ph * 0.06) {
+      defender.x = guardX;
+      defender.mode = "guard";
+      actorAct(defender, [{ to: "defense", dur: 0.24, ease: easeOutCubic }]);
+    }
+  } else if (defender.mode === "guard") {
+    // Живая стойка: лёгкие приставные покачивания.
+    defender.sway = Math.sin(defender.runPhase * 0.9) * m.ph * 0.03;
+  } else if (defender.mode === "sad") {
+    defender.sway = 0;
+    defender.sadUntil ||= Date.now() + 700;
+    if (Date.now() > defender.sadUntil) {
+      defender.mode = "exit";
+      defender.sadUntil = 0;
+      defender.facingTarget = 1; // уходит направо, откуда пришёл
+      actorAct(defender, [{ to: "run", dur: 0.3 }]);
+    }
+  } else if (defender.mode === "exit") {
+    defender.x += dt * m.width * 0.42;
+    if (defender.x > m.width + m.ph * 1.3) {
+      defender.active = false;
+      defender.mode = null;
+    }
   }
 }
 
@@ -546,8 +677,11 @@ function updateScene(rdt) {
     }
   }
 
-  stepPlayer(dt);
-  stepJump(dt);
+  stepActor(player, dt);
+  stepJump(player, dt);
+  stepActor(defender, dt);
+  stepJump(defender, dt);
+  stepDefender(dt, rdt, m);
   // «24» на спине: хотим показать (замах коронки) И спина уже к камере.
   const backVisible = player.facing < -0.3;
   player.show24 += (((player.wants24 && backVisible) ? 1 : 0) - player.show24) * Math.min(1, rdt * 7);
@@ -573,28 +707,37 @@ function updateScene(rdt) {
     }
   }
 
-  // Дриблинг мяча в руке
+  // Дриблинг мяча в руке. Кроссовер: мяч ходит с руки на руку, корпус
+  // качается в противофазе — живой ритм вместо метронома.
   const held = player.heldBall;
   if (held) {
     const hand = handWorld(m);
     if (held.dribble) {
-      held.dribble.t += dt * 3.4;
+      held.dribble.t += dt * 3.6;
       const cycle = held.dribble.t % 1;
+      const bounceIdx = Math.floor(held.dribble.t);
       const down = Math.sin(cycle * Math.PI);
       const prevY = held.y;
+      const side = held.dribble.cross ? (bounceIdx % 2 ? -1 : 1) : 1;
+      const crossShift = held.dribble.cross ? side * m.ph * 0.16 * down : 0;
       held.y = hand.y + (m.floorY - held.r - hand.y) * down;
-      held.x = hand.x + (player.facing > 0 ? 2 : -2);
+      held.x = hand.x + (player.facing > 0 ? 2 : -2) + crossShift;
+      player.sway = held.dribble.cross ? -side * m.ph * 0.05 * down : 0;
       if (down > 0.97 && prevY < held.y) {
         playMotionSound("tap");
+        floorFlashes.push({ x: held.x, age: 0 });
       }
       if (held.dribble.t >= held.dribble.n) {
         held.dribble = null;
+        player.sway = 0;
       }
     } else {
       held.x += (hand.x - held.x) * Math.min(1, dt * 18);
       held.y += (hand.y - held.y) * Math.min(1, dt * 18);
     }
     held.rot += dt * 6;
+  } else {
+    player.sway *= Math.max(0, 1 - dt * 8);
   }
 
   // Физика мячей
@@ -614,6 +757,7 @@ function updateScene(rdt) {
         ball.vy = -Math.abs(ball.vy) * 0.46;
         ball.vx *= 0.8;
         playMotionSound("tap");
+        floorFlashes.push({ x: ball.x, age: 0 });
         if (ball.bounces >= 2 || Math.abs(ball.vy) < m.height * 0.04) {
           ball.state = "queue";
           ball.vy = 0;
@@ -686,6 +830,10 @@ function updateScene(rdt) {
     s.age += rdt;
   }
   streaks = streaks.filter((s) => s.age < s.life);
+  for (const f of floorFlashes) {
+    f.age += rdt;
+  }
+  floorFlashes = floorFlashes.filter((f) => f.age < 0.35);
 }
 
 // ---------------------------------------------------------------------------
@@ -735,20 +883,29 @@ function strokeLimb(ctx, ax, ay, bx, by, cx, cy, w) {
   ctx.stroke();
 }
 
-function drawPlayer(ctx, m) {
-  if (!player.active) {
+const actorGlowSprites = new Map();
+function actorGlow(rgb) {
+  if (!actorGlowSprites.has(rgb)) {
+    actorGlowSprites.set(rgb, makeGlow(rgb, 0.26));
+  }
+  return actorGlowSprites.get(rgb);
+}
+
+function drawActor(ctx, m, actor, style) {
+  if (!actor.active) {
     return;
   }
-  const j = joints(m);
-  const f = player.facing;
+  const j = joints(actor, m);
+  const f = actor.facing;
+  const isStar = actor === player;
   ctx.save();
-  ctx.translate(player.x, m.floorY);
+  ctx.translate(actor.x, m.floorY);
   ctx.scale(f < 0 ? Math.min(-0.12, f) : Math.max(0.12, f), 1);
 
   // ореол
-  ctx.globalAlpha = 0.5;
+  ctx.globalAlpha = isStar ? 0.5 : 0.36;
   const gr = m.ph * 0.9;
-  ctx.drawImage(playerGlowSprite, j.hip.x - gr, j.hip.y - gr * 0.8, gr * 2, gr * 2);
+  ctx.drawImage(actorGlow(style.glowRgb), j.hip.x - gr, j.hip.y - gr * 0.8, gr * 2, gr * 2);
   ctx.globalAlpha = 1;
 
   ctx.lineCap = "round";
@@ -759,7 +916,7 @@ function drawPlayer(ctx, m) {
   ctx.strokeStyle = INK;
   strokeLimb(ctx, j.neck.x, j.neck.y, j.armB.mid.x, j.armB.mid.y, j.armB.tip.x, j.armB.tip.y, limbW);
   strokeLimb(ctx, j.hip.x, j.hip.y, j.legB.mid.x, j.legB.mid.y, j.legB.tip.x, j.legB.tip.y, limbW * 1.15);
-  ctx.strokeStyle = "rgba(53, 246, 255, 0.34)";
+  ctx.strokeStyle = style.coreBack;
   strokeLimb(ctx, j.neck.x, j.neck.y, j.armB.mid.x, j.armB.mid.y, j.armB.tip.x, j.armB.tip.y, limbW * 0.28);
   strokeLimb(ctx, j.hip.x, j.hip.y, j.legB.mid.x, j.legB.mid.y, j.legB.tip.x, j.legB.tip.y, limbW * 0.3);
 
@@ -775,20 +932,20 @@ function drawPlayer(ctx, m) {
   ctx.arc(j.head.x, j.head.y, j.headR, 0, Math.PI * 2);
   ctx.fill();
   // энергетическое ядро
-  ctx.strokeStyle = "rgba(183, 255, 77, 0.75)";
+  ctx.strokeStyle = style.coreTorso;
   ctx.lineWidth = limbW * 0.32;
   ctx.beginPath();
   ctx.moveTo(j.hip.x, j.hip.y);
   ctx.lineTo(j.neck.x, j.neck.y);
   ctx.stroke();
-  ctx.strokeStyle = "rgba(53, 246, 255, 0.8)";
+  ctx.strokeStyle = style.head;
   ctx.lineWidth = 1.2;
   ctx.beginPath();
   ctx.arc(j.head.x, j.head.y, j.headR, 0, Math.PI * 2);
   ctx.stroke();
 
-  // номер 24 на спине (виден, когда игрок спиной к кольцу)
-  if (player.show24 > 0.02) {
+  // номер 24 на спине (виден, когда звезда спиной к кольцу)
+  if (isStar && player.show24 > 0.02) {
     ctx.save();
     ctx.scale(-1, 1); // текст не должен зеркалиться
     ctx.globalAlpha = player.show24;
@@ -805,12 +962,12 @@ function drawPlayer(ctx, m) {
   ctx.strokeStyle = INK;
   strokeLimb(ctx, j.hip.x, j.hip.y, j.legF.mid.x, j.legF.mid.y, j.legF.tip.x, j.legF.tip.y, limbW * 1.15);
   strokeLimb(ctx, j.neck.x, j.neck.y, j.armF.mid.x, j.armF.mid.y, j.armF.tip.x, j.armF.tip.y, limbW);
-  ctx.strokeStyle = "rgba(183, 255, 77, 0.85)";
+  ctx.strokeStyle = style.coreLimb;
   strokeLimb(ctx, j.hip.x, j.hip.y, j.legF.mid.x, j.legF.mid.y, j.legF.tip.x, j.legF.tip.y, limbW * 0.3);
   strokeLimb(ctx, j.neck.x, j.neck.y, j.armF.mid.x, j.armF.mid.y, j.armF.tip.x, j.armF.tip.y, limbW * 0.28);
 
   // «24» на груди после коронки — золотой отсвет на праздновании
-  if (player.celebrating24 > 0.05 && phase !== "exit") {
+  if (isStar && player.celebrating24 > 0.05 && phase !== "exit") {
     ctx.globalAlpha = Math.min(1, player.celebrating24);
     ctx.fillStyle = GOLD;
     ctx.font = `900 ${Math.round(m.ph * 0.14)}px system-ui, sans-serif`;
@@ -966,7 +1123,23 @@ function drawScene(ctx, measured) {
     drawBall(ctx, ball);
   }
 
-  drawPlayer(ctx, m);
+  // Блики пола в точках отскока
+  if (floorFlashes.length) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (const f of floorFlashes) {
+      const k = 1 - f.age / 0.35;
+      ctx.globalAlpha = k * 0.5;
+      const fr = m.ph * 0.3 * (1 + (1 - k) * 0.8);
+      ctx.drawImage(ballGlowSprite, f.x - fr, m.floorY - fr * 0.28, fr * 2, fr * 0.56);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  // Защитник позади звезды: бросают именно через него.
+  drawActor(ctx, m, defender, DEFENDER_STYLE);
+  drawActor(ctx, m, player, PLAYER_STYLE);
 
   // летящие мячи: след → мяч
   for (const ball of balls) {
@@ -1125,6 +1298,8 @@ const basketballScene = {
       || balls.length > 0
       || particles.length > 0
       || popups.length > 0
+      || floorFlashes.length > 0
+      || defender.active
       || pendingSummonStrength > 0
       || hoop.visible > 0.02;
   },
@@ -1133,6 +1308,7 @@ const basketballScene = {
     particles = [];
     popups = [];
     streaks = [];
+    floorFlashes = [];
     player.active = false;
     player.heldBall = null;
     player.queue = [];
@@ -1140,6 +1316,13 @@ const basketballScene = {
     player.jump = null;
     player.wants24 = false;
     player.show24 = 0;
+    player.sway = 0;
+    defender.active = false;
+    defender.mode = null;
+    defender.queue = [];
+    defender.onDone = null;
+    defender.jump = null;
+    defender.sadUntil = 0;
     phase = "idle";
     hoop.visible = 0;
     hoop.ring = 0;
