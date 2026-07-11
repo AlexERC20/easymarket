@@ -246,10 +246,15 @@
 }
 
 .lm-clickable {
-  position: relative;
   overflow: hidden;
   isolation: isolate;
   border-radius: var(--lm-radius, inherit);
+}
+
+/* Нулевая специфичность: кнопка со своим позиционированием (например,
+   абсолютная MAX в поле суммы) не должна выпадать из угла после тапа. */
+:where(.lm-clickable) {
+  position: relative;
 }
 
 .lm-clickable[data-stake-tier="1"] {

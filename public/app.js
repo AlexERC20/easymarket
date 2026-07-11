@@ -7025,8 +7025,46 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-// Keep a focused sheet input visible above the on-screen keyboard so the
-// bottom-anchored panel doesn't jump/jitter when the keyboard opens.
+// Плавная клавиатура для нижних шторок. Когда Telegram сжимает вьюпорт под
+// клавиатуру, прижатая к низу панель телепортируется вверх на высоту
+// клавиатуры. Компенсируем FLIP-ом: мгновенно возвращаем панель на старое
+// место через translate (не конфликтует с transform из bottomSheetIn) и даём
+// CSS-переходу довезти её до нового.
+let sheetViewportHeight = window.innerHeight;
+
+function glideOpenSheetPanels(delta) {
+  document
+    .querySelectorAll(".task-sheet:not(.hidden) :is(.task-panel, .bet-panel)")
+    .forEach((panel) => {
+      // Текущий Y из computed style: если глайд ещё едет, стартуем с него.
+      const currentY = parseFloat(String(getComputedStyle(panel).translate || "").split(" ")[1] || "") || 0;
+      panel.style.transition = "none";
+      panel.style.translate = `0 ${currentY - delta}px`;
+      void panel.offsetHeight;
+      panel.style.transition = "";
+      panel.style.translate = "0 0";
+    });
+}
+
+window.addEventListener("resize", () => {
+  const delta = window.innerHeight - sheetViewportHeight;
+  sheetViewportHeight = window.innerHeight;
+  if (Math.abs(delta) >= 40) {
+    glideOpenSheetPanels(delta);
+  }
+});
+
+// iOS-клавиатуры-оверлеи не меняют layout-вьюпорт — фиксированная шторка не
+// прыгает, но поле оказывается под клавиатурой. Приподнимаем через --kb-inset
+// (у .task-sheet есть transition на padding-bottom).
+window.visualViewport?.addEventListener("resize", () => {
+  const vv = window.visualViewport;
+  const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+  document.documentElement.style.setProperty("--kb-inset", `${Math.round(overlap)}px`);
+});
+
+// После того как клавиатура и глайд устаканились, доводим поле до видимости —
+// только если его реально перекрыло, и минимальным сдвигом, без прыжка в центр.
 document.addEventListener("focusin", (event) => {
   const el = event.target;
   if (!(el instanceof HTMLElement) || !el.matches("input, textarea")) {
@@ -7036,12 +7074,22 @@ document.addEventListener("focusin", (event) => {
     return;
   }
   window.setTimeout(() => {
+    if (document.activeElement !== el) {
+      return;
+    }
+    const vv = window.visualViewport;
+    const visibleTop = (vv?.offsetTop ?? 0) + 8;
+    const visibleBottom = (vv ? vv.offsetTop + vv.height : window.innerHeight) - 8;
+    const rect = el.getBoundingClientRect();
+    if (rect.top >= visibleTop && rect.bottom <= visibleBottom) {
+      return;
+    }
     try {
-      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
     } catch {
       el.scrollIntoView();
     }
-  }, 280);
+  }, 360);
 });
 
 $("clanInfoBtn")?.addEventListener("click", () => {

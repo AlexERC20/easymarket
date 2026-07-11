@@ -2493,6 +2493,9 @@ code {
   /* Darker backdrop so the live chart/aquarium behind doesn't flicker through. */
   background: rgba(3, 6, 11, 0.74);
   padding: 14px;
+  /* Клавиатуры-оверлеи (не сжимают вьюпорт): приподнимаем шторку плавно. */
+  padding-bottom: calc(14px + var(--kb-inset, 0px));
+  transition: padding-bottom 300ms var(--ease-default);
 }
 
 .task-sheet.sheet-open {
@@ -2535,6 +2538,14 @@ code {
   transform-origin: center bottom;
   overscroll-behavior: contain;
   will-change: transform, opacity;
+}
+
+/* Плавный «доезд» шторки при открытии/закрытии клавиатуры: app.js ставит
+   стартовый сдвиг через translate, сюда возвращаемся с анимацией. Отдельное
+   свойство translate не конфликтует с transform из bottomSheetIn. */
+.task-panel,
+.bet-panel {
+  transition: translate 300ms var(--ease-default);
 }
 
 .task-sheet.sheet-open .task-panel {
