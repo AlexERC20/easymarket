@@ -387,6 +387,11 @@ const formatCents = (value) => {
   }
   return `${Math.round(cents)}¢`;
 };
+const outcomePriceToCentsInput = (value) => {
+  const cents = Number(value || 0) * 100;
+  return Number(cents.toFixed(3)).toString();
+};
+const centsInputToOutcomePrice = (value) => Number(value) / 100;
 const yesNoSideLabel = (side) => (side === "YES" ? "Yes" : "No");
 const sideLabel = (side) => (side === "YES" ? "UP" : "DOWN");
 const marketSideLabel = (market, side) => (
@@ -3433,7 +3438,7 @@ function syncLimitOrderDefaults(market, side) {
   }
 
   if (!state.orderbook.formPrice && market) {
-    state.orderbook.formPrice = getLimitOrderDefaultPrice(market, side).toFixed(3);
+    state.orderbook.formPrice = outcomePriceToCentsInput(getLimitOrderDefaultPrice(market, side));
   }
   if (!state.orderbook.formAmount) {
     state.orderbook.formAmount = String(state.selectedAmount || getAmountsForCurrency()[0] || 10);
@@ -3480,6 +3485,10 @@ function renderLimitOrderControls(market, side) {
 
   syncLimitOrderDefaults(market, side);
   const orderSide = state.orderbook.orderSide || "BUY";
+  const minPrice = getMarketMinOutcomePrice(market);
+  priceInput.min = outcomePriceToCentsInput(minPrice);
+  priceInput.max = outcomePriceToCentsInput(1 - minPrice);
+  priceInput.step = "0.1";
   buyButton?.classList.toggle("active", orderSide === "BUY");
   sellButton?.classList.toggle("active", orderSide === "SELL");
   // Drives the submit button colour (green Buy / red Sell).
@@ -3491,7 +3500,7 @@ function renderLimitOrderControls(market, side) {
     amountInput.value = state.orderbook.formAmount || "";
   }
 
-  const price = Number(state.orderbook.formPrice);
+  const price = centsInputToOutcomePrice(state.orderbook.formPrice);
   const amount = Number(state.orderbook.formAmount);
   const sellablePosition = getSellableLimitPosition(market, side);
   const sellableValue = Number(sellablePosition?.shares || 0) * price;
@@ -3500,7 +3509,8 @@ function renderLimitOrderControls(market, side) {
     && state.user
     && isMarketOpenForBuy(market)
     && Number.isFinite(price)
-    && price > 0
+    && price >= minPrice
+    && price <= 1 - minPrice
     && Number.isFinite(amount)
     && amount > 0
     && (orderSide !== "SELL" || (sellablePosition && amount <= sellableValue + 0.00000001))
@@ -6565,7 +6575,9 @@ async function submitLimitOrder() {
   const side = state.orderbookSide || state.selectedSide || "YES";
   const orderSide = state.orderbook.orderSide || "BUY";
   const amount = Number(state.orderbook.formAmount || 0);
-  const limitPrice = Number(state.orderbook.formPrice || 0);
+  const limitPriceCents = Number(state.orderbook.formPrice || 0);
+  const limitPrice = centsInputToOutcomePrice(limitPriceCents);
+  const minLimitPrice = getMarketMinOutcomePrice(market);
   if (!state.user || !market) {
     triggerHaptic("warning");
     showToast("Сначала нужен пользователь и активный рынок.");
@@ -6576,9 +6588,16 @@ async function submitLimitOrder() {
     showToast("Этот рынок уже завершился.");
     return;
   }
-  if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(limitPrice) || limitPrice <= 0) {
+  if (
+    !Number.isFinite(amount)
+    || amount <= 0
+    || !Number.isFinite(limitPriceCents)
+    || !Number.isFinite(limitPrice)
+    || limitPrice < minLimitPrice
+    || limitPrice > 1 - minLimitPrice
+  ) {
     triggerHaptic("warning");
-    showToast("Проверь цену и сумму лимитки.");
+    showToast("Проверь цену в центах и сумму лимитки.");
     return;
   }
   if (orderSide === "SELL") {
