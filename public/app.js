@@ -987,19 +987,58 @@ function applyAquariumEntitlements(data) {
   applyLegendSceneEntitlements(data);
 }
 
-// Сцена «Легенда 24»: сервер решает, кому доступно (сейчас — только админ).
-// Когда открыто — встряска показывает баскетбольный трибьют вместо аквариума.
-function applyLegendSceneEntitlements(data) {
-  const info = data?.legend_scene || null;
-  state.legendScene = info;
-  const unlocked = Boolean(info?.available && info?.unlocked);
+// Сцена «Легенда 24»: сервер решает, кому открыто (депозит $1000 или админ).
+// Владелец премиума сам выбирает в настройках: шоу или рыбки.
+const LEGEND_SCENE_PREF_KEY = "em_legend_scene_on";
+
+function legendScenePrefEnabled() {
+  try {
+    return window.localStorage?.getItem(LEGEND_SCENE_PREF_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function setLegendScenePref(on) {
+  try {
+    window.localStorage?.setItem(LEGEND_SCENE_PREF_KEY, on ? "1" : "0");
+  } catch {
+    // storage может быть недоступен в hardened webview
+  }
+}
+
+function isLegendSceneUnlocked() {
+  return Boolean(state.legendScene?.available && state.legendScene?.unlocked);
+}
+
+function syncActiveShakeScene() {
+  const wantPremium = isLegendSceneUnlocked() && legendScenePrefEnabled();
   const activeKey = getActiveSceneKey();
-  if (unlocked && activeKey === "aquarium") {
+  if (wantPremium && activeKey === "aquarium") {
     setActiveScene("basketball");
-  } else if (!unlocked && activeKey === "basketball") {
+  } else if (!wantPremium && activeKey === "basketball") {
     setActiveScene("aquarium");
   }
+}
+
+function applyLegendSceneEntitlements(data) {
+  state.legendScene = data?.legend_scene || null;
+  syncActiveShakeScene();
   renderLegendSceneTask();
+  renderLegendSceneToggle();
+}
+
+function renderLegendSceneToggle() {
+  const row = $("legendSceneSettingsRow");
+  const button = $("legendSceneToggleBtn");
+  if (!row || !button) {
+    return;
+  }
+  const unlocked = isLegendSceneUnlocked();
+  row.classList.toggle("hidden", !unlocked);
+  const on = legendScenePrefEnabled();
+  button.classList.toggle("active", on);
+  button.setAttribute("aria-pressed", on ? "true" : "false");
 }
 
 function renderLegendSceneTask() {
@@ -8544,6 +8583,15 @@ $("aquariumToggleBtn")?.addEventListener("click", () => {
   const enabled = setAquariumEnabled(!isAquariumEnabled());
   renderAquariumToggle();
   showToast(enabled ? "Аквариум включен." : "Аквариум выключен.");
+});
+
+$("legendSceneToggleBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  const on = !legendScenePrefEnabled();
+  setLegendScenePref(on);
+  syncActiveShakeScene();
+  renderLegendSceneToggle();
+  showToast(on ? "Премиум анимация включена." : "Премиум выключен — рыбки вернулись.");
 });
 
 $("tasksSheet").addEventListener("click", (event) => {

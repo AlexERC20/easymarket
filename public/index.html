@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260711-06" />
+    <link rel="stylesheet" href="/styles.css?v=20260711-07" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260711-03" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -137,6 +137,14 @@
                 <small>Корм и рыбки только на 5-минутном BTC-графике.</small>
               </div>
               <button id="aquariumToggleBtn" class="settings-switch" type="button" aria-pressed="false"><i></i></button>
+            </div>
+            <div id="legendSceneSettingsRow" class="settings-row hidden">
+              <div class="settings-row-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 13.8 9l5.7.2-4.5 3.6 1.6 5.7L12 15.2l-4.6 3.3 1.6-5.7-4.5-3.6 5.7-.2L12 3.5Z"/></svg></div>
+              <div class="settings-row-body">
+                <strong>Премиум анимация</strong>
+                <small>Премиум-шоу вместо рыбок при встряске графика.</small>
+              </div>
+              <button id="legendSceneToggleBtn" class="settings-switch" type="button" aria-pressed="false"><i></i></button>
             </div>
             <div class="settings-row">
               <div class="settings-row-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="m8 8 4-4 4 4"/><path d="M6 12H5a1.5 1.5 0 0 0-1.5 1.5v5A1.5 1.5 0 0 0 5 20h14a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 19 12h-1"/></svg></div>
@@ -815,6 +823,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260711-08" type="module"></script>
+    <script src="/app.js?v=20260711-09" type="module"></script>
   </body>
 </html>
