@@ -7,7 +7,20 @@
 // falling onto the next round's fresh screen where the fish are already living.
 
 import { playAquariumFood, playAquariumEat } from "./lightning-motion.js?v=20260707-01";
-import { PREMIUM_DOM_FISH_SVG, drawPremiumFish } from "./premium-fish.js?v=20260711-02";
+import { PREMIUM_DOM_FISH_SVG, drawPremiumFish } from "./premium-fish.js?v=20260711-03";
+import {
+  clearShakeSceneCanvas,
+  getActiveSceneKey,
+  getShakeScenePlatform,
+  initShakeScenes,
+  measureShakeSceneCanvas,
+  primeActiveScene,
+  registerScene,
+  setShakeScenesEnabled,
+  setShakeScenesRuntimeAllowed,
+  stopActiveSceneLoop,
+  wakeActiveScene,
+} from "./shake-scenes.js?v=20260711-01";
 
 // Realistic little fish drawn as inline SVG (iOS DOM path). Faces +x; colours
 // come from CSS custom properties set per .fish-N class.
@@ -31,11 +44,9 @@ const FISH_MIN = 2;
 const FISH_MAX = 3;
 const FOOD_ARM_MS = 1500; // brief settle before the hungry fish start hunting
 const EAT_MS = 3280; // a bite is gradual, never instant
-const FRAME_MS = 33; // ~30fps simulation cap to stay light on the phone
 const FOOD_LIFE_MS = 16000; // uneaten food slowly fades out and vanishes
 const FOOD_FADE_MS = 2800; // fade window at the end of a crumb's life
 const FISH_LEAVE_GRACE_MS = 1600; // after the food is gone, fish linger then leave
-const SHAKE_JERK = 26; // summed |Δacceleration| that counts as a deliberate shake
 const SHAKE_FEED_COOLDOWN_MS = 1400; // min gap between shake-triggered food spills
 
 const FISH_PALETTES = [
@@ -88,29 +99,12 @@ let simT = 0; // накопленное время симуляции, сек (�
 let pendingFoodAvatars = [];
 let pendingSummon = false; // remember to summon canvas fish once the canvas is ready
 
-let rafId = 0;
-let lastTs = 0;
-
 let tilt = 0; // smoothed -1..1, from device orientation
-let tiltTarget = 0;
 let tiltImpulse = 0;
-let tiltListening = false;
-let tiltPermissionAsked = false;
-let motionListening = false;
-let motionPermissionAsked = false;
-let lastMotionX = null;
-let lastAccX = null;
-let lastAccY = null;
-let lastAccZ = null;
 let lastShakeFeedAt = 0;
 let lastScatterAt = 0;
 let feedProvider = null;
 let premiumFishUnlocked = false;
-// Telegram Mini App sensor API (Bot API 8.0+). iOS Telegram blocks the W3C
-// devicemotion/deviceorientation events, so we drive tilt/shake from these.
-let tgAccelStarted = false;
-let tgOrientStarted = false;
-let tgSensorListeners = false;
 
 const foodImages = new Map();
 
@@ -148,7 +142,10 @@ export function setAquariumPremiumFish(enabled) {
 
   // If food is already in the water, let the unlocked fish join immediately;
   // otherwise it waits off-screen until the next shake with the base school.
-  if (enabled && runtimeAllowed && (food.length || fish.length || domFood.length || domFish.length)) {
+  if (getActiveSceneKey() === "aquarium"
+    && enabled
+    && runtimeAllowed
+    && (food.length || fish.length || domFood.length || domFish.length)) {
     if (shouldUseDomAquarium()) {
       const measured = measureDomLayer();
       if (measured) {
@@ -174,10 +171,6 @@ let foodGlowSprites = null;
 let domLayer = null;
 let domFish = [];
 let domFood = [];
-let domRafId = 0;
-let domLastTs = 0;
-let domIntervalId = 0;
-let domLastFrameAt = 0;
 
 function readEnabledFlag() {
   try {
@@ -192,11 +185,6 @@ function readEnabledFlag() {
   }
 }
 
-function reducedMotion() {
-  const reduced = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
-  return reduced && !isTelegramMiniApp();
-}
-
 function isTelegramMiniApp() {
   return Boolean(window.Telegram?.WebApp);
 }
@@ -207,21 +195,6 @@ function aquariumHaptic(style = "light") {
   } catch {
     // ignore on platforms without haptics
   }
-}
-
-function canAnimateAquarium() {
-  // Canvas-движок работает только на своих платформах (Android/браузер):
-  // на DOM-платформах он не стартует вовсе, чтобы не было двух аквариумов.
-  // Telegram on iOS runs inside WKWebView. Some builds can report the document
-  // as hidden while the Mini App is visibly active, which killed the fish loop.
-  return enabled && runtimeAllowed && !shouldUseDomAquarium() && !reducedMotion() && (!document.hidden || isTelegramMiniApp());
-}
-
-function canAnimateDomAquarium() {
-  // DOM fallback is the compatibility path for iOS Telegram WebView. Do not
-  // gate it on prefers-reduced-motion: on some iPhones Telegram reports reduce
-  // by default, which prevented fish from being created at all.
-  return enabled && runtimeAllowed && shouldUseDomAquarium() && (!document.hidden || isTelegramMiniApp());
 }
 
 function rand(min, max) {
@@ -241,32 +214,18 @@ export function setAquariumEnabled(next) {
     // storage can be unavailable in hardened webviews
   }
 
-  if (enabled) {
-    requestTiltAccess();
-    primeAquarium();
-  } else {
-    stopLoop();
-    stopDomLoop();
-    stopTelegramSensors();
-    fish = [];
-    food = [];
-    bubbles = [];
-    pendingFoodAvatars = [];
-    foodImages.clear();
-    clearDomAquarium();
-    clearCanvas();
-  }
+  setShakeScenesEnabled(enabled);
   return enabled;
 }
 
 function clearAquariumRuntime() {
-  stopLoop();
-  stopDomLoop();
-  stopTelegramSensors();
   fish = [];
   food = [];
   bubbles = [];
+  debris = [];
+  mouthBubbles = [];
   pendingFoodAvatars = [];
+  pendingSummon = false;
   foodImages.clear();
   clearDomAquarium();
   clearCanvas();
@@ -278,39 +237,15 @@ export function setAquariumRuntimeAllowed(next) {
     return runtimeAllowed;
   }
   runtimeAllowed = allowed;
-  if (!runtimeAllowed) {
-    clearAquariumRuntime();
-  } else if (enabled) {
-    primeAquarium(10);
-  }
+  setShakeScenesRuntimeAllowed(runtimeAllowed);
   return runtimeAllowed;
-}
-
-// Платформа аквариума: ios / android / desktop (Telegram Desktop, macOS) / web.
-function getAquariumPlatform() {
-  const tgPlatform = String(window.Telegram?.WebApp?.platform || "").toLowerCase();
-  const ua = String(window.navigator?.userAgent || "").toLowerCase();
-  // iPadOS маскируется под Macintosh, но выдаёт себя тач-поинтами.
-  const isIosUa = /iphone|ipad|ipod/.test(ua)
-    || (/macintosh|mac os/.test(ua) && (window.navigator?.maxTouchPoints || 0) > 1);
-  if (tgPlatform.includes("ios") || isIosUa) {
-    return "ios";
-  }
-  if (tgPlatform.includes("android") || /android/.test(ua)) {
-    return "android";
-  }
-  if (tgPlatform.includes("tdesktop") || tgPlatform.includes("mac") || /macintosh|mac os/.test(ua)) {
-    return "desktop";
-  }
-  // Неизвестные Telegram-платформы (webk/weba) — это обычный браузер: canvas.
-  return "web";
 }
 
 // Ровно один движок на платформу — «аквариум в аквариуме» запрещён.
 // iOS -> DOM-рыбки (WKWebView в Telegram душит canvas rAF), Telegram
 // Desktop/macOS -> DOM, Android и обычный браузер -> canvas.
 function aquariumEngine() {
-  const platform = getAquariumPlatform();
+  const platform = getShakeScenePlatform();
   if (platform === "ios") {
     return "dom";
   }
@@ -364,11 +299,8 @@ function primeDomAquarium() {
   if (!measured) {
     return false;
   }
-  // Fish are no longer spawned at idle — only summoned by a shake (summonDomFish).
-  // Just keep the loop alive while there is something to animate.
-  if (domFish.length || domFood.length) {
-    startDomLoop();
-  }
+  // Fish are no longer spawned at idle. The shared scheduler wakes only when
+  // isAlive() reports existing fish or food.
   return true;
 }
 
@@ -461,8 +393,6 @@ function clearDomAquarium() {
   stopDomLoop();
   domFish = [];
   domFood = [];
-  domLastTs = 0;
-  domLastFrameAt = 0;
   if (domLayer) {
     domLayer.remove();
     domLayer = null;
@@ -811,75 +741,24 @@ function renderDomAquarium() {
   }
 }
 
-function stepDomAquarium(ts) {
+function updateDomAquarium(dt) {
   const measured = measureDomLayer();
   if (!measured) {
     return false;
   }
-  if (domLastTs && ts - domLastTs < FRAME_MS) {
-    return true;
-  }
-  const dt = domLastTs ? Math.min(0.05, (ts - domLastTs) / 1000) : 0.033;
-  domLastTs = ts;
-  domLastFrameAt = Date.now();
-  tilt += (tiltTarget - tilt) * Math.min(1, dt * 4);
-  tiltImpulse *= Math.max(0, 1 - dt * 2.1);
   updateDomFood(dt, measured.width, measured.height);
   updateDomFish(dt, measured.width, measured.height);
   renderDomAquarium();
   return true;
 }
 
-function domFrame(ts) {
-  domRafId = 0;
-  if (!canAnimateDomAquarium()) {
-    return;
-  }
-  if (!stepDomAquarium(ts)) {
-    window.setTimeout(() => startDomLoop(), 300);
-    return;
-  }
-  if (enabled && (domFish.length || domFood.length)) {
-    domRafId = requestAnimationFrame(domFrame);
-  } else {
-    stopDomLoop(); // nothing left to animate -> wind the loop fully down
-  }
-}
-
 function startDomLoop() {
-  if (!canAnimateDomAquarium()) {
-    return;
-  }
-  if (!domRafId) {
-    domLastTs = 0;
-    domRafId = requestAnimationFrame(domFrame);
-  }
-  if (!domIntervalId) {
-    domIntervalId = window.setInterval(() => {
-      if (!canAnimateDomAquarium() || (!domFish.length && !domFood.length)) {
-        stopDomLoop(); // idle -> don't keep ticking for nothing
-        return;
-      }
-      const now = Date.now();
-      // iOS Telegram can pause or starve rAF while a WebApp remains visible.
-      // Step manually only when rAF has not advanced recently.
-      if (!domLastFrameAt || now - domLastFrameAt > 180) {
-        if (!stepDomAquarium(performance.now())) {
-          domLastTs = 0;
-        }
-      }
-    }, 120);
-  }
+  wakeActiveScene();
 }
 
 function stopDomLoop() {
-  if (domRafId) {
-    cancelAnimationFrame(domRafId);
-    domRafId = 0;
-  }
-  if (domIntervalId) {
-    window.clearInterval(domIntervalId);
-    domIntervalId = 0;
+  if (getActiveSceneKey() === "aquarium") {
+    stopActiveSceneLoop();
   }
 }
 
@@ -914,44 +793,24 @@ function getFoodImage(url) {
   return null;
 }
 
-function measure() {
-  // Re-acquire the canvas if it was ever detached (defensive: the chart area
-  // is static markup, but this keeps the layer alive through any DOM rebuild).
-  if (!canvas || !canvas.isConnected) {
-    const el = document.getElementById("aquariumCanvas");
-    if (el instanceof HTMLCanvasElement) {
-      canvas = el;
-      ctx = canvas.getContext("2d");
-      waterGrad = null;
-    }
-  }
-  if (!canvas || !ctx) {
+function applyCanvasSurface(nextSurface) {
+  if (!nextSurface) {
     return false;
   }
-  const rect = canvas.getBoundingClientRect();
-  let width = rect.width;
-  let height = rect.height;
-
-  if (width < 2 || height < 2) {
-    const host = canvas.closest?.(".chart-frame") || canvas.parentElement;
-    const hostRect = host?.getBoundingClientRect?.();
-    width = hostRect?.width || canvas.offsetWidth || width;
-    height = hostRect?.height || canvas.offsetHeight || height;
-  }
-
-  if (width < 2 || height < 2) {
-    return false;
-  }
-  dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-  cssW = width;
-  cssH = height;
-  const pw = Math.round(cssW * dpr);
-  const ph = Math.round(cssH * dpr);
-  if (canvas.width !== pw || canvas.height !== ph) {
-    canvas.width = pw;
-    canvas.height = ph;
+  const canvasChanged = canvas !== nextSurface.canvas || ctx !== nextSurface.ctx;
+  canvas = nextSurface.canvas;
+  ctx = nextSurface.ctx;
+  cssW = nextSurface.width;
+  cssH = nextSurface.height;
+  dpr = nextSurface.dpr;
+  if (canvasChanged) {
+    waterGrad = null;
   }
   return true;
+}
+
+function measure() {
+  return applyCanvasSurface(measureShakeSceneCanvas());
 }
 
 function bandTop() {
@@ -1048,29 +907,28 @@ function summonFish() {
   return fish.length > 0;
 }
 
-export function primeAquarium(retries = 10) {
+function prepareAquarium() {
   // На DOM-платформах поднимаем только DOM-слой; canvas-ветка ниже не нужна.
   if (shouldUseDomAquarium()) {
     return primeDomAquarium();
   }
-  if (!canAnimateAquarium()) {
+  if (getActiveSceneKey() !== "aquarium" || !enabled || !runtimeAllowed) {
     return false;
   }
   // Don't spawn fish at idle anymore — only keep the loop alive for existing
   // food/fish. Fish are summoned by a shake (see spillAquariumFood/summonFish).
   if (measure()) {
     flushPendingFood();
-    if (food.length || fish.length) {
-      startLoop();
-    }
     return true;
   }
-  if (retries > 0) {
-    window.setTimeout(() => {
-      primeAquarium(retries - 1);
-    }, 180);
-  }
   return false;
+}
+
+export function primeAquarium(retries = 10) {
+  if (getActiveSceneKey() !== "aquarium") {
+    return false;
+  }
+  return primeActiveScene(retries);
 }
 
 function pickSpecies() {
@@ -1295,7 +1153,7 @@ function flushPendingFood() {
 // Convert a snapshot of on-chart avatars into falling food crumbs.
 // avatars: [{ xFrac, yFrac, url, color, initial, side }]
 export function spillAquariumFood(avatars, summon = false) {
-  if (!enabled || !Array.isArray(avatars) || !avatars.length) {
+  if (getActiveSceneKey() !== "aquarium" || !enabled || !Array.isArray(avatars) || !avatars.length) {
     return;
   }
   // Halve the crumbs per spill so the tank stays light on the phone.
@@ -1324,114 +1182,6 @@ export function spillAquariumFood(avatars, summon = false) {
     summonFish();
   }
   startLoop();
-}
-
-// Tilt drift, fed from W3C deviceorientation (degrees) or Telegram (converted).
-function ingestOrientationGamma(gammaDeg) {
-  if (!Number.isFinite(gammaDeg)) {
-    return;
-  }
-  tiltTarget = Math.max(-1, Math.min(1, gammaDeg / 34));
-}
-
-// Shake detection + impulse, fed from W3C devicemotion or Telegram accelerometer.
-function ingestAccel(x, y, z) {
-  if (!Number.isFinite(x)) {
-    return;
-  }
-  const delta = lastMotionX === null ? 0 : x - lastMotionX;
-  lastMotionX = x;
-  tiltImpulse = Math.max(-2.4, Math.min(2.4, tiltImpulse + delta * 0.12));
-
-  // Shake = a sharp jerk across the axes -> feed the fish and scatter the crumbs.
-  if (Number.isFinite(y) && Number.isFinite(z) && lastAccX !== null) {
-    const jerk = Math.abs(x - lastAccX) + Math.abs(y - lastAccY) + Math.abs(z - lastAccZ);
-    if (jerk > SHAKE_JERK) {
-      onShake(Math.min(3, jerk / SHAKE_JERK));
-    }
-  }
-  lastAccX = x;
-  lastAccY = y;
-  lastAccZ = z;
-}
-
-function tiltHandler(event) {
-  // Telegram native orientation wins when active — never let both drive tilt.
-  if (tgOrientStarted) {
-    return;
-  }
-  ingestOrientationGamma(Number(event.gamma)); // degrees
-}
-
-function motionHandler(event) {
-  if (tgAccelStarted) {
-    return;
-  }
-  const a = event.accelerationIncludingGravity || event.acceleration || {};
-  ingestAccel(Number(a.x), Number(a.y), Number(a.z));
-}
-
-// Telegram Mini App native sensors — the only path that works in iOS Telegram.
-function startTelegramSensors() {
-  const tg = window.Telegram?.WebApp;
-  if (!tg) {
-    return false;
-  }
-  if (!tgSensorListeners && typeof tg.onEvent === "function") {
-    tg.onEvent("accelerometerChanged", () => {
-      const a = tg.Accelerometer || {};
-      ingestAccel(Number(a.x), Number(a.y), Number(a.z));
-    });
-    tg.onEvent("deviceOrientationChanged", () => {
-      const o = tg.DeviceOrientation || {};
-      // Telegram reports gamma in radians; our tilt math expects degrees.
-      ingestOrientationGamma(Number(o.gamma) * (180 / Math.PI));
-    });
-    tgSensorListeners = true;
-  }
-  let started = false;
-  if (typeof tg.Accelerometer?.start === "function" && !tgAccelStarted) {
-    tgAccelStarted = true;
-    try {
-      tg.Accelerometer.start({ refresh_rate: 50 });
-      started = true;
-    } catch {
-      tgAccelStarted = false;
-    }
-  }
-  if (typeof tg.DeviceOrientation?.start === "function" && !tgOrientStarted) {
-    tgOrientStarted = true;
-    try {
-      tg.DeviceOrientation.start({ refresh_rate: 60 });
-      started = true;
-    } catch {
-      tgOrientStarted = false;
-    }
-  }
-  return started;
-}
-
-function stopTelegramSensors() {
-  const tg = window.Telegram?.WebApp;
-  if (!tg) {
-    return;
-  }
-  if (tgAccelStarted) {
-    try {
-      tg.Accelerometer?.stop?.();
-    } catch {
-      // ignore
-    }
-    tgAccelStarted = false;
-  }
-  if (tgOrientStarted) {
-    try {
-      tg.DeviceOrientation?.stop?.();
-    } catch {
-      // ignore
-    }
-    tgOrientStarted = false;
-  }
 }
 
 function onShake(strength = 1) {
@@ -1497,67 +1247,6 @@ function startleFish(strength = 1) {
     f.vx += (f.vx >= 0 ? 1 : -1) * f.speed * burst + (Math.random() - 0.5) * 30;
     f.vy += (Math.random() - 0.5) * f.speed * burst;
     f.target = null;
-  }
-}
-
-function requestTiltAccess() {
-  // Telegram's native sensors are the only ones that work inside iOS Telegram.
-  startTelegramSensors();
-
-  const addOrientation = () => {
-    if (tiltListening) {
-      return;
-    }
-    tiltListening = true;
-    window.addEventListener("deviceorientation", tiltHandler, { passive: true });
-  };
-  const addMotion = () => {
-    if (motionListening || typeof window.DeviceMotionEvent === "undefined") {
-      return;
-    }
-    motionListening = true;
-    window.addEventListener("devicemotion", motionHandler, { passive: true });
-  };
-
-  // Only fall back to W3C sensors when Telegram's native ones are NOT driving.
-  // If both feed tiltTarget (Telegram gamma in radians, W3C gamma in degrees,
-  // often with opposite sign) they fight every event and the tank oscillates —
-  // the Android bug. iOS Telegram never doubled because its W3C events are dead.
-  if (!tgOrientStarted && typeof window.DeviceOrientationEvent !== "undefined") {
-    const req = window.DeviceOrientationEvent?.requestPermission;
-    if (typeof req === "function") {
-      if (!tiltPermissionAsked) {
-        tiltPermissionAsked = true;
-        // iOS 13+: needs a user gesture; setAquariumEnabled is called from a tap.
-        req.call(window.DeviceOrientationEvent)
-          .then((state) => {
-            if (state === "granted") {
-              addOrientation();
-            }
-          })
-          .catch(() => undefined);
-      }
-    } else {
-      addOrientation();
-    }
-  }
-
-  if (!tgAccelStarted) {
-    const motionReq = window.DeviceMotionEvent?.requestPermission;
-    if (typeof motionReq === "function") {
-      if (!motionPermissionAsked) {
-        motionPermissionAsked = true;
-        motionReq.call(window.DeviceMotionEvent)
-          .then((state) => {
-            if (state === "granted") {
-              addMotion();
-            }
-          })
-          .catch(() => undefined);
-      }
-    } else {
-      addMotion();
-    }
   }
 }
 
@@ -2091,146 +1780,105 @@ function drawFish(f) {
 }
 
 function clearCanvas() {
-  if (ctx && canvas) {
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-  }
+  clearShakeSceneCanvas();
 }
 
-function frame(ts) {
-  rafId = 0;
-  if (!canAnimateAquarium()) {
-    // Leave nothing frozen on screen if motion just got turned off mid-session.
-    if (reducedMotion()) {
-      clearCanvas();
-    }
-    return;
-  }
-  if (!measure()) {
-    // Canvas not laid out yet: retry on a slow timer instead of busy-spinning rAF.
-    lastTs = 0;
-    window.setTimeout(() => {
-      if (canAnimateAquarium()) {
-        startLoop();
-      }
-    }, 300);
-    return;
-  }
-
-  // Fish are no longer auto-spawned here — they only swim in on a shake. Just
-  // flush any food that was queued before the canvas had a size.
+function updateAquarium(dt) {
   flushPendingFood();
-
-  // Cap the simulation to ~30fps. Ambient fish do not need 60fps, and halving
-  // the canvas work keeps the phone cool next to the chart's own render loop.
-  if (lastTs && ts - lastTs < FRAME_MS) {
-    rafId = requestAnimationFrame(frame);
-    return;
-  }
-  const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0.033;
-  lastTs = ts;
   simT += dt;
-
-  tilt += (tiltTarget - tilt) * Math.min(1, dt * 4);
-  tiltImpulse *= Math.max(0, 1 - dt * 2.1);
-
   updateFood(dt);
   updateFish(dt);
   updateDebris(dt);
   updateBubbles(dt);
+}
 
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, cssW, cssH);
-  const alive = food.length || fish.length || debris.length || mouthBubbles.length;
-  if (alive) {
-    drawWater();
-    drawFood();
-    for (const f of fish) {
-      if (f.premium) {
-        drawPremiumFish(ctx, f, simT);
-      } else {
-        drawFish(f);
-      }
+function drawAquarium(drawCtx, nextSurface) {
+  applyCanvasSurface(nextSurface);
+  drawCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawWater();
+  drawFood();
+  for (const f of fish) {
+    if (f.premium) {
+      drawPremiumFish(drawCtx, f, simT);
+    } else {
+      drawFish(f);
     }
-  }
-
-  // Animate only while there is food or fish; otherwise wind down so the canvas
-  // stays clear and nothing burns CPU at idle.
-  if (enabled && alive) {
-    rafId = requestAnimationFrame(frame);
   }
 }
 
 function startLoop() {
-  if (rafId || !canAnimateAquarium()) {
-    return;
-  }
-  lastTs = 0;
-  rafId = requestAnimationFrame(frame);
+  wakeActiveScene();
 }
 
-function stopLoop() {
-  if (rafId) {
-    cancelAnimationFrame(rafId);
-    rafId = 0;
-  }
-}
+const aquariumScene = {
+  key: "aquarium",
+  renderMode(platform) {
+    if (platform === "ios" || (platform === "desktop" && isTelegramMiniApp())) {
+      return "dom";
+    }
+    return "canvas";
+  },
+  setEnabled(next) {
+    enabled = Boolean(next);
+  },
+  isEnabled() {
+    return enabled;
+  },
+  setRuntimeAllowed(next) {
+    runtimeAllowed = Boolean(next);
+  },
+  isRuntimeAllowed() {
+    return runtimeAllowed;
+  },
+  onSurface(nextSurface) {
+    applyCanvasSurface(nextSurface);
+  },
+  onTilt(nextTilt, nextImpulse) {
+    tilt = nextTilt;
+    tiltImpulse = nextImpulse;
+  },
+  onEntitlements(mePayload) {
+    if (Object.prototype.hasOwnProperty.call(mePayload || {}, "aquarium_premium_fish_unlocked")) {
+      setAquariumPremiumFish(Boolean(mePayload.aquarium_premium_fish_unlocked));
+    }
+  },
+  summon(strength) {
+    onShake(strength);
+  },
+  prime() {
+    return prepareAquarium();
+  },
+  update(dt) {
+    updateAquarium(dt);
+  },
+  draw(drawCtx, nextSurface) {
+    drawAquarium(drawCtx, nextSurface);
+  },
+  updateDom(dt) {
+    return updateDomAquarium(dt);
+  },
+  isAlive(mode) {
+    if (mode === "dom") {
+      return domFish.length > 0 || domFood.length > 0;
+    }
+    return food.length > 0 || fish.length > 0 || debris.length > 0 || mouthBubbles.length > 0;
+  },
+  windDown() {
+    clearAquariumRuntime();
+  },
+};
+
+registerScene(aquariumScene);
 
 export function initAquarium() {
   if (initialized) {
     return;
   }
-  canvas = document.getElementById("aquariumCanvas");
-  if (!(canvas instanceof HTMLCanvasElement)) {
-    return;
-  }
-  ctx = canvas.getContext("2d");
-  if (!ctx) {
-    return;
-  }
   initialized = true;
   enabled = readEnabledFlag();
-
-  const resume = (retries = 10) => {
-    if (enabled) {
-      measure();
-      primeAquarium(retries);
-    }
-  };
-  const unlockTilt = () => {
-    if (enabled) {
-      requestTiltAccess();
-    }
-  };
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden && !isTelegramMiniApp()) {
-      stopLoop();
-    } else if (enabled) {
-      resume(12);
-    }
-  });
-  window.addEventListener("pageshow", () => resume(12));
-  window.addEventListener("focus", () => resume(8));
-  window.addEventListener("pointerdown", unlockTilt, { passive: true });
-  window.addEventListener("touchstart", unlockTilt, { passive: true });
-  window.addEventListener("resize", () => {
-    if (enabled) {
-      measure();
-      primeAquarium(4);
-    }
-  });
-  window.Telegram?.WebApp?.onEvent?.("viewportChanged", () => resume(10));
-  const motionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-  motionQuery?.addEventListener?.("change", (event) => {
-    if (event.matches && !isTelegramMiniApp()) {
-      stopLoop();
-      clearCanvas();
-    } else if (enabled) {
-      primeAquarium();
-    }
-  });
-
+  initShakeScenes();
+  setShakeScenesEnabled(enabled, false);
+  setShakeScenesRuntimeAllowed(runtimeAllowed);
   if (enabled) {
     primeAquarium(18);
   }
