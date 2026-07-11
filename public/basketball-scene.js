@@ -105,25 +105,31 @@ function metrics() {
 // Углы: 0 — сегмент направлен вниз, положительные — вперёд (к кольцу).
 // Поза — плоский набор чисел, интерполируется покомпонентно.
 
+// Конвенция: 0 = сегмент вниз, положительное = вперёд (к кольцу), «верх» = ±π.
+// Броски живут на ПОЛОЖИТЕЛЬНОЙ стороне (вверх-вперёд, 2.7..3.0) — на
+// отрицательной рука уходит вверх-назад, и силуэт «бросает задом наперёд».
+// Колени всегда отрицательные: голень складывается назад, а не как у птицы.
 const POSES = {
-  stand: { crouch: 0.06, lean: 0.04, shF: 0.28, elF: 0.32, shB: -0.22, elB: 0.3, hipF: -0.07, kneeF: 0.14, hipB: 0.08, kneeB: 0.1, run: 0 },
-  run: { crouch: 0.16, lean: 0.2, shF: -1.9, elF: 1.7, shB: 0.9, elB: 1.5, hipF: -0.8, kneeF: 1.4, hipB: 0.65, kneeB: 0.75, run: 1 },
-  dribble: { crouch: 0.3, lean: 0.24, shF: 0.75, elF: 0.55, shB: -0.5, elB: 0.55, hipF: -0.32, kneeF: 0.62, hipB: 0.3, kneeB: 0.42, run: 0 },
-  gather: { crouch: 0.46, lean: 0.18, shF: 0.42, elF: -1.15, shB: 0.34, elB: -1.2, hipF: -0.44, kneeF: 0.92, hipB: 0.4, kneeB: 0.66, run: 0 },
-  rise: { crouch: 0.1, lean: -0.03, shF: -2.5, elF: -0.5, shB: -1.7, elB: -0.6, hipF: -0.5, kneeF: 1.1, hipB: 0.25, kneeB: 0.5, run: 0 },
-  release: { crouch: 0.02, lean: -0.07, shF: -2.95, elF: -0.12, shB: -0.9, elB: 0.4, hipF: -0.32, kneeF: 0.55, hipB: 0.32, kneeB: 0.3, run: 0 },
-  fadeRise: { crouch: 0.08, lean: -0.3, shF: -2.4, elF: -0.55, shB: -1.5, elB: -0.65, hipF: -0.8, kneeF: 1.25, hipB: 0.12, kneeB: 0.75, run: 0 },
-  fadeRelease: { crouch: 0.02, lean: -0.36, shF: -2.9, elF: -0.1, shB: -0.75, elB: 0.5, hipF: -0.6, kneeF: 0.8, hipB: 0.25, kneeB: 0.55, run: 0 },
-  backHold: { crouch: 0.24, lean: 0.1, shF: 0.5, elF: -1.05, shB: 0.42, elB: -1.1, hipF: -0.16, kneeF: 0.34, hipB: 0.14, kneeB: 0.26, run: 0 },
-  land: { crouch: 0.36, lean: 0.12, shF: 0.6, elF: 0.5, shB: -0.5, elB: 0.5, hipF: -0.4, kneeF: 0.8, hipB: 0.36, kneeB: 0.6, run: 0 },
-  celebrate: { crouch: 0.03, lean: -0.08, shF: -3.05, elF: -0.06, shB: 0.4, elB: 0.5, hipF: -0.1, kneeF: 0.2, hipB: 0.1, kneeB: 0.16, run: 0 },
-  // Follow-through: рука остаётся вытянутой после выпуска — фирменный жест.
-  followThrough: { crouch: 0.05, lean: -0.1, shF: -2.98, elF: -0.05, shB: -0.5, elB: 0.35, hipF: -0.25, kneeF: 0.4, hipB: 0.28, kneeB: 0.25, run: 0 },
-  fadeFollow: { crouch: 0.04, lean: -0.32, shF: -2.92, elF: -0.06, shB: -0.6, elB: 0.4, hipF: -0.5, kneeF: 0.7, hipB: 0.2, kneeB: 0.5, run: 0 },
+  stand: { crouch: 0.06, lean: 0.04, shF: 0.18, elF: 0.4, shB: -0.14, elB: 0.35, hipF: 0.04, kneeF: -0.1, hipB: -0.05, kneeB: -0.08, run: 0 },
+  run: { crouch: 0.16, lean: 0.22, shF: 0, elF: 1.15, shB: 0, elB: 1.15, hipF: 0, kneeF: -0.3, hipB: 0, kneeB: -0.3, run: 1 },
+  dribble: { crouch: 0.3, lean: 0.24, shF: 0.7, elF: 0.6, shB: -0.35, elB: 0.45, hipF: 0.22, kneeF: -0.5, hipB: -0.28, kneeB: -0.3, run: 0 },
+  gather: { crouch: 0.46, lean: 0.18, shF: 0.5, elF: 0.9, shB: 0.3, elB: 1, hipF: 0.28, kneeF: -0.75, hipB: -0.3, kneeB: -0.45, run: 0 },
+  // Сет-поинт: мяч над лбом, предплечье сложено назад над головой.
+  rise: { crouch: 0.1, lean: 0.02, shF: 2.9, elF: 0.7, shB: 2.3, elB: 0.55, hipF: 0.55, kneeF: -1.05, hipB: -0.15, kneeB: -0.5, run: 0 },
+  // Выпуск: рука выстреливает вверх-вперёд к кольцу, ведущая ладонь падает.
+  release: { crouch: 0.02, lean: 0.04, shF: 2.75, elF: 0.1, shB: -0.5, elB: 0.4, hipF: 0.3, kneeF: -0.55, hipB: -0.2, kneeB: -0.35, run: 0 },
+  // Follow-through: кисть щёлкает вперёд-вниз, рука остаётся вытянутой.
+  followThrough: { crouch: 0.05, lean: 0.05, shF: 2.68, elF: -0.28, shB: -0.45, elB: 0.4, hipF: 0.25, kneeF: -0.45, hipB: -0.22, kneeB: -0.3, run: 0 },
+  fadeRise: { crouch: 0.08, lean: -0.3, shF: 2.95, elF: 0.75, shB: 2.2, elB: 0.6, hipF: 0.7, kneeF: -0.9, hipB: 0.1, kneeB: -0.65, run: 0 },
+  fadeRelease: { crouch: 0.02, lean: -0.34, shF: 2.8, elF: 0.08, shB: -0.4, elB: 0.45, hipF: 0.55, kneeF: -0.6, hipB: 0.05, kneeB: -0.5, run: 0 },
+  fadeFollow: { crouch: 0.04, lean: -0.32, shF: 2.72, elF: -0.25, shB: -0.5, elB: 0.4, hipF: 0.5, kneeF: -0.5, hipB: 0.02, kneeB: -0.45, run: 0 },
+  backHold: { crouch: 0.24, lean: 0.1, shF: 0.5, elF: 0.95, shB: 0.4, elB: 1.05, hipF: 0.12, kneeF: -0.3, hipB: -0.12, kneeB: -0.22, run: 0 },
+  land: { crouch: 0.36, lean: 0.12, shF: 0.5, elF: 0.5, shB: -0.4, elB: 0.45, hipF: 0.3, kneeF: -0.7, hipB: -0.3, kneeB: -0.5, run: 0 },
+  celebrate: { crouch: 0.03, lean: -0.06, shF: 3, elF: -0.08, shB: -0.35, elB: 0.4, hipF: 0.08, kneeF: -0.18, hipB: -0.08, kneeB: -0.12, run: 0 },
   // Защитник: стойка, контест с вытянутой рукой и поникший уход.
-  defense: { crouch: 0.42, lean: 0.18, shF: -1.15, elF: -0.6, shB: 0.95, elB: 0.55, hipF: -0.55, kneeF: 0.95, hipB: 0.5, kneeB: 0.7, run: 0 },
-  contest: { crouch: 0.06, lean: -0.05, shF: -3.1, elF: -0.02, shB: 0.5, elB: 0.4, hipF: -0.45, kneeF: 0.9, hipB: 0.2, kneeB: 0.45, run: 0 },
-  dejected: { crouch: 0.22, lean: 0.34, shF: 0.35, elF: 0.15, shB: -0.3, elB: 0.15, hipF: -0.1, kneeF: 0.25, hipB: 0.1, kneeB: 0.2, run: 0 },
+  defense: { crouch: 0.42, lean: 0.18, shF: -1.05, elF: 0.5, shB: 1.15, elB: 0.4, hipF: 0.4, kneeF: -0.85, hipB: -0.42, kneeB: -0.6, run: 0 },
+  contest: { crouch: 0.06, lean: -0.04, shF: 3.05, elF: 0.06, shB: 0.5, elB: 0.4, hipF: 0.45, kneeF: -0.8, hipB: -0.15, kneeB: -0.45, run: 0 },
+  dejected: { crouch: 0.22, lean: 0.34, shF: 0.25, elF: 0.2, shB: -0.2, elB: 0.2, hipF: 0.05, kneeF: -0.2, hipB: -0.06, kneeB: -0.15, run: 0 },
 };
 
 function lerpPose(a, b, t) {

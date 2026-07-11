@@ -24,7 +24,7 @@ import {
   setAquariumShakeFeeder,
 } from "./aquarium.js?v=20260711-04";
 import { getActiveSceneKey, setActiveScene } from "./shake-scenes.js?v=20260711-02";
-import "./basketball-scene.js?v=20260712-01"; // регистрирует сцену «Легенда 24»
+import "./basketball-scene.js?v=20260712-02"; // регистрирует сцену «Легенда 24»
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
