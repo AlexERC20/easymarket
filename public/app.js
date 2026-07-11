@@ -1019,16 +1019,14 @@ function renderDepositBonusTask() {
     bar.style.width = `${Math.round(Math.min(1, Math.max(0, fill)) * 100)}%`;
   }
   if ($("depositBonusCur")) {
-    $("depositBonusCur").textContent = `$${Math.floor(total).toLocaleString("ru-RU")}`;
+    const goalLabel = `$${Math.floor(next ? next.goal : lastGoal).toLocaleString("ru-RU")}`;
+    $("depositBonusCur").textContent = `$${Math.floor(total).toLocaleString("ru-RU")} из ${goalLabel}`;
   }
-  if ($("depositBonusGoal")) {
-    $("depositBonusGoal").textContent = `$${Math.floor(next ? next.goal : lastGoal).toLocaleString("ru-RU")}`;
-  }
-  const reward = $("depositBonusReward");
-  if (reward) {
-    const rewardValue = readySum > 0 ? readySum : Number(next?.bonus) || 0;
-    reward.textContent = `+$${Math.floor(rewardValue).toLocaleString("ru-RU")}`;
-    reward.classList.toggle("hidden", rewardValue <= 0);
+  const nextLabel = $("depositBonusNext");
+  if (nextLabel) {
+    const nextBonus = Number(next?.bonus) || 0;
+    nextLabel.textContent = `+$${Math.floor(nextBonus).toLocaleString("ru-RU")}`;
+    nextLabel.classList.toggle("hidden", nextBonus <= 0);
   }
   const button = $("depositBonusBtn");
   if (button) {

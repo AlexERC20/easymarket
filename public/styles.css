@@ -3072,6 +3072,12 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   font-weight: 850;
 }
 
+/* Бонус ближайшего порога — золотая подпись у бара, не кнопка и не чип */
+.task-body .legend-progress small .deposit-bonus-next {
+  color: var(--fire);
+  font-weight: 950;
+}
+
 .task-item.info {
   border-color: rgba(94, 161, 255, 0.24);
   background: rgba(94, 161, 255, 0.06);
