@@ -3078,6 +3078,14 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   font-weight: 950;
 }
 
+/* Награда внутри описания задания: золотой текст вместо чипа рядом с
+   кнопкой — чип читался как вторая кнопка. */
+.task-body small .task-reward-inline {
+  color: var(--fire);
+  font-weight: 950;
+  white-space: nowrap;
+}
+
 .task-item.info {
   border-color: rgba(94, 161, 255, 0.24);
   background: rgba(94, 161, 255, 0.06);
