@@ -197,7 +197,8 @@ function stepActor(actor, dt) {
   if (!actor.active) {
     return;
   }
-  actor.runPhase += dt * 9;
+  // В беге цикл шагов крутится заметно быстрее, чем «дыхание» на месте.
+  actor.runPhase += dt * (9 + (actor.pose?.run || 0) * 5);
   actor.facing += (actor.facingTarget - actor.facing) * Math.min(1, dt * 7);
   actor.t += dt;
   if (actor.t >= actor.dur) {
@@ -241,23 +242,38 @@ function joints(actor, m) {
   // «Дыхание» на месте: едва заметный вертикальный ход корпуса, гаснет в беге
   // и прыжке — силуэт никогда не стоит замороженным.
   const breathe = Math.sin(actor.runPhase * 0.6) * s * 0.012 * (1 - p.run) * (actor.jump ? 0 : 1);
-  const hipY = -legL * (1 - p.crouch * 0.34) - actor.airY + breathe;
+  // Подскок бегового шага: тело выше всего в «полёте» (ноги в ножницах).
+  const stride = Math.sin(actor.runPhase);
+  const runBounce = p.run * Math.abs(stride) * s * 0.045;
+  const hipY = -legL * (1 - p.crouch * 0.34) - actor.airY + breathe - runBounce;
   const hip = { x: actor.airX + actor.sway, y: hipY };
   const lean = p.lean + actor.sway * 0.01;
   const neck = { x: hip.x + Math.sin(lean) * torso, y: hip.y - Math.cos(lean) * torso };
   const head = { x: neck.x + Math.sin(lean) * s * 0.09, y: neck.y - Math.cos(lean) * s * 0.115 };
 
-  const runSwing = p.run * Math.sin(actor.runPhase) * 0.55;
   const limb = (root, a1, l1, a2, l2) => {
     const mid = { x: root.x + Math.sin(a1) * l1, y: root.y + Math.cos(a1) * l1 };
     const tip = { x: mid.x + Math.sin(a1 + a2) * l2, y: mid.y + Math.cos(a1 + a2) * l2 };
     return { mid, tip };
   };
 
-  const armF = limb(neck, p.shF, upper, p.elF, fore);
-  const armB = limb(neck, p.shB, upper, p.elB, fore);
-  const legF = limb(hip, p.hipF + runSwing, thigh, p.kneeF, shin);
-  const legB = limb(hip, p.hipB - runSwing, thigh, p.kneeB, shin);
+  // Беговой цикл: нога проходит через вертикаль вперёд-назад, колено
+  // складывается НАЗАД (пятка вверх у задней ноги), руки — в противофазе
+  // ногам. Иначе силуэт «бежит задом наперёд».
+  const mix = (a, b) => a + (b - a) * p.run;
+  const legFAng = mix(p.hipF, stride * 0.8);
+  const legBAng = mix(p.hipB, -stride * 0.8);
+  const kneeFAng = mix(p.kneeF, -(0.15 + Math.max(0, -stride) * 1.2));
+  const kneeBAng = mix(p.kneeB, -(0.15 + Math.max(0, stride) * 1.2));
+  const armFAng = mix(p.shF, -stride * 0.7 - 0.12);
+  const armBAng = mix(p.shB, stride * 0.7 - 0.12);
+  const elFAng = mix(p.elF, 1.15);
+  const elBAng = mix(p.elB, 1.15);
+
+  const armF = limb(neck, armFAng, upper, elFAng, fore);
+  const armB = limb(neck, armBAng, upper, elBAng, fore);
+  const legF = limb(hip, legFAng, thigh, kneeFAng, shin);
+  const legB = limb(hip, legBAng, thigh, kneeBAng, shin);
 
   return { hip, neck, head, armF, armB, legF, legB, headR: s * 0.085 };
 }
