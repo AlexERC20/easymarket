@@ -3032,6 +3032,13 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   background: linear-gradient(135deg, rgba(255, 184, 77, 0.13), rgba(51, 178, 116, 0.06));
 }
 
+/* display: grid объявлен после глобального .hidden — возвращаем ему силу
+   для скрываемых по флагу заданий (сцена «Легенда 24»). */
+.task-item.hidden,
+.task-section.hidden {
+  display: none;
+}
+
 .task-item.info {
   border-color: rgba(94, 161, 255, 0.24);
   background: rgba(94, 161, 255, 0.06);

@@ -250,13 +250,20 @@ function frame(ts) {
   }
 }
 
+// Страховочный степпер нужен DOM-сценам всегда, а canvas-сценам — в iOS
+// Telegram, где WKWebView может душить rAF при видимом WebApp.
+function needsFrameBackstop(scene = activeScene()) {
+  return renderMode(scene) === "dom"
+    || (getShakeScenePlatform() === "ios" && isTelegramMiniApp());
+}
+
 function ensureDomFallback() {
-  if (domFallbackId || renderMode() !== "dom") {
+  if (domFallbackId || !needsFrameBackstop()) {
     return;
   }
   domFallbackId = window.setInterval(() => {
     const scene = activeScene();
-    if (!canRunScene(scene) || renderMode(scene) !== "dom" || !sceneIsAlive(scene)) {
+    if (!canRunScene(scene) || !needsFrameBackstop(scene) || !sceneIsAlive(scene)) {
       stopActiveSceneLoop();
       return;
     }

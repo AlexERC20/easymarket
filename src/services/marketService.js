@@ -2970,6 +2970,20 @@ async function getUserReferralStats(userId, telegramId) {
   };
 }
 
+// Сцена «Легенда 24» (баскетбольный трибьют на графике). Продуктовая механика —
+// открытие за суммарный депозит $1000; сейчас тест-режим: доступ только у
+// админа, чтобы выверить моушен на живых устройствах.
+const LEGEND_SCENE_DEPOSIT_GOAL = 1000;
+const LEGEND_SCENE_TESTER_USERNAMES = new Set(["ownagez"]);
+
+function isLegendSceneTester(user) {
+  const username = String(user?.username || "").replace(/^@/, "").toLowerCase();
+  if (LEGEND_SCENE_TESTER_USERNAMES.has(username)) {
+    return true;
+  }
+  return config.telegramAdminUserIds.includes(String(user?.telegram_id ?? ""));
+}
+
 export async function getUserSnapshot(telegramId) {
   const user = await getUserByTelegramId(telegramId);
   if (!user) {
@@ -2985,7 +2999,7 @@ export async function getUserSnapshot(telegramId) {
     [user.id],
   );
 
-  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, premiumFishResult, lossRefundOffersResult] = await Promise.all([
+  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, premiumFishResult, lossRefundOffersResult, depositTotalResult] = await Promise.all([
     getBalanceByUserId(user.id),
     getUsdtBalanceByUserId(user.id),
     getUsdtBonusBalanceByUserId(user.id),
@@ -3067,8 +3081,19 @@ export async function getUserSnapshot(telegramId) {
       `,
       [user.id, getDayKey()],
     ),
+    query(
+      `
+        SELECT COALESCE(SUM(credited_amount), 0) AS total
+        FROM usdt_deposit_intents
+        WHERE user_id = $1
+          AND status = 'credited'
+      `,
+      [user.id],
+    ),
   ]);
   const usdtTotalBalance = Math.round((usdtCashBalance + usdtBonusBalance) * 100) / 100;
+  const depositTotal = Math.round(toNumber(depositTotalResult.rows[0]?.total) * 100) / 100;
+  const sceneTester = isLegendSceneTester(user);
 
   return {
     user,
@@ -3082,6 +3107,14 @@ export async function getUserSnapshot(telegramId) {
     referral_stats: referralStats,
     daily_tasks: dailyTasks,
     aquarium_premium_fish_unlocked: Boolean(premiumFishResult.rows[0]?.unlocked),
+    // Сцена «Легенда 24»: пока в тест-режиме — задание и сцена видны только
+    // админу. При раскатке на всех: available -> true, unlocked -> по депозиту.
+    legend_scene: {
+      available: sceneTester,
+      unlocked: sceneTester,
+      deposit_total: depositTotal,
+      deposit_goal: LEGEND_SCENE_DEPOSIT_GOAL,
+    },
     loss_refund_offers: lossRefundOffersResult.rows.map((row) => ({
       id: Number(row.id),
       position_id: Number(row.position_id),

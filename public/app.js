@@ -23,6 +23,8 @@ import {
   setAquariumRuntimeAllowed,
   setAquariumShakeFeeder,
 } from "./aquarium.js?v=20260711-04";
+import { getActiveSceneKey, setActiveScene } from "./shake-scenes.js?v=20260711-02";
+import "./basketball-scene.js?v=20260711-01"; // регистрирует сцену «Легенда 24»
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -196,6 +198,7 @@ const state = {
   aquariumSnapAt: 0,
   aquariumRuntimeAllowed: false,
   aquariumPremiumFishUnlocked: false,
+  legendScene: null,
   freshActivityIds: new Set(),
   playedActivityAnimIds: new Set(), // въезд/глинт уже проигран — не повторять на пере-рендерах
   lastPositionPnl: {},
@@ -981,6 +984,48 @@ function applyAquariumEntitlements(data) {
   const unlocked = Boolean(data?.aquarium_premium_fish_unlocked);
   state.aquariumPremiumFishUnlocked = unlocked;
   setAquariumPremiumFish(unlocked);
+  applyLegendSceneEntitlements(data);
+}
+
+// Сцена «Легенда 24»: сервер решает, кому доступно (сейчас — только админ).
+// Когда открыто — встряска показывает баскетбольный трибьют вместо аквариума.
+function applyLegendSceneEntitlements(data) {
+  const info = data?.legend_scene || null;
+  state.legendScene = info;
+  const unlocked = Boolean(info?.available && info?.unlocked);
+  const activeKey = getActiveSceneKey();
+  if (unlocked && activeKey === "aquarium") {
+    setActiveScene("basketball");
+  } else if (!unlocked && activeKey === "basketball") {
+    setActiveScene("aquarium");
+  }
+  renderLegendSceneTask();
+}
+
+function renderLegendSceneTask() {
+  const row = $("legendSceneTask");
+  const section = $("legendSceneTaskSection");
+  if (!row) {
+    return;
+  }
+  const info = state.legendScene;
+  const available = Boolean(info?.available);
+  row.classList.toggle("hidden", !available);
+  section?.classList.toggle("hidden", !available);
+  if (!available) {
+    return;
+  }
+  const goal = Math.max(1, Number(info.deposit_goal) || 1000);
+  const total = Math.min(Math.max(0, Number(info.deposit_total) || 0), goal);
+  if ($("legendSceneTaskProgress")) {
+    $("legendSceneTaskProgress").textContent = `$${total.toFixed(0)} / $${goal.toFixed(0)}`;
+  }
+  const button = $("legendSceneTaskBtn");
+  if (button) {
+    const done = Boolean(info.unlocked);
+    button.textContent = done ? "Открыто" : "Пополнить";
+    button.disabled = done;
+  }
 }
 
 function isMarketOpenForBuy(market, bufferMs = MARKET_BUY_CLOSE_BUFFER_MS) {
@@ -8523,6 +8568,15 @@ $("taskPrivateChatBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   openTelegramUrl(state.publicConfig.private_chat_url || state.publicConfig.av_bot_url);
   showToast(`После подписки на приватку AV-бот начислит аванс ${formatFire(Number(state.publicConfig.task_private_chat_fire || 7500))}.`);
+});
+
+$("legendSceneTaskBtn")?.addEventListener("click", () => {
+  if (state.legendScene?.unlocked) {
+    return;
+  }
+  triggerHaptic("selection");
+  closeSheet("tasksSheet");
+  openTopupSheet(1000, "", "topup", "USDT");
 });
 
 $("taskShareBtn").addEventListener("click", (event) => {
