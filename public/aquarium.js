@@ -7,7 +7,7 @@
 // falling onto the next round's fresh screen where the fish are already living.
 
 import { playAquariumFood, playAquariumEat } from "./lightning-motion.js?v=20260707-01";
-import { PREMIUM_DOM_FISH_SVG, drawPremiumFish } from "./premium-fish.js?v=20260711-01";
+import { PREMIUM_DOM_FISH_SVG, drawPremiumFish } from "./premium-fish.js?v=20260711-02";
 
 // Realistic little fish drawn as inline SVG (iOS DOM path). Faces +x; colours
 // come from CSS custom properties set per .fish-N class.
@@ -1188,7 +1188,8 @@ function spawnBiteFx(f, crumb) {
       vy: rand(-30, -6),
       s: rand(1, 2),
       life: rand(0.35, 0.6),
-      color: crumb.color || "#cfd8e3",
+      // У премиум-рыбы укус рассыпается неоново-мятными искрами.
+      color: f.premium ? (i % 2 ? "#7dffca" : "#d7ff62") : (crumb.color || "#cfd8e3"),
     });
   }
   const count = 2 + Math.round(Math.random());
@@ -1801,6 +1802,21 @@ function updateFish(dt) {
     const mouthWant = (f.target && Math.hypot(f.target.x - f.x, f.target.y - f.y) < f.size * 2.6) || now < (f.mouthUntil || 0) ? 1 : 0;
     f.mouth = (f.mouth || 0) + (mouthWant - (f.mouth || 0)) * Math.min(1, dt * 9);
     f.tailPhase += dt * ((f.premium ? 3.8 : 5) + Math.min(f.premium ? 9 : 12, sp * (f.premium ? 0.2 : 0.25)));
+    // Премиум-рыба изредка выпускает пузырёк на ходу — живая дорожка.
+    if (f.premium && now > (f.nextTrailBubbleAt || 0) && mouthBubbles.length < MOUTH_BUBBLES_MAX) {
+      f.nextTrailBubbleAt = now + rand(1300, 2600);
+      const bubbleDir = (f.facing ?? f.dir) >= 0 ? 1 : -1;
+      mouthBubbles.push({
+        x: f.x + bubbleDir * f.size * 1.05,
+        y: f.y - f.size * 0.12,
+        r: rand(0.5, 1.1),
+        speed: rand(9, 15),
+        vx: bubbleDir * rand(1, 5),
+        phase: Math.random() * Math.PI * 2,
+        life: rand(1.1, 1.8),
+        alpha: rand(0.14, 0.24),
+      });
+    }
   }
 
   // Remove fish that have fully left the frame so the loop can wind down.

@@ -1228,6 +1228,43 @@ h2 {
   to { transform: rotate(11deg) scaleY(1.06); }
 }
 
+.aquarium-premium-fish .premium-aura {
+  animation: aquariumPremiumAura 2.3s ease-in-out infinite alternate;
+}
+
+.aquarium-premium-fish .premium-glint {
+  transform-box: fill-box;
+  animation: aquariumPremiumGlint 3.2s ease-in-out infinite;
+}
+
+.aquarium-premium-fish .premium-spark {
+  fill: #eafffb;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: aquariumPremiumSpark 2.7s ease-in-out infinite;
+}
+
+.aquarium-premium-fish .premium-spark.s2 { animation-delay: 0.9s; }
+.aquarium-premium-fish .premium-spark.s3 { animation-delay: 1.8s; }
+
+@keyframes aquariumPremiumAura {
+  from { opacity: 0.38; }
+  to { opacity: 0.85; }
+}
+
+@keyframes aquariumPremiumGlint {
+  0% { transform: translateX(-30px) skewX(-14deg); opacity: 0; }
+  10% { opacity: 0.8; }
+  38%, 100% { transform: translateX(52px) skewX(-14deg); opacity: 0; }
+}
+
+@keyframes aquariumPremiumSpark {
+  0%, 26%, 100% { opacity: 0; transform: scale(0.35); }
+  10% { opacity: 0.95; transform: scale(1.15); }
+  18% { opacity: 0.5; transform: scale(0.9); }
+}
+
 .aquarium-dom-food {
   position: absolute;
   top: 0;

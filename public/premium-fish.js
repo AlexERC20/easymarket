@@ -15,7 +15,21 @@ export const PREMIUM_DOM_FISH_SVG = `
         <stop offset=".5" stop-color="#735df2" stop-opacity=".7" />
         <stop offset="1" stop-color="#ff6d9c" stop-opacity=".18" />
       </linearGradient>
+      <radialGradient id="emPremiumAura" cx=".5" cy=".5" r=".5">
+        <stop offset="0" stop-color="#7dffd6" stop-opacity=".32" />
+        <stop offset=".55" stop-color="#5f8cff" stop-opacity=".13" />
+        <stop offset="1" stop-color="#a74ee8" stop-opacity="0" />
+      </radialGradient>
+      <linearGradient id="emPremiumGlint" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#ffffff" stop-opacity="0" />
+        <stop offset=".5" stop-color="#f2ffff" stop-opacity=".85" />
+        <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+      </linearGradient>
+      <clipPath id="emPremiumBodyClip">
+        <path d="M20 20 C23 9 34 6 49 8 C62 9 72 14 74 20 C71 27 61 32 47 32 C33 33 23 29 20 20Z" />
+      </clipPath>
     </defs>
+    <ellipse class="premium-aura" cx="42" cy="20" rx="33" ry="17" fill="url(#emPremiumAura)" />
     <g class="premium-tail-root">
       <path d="M22 20 C13 11 5 7 1 9 C7 15 7 24 1 31 C8 32 15 28 22 21Z" fill="url(#emPremiumFin)" />
       <g class="premium-tail-tip">
@@ -32,6 +46,9 @@ export const PREMIUM_DOM_FISH_SVG = `
       <path d="M34 21q3 3 6 0M40 20q3 3 6 0M46 20q3 3 6 0M52 21q3 3 6 0" />
       <path d="M36 27q3 3 6 0M42 26q3 3 6 0M48 26q3 3 6 0" />
     </g>
+    <g clip-path="url(#emPremiumBodyClip)">
+      <rect class="premium-glint" x="24" y="1" width="13" height="38" fill="url(#emPremiumGlint)" />
+    </g>
     <g class="premium-pectoral">
       <path d="M47 23 C43 32 51 36 57 27 C52 29 49 27 47 23Z" fill="url(#emPremiumFin)" />
     </g>
@@ -40,8 +57,38 @@ export const PREMIUM_DOM_FISH_SVG = `
     <circle cx="65.2" cy="16.1" r="1.45" fill="#07131b" />
     <circle cx="65.8" cy="15.4" r=".5" fill="#fff" />
     <path d="M73 21q2 1 0 2" fill="none" stroke="#07131b" stroke-width=".8" stroke-linecap="round" opacity=".72" />
+    <g transform="translate(35 12)"><path class="premium-spark" d="M0 -3.2 L1.15 0 L0 3.2 L-1.15 0Z" /></g>
+    <g transform="translate(56 25)"><path class="premium-spark s2" d="M0 -2.6 L0.95 0 L0 2.6 L-0.95 0Z" /></g>
+    <g transform="translate(64 13)"><path class="premium-spark s3" d="M0 -2.2 L0.8 0 L0 2.2 L-0.8 0Z" /></g>
   </svg>
 `;
+
+// Ореол рендерится в спрайт один раз: один drawImage за кадр вместо
+// shadowBlur/фильтров, которые аквариум сознательно избегает на мобилках.
+let haloSprite = null;
+function premiumHalo() {
+  if (!haloSprite) {
+    const size = 96;
+    haloSprite = document.createElement("canvas");
+    haloSprite.width = size;
+    haloSprite.height = size;
+    const g = haloSprite.getContext("2d");
+    const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0, "rgba(125, 255, 214, 0.55)");
+    grad.addColorStop(0.5, "rgba(95, 140, 255, 0.18)");
+    grad.addColorStop(1, "rgba(167, 78, 232, 0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+  }
+  return haloSprite;
+}
+
+// Точки искорок на теле (в долях размера рыбы, локальные координаты).
+const PREMIUM_SPARK_POINTS = [
+  [-0.1, -0.28],
+  [0.5, 0.12],
+  [-0.62, 0.2],
+];
 
 function traceBody(ctx, s, bend, midBend) {
   const h = s * 0.48;
@@ -70,6 +117,11 @@ export function drawPremiumFish(ctx, fish, simTime) {
   ctx.translate(fish.x, fish.y);
   ctx.rotate(angle);
   ctx.scale(facing, 1);
+
+  // Мягкий пульсирующий ореол под рыбой — сразу видно, что она особенная.
+  const haloR = s * 2.35;
+  ctx.globalAlpha = 0.14 + (Math.sin(simTime * 1.9 + fish.tailPhase * 0.12) + 1) * 0.05;
+  ctx.drawImage(premiumHalo(), -haloR, -haloR, haloR * 2, haloR * 2);
 
   // Layered translucent tail: two delayed curves make the body feel flexible
   // without a skeletal simulation or extra canvas.
@@ -121,6 +173,18 @@ export function drawPremiumFish(ctx, fish, simTime) {
   ctx.beginPath();
   ctx.ellipse(s * 0.26, s * 0.32, s * 0.52, s * 0.18, -0.08, 0, Math.PI * 2);
   ctx.fill();
+
+  // Бегущий блик: узкая полоса света проходит по телу раз в ~2.5s. Клип уже
+  // стоит, так что это одна дешёвая заливка эллипсом.
+  const glintCycle = (simTime * 0.4 + fish.tailPhase * 0.06) % 1;
+  if (glintCycle < 0.45) {
+    const p = glintCycle / 0.45;
+    ctx.globalAlpha = 0.36 * Math.sin(p * Math.PI);
+    ctx.fillStyle = "#ecfffd";
+    ctx.beginPath();
+    ctx.ellipse(-s * 0.95 + p * s * 2.2, midBend, s * 0.2, s * 0.72, -0.42, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 
   ctx.globalAlpha = 0.32;
@@ -172,5 +236,26 @@ export function drawPremiumFish(ctx, fish, simTime) {
   ctx.beginPath();
   ctx.arc(s * 1.07, s * 0.05, s * (0.1 + mouth * 0.04), -0.7, 0.7);
   ctx.stroke();
+
+  // Редкие искорки-ромбики на чешуе: каждая мигает на пике своей синусоиды.
+  ctx.fillStyle = "#eafffb";
+  for (let i = 0; i < PREMIUM_SPARK_POINTS.length; i += 1) {
+    const tw = Math.sin(simTime * 2.1 + i * 2.4 + fish.tailPhase * 0.2);
+    if (tw < 0.62) {
+      continue;
+    }
+    const a = ((tw - 0.62) / 0.38) ** 2;
+    const px = PREMIUM_SPARK_POINTS[i][0] * s;
+    const py = PREMIUM_SPARK_POINTS[i][1] * s + midBend * 0.5;
+    const r = s * (0.05 + a * 0.05);
+    ctx.globalAlpha = a * 0.95;
+    ctx.beginPath();
+    ctx.moveTo(px, py - r * 2.6);
+    ctx.lineTo(px + r, py);
+    ctx.lineTo(px, py + r * 2.6);
+    ctx.lineTo(px - r, py);
+    ctx.closePath();
+    ctx.fill();
+  }
   ctx.restore();
 }
