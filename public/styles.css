@@ -3039,6 +3039,38 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   display: none;
 }
 
+/* Прогресс депозита к премиум-анимации */
+.legend-progress {
+  display: grid;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.legend-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+
+.legend-progress-track i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #b7ff4d, #35f6ff);
+  transition: width 480ms var(--ease-default);
+}
+
+/* Специфичность выше, чем у .task-body small ниже по файлу */
+.task-body .legend-progress small {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+}
+
 .task-item.info {
   border-color: rgba(94, 161, 255, 0.24);
   background: rgba(94, 161, 255, 0.06);

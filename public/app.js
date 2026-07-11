@@ -1017,8 +1017,14 @@ function renderLegendSceneTask() {
   }
   const goal = Math.max(1, Number(info.deposit_goal) || 1000);
   const total = Math.min(Math.max(0, Number(info.deposit_total) || 0), goal);
-  if ($("legendSceneTaskProgress")) {
-    $("legendSceneTaskProgress").textContent = `$${total.toFixed(0)} / $${goal.toFixed(0)}`;
+  if ($("legendSceneTaskBar")) {
+    $("legendSceneTaskBar").style.width = `${Math.round((total / goal) * 100)}%`;
+  }
+  if ($("legendSceneTaskCur")) {
+    $("legendSceneTaskCur").textContent = `$${Math.floor(total).toLocaleString("ru-RU")}`;
+  }
+  if ($("legendSceneTaskGoal")) {
+    $("legendSceneTaskGoal").textContent = `$${Math.floor(goal).toLocaleString("ru-RU")}`;
   }
   const button = $("legendSceneTaskBtn");
   if (button) {

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260711-05" />
+    <link rel="stylesheet" href="/styles.css?v=20260711-06" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260711-03" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
@@ -195,15 +195,17 @@
             <div id="coreDailyList" class="daily-rotation">
               <p class="muted">Загружаю задания…</p>
             </div>
-            <p id="legendSceneTaskSection" class="task-section hidden">Секрет</p>
+            <p id="legendSceneTaskSection" class="task-section hidden">Премиум</p>
             <div id="legendSceneTask" class="task-item featured hidden">
               <span class="task-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 13.8 9l5.7.2-4.5 3.6 1.6 5.7L12 15.2l-4.6 3.3 1.6-5.7-4.5-3.6 5.7-.2L12 3.5Z"/></svg></span>
               <div class="task-body">
-                <strong>Секрет за $1 000</strong>
-                <small>Пополни всего на $1 000, встряхни график — и смотри. Больше ничего не скажем. <b id="legendSceneTaskProgress">$0 / $1000</b></small>
+                <strong>Премиум анимация</strong>
+                <div class="legend-progress">
+                  <div class="legend-progress-track"><i id="legendSceneTaskBar"></i></div>
+                  <small><span id="legendSceneTaskCur">$0</span><span id="legendSceneTaskGoal">$1 000</span></small>
+                </div>
               </div>
               <div class="task-act">
-                <span class="task-reward">?</span>
                 <button id="legendSceneTaskBtn" class="task-button gold" type="button">Пополнить</button>
               </div>
             </div>
@@ -813,6 +815,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260711-07" type="module"></script>
+    <script src="/app.js?v=20260711-08" type="module"></script>
   </body>
 </html>

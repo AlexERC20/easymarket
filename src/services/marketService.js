@@ -3107,11 +3107,11 @@ export async function getUserSnapshot(telegramId) {
     referral_stats: referralStats,
     daily_tasks: dailyTasks,
     aquarium_premium_fish_unlocked: Boolean(premiumFishResult.rows[0]?.unlocked),
-    // Сцена «Легенда 24»: пока в тест-режиме — задание и сцена видны только
-    // админу. При раскатке на всех: available -> true, unlocked -> по депозиту.
+    // Премиум-анимация («Легенда 24»): задание с прогрессом видят все,
+    // открывается за суммарный депозит $1000. Админ — без депозита (тест).
     legend_scene: {
-      available: sceneTester,
-      unlocked: sceneTester,
+      available: true,
+      unlocked: sceneTester || depositTotal >= LEGEND_SCENE_DEPOSIT_GOAL,
       deposit_total: depositTotal,
       deposit_goal: LEGEND_SCENE_DEPOSIT_GOAL,
     },
