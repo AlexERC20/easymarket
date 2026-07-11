@@ -185,9 +185,14 @@ function mapMarket(row) {
     status: row.status,
     winner: row.winner,
     is_lucky: Boolean(row.is_lucky),
+    lucky_until: row.lucky_until ?? null,
     created_at: row.created_at,
     resolved_at: row.resolved_at,
   };
+}
+
+function isLuckyWindowActive(marketRow) {
+  return Boolean(marketRow?.lucky_until) && new Date(marketRow.lucky_until).getTime() > Date.now();
 }
 
 function mapUser(row) {
@@ -5275,9 +5280,11 @@ export async function createBtcMarket(definition = BTC_MARKET_DEFS[0], btcInput 
   const startTime = new Date();
   const durationMinutes = getBtcMarketDurationMinutes(definition);
   const endTime = new Date(startTime.getTime() + durationMinutes * 60_000);
-  // Счастливый раунд ⚡x2: ~каждая пятая 5-минутка. Выигрыш удвоится бонусом
-  // при резолве — базовые выплаты не трогаем.
-  const isLucky = definition.symbol === "BTCUSDT" && Math.random() < 0.2;
+  // Счастливый раунд ⚡x2 больше НЕ решается при создании: на весь раунд у
+  // центра он ломал экономику (лудка обеих сторон = гарантированный профит).
+  // Теперь x2 прокает коротким окном в конце раунда на перекосе — см.
+  // maybeTriggerLuckyWindow в updateLiveBtcPrice.
+  const isLucky = false;
 
   const result = await query(
     `
@@ -5368,6 +5375,38 @@ export async function ensureActiveMarket() {
   return markets.find((market) => market.symbol === MARKET_SYMBOL) || markets[0] || null;
 }
 
+// Счастливое окно ⚡x2: один ролл за раунд, только в последней минуте и
+// только на перекосе (на центре обе стороны дают гарантированный арбитраж).
+// Прокнуло — окно на 15 секунд: успел поставить — эти ставки получат x2.
+const LUCKY_WINDOW_CHANCE = 0.05;
+const LUCKY_WINDOW_MS = 15_000;
+const LUCKY_TRIGGER_ZONE_MS = 60_000; // катаем только в последней минуте
+const LUCKY_MIN_TAIL_MS = 20_000; // окно должно успеть прожить до конца раунда
+const LUCKY_MIN_SKEW = 0.12; // |yes - 0.5| >= 0.12, т.е. 62/38 и дальше
+
+async function maybeTriggerLuckyWindow(client, market, yesPrice) {
+  if (market.symbol !== MARKET_SYMBOL || market.lucky_rolled) {
+    return;
+  }
+  const msLeft = new Date(market.end_time).getTime() - Date.now();
+  if (msLeft > LUCKY_TRIGGER_ZONE_MS || msLeft < LUCKY_MIN_TAIL_MS) {
+    return;
+  }
+  if (Math.abs(yesPrice - 0.5) < LUCKY_MIN_SKEW) {
+    return;
+  }
+  const procs = Math.random() < LUCKY_WINDOW_CHANCE;
+  await client.query(
+    `
+      UPDATE markets
+      SET lucky_rolled = true,
+          lucky_until = $2
+      WHERE id = $1
+    `,
+    [market.id, procs ? new Date(Date.now() + LUCKY_WINDOW_MS) : null],
+  );
+}
+
 export async function updateLiveBtcPrice() {
   const btc = await getBtcPrice();
   await withTransaction(async (client) => {
@@ -5401,6 +5440,8 @@ export async function updateLiveBtcPrice() {
         `,
         [market.id, btc.price, yesPrice, noPrice],
       );
+
+      await maybeTriggerLuckyWindow(client, market, yesPrice);
 
       if (!isBtcMarketSymbol(market.symbol) && market.symbol !== btc.symbol) {
         await persistPriceTick(client, market.symbol, btc.price, btc.source);
@@ -6697,6 +6738,8 @@ export async function buyOutcome(input) {
       ],
     );
 
+    // Ставка внутри счастливого окна: только эта часть позиции получит x2.
+    const luckySpentPart = isLuckyWindowActive(market) ? amount : 0;
     const positionResult = await client.query(
       `
         INSERT INTO positions (
@@ -6708,20 +6751,22 @@ export async function buyOutcome(input) {
           avg_price,
           bonus_spent,
           currency,
+          lucky_spent,
           status,
           updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'open', now())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open', now())
         ON CONFLICT (user_id, market_id, side, currency) DO UPDATE SET
           shares = positions.shares + EXCLUDED.shares,
           spent = positions.spent + EXCLUDED.spent,
           bonus_spent = positions.bonus_spent + EXCLUDED.bonus_spent,
+          lucky_spent = positions.lucky_spent + EXCLUDED.lucky_spent,
           avg_price = (positions.spent + EXCLUDED.spent) / NULLIF(positions.shares + EXCLUDED.shares, 0),
           status = 'open',
           updated_at = now()
         RETURNING *
       `,
-      [user.id, marketId, side, shares, amount, quote.executionPrice, debit.bonus_spent, currency],
+      [user.id, marketId, side, shares, amount, quote.executionPrice, debit.bonus_spent, currency, luckySpentPart],
     );
 
     const tradeResult = await client.query(
@@ -7178,9 +7223,15 @@ export async function resolveExpiredMarkets() {
         const basePayout = Math.max(0, roundMoney(grossPayout - fee));
         const basePnl = roundMoney(basePayout - spent);
         // Lucky x2 is a promo boost for net profit only: stake is not doubled.
-        // Example: spent 100, shares 140, fee 2.8 -> base pnl 37.2 -> final pnl 74.4.
-        const luckyBonus = currentMarket.is_lucky && basePnl > 0
-          ? roundMoney(basePnl)
+        // Новая механика: бонус пропорционален доле ставки, сделанной ВНУТРИ
+        // счастливого окна (lucky_spent / spent). Легаси is_lucky (флаг на
+        // весь раунд) дорезолвливается по-старому.
+        const luckySpent = Math.min(toNumber(position.lucky_spent), spent);
+        const luckyShare = currentMarket.is_lucky
+          ? 1
+          : spent > 0 ? luckySpent / spent : 0;
+        const luckyBonus = basePnl > 0 && luckyShare > 0
+          ? roundMoney(basePnl * luckyShare)
           : 0;
         const payout = roundMoney(basePayout + luckyBonus);
         const pnl = roundMoney(basePnl + luckyBonus);

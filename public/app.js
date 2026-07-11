@@ -201,6 +201,7 @@ const state = {
   legendScene: null,
   depositBonus: null,
   shakeFeed: null,
+  luckyAnnouncedFor: 0,
   freshActivityIds: new Set(),
   playedActivityAnimIds: new Set(), // въезд/глинт уже проигран — не повторять на пере-рендерах
   lastPositionPnl: {},
@@ -984,6 +985,18 @@ function syncAquariumRuntimeForMarket(market = getDisplayMarket()) {
   return allowed;
 }
 
+// Счастливое окно только что прокнуло — громко объявляем один раз за раунд:
+// шанс поставить с x2 живёт всего ~15 секунд.
+function maybeAnnounceLuckyWindow(market, luckyLeftSec) {
+  if (!market || luckyLeftSec <= 0 || state.luckyAnnouncedFor === market.id) {
+    return;
+  }
+  state.luckyAnnouncedFor = market.id;
+  triggerHaptic("medium");
+  playMotionSound("tap-strong");
+  showToast(`⚡ x2 на ${luckyLeftSec} секунд — успей поставить!`);
+}
+
 function applyAquariumEntitlements(data) {
   const unlocked = Boolean(data?.aquarium_premium_fish_unlocked);
   state.aquariumPremiumFishUnlocked = unlocked;
@@ -1715,8 +1728,12 @@ function drawMarketChartFrame(ts) {
     ctx.stroke();
   }
 
-  // Счастливый раунд: маленькая мерцающая молния + x2 без тяжёлой плашки.
-  if (market.is_lucky && market.status === "open") {
+  // Счастливое окно x2: молния + обратный отсчёт, пока окно живо. Легаси
+  // is_lucky (флаг на весь раунд) дорисовывается без таймера.
+  const luckyUntilTs = market.lucky_until ? Date.parse(market.lucky_until) : 0;
+  const luckyLeftSec = Math.max(0, Math.ceil((luckyUntilTs - Date.now()) / 1000));
+  maybeAnnounceLuckyWindow(market, luckyLeftSec);
+  if ((market.is_lucky || luckyLeftSec > 0) && market.status === "open") {
     const flicker = 0.72 + 0.28 * Math.sin(nowTs * 0.018);
     const luckyX = left + 10 * dpr;
     const luckyY = top + 15 * dpr;
@@ -1737,7 +1754,7 @@ function drawMarketChartFrame(ts) {
     ctx.shadowBlur = 7 * dpr;
     ctx.font = `900 ${Math.max(10, width * 0.024)}px Inter, system-ui, sans-serif`;
     ctx.textBaseline = "middle";
-    ctx.fillText("x2", luckyX + 20 * dpr, luckyY + 1 * dpr);
+    ctx.fillText(luckyLeftSec > 0 ? `x2 · ${luckyLeftSec}с` : "x2", luckyX + 20 * dpr, luckyY + 1 * dpr);
     ctx.restore();
   }
 

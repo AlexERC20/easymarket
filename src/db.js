@@ -615,6 +615,15 @@ export async function runMigrations() {
     ALTER TABLE markets
       ADD COLUMN IF NOT EXISTS is_lucky BOOLEAN NOT NULL DEFAULT false;
 
+    -- Счастливое ОКНО x2: прокает один раз в конце раунда на перекосе и
+    -- живёт ~15 секунд; бонус получают только ставки внутри окна.
+    ALTER TABLE markets
+      ADD COLUMN IF NOT EXISTS lucky_until TIMESTAMPTZ;
+    ALTER TABLE markets
+      ADD COLUMN IF NOT EXISTS lucky_rolled BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE positions
+      ADD COLUMN IF NOT EXISTS lucky_spent NUMERIC(20, 8) NOT NULL DEFAULT 0;
+
 
     CREATE TABLE IF NOT EXISTS price_ticks (
       id BIGSERIAL PRIMARY KEY,
