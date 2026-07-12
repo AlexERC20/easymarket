@@ -342,8 +342,24 @@ export async function runMigrations() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    ALTER TABLE top_market_meta
+      ADD COLUMN IF NOT EXISTS feed_group TEXT NOT NULL DEFAULT 'TOP',
+      ADD COLUMN IF NOT EXISTS event_id TEXT,
+      ADD COLUMN IF NOT EXISTS event_slug TEXT,
+      ADD COLUMN IF NOT EXISTS event_title TEXT,
+      ADD COLUMN IF NOT EXISTS sport TEXT,
+      ADD COLUMN IF NOT EXISTS yes_label TEXT NOT NULL DEFAULT 'Yes',
+      ADD COLUMN IF NOT EXISTS no_label TEXT NOT NULL DEFAULT 'No',
+      ADD COLUMN IF NOT EXISTS is_live BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS score TEXT,
+      ADD COLUMN IF NOT EXISTS period TEXT,
+      ADD COLUMN IF NOT EXISTS starts_at TIMESTAMPTZ;
+
     CREATE INDEX IF NOT EXISTS idx_top_market_meta_rank
       ON top_market_meta(top_rank);
+
+    CREATE INDEX IF NOT EXISTS idx_top_market_meta_feed_group_rank
+      ON top_market_meta(feed_group, top_rank);
 
     ALTER TABLE top_market_meta
       DROP CONSTRAINT IF EXISTS top_market_meta_polymarket_id_key;

@@ -504,6 +504,10 @@ h2 {
   color: rgba(126, 200, 255, 0.92);
 }
 
+.top-more-item.sports-market-action {
+  color: rgba(133, 255, 197, 0.94);
+}
+
 @keyframes topMoreIn {
   from {
     opacity: 0;
@@ -1809,6 +1813,13 @@ h2 {
   line-height: 1;
 }
 
+.market-card.sports-market-card .outcome-button strong {
+  overflow: hidden;
+  font-size: clamp(11px, 3.7vw, 16px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .outcome-button.yes.active {
   background: #329b5f;
 }
@@ -2598,6 +2609,7 @@ code {
 }
 
 #worldCupSheet,
+#sportsMarketsSheet,
 #tasksSheet,
 #leaderboardSheet {
   z-index: 34;
@@ -4698,6 +4710,33 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   border-radius: 10px;
   font-size: 12.5px;
   white-space: nowrap;
+}
+
+.sports-market-row {
+  border-color: rgba(128, 255, 202, 0.1);
+}
+
+.sports-market-row.is-live .team-flag {
+  box-shadow: 0 0 0 1px rgba(72, 235, 154, 0.38), 0 0 18px rgba(72, 235, 154, 0.13);
+}
+
+.sports-live-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 16px;
+  border-radius: 5px;
+  background: rgba(72, 235, 154, 0.14);
+  color: #63efa6;
+  padding: 0 5px;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 950;
+}
+
+.sports-market-actions button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .btc-mini-icon {

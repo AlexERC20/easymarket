@@ -6,6 +6,7 @@ const MARKET_SYMBOL = "BTCUSDT";
 const WORLD_CUP_EVENT_SLUG = "world-cup-winner";
 const WORLD_CUP_SYMBOL_PREFIX = "WCUP:";
 const TOP_MARKET_SYMBOL_PREFIX = "TOP:";
+const SPORTS_MARKET_SYMBOL_PREFIX = "SPORT:";
 const MIN_PRICE = 0.001;
 const MAX_PRICE = 0.999;
 const BTC_MIN_PRICE = 0.001;
@@ -22,9 +23,14 @@ const MIN_TAIL_DEPTH_FACTOR = 0.004;
 const REFERRAL_SIGNUP_BONUS = 100;
 const CURRENCIES = new Set(["STAR", "USDT"]);
 const WORLD_CUP_SYNC_INTERVAL_MS = 90_000;
-const TOP_MARKET_SYNC_INTERVAL_MS = 10 * 60_000;
+const TOP_MARKET_SYNC_INTERVAL_MS = 60_000;
+const TOP_MARKET_CATALOG_REFRESH_INTERVAL_MS = 10 * 60_000;
 const TOP_MARKET_LIMIT = 20;
 const TOP_MARKET_FETCH_LIMIT = 250;
+const SPORTS_MARKET_SYNC_INTERVAL_MS = 60_000;
+const SPORTS_CATALOG_REFRESH_INTERVAL_MS = 5 * 60_000;
+const SPORTS_MARKET_LIMIT = 20;
+const SPORTS_EVENT_FETCH_LIMIT = 100;
 const TOP_MARKET_BLOCKED_PATTERN = new RegExp([
   "jesus",
   "christ",
@@ -102,6 +108,14 @@ let worldCupLastSource = "cache";
 let topMarketSyncPromise = null;
 let topMarketLastSyncAt = 0;
 let topMarketLastSource = "cache";
+let topMarketCatalogLastFetchAt = 0;
+let topMarketCatalogCache = [];
+let sportsMarketSyncPromise = null;
+let sportsMarketLastSyncAt = 0;
+let sportsMarketLastSource = "cache";
+let sportsCatalogLastFetchAt = 0;
+let sportsCatalogCache = [];
+let externalMarketSchemaReady = false;
 
 function getBtcMarketDef(symbol) {
   return BTC_MARKET_DEFS.find((definition) => definition.symbol === symbol) || null;
@@ -143,6 +157,7 @@ function mapMarket(row) {
   const btcDefinition = getBtcMarketDef(row.symbol);
   const isWorldCup = String(row.symbol || "").startsWith(WORLD_CUP_SYMBOL_PREFIX);
   const isTop = String(row.symbol || "").startsWith(TOP_MARKET_SYMBOL_PREFIX);
+  const isSports = String(row.symbol || "").startsWith(SPORTS_MARKET_SYMBOL_PREFIX);
   const minPrice = btcDefinition ? BTC_MIN_PRICE : MIN_PRICE;
   const yesPrice = roundOutcomePrice(toNumber(row.yes_price), minPrice);
   const noPrice = roundOutcomePrice(toNumber(row.no_price, 1 - yesPrice), minPrice);
@@ -150,10 +165,14 @@ function mapMarket(row) {
   return {
     id: Number(row.id),
     symbol: row.symbol,
-    market_type: btcDefinition ? "BTC_UPDOWN" : (isWorldCup ? "WORLD_CUP_WINNER" : (isTop ? "TOP_MARKET" : undefined)),
-    title: btcDefinition?.title || row.title || (isTop ? row.question : undefined),
-    team: row.team || (isTop ? row.title || row.question : undefined),
+    market_type: btcDefinition
+      ? "BTC_UPDOWN"
+      : (isWorldCup ? "WORLD_CUP_WINNER" : (isTop ? "TOP_MARKET" : (isSports ? "SPORTS_MARKET" : undefined))),
+    title: btcDefinition?.title || row.title || ((isTop || isSports) ? row.question : undefined),
+    team: row.team || ((isTop || isSports) ? row.title || row.question : undefined),
     icon: row.icon,
+    yes_label: row.yes_label || "Yes",
+    no_label: row.no_label || "No",
     label: btcDefinition?.label,
     question: row.question,
     open_price: toNumber(row.open_price),
@@ -218,6 +237,8 @@ function mapPosition(row) {
     market_symbol: row.market_symbol,
     team: row.team,
     icon: row.icon,
+    yes_label: row.yes_label || undefined,
+    no_label: row.no_label || undefined,
     yes_price: row.yes_price === undefined ? undefined : toNumber(row.yes_price),
     no_price: row.no_price === undefined ? undefined : toNumber(row.no_price),
   };
@@ -279,6 +300,8 @@ function mapMarketActivity(row) {
     market_status: row.market_status,
     market_winner: row.market_winner,
     team: row.team,
+    yes_label: row.yes_label || undefined,
+    no_label: row.no_label || undefined,
     telegram_id: row.telegram_id,
     username: row.username,
     first_name: row.first_name,
@@ -374,6 +397,8 @@ function mapTopMarket(row) {
     slug: row.slug,
     polymarket_id: row.polymarket_id,
     question: row.question,
+    yes_label: row.yes_label || "Yes",
+    no_label: row.no_label || "No",
     open_price: toNumber(row.open_price),
     current_price: yesPrice,
     yes_price: yesPrice,
@@ -387,6 +412,48 @@ function mapTopMarket(row) {
     chart: row.chart || [],
     start_time: row.start_time,
     status: row.status,
+    end_time: row.end_time,
+  };
+}
+
+function mapSportsMarket(row) {
+  const yesPrice = toNumber(row.yes_price);
+  const localVolume = toNumber(row.yes_volume) + toNumber(row.no_volume);
+  return {
+    id: Number(row.id),
+    symbol: row.symbol,
+    market_type: "SPORTS_MARKET",
+    title: row.title || row.question,
+    team: row.title || row.question,
+    event_title: row.event_title || row.title || row.question,
+    icon: row.icon || "",
+    image: row.icon || null,
+    slug: row.slug,
+    event_slug: row.event_slug,
+    polymarket_id: row.polymarket_id,
+    event_id: row.event_id,
+    sport: row.sport || "sports",
+    question: row.question,
+    yes_label: row.yes_label || "Yes",
+    no_label: row.no_label || "No",
+    open_price: toNumber(row.open_price),
+    current_price: yesPrice,
+    yes_price: yesPrice,
+    no_price: toNumber(row.no_price, 1 - yesPrice),
+    chance_pct: Math.round(yesPrice * 1000) / 10,
+    volume: localVolume,
+    external_volume: toNumber(row.meta_volume ?? row.volume),
+    yes_volume: toNumber(row.yes_volume),
+    no_volume: toNumber(row.no_volume),
+    sports_rank: row.top_rank === null || row.top_rank === undefined ? null : Number(row.top_rank),
+    is_live: Boolean(row.is_live),
+    score: row.score || "",
+    period: row.period || "",
+    starts_at: row.starts_at || null,
+    chart: row.chart || [],
+    start_time: row.start_time,
+    status: row.status,
+    winner: row.winner,
     end_time: row.end_time,
   };
 }
@@ -491,7 +558,9 @@ function getMarketMinOutcomePrice(market) {
 
 function isSportsMarket(market) {
   const symbol = String(market?.symbol || "");
-  return symbol.startsWith(WORLD_CUP_SYMBOL_PREFIX) || symbol.startsWith(TOP_MARKET_SYMBOL_PREFIX);
+  return symbol.startsWith(WORLD_CUP_SYMBOL_PREFIX)
+    || symbol.startsWith(TOP_MARKET_SYMBOL_PREFIX)
+    || symbol.startsWith(SPORTS_MARKET_SYMBOL_PREFIX);
 }
 
 function getMarketMakerYesPrice(market, currentPrice, options = {}) {
@@ -1055,6 +1124,32 @@ function getPolymarketEventText(market) {
     .join(" ");
 }
 
+function getPolymarketTagSlugs(value) {
+  const directTags = Array.isArray(value?.tags) ? value.tags : [];
+  const eventTags = (Array.isArray(value?.events) ? value.events : [])
+    .flatMap((event) => Array.isArray(event?.tags) ? event.tags : []);
+  return [...directTags, ...eventTags]
+    .map((tag) => String(tag?.slug || tag?.label || tag || "").trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isPolymarketSportsMarket(market) {
+  if (market?.sportsMarketType || market?.gameStartTime) {
+    return true;
+  }
+  return getPolymarketTagSlugs(market).some((tag) => (
+    tag === "sports"
+    || tag === "games"
+    || tag === "esports"
+    || tag === "soccer"
+    || tag === "tennis"
+    || tag === "basketball"
+    || tag === "baseball"
+    || tag === "hockey"
+    || tag === "formula1"
+  ));
+}
+
 function isExcludedTopMarket(market) {
   const text = [
     market?.question,
@@ -1067,6 +1162,7 @@ function isExcludedTopMarket(market) {
     text.includes(WORLD_CUP_EVENT_SLUG)
     || text.includes("world cup winner")
     || text.includes("2026 fifa world cup")
+    || isPolymarketSportsMarket(market)
     || TOP_MARKET_BLOCKED_PATTERN.test(text)
   ) {
     return true;
@@ -1353,9 +1449,20 @@ async function fetchTopMarketsFromPolymarket() {
 }
 
 async function getTopFeedMarkets() {
+  if (
+    topMarketCatalogCache.length
+    && Date.now() - topMarketCatalogLastFetchAt < TOP_MARKET_CATALOG_REFRESH_INTERVAL_MS
+  ) {
+    return {
+      source: "polymarket_top_cache",
+      markets: topMarketCatalogCache,
+    };
+  }
   try {
     const markets = await fetchTopMarketsFromPolymarket();
     if (markets.length) {
+      topMarketCatalogCache = markets;
+      topMarketCatalogLastFetchAt = Date.now();
       return {
         source: "polymarket_top",
         markets,
@@ -1365,13 +1472,308 @@ async function getTopFeedMarkets() {
     console.warn("[EasyMarket] Polymarket top fetch failed", error instanceof Error ? error.message : String(error));
   }
 
+  return topMarketCatalogCache.length
+    ? { source: "polymarket_top_stale", markets: topMarketCatalogCache }
+    : { source: "empty", markets: [] };
+}
+
+function sportsMarketSymbol(input) {
+  return `${SPORTS_MARKET_SYMBOL_PREFIX}${normalizeTopMarketSlug(input.polymarketId || input.slug || input.title)}`;
+}
+
+function localizeSportsTitle(value) {
+  const localized = localizeTopMarketTitle(value);
+  const input = String(localized || "")
+    .replace(/^World Cup:\s*Golden Ball Winner$/i, "Чемпионат мира: обладатель Золотого мяча")
+    .replace(/^World Cup:\s*Golden Boot Winner$/i, "Чемпионат мира: лучший бомбардир")
+    .replace(/^World Cup:\s*Nation to Reach Final$/i, "Чемпионат мира: сборная выйдет в финал")
+    .replace(/^F1 Drivers['’] Champion$/i, "Чемпион Формулы-1")
+    .replace(/^Wimbledon ATP:/i, "Уимблдон:")
+    .replace(/\s+vs\.?\s+/gi, " — ")
+    .replace(/\s+-\s+More Markets$/i, "")
+    .trim();
+  let match = input.match(/^Will\s+(.+?)\s+be the top goalscorer at the 2026 FIFA World Cup\?$/i);
+  if (match) return `${localizeTopMarketName(match[1])} станет лучшим бомбардиром ЧМ-2026?`;
+  match = input.match(/^Will\s+(.+?)\s+reach the 2026 FIFA World Cup final\?$/i);
+  if (match) return `${localizeTopMarketName(match[1])} выйдет в финал ЧМ-2026?`;
+  match = input.match(/^Will\s+(.+?)\s+win the Golden Ball at the 2026 FIFA World Cup\?$/i);
+  if (match) return `${localizeTopMarketName(match[1])} получит Золотой мяч ЧМ-2026?`;
+  if (/^World Cup:\s*Unbeaten Champion\?$/i.test(input)) return "Чемпион мира пройдет турнир без поражений?";
+  return input;
+}
+
+function getSportsEventKey(event) {
+  return String(event?.slug || event?.title || event?.id || "")
+    .toLowerCase()
+    .replace(/-(more-markets|player-props|exact-score)$/i, "")
+    .replace(/\s+-\s+(more markets|player props|exact score)$/i, "")
+    .trim();
+}
+
+function getSportsMarketPriority(market) {
+  const type = String(market?.sportsMarketType || "").toLowerCase();
+  const question = String(market?.question || "").toLowerCase();
+  if (type === "moneyline" || type.includes("match_winner") || type === "winner") return 6;
+  if (/will .+ win/.test(question)) return 5;
+  if (type.includes("handicap") || type.includes("spread")) return 3;
+  if (type.includes("total") || type.includes("over_under")) return 2;
+  if (type.includes("completed")) return -10;
+  return 1;
+}
+
+function getSportsTag(event) {
+  const tags = getPolymarketTagSlugs(event);
+  const priority = [
+    "soccer",
+    "tennis",
+    "basketball",
+    "baseball",
+    "hockey",
+    "formula1",
+    "counter-strike-2",
+    "dota-2",
+    "league-of-legends",
+    "valorant",
+    "esports",
+  ];
+  const tagged = priority.find((tag) => tags.includes(tag));
+  if (tagged) return tagged;
+  const hint = `${event?.slug || ""} ${event?.title || ""}`.toLowerCase();
+  if (/\b(atp|wta|tennis|wimbledon)\b/.test(hint)) return "tennis";
+  if (/\b(mlb|baseball)\b/.test(hint)) return "baseball";
+  if (/\b(nba|wnba|basketball)\b/.test(hint)) return "basketball";
+  if (/\b(nhl|hockey)\b/.test(hint)) return "hockey";
+  if (/\b(f1|formula\s*1)\b/.test(hint)) return "formula1";
+  if (/\b(lol|dota|valorant|counter-strike|cs2)\b/.test(hint)) return "esports";
+  if (/\b(fifa|fifwc|world cup|fc|soccer|football)\b/.test(hint)) return "soccer";
+  return "sports";
+}
+
+function normalizeSportsFeedEvent(event) {
+  const eventSlug = String(event?.slug || "").trim();
+  const eventTitle = String(event?.title || "").trim();
+  if (
+    !eventTitle
+    || eventSlug === WORLD_CUP_EVENT_SLUG
+    || event?.ended === true
+    || /\s+-\s+(more markets|player props|exact score)$/i.test(eventTitle)
+    || /-(more-markets|player-props|exact-score)$/i.test(eventSlug)
+  ) {
+    return null;
+  }
+
+  const candidates = (Array.isArray(event?.markets) ? event.markets : [])
+    .map((market) => {
+      if (market?.closed || market?.archived || market?.active === false || market?.acceptingOrders === false) {
+        return null;
+      }
+      const outcomes = parseJsonArray(market.outcomes).map((outcome) => String(outcome || "").trim());
+      const prices = parseJsonArray(market.outcomePrices).map(Number);
+      if (outcomes.length !== 2 || prices.length !== 2 || !prices.every(Number.isFinite)) {
+        return null;
+      }
+      const endTime = new Date(market.endDate || market.endDateIso || event.endDate || event.endDateIso);
+      if (!Number.isFinite(endTime.getTime()) || (endTime.getTime() <= Date.now() && event?.live !== true)) {
+        return null;
+      }
+      const bestBid = Number(market.bestBid);
+      const bestAsk = Number(market.bestAsk);
+      const yesPrice = Number.isFinite(bestBid) && Number.isFinite(bestAsk) && bestBid > 0 && bestAsk > 0
+        ? (bestBid + bestAsk) / 2
+        : prices[0];
+      const volume24h = toNumber(market.volume24hrClob ?? market.volume24hr);
+      const liquidity = toNumber(market.liquidityNum ?? market.liquidity ?? config.marketLiquidity);
+      return {
+        raw: market,
+        outcomes,
+        yesPrice: clamp(yesPrice, MIN_PRICE, MAX_PRICE),
+        volume24h,
+        liquidity,
+        endTime,
+        priority: getSportsMarketPriority(market),
+        score: getSportsMarketPriority(market) * 1_000_000_000 + volume24h * 100 + liquidity,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score);
+
+  const selected = candidates[0];
+  if (!selected || selected.priority < 0) {
+    return null;
+  }
+
+  const market = selected.raw;
+  const labelsAreYesNo = selected.outcomes[0].toLowerCase() === "yes" && selected.outcomes[1].toLowerCase() === "no";
+  const startsAt = new Date(market.gameStartTime || event.gameStartTime || event.startDate || event.startDateIso || Date.now());
+  const effectiveEndTime = new Date(selected.endTime);
+  if (
+    Number.isFinite(startsAt.getTime())
+    && effectiveEndTime.getTime() <= startsAt.getTime() + 60 * 60_000
+  ) {
+    effectiveEndTime.setTime(startsAt.getTime() + 8 * 60 * 60_000);
+  }
+  if (event?.live === true && effectiveEndTime.getTime() <= Date.now()) {
+    effectiveEndTime.setTime(Date.now() + 4 * 60 * 60_000);
+  }
+  const eventVolume24h = toNumber(event.volume24hr) || selected.volume24h;
+  const live = event?.live === true;
+  const hoursUntilStart = Number.isFinite(startsAt.getTime())
+    ? (startsAt.getTime() - Date.now()) / 3_600_000
+    : Number.POSITIVE_INFINITY;
+  const timingRank = live ? 3 : (hoursUntilStart >= -2 && hoursUntilStart <= 24 * 7 ? 2 : 1);
+  const displayTitle = labelsAreYesNo
+    ? localizeSportsTitle(market.question || eventTitle)
+    : localizeSportsTitle(eventTitle);
+
   return {
-    source: "empty",
-    markets: [],
+    polymarketId: String(market.id || market.conditionId || market.slug),
+    slug: market.slug || "",
+    eventId: String(event.id || eventSlug || market.id),
+    eventSlug,
+    eventTitle: localizeSportsTitle(eventTitle),
+    title: displayTitle,
+    icon: market.icon || market.image || event.icon || event.image || "",
+    yesLabel: labelsAreYesNo ? "Yes" : localizeTopMarketName(selected.outcomes[0]),
+    noLabel: labelsAreYesNo ? "No" : localizeTopMarketName(selected.outcomes[1]),
+    yesPrice: selected.yesPrice,
+    volume: eventVolume24h || toNumber(event.volume),
+    liquidity: selected.liquidity,
+    endTime: effectiveEndTime,
+    startsAt: Number.isFinite(startsAt.getTime()) ? startsAt : null,
+    live,
+    score: String(event.score || ""),
+    period: String(event.period || event.elapsed || ""),
+    sport: getSportsTag(event),
+    timingRank,
+    activityScore: timingRank * 1_000_000_000_000 + eventVolume24h * 1_000 + selected.liquidity,
+    eventKey: getSportsEventKey(event),
   };
 }
 
+export async function fetchSportsMarketsFromPolymarket() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const url = `https://gamma-api.polymarket.com/markets?active=true&closed=false&tag_id=1&limit=${SPORTS_EVENT_FETCH_LIMIT}&order=volume24hr&ascending=false`;
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`polymarket_${response.status}`);
+    }
+    const payload = await response.json();
+    const marketRows = Array.isArray(payload) ? payload : (payload.markets || []);
+    const groupedEvents = new Map();
+    for (const market of marketRows) {
+      const sourceEvent = Array.isArray(market.events) ? market.events[0] : null;
+      const eventId = String(sourceEvent?.id || sourceEvent?.slug || market.id || "");
+      if (!eventId) continue;
+      const event = groupedEvents.get(eventId) || {
+        ...(sourceEvent || {}),
+        id: eventId,
+        title: sourceEvent?.title || market.question,
+        slug: sourceEvent?.slug || market.slug,
+        endDate: sourceEvent?.endDate || market.endDate,
+        markets: [],
+      };
+      event.markets.push(market);
+      groupedEvents.set(eventId, event);
+    }
+    const byEvent = new Map();
+    for (const row of groupedEvents.values()) {
+      const market = normalizeSportsFeedEvent(row);
+      if (!market) continue;
+      const current = byEvent.get(market.eventKey);
+      if (!current || market.activityScore > current.activityScore) {
+        byEvent.set(market.eventKey, market);
+      }
+    }
+    const allMarkets = Array.from(byEvent.values());
+    const liveMarkets = allMarkets
+      .filter((market) => market.live)
+      .sort((a, b) => toNumber(b.volume) - toNumber(a.volume));
+    const upcomingMarkets = allMarkets
+      .filter((market) => !market.live)
+      .sort((a, b) => b.activityScore - a.activityScore);
+    const liveSlots = Math.min(10, liveMarkets.length);
+    const selected = [
+      ...liveMarkets.slice(0, liveSlots),
+      ...upcomingMarkets.slice(0, SPORTS_MARKET_LIMIT - liveSlots),
+    ];
+    if (selected.length < SPORTS_MARKET_LIMIT) {
+      selected.push(...liveMarkets.slice(liveSlots, liveSlots + SPORTS_MARKET_LIMIT - selected.length));
+    }
+    return selected.slice(0, SPORTS_MARKET_LIMIT);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function fetchPolymarketStatesByIds(ids) {
+  const uniqueIds = [...new Set(ids.map((id) => String(id || "").trim()).filter(Boolean))].slice(0, 200);
+  if (!uniqueIds.length) return [];
+  const chunks = [];
+  for (let index = 0; index < uniqueIds.length; index += 40) {
+    chunks.push(uniqueIds.slice(index, index + 40));
+  }
+  const responses = await Promise.all(chunks.map(async (chunk) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6_000);
+    try {
+      const fetchBatch = async (closed) => {
+        const params = new URLSearchParams({ limit: String(chunk.length) });
+        if (closed) params.set("closed", "true");
+        chunk.forEach((id) => params.append("id", id));
+        const response = await fetch(`https://gamma-api.polymarket.com/markets?${params}`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`polymarket_${response.status}`);
+        const payload = await response.json();
+        return Array.isArray(payload) ? payload : [];
+      };
+      const [openMarkets, closedMarkets] = await Promise.all([
+        fetchBatch(false),
+        fetchBatch(true),
+      ]);
+      return [...openMarkets, ...closedMarkets];
+    } finally {
+      clearTimeout(timeout);
+    }
+  }));
+  return responses.flat();
+}
+
+function getResolvedPolymarketWinner(market) {
+  if (!market?.closed && !market?.archived) return null;
+  const prices = parseJsonArray(market.outcomePrices).map(Number);
+  if (prices.length !== 2 || !prices.every(Number.isFinite)) return null;
+  if (prices[0] >= MAX_PRICE && prices[1] <= MIN_PRICE) return "YES";
+  if (prices[1] >= MAX_PRICE && prices[0] <= MIN_PRICE) return "NO";
+  return prices.every((price) => price >= 0 && price <= 1) ? "REFUND" : null;
+}
+
+async function getSportsFeedMarkets() {
+  if (
+    sportsCatalogCache.length
+    && Date.now() - sportsCatalogLastFetchAt < SPORTS_CATALOG_REFRESH_INTERVAL_MS
+  ) {
+    return { source: "polymarket_sports_cache", markets: sportsCatalogCache };
+  }
+  try {
+    const markets = await fetchSportsMarketsFromPolymarket();
+    if (markets.length) {
+      sportsCatalogCache = markets;
+      sportsCatalogLastFetchAt = Date.now();
+      return { source: "polymarket_sports", markets };
+    }
+  } catch (error) {
+    console.warn("[EasyMarket] Polymarket sports fetch failed", error instanceof Error ? error.message : String(error));
+  }
+  return sportsCatalogCache.length
+    ? { source: "polymarket_sports_stale", markets: sportsCatalogCache }
+    : { source: "empty", markets: [] };
+}
+
 async function ensureTopMarketSchema(db = { query }) {
+  if (externalMarketSchemaReady) {
+    return;
+  }
   await db.query(`
     CREATE TABLE IF NOT EXISTS top_market_meta (
       symbol TEXT PRIMARY KEY,
@@ -1387,14 +1789,31 @@ async function ensureTopMarketSchema(db = { query }) {
     );
 
     ALTER TABLE top_market_meta
+      ADD COLUMN IF NOT EXISTS feed_group TEXT NOT NULL DEFAULT 'TOP',
+      ADD COLUMN IF NOT EXISTS event_id TEXT,
+      ADD COLUMN IF NOT EXISTS event_slug TEXT,
+      ADD COLUMN IF NOT EXISTS event_title TEXT,
+      ADD COLUMN IF NOT EXISTS sport TEXT,
+      ADD COLUMN IF NOT EXISTS yes_label TEXT NOT NULL DEFAULT 'Yes',
+      ADD COLUMN IF NOT EXISTS no_label TEXT NOT NULL DEFAULT 'No',
+      ADD COLUMN IF NOT EXISTS is_live BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS score TEXT,
+      ADD COLUMN IF NOT EXISTS period TEXT,
+      ADD COLUMN IF NOT EXISTS starts_at TIMESTAMPTZ;
+
+    ALTER TABLE top_market_meta
       DROP CONSTRAINT IF EXISTS top_market_meta_polymarket_id_key;
 
     CREATE INDEX IF NOT EXISTS idx_top_market_meta_rank
       ON top_market_meta(top_rank);
 
+    CREATE INDEX IF NOT EXISTS idx_top_market_meta_feed_group_rank
+      ON top_market_meta(feed_group, top_rank);
+
     CREATE INDEX IF NOT EXISTS idx_top_market_meta_polymarket_id
       ON top_market_meta(polymarket_id);
   `);
+  externalMarketSchemaReady = true;
 }
 
 function getDayKey() {
@@ -2848,6 +3267,7 @@ async function getUserMarketStats(userId, limit = 40) {
             WHEN m.symbol = ANY($2) THEN 'BTC_UPDOWN'
             WHEN m.symbol LIKE '${WORLD_CUP_SYMBOL_PREFIX}%' THEN 'WORLD_CUP_WINNER'
             WHEN m.symbol LIKE '${TOP_MARKET_SYMBOL_PREFIX}%' THEN 'TOP_MARKET'
+            WHEN m.symbol LIKE '${SPORTS_MARKET_SYMBOL_PREFIX}%' THEN 'SPORTS_MARKET'
             ELSE NULL
           END AS market_type,
           COALESCE(meta.team, top_meta.title) AS team,
@@ -3223,6 +3643,8 @@ export async function getUserSnapshot(telegramId) {
           m.symbol AS market_symbol,
           COALESCE(meta.team, top_meta.title) AS team,
           COALESCE(meta.icon, top_meta.icon) AS icon,
+          top_meta.yes_label,
+          top_meta.no_label,
           m.yes_price,
           m.no_price
         FROM positions p
@@ -4336,9 +4758,16 @@ async function getDailyTaskValue(client, userId, taskKey) {
         SELECT COUNT(*)::int AS count
         FROM trades
         JOIN markets ON markets.id = trades.market_id
+        LEFT JOIN top_market_meta sports_meta ON sports_meta.symbol = markets.symbol
         WHERE trades.user_id = $1
           AND trades.action = 'BUY'
-          AND markets.symbol LIKE $2
+          AND (
+            markets.symbol LIKE $2
+            OR (
+              sports_meta.feed_group = 'SPORT'
+              AND sports_meta.sport = 'soccer'
+            )
+          )
           AND trades.created_at >= date_trunc('day', now())
       `,
       [userId, `${WORLD_CUP_SYMBOL_PREFIX}%`],
@@ -5665,7 +6094,9 @@ export async function getRecentActivity(limit = 30) {
         markets.question AS market_question,
         markets.status AS market_status,
         markets.winner AS market_winner,
-        COALESCE(meta.team, top_meta.title) AS team
+        COALESCE(meta.team, top_meta.title) AS team,
+        top_meta.yes_label,
+        top_meta.no_label
       FROM trades
       JOIN users ON users.id = trades.user_id
       JOIN markets ON markets.id = trades.market_id
@@ -5961,12 +6392,31 @@ export async function getWorldCupMarkets() {
 }
 
 async function performTopMarketSync() {
-  const feed = await getTopFeedMarkets();
+  await ensureTopMarketSchema();
+  const trackedResult = await query(
+    `
+      SELECT meta.polymarket_id
+      FROM top_market_meta meta
+      JOIN markets m ON m.symbol = meta.symbol
+      WHERE meta.feed_group = 'TOP'
+        AND m.status = 'open'
+        AND meta.polymarket_id IS NOT NULL
+      LIMIT 200
+    `,
+  );
+  const [feed, trackedStates] = await Promise.all([
+    getTopFeedMarkets(),
+    fetchPolymarketStatesByIds(trackedResult.rows.map((row) => row.polymarket_id)).catch((error) => {
+      console.warn("[EasyMarket] Polymarket top state fetch failed", error instanceof Error ? error.message : String(error));
+      return [];
+    }),
+  ]);
+  const stateById = new Map(trackedStates.map((market) => [String(market.id), market]));
   const now = new Date();
 
   await withTransaction(async (client) => {
     await ensureTopMarketSchema(client);
-    await client.query("UPDATE top_market_meta SET top_rank = NULL WHERE top_rank IS NOT NULL");
+    await client.query("UPDATE top_market_meta SET top_rank = NULL WHERE feed_group = 'TOP' AND top_rank IS NOT NULL");
 
     for (let index = 0; index < feed.markets.length; index += 1) {
       const feedMarket = feed.markets[index];
@@ -6041,11 +6491,14 @@ async function performTopMarketSync() {
             icon,
             volume,
             liquidity,
+            feed_group,
+            yes_label,
+            no_label,
             top_rank,
             last_seen_at,
             updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'TOP', 'Yes', 'No', $8, now(), now())
           ON CONFLICT (symbol) DO UPDATE SET
             polymarket_id = EXCLUDED.polymarket_id,
             slug = EXCLUDED.slug,
@@ -6053,6 +6506,9 @@ async function performTopMarketSync() {
             icon = EXCLUDED.icon,
             volume = EXCLUDED.volume,
             liquidity = EXCLUDED.liquidity,
+            feed_group = 'TOP',
+            yes_label = 'Yes',
+            no_label = 'No',
             top_rank = EXCLUDED.top_rank,
             last_seen_at = now(),
             updated_at = now()
@@ -6072,6 +6528,31 @@ async function performTopMarketSync() {
       const market = marketResult.rows[0];
       await persistPriceTick(client, symbol, toNumber(market.yes_price), feed.source);
     }
+
+    for (const [polymarketId, externalState] of stateById) {
+      if (getResolvedPolymarketWinner(externalState)) continue;
+      const yesPrice = getPolymarketYesPrice(externalState);
+      if (yesPrice === null) continue;
+      await client.query(
+        `
+          UPDATE markets m
+          SET current_price = $2,
+              yes_price = (m.yes_price * 0.78 + $2::numeric * 0.22),
+              no_price = (m.no_price * 0.78 + $3::numeric * 0.22)
+          FROM top_market_meta meta
+          WHERE meta.symbol = m.symbol
+            AND meta.feed_group = 'TOP'
+            AND meta.polymarket_id = $1
+            AND m.status = 'open'
+        `,
+        [polymarketId, yesPrice, 1 - yesPrice],
+      );
+    }
+
+    await resolveExternalFeedMarkets(client, stateById, {
+      feedGroup: "TOP",
+      symbolPrefix: TOP_MARKET_SYMBOL_PREFIX,
+    });
   });
 
   return feed.source;
@@ -6111,6 +6592,8 @@ export async function getTopMarkets() {
         meta.icon,
         meta.volume AS meta_volume,
         meta.liquidity AS meta_liquidity,
+        meta.yes_label,
+        meta.no_label,
         meta.top_rank,
         (
           EXISTS (SELECT 1 FROM positions p WHERE p.market_id = markets.id)
@@ -6121,8 +6604,8 @@ export async function getTopMarkets() {
       FROM markets
       JOIN top_market_meta meta ON meta.symbol = markets.symbol
       WHERE markets.status = 'open'
-        AND markets.end_time > now()
         AND markets.symbol LIKE $1
+        AND meta.feed_group = 'TOP'
         AND (
           meta.top_rank IS NOT NULL
           OR EXISTS (SELECT 1 FROM positions p WHERE p.market_id = markets.id)
@@ -6174,6 +6657,405 @@ export async function getTopMarkets() {
   return {
     source,
     markets: rows.map((row) => mapTopMarket({
+      ...row,
+      chart: chartBySymbol.get(row.symbol) || [],
+    })),
+  };
+}
+
+function getPolymarketYesPrice(market) {
+  const prices = parseJsonArray(market?.outcomePrices).map(Number);
+  const bestBid = Number(market?.bestBid);
+  const bestAsk = Number(market?.bestAsk);
+  if (Number.isFinite(bestBid) && Number.isFinite(bestAsk) && bestBid > 0 && bestAsk > 0) {
+    return clamp((bestBid + bestAsk) / 2, MIN_PRICE, MAX_PRICE);
+  }
+  return Number.isFinite(prices[0]) ? clamp(prices[0], MIN_PRICE, MAX_PRICE) : null;
+}
+
+async function resolveExternalFeedMarkets(client, stateById, options) {
+  if (!stateById.size) return 0;
+  const feedGroup = String(options?.feedGroup || "").trim().toUpperCase();
+  const symbolPrefix = String(options?.symbolPrefix || "");
+  if (!feedGroup || !symbolPrefix) return 0;
+  const openResult = await client.query(
+    `
+      SELECT m.*, meta.polymarket_id
+      FROM markets m
+      JOIN top_market_meta meta ON meta.symbol = m.symbol
+      WHERE m.status = 'open'
+        AND m.symbol LIKE $1
+        AND meta.feed_group = $2
+      FOR UPDATE OF m
+    `,
+    [`${symbolPrefix}%`, feedGroup],
+  );
+  let resolvedCount = 0;
+  for (const market of openResult.rows) {
+    const state = stateById.get(String(market.polymarket_id || ""));
+    const winner = getResolvedPolymarketWinner(state);
+    if (!winner) continue;
+    if (winner === "REFUND") {
+      await refundMarket(client, market, "external_market_refund");
+      await client.query(
+        `
+          UPDATE markets
+          SET close_price = 0.5,
+              current_price = 0.5,
+              yes_price = 0.5,
+              no_price = 0.5,
+              status = 'price_error',
+              resolved_at = now()
+          WHERE id = $1
+        `,
+        [market.id],
+      );
+      resolvedCount += 1;
+      continue;
+    }
+    await cancelOpenLimitOrdersForMarket(client, market.id, "market_closed");
+    const yesClose = winner === "YES" ? 1 : 0;
+    await client.query(
+      `
+        UPDATE markets
+        SET close_price = $2,
+            current_price = $2,
+            yes_price = $2,
+            no_price = $3,
+            status = 'resolved',
+            winner = $4,
+            resolved_at = now()
+        WHERE id = $1
+      `,
+      [market.id, yesClose, 1 - yesClose, winner],
+    );
+    await settleOpenMarketPositions(client, market, winner);
+    resolvedCount += 1;
+  }
+  return resolvedCount;
+}
+
+async function performSportsMarketSync() {
+  await ensureTopMarketSchema();
+  const trackedResult = await query(
+    `
+      SELECT meta.polymarket_id
+      FROM top_market_meta meta
+      JOIN markets m ON m.symbol = meta.symbol
+      WHERE meta.feed_group = 'SPORT'
+        AND m.status = 'open'
+        AND meta.polymarket_id IS NOT NULL
+      LIMIT 200
+    `,
+  );
+  const trackedIds = trackedResult.rows.map((row) => row.polymarket_id);
+  const [feed, trackedStates] = await Promise.all([
+    getSportsFeedMarkets(),
+    fetchPolymarketStatesByIds(trackedIds).catch((error) => {
+      console.warn("[EasyMarket] Polymarket sports state fetch failed", error instanceof Error ? error.message : String(error));
+      return [];
+    }),
+  ]);
+  const stateById = new Map(trackedStates.map((market) => [String(market.id), market]));
+  const now = new Date();
+
+  await withTransaction(async (client) => {
+    await ensureTopMarketSchema(client);
+    if (feed.markets.length) {
+      await client.query("UPDATE top_market_meta SET top_rank = NULL WHERE feed_group = 'SPORT' AND top_rank IS NOT NULL");
+    }
+
+    for (let index = 0; index < feed.markets.length; index += 1) {
+      const feedMarket = feed.markets[index];
+      const symbol = sportsMarketSymbol(feedMarket);
+      const yesPrice = clamp(feedMarket.yesPrice, MIN_PRICE, MAX_PRICE);
+      const noPrice = 1 - yesPrice;
+      const liquidity = Math.max(1_000, toNumber(feedMarket.liquidity, config.marketLiquidity));
+      const existingResult = await client.query(
+        `
+          SELECT m.*
+          FROM markets m
+          LEFT JOIN top_market_meta meta ON meta.symbol = m.symbol
+          WHERE m.status = 'open'
+            AND (
+              m.symbol = $1
+              OR meta.polymarket_id = $2
+            )
+          ORDER BY
+            (COALESCE(m.yes_volume, 0) + COALESCE(m.no_volume, 0)) DESC,
+            m.id DESC
+          LIMIT 1
+        `,
+        [symbol, feedMarket.polymarketId],
+      );
+      let existingMarket = existingResult.rows[0];
+      if (existingMarket && existingMarket.symbol !== symbol) {
+        const targetResult = await client.query(
+          "SELECT * FROM markets WHERE symbol = $1 AND status = 'open' LIMIT 1",
+          [symbol],
+        );
+        if (targetResult.rows[0]) {
+          existingMarket = targetResult.rows[0];
+        } else {
+          const previousSymbol = existingMarket.symbol;
+          const migratedResult = await client.query(
+            "UPDATE markets SET symbol = $2 WHERE id = $1 RETURNING *",
+            [existingMarket.id, symbol],
+          );
+          await client.query("DELETE FROM top_market_meta WHERE symbol = $1", [previousSymbol]);
+          existingMarket = migratedResult.rows[0];
+        }
+      }
+      const marketResult = existingMarket
+        ? await client.query(
+          `
+            UPDATE markets
+            SET question = $2,
+                current_price = $3,
+                yes_price = (yes_price * 0.72 + $3::numeric * 0.28),
+                no_price = (no_price * 0.72 + $4::numeric * 0.28),
+                liquidity = $5,
+                end_time = $6
+            WHERE id = $1
+            RETURNING *
+          `,
+          [existingMarket.id, feedMarket.title, yesPrice, noPrice, liquidity, feedMarket.endTime],
+        )
+        : await client.query(
+          `
+            INSERT INTO markets (
+              symbol,
+              question,
+              open_price,
+              current_price,
+              yes_price,
+              no_price,
+              yes_volume,
+              no_volume,
+              liquidity,
+              start_time,
+              end_time,
+              status
+            )
+            VALUES ($1, $2, $3, $3, $3, $4, 0, 0, $5, $6, $7, 'open')
+            RETURNING *
+          `,
+          [symbol, feedMarket.title, yesPrice, noPrice, liquidity, now, feedMarket.endTime],
+        );
+
+      await client.query(
+        `
+          INSERT INTO top_market_meta (
+            symbol,
+            polymarket_id,
+            slug,
+            title,
+            icon,
+            volume,
+            liquidity,
+            feed_group,
+            event_id,
+            event_slug,
+            event_title,
+            sport,
+            yes_label,
+            no_label,
+            is_live,
+            score,
+            period,
+            starts_at,
+            top_rank,
+            last_seen_at,
+            updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'SPORT', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now(), now())
+          ON CONFLICT (symbol) DO UPDATE SET
+            polymarket_id = EXCLUDED.polymarket_id,
+            slug = EXCLUDED.slug,
+            title = EXCLUDED.title,
+            icon = EXCLUDED.icon,
+            volume = EXCLUDED.volume,
+            liquidity = EXCLUDED.liquidity,
+            feed_group = 'SPORT',
+            event_id = EXCLUDED.event_id,
+            event_slug = EXCLUDED.event_slug,
+            event_title = EXCLUDED.event_title,
+            sport = EXCLUDED.sport,
+            yes_label = EXCLUDED.yes_label,
+            no_label = EXCLUDED.no_label,
+            is_live = EXCLUDED.is_live,
+            score = EXCLUDED.score,
+            period = EXCLUDED.period,
+            starts_at = EXCLUDED.starts_at,
+            top_rank = EXCLUDED.top_rank,
+            last_seen_at = now(),
+            updated_at = now()
+        `,
+        [
+          symbol,
+          feedMarket.polymarketId,
+          feedMarket.slug || "",
+          feedMarket.title,
+          feedMarket.icon || "",
+          toNumber(feedMarket.volume),
+          liquidity,
+          feedMarket.eventId,
+          feedMarket.eventSlug || "",
+          feedMarket.eventTitle,
+          feedMarket.sport,
+          feedMarket.yesLabel,
+          feedMarket.noLabel,
+          feedMarket.live,
+          feedMarket.score,
+          feedMarket.period,
+          feedMarket.startsAt,
+          index + 1,
+        ],
+      );
+      const market = marketResult.rows[0];
+      await persistPriceTick(client, market.symbol, toNumber(market.yes_price), feed.source);
+    }
+
+    for (const [polymarketId, externalState] of stateById) {
+      if (getResolvedPolymarketWinner(externalState)) continue;
+      const yesPrice = getPolymarketYesPrice(externalState);
+      if (yesPrice === null) continue;
+      await client.query(
+        `
+          UPDATE markets m
+          SET current_price = $2,
+              yes_price = (m.yes_price * 0.78 + $2::numeric * 0.22),
+              no_price = (m.no_price * 0.78 + $3::numeric * 0.22)
+          FROM top_market_meta meta
+          WHERE meta.symbol = m.symbol
+            AND meta.feed_group = 'SPORT'
+            AND meta.polymarket_id = $1
+            AND m.status = 'open'
+        `,
+        [polymarketId, yesPrice, 1 - yesPrice],
+      );
+    }
+
+    await resolveExternalFeedMarkets(client, stateById, {
+      feedGroup: "SPORT",
+      symbolPrefix: SPORTS_MARKET_SYMBOL_PREFIX,
+    });
+
+    if (feed.markets.length) {
+      await client.query(
+        `
+          UPDATE markets m
+          SET status = 'superseded',
+              resolved_at = now()
+          FROM top_market_meta meta
+          WHERE meta.symbol = m.symbol
+            AND meta.feed_group = 'SPORT'
+            AND meta.top_rank IS NULL
+            AND m.status = 'open'
+            AND NOT EXISTS (SELECT 1 FROM positions p WHERE p.market_id = m.id)
+            AND NOT EXISTS (SELECT 1 FROM trades t WHERE t.market_id = m.id)
+            AND NOT EXISTS (SELECT 1 FROM market_comments c WHERE c.market_id = m.id)
+            AND NOT EXISTS (SELECT 1 FROM limit_orders lo WHERE lo.market_id = m.id)
+        `,
+      );
+    }
+  });
+
+  return feed.source;
+}
+
+export async function syncSportsMarkets({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && sportsMarketLastSyncAt && now - sportsMarketLastSyncAt < SPORTS_MARKET_SYNC_INTERVAL_MS) {
+    return sportsMarketLastSource;
+  }
+  if (!sportsMarketSyncPromise) {
+    sportsMarketSyncPromise = performSportsMarketSync()
+      .then((source) => {
+        sportsMarketLastSyncAt = Date.now();
+        sportsMarketLastSource = source;
+        return source;
+      })
+      .finally(() => {
+        sportsMarketSyncPromise = null;
+      });
+  }
+  return sportsMarketSyncPromise;
+}
+
+export async function getSportsMarkets() {
+  await ensureTopMarketSchema();
+  const source = await syncSportsMarkets();
+  const result = await query(
+    `
+      SELECT
+        markets.*,
+        meta.polymarket_id,
+        meta.slug,
+        meta.title,
+        meta.icon,
+        meta.volume AS meta_volume,
+        meta.liquidity AS meta_liquidity,
+        meta.top_rank,
+        meta.event_id,
+        meta.event_slug,
+        meta.event_title,
+        meta.sport,
+        meta.yes_label,
+        meta.no_label,
+        meta.is_live,
+        meta.score,
+        meta.period,
+        meta.starts_at
+      FROM markets
+      JOIN top_market_meta meta ON meta.symbol = markets.symbol
+      WHERE markets.status = 'open'
+        AND markets.symbol LIKE $1
+        AND meta.feed_group = 'SPORT'
+        AND (
+          meta.top_rank IS NOT NULL
+          OR EXISTS (SELECT 1 FROM positions p WHERE p.market_id = markets.id)
+          OR EXISTS (SELECT 1 FROM trades t WHERE t.market_id = markets.id)
+          OR EXISTS (SELECT 1 FROM market_comments c WHERE c.market_id = markets.id)
+          OR EXISTS (SELECT 1 FROM limit_orders lo WHERE lo.market_id = markets.id)
+        )
+      ORDER BY
+        CASE WHEN meta.is_live THEN 0 ELSE 1 END,
+        CASE WHEN meta.top_rank IS NULL THEN 999 ELSE meta.top_rank END,
+        (COALESCE(markets.yes_volume, 0) + COALESCE(markets.no_volume, 0)) DESC,
+        markets.id DESC
+      LIMIT 80
+    `,
+    [`${SPORTS_MARKET_SYMBOL_PREFIX}%`],
+  );
+  const rows = result.rows;
+  const symbols = rows.map((row) => row.symbol);
+  let chartBySymbol = new Map();
+  if (symbols.length) {
+    const chartResult = await query(
+      `
+        SELECT symbol, price, created_at
+        FROM (
+          SELECT symbol, price, created_at,
+            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY created_at DESC) AS rn
+          FROM price_ticks
+          WHERE symbol = ANY($1)
+        ) ranked_ticks
+        WHERE rn <= 160
+        ORDER BY symbol ASC, created_at ASC
+      `,
+      [symbols],
+    );
+    chartBySymbol = chartResult.rows.reduce((map, row) => {
+      const current = map.get(row.symbol) || [];
+      current.push({ price: toNumber(row.price), created_at: row.created_at });
+      map.set(row.symbol, current);
+      return map;
+    }, new Map());
+  }
+  return {
+    source,
+    markets: rows.map((row) => mapSportsMarket({
       ...row,
       chart: chartBySymbol.get(row.symbol) || [],
     })),
@@ -7393,10 +8275,18 @@ export async function resolveExpiredMarkets() {
 export async function getRecentMarkets(limit = 10) {
   const result = await query(
     `
-      SELECT *
+      SELECT
+        markets.*,
+        COALESCE(world_meta.team, top_meta.title) AS team,
+        COALESCE(world_meta.icon, top_meta.icon) AS icon,
+        top_meta.title,
+        top_meta.yes_label,
+        top_meta.no_label
       FROM markets
-      WHERE status IN ('resolved', 'price_error')
-      ORDER BY COALESCE(resolved_at, end_time) DESC
+      LEFT JOIN world_cup_market_meta world_meta ON world_meta.symbol = markets.symbol
+      LEFT JOIN top_market_meta top_meta ON top_meta.symbol = markets.symbol
+      WHERE markets.status IN ('resolved', 'price_error')
+      ORDER BY COALESCE(markets.resolved_at, markets.end_time) DESC
       LIMIT $1
     `,
     [Math.max(1, Math.min(25, Number(limit) || 10))],
@@ -7503,16 +8393,19 @@ export async function getLeaderboard(options = {}) {
               WHEN m.symbol = 'BTCUSDT' THEN 'BTC 5m'
               WHEN m.symbol LIKE 'BTCUSDT_%' THEN REPLACE(REPLACE(m.symbol, 'BTCUSDT_', 'BTC '), '_', ' ')
               WHEN m.symbol LIKE '${WORLD_CUP_SYMBOL_PREFIX}%' THEN 'World Cup'
+              WHEN m.symbol LIKE '${SPORTS_MARKET_SYMBOL_PREFIX}%' THEN 'Sports'
               ELSE m.symbol
             END AS market_title,
             CASE
               WHEN m.symbol = 'BTCUSDT' THEN '5m'
               WHEN m.symbol LIKE 'BTCUSDT_%' THEN LOWER(REPLACE(m.symbol, 'BTCUSDT_', ''))
               WHEN m.symbol LIKE '${WORLD_CUP_SYMBOL_PREFIX}%' THEN 'football'
+              WHEN m.symbol LIKE '${SPORTS_MARKET_SYMBOL_PREFIX}%' THEN 'sports'
               ELSE m.symbol
             END AS market_label,
             CASE
               WHEN m.symbol LIKE '${WORLD_CUP_SYMBOL_PREFIX}%' THEN 'WORLD_CUP_WINNER'
+              WHEN m.symbol LIKE '${SPORTS_MARKET_SYMBOL_PREFIX}%' THEN 'SPORTS_MARKET'
               WHEN m.symbol LIKE 'BTCUSDT%' THEN 'BTC_UPDOWN'
               ELSE m.symbol
             END AS market_type,
