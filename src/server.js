@@ -52,6 +52,7 @@ import {
   resolveExpiredMarkets,
   sellOutcome,
   syncTopMarkets,
+  syncWorldCupMarkets,
   syncFireBalanceByUsername,
   syncFireBalance,
   updateProjectEconomySettings,
@@ -1405,6 +1406,7 @@ async function marketTick() {
   try {
     await resolveExpiredMarkets();
     await ensureActiveMarket();
+    await syncWorldCupMarkets();
     await syncTopMarkets();
   } catch (error) {
     console.warn("[easymarket] market tick failed:", error instanceof Error ? error.message : "unknown error");

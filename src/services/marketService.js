@@ -80,36 +80,20 @@ const DAILY_TASK_KEYS = [
 ];
 
 const WORLD_CUP_FALLBACK_MARKETS = [
-  { polymarketId: "fallback-france", team: "France", icon: "🇫🇷", yesPrice: 0.3285, volume: 97_261_093 },
-  { polymarketId: "fallback-spain", team: "Spain", icon: "🇪🇸", yesPrice: 0.1805, volume: 89_534_071 },
-  { polymarketId: "fallback-argentina", team: "Argentina", icon: "🇦🇷", yesPrice: 0.1705, volume: 102_824_162 },
-  { polymarketId: "fallback-england", team: "England", icon: "🏴", yesPrice: 0.1525, volume: 84_462_721 },
-  { polymarketId: "fallback-norway", team: "Norway", icon: "🇳🇴", yesPrice: 0.0475, volume: 109_060_486 },
-  { polymarketId: "fallback-colombia", team: "Colombia", icon: "🇨🇴", yesPrice: 0.0315, volume: 98_203_045 },
-  { polymarketId: "fallback-usa", team: "USA", icon: "🇺🇸", yesPrice: 0.0295, volume: 138_797_963 },
-  { polymarketId: "fallback-morocco", team: "Morocco", icon: "🇲🇦", yesPrice: 0.0265, volume: 134_104_608 },
-  { polymarketId: "fallback-belgium", team: "Belgium", icon: "🇧🇪", yesPrice: 0.0135, volume: 108_134_290 },
-  { polymarketId: "fallback-switzerland", team: "Switzerland", icon: "🇨🇭", yesPrice: 0.0095, volume: 98_917_472 },
-  { polymarketId: "fallback-egypt", team: "Egypt", icon: "🇪🇬", yesPrice: 0.0035, volume: 133_276_897 },
+  { polymarketId: "fallback-france", team: "France", icon: "🇫🇷", yesPrice: 0.3845, volume: 97_261_093 },
+  { polymarketId: "fallback-england", team: "England", icon: "🏴", yesPrice: 0.2145, volume: 84_462_721 },
+  { polymarketId: "fallback-spain", team: "Spain", icon: "🇪🇸", yesPrice: 0.1995, volume: 89_534_071 },
+  { polymarketId: "fallback-argentina", team: "Argentina", icon: "🇦🇷", yesPrice: 0.1875, volume: 102_824_162 },
 ];
 
-// Quarter-final stage shortlist. Keep unresolved round-of-16 pair winners here
-// until the official feed settles them, but drop eliminated teams immediately so
-// old football markets stop filling the UI and polling work.
-const ACTIVE_WORLD_CUP_TEAM_KEYS = new Set([
-  "morocco",
-  "norway",
+// Safety list for a temporary Polymarket outage. A successful live sync replaces
+// it with every outcome that is still accepting orders, so stage transitions no
+// longer require another hard-coded cleanup.
+let activeWorldCupTeamKeys = new Set([
   "france",
-  "spain",
-  "usa",
-  "united-states",
-  "united-states-of-america",
-  "belgium",
   "england",
-  "switzerland",
-  "egypt",
+  "spain",
   "argentina",
-  "colombia",
 ]);
 
 let worldCupSyncPromise = null;
@@ -913,7 +897,7 @@ function normalizeWorldCupTeamKey(team) {
 }
 
 function isActiveWorldCupTeam(team) {
-  return ACTIVE_WORLD_CUP_TEAM_KEYS.has(normalizeWorldCupTeamKey(team));
+  return activeWorldCupTeamKeys.has(normalizeWorldCupTeamKey(team));
 }
 
 function isImageIcon(icon) {
@@ -970,9 +954,6 @@ function parseJsonArray(value) {
 }
 
 function normalizeWorldCupFeedMarket(market) {
-  if (market?.closed || market?.archived || market?.acceptingOrders === false) {
-    return null;
-  }
   const outcomePrices = parseJsonArray(market.outcomePrices);
   const rawYesPrice = Number(outcomePrices[0]);
   const team = normalizeWorldCupTeam(market.question);
@@ -988,6 +969,12 @@ function normalizeWorldCupFeedMarket(market) {
     slug: market.slug || "",
     yesPrice,
     volume: toNumber(market.volumeNum ?? market.volume),
+    active: !market?.closed && !market?.archived && market?.acceptingOrders !== false,
+    resolvedWinner: (market?.closed || market?.archived) && rawYesPrice <= MIN_PRICE
+      ? "NO"
+      : (market?.closed || market?.archived) && rawYesPrice >= MAX_PRICE
+        ? "YES"
+        : null,
   };
 }
 
@@ -1003,12 +990,21 @@ async function fetchWorldCupMarketsFromPolymarket() {
       throw new Error(`polymarket_${response.status}`);
     }
     const event = await response.json();
-    return (event.markets || [])
+    const normalized = (event.markets || [])
       .map(normalizeWorldCupFeedMarket)
-      .filter(Boolean)
-      .filter((market) => isActiveWorldCupTeam(market.team))
+      .filter(Boolean);
+    return {
+      markets: normalized
+      .filter((market) => market.active)
       .sort((a, b) => b.yesPrice - a.yesPrice)
-      .slice(0, 60);
+      .slice(0, 60),
+      resolutions: normalized
+        .filter((market) => market.resolvedWinner)
+        .map((market) => ({
+          team: market.team,
+          winner: market.resolvedWinner,
+        })),
+    };
   } finally {
     clearTimeout(timeout);
   }
@@ -1020,11 +1016,12 @@ function worldCupSymbol(input) {
 
 async function getWorldCupFeedMarkets() {
   try {
-    const markets = await fetchWorldCupMarketsFromPolymarket();
-    if (markets.length) {
+    const feed = await fetchWorldCupMarketsFromPolymarket();
+    if (feed.markets.length || feed.resolutions.length) {
       return {
         source: "polymarket",
-        markets,
+        markets: feed.markets,
+        resolutions: feed.resolutions,
       };
     }
   } catch (error) {
@@ -1034,6 +1031,7 @@ async function getWorldCupFeedMarkets() {
   return {
     source: "fallback",
     markets: WORLD_CUP_FALLBACK_MARKETS.filter((market) => isActiveWorldCupTeam(market.team)),
+    resolutions: [],
   };
 }
 
@@ -5712,10 +5710,68 @@ export async function getMarketChart(market, limit = 240) {
   return result.rows.map(mapMarketChartPoint);
 }
 
+async function resolveWorldCupFeedMarkets(client, resolutions) {
+  const winnerByTeam = new Map(
+    resolutions
+      .filter((resolution) => resolution?.winner === "YES" || resolution?.winner === "NO")
+      .map((resolution) => [normalizeWorldCupTeamKey(resolution.team), resolution.winner]),
+  );
+  if (!winnerByTeam.size) {
+    return 0;
+  }
+
+  const openResult = await client.query(
+    `
+      SELECT m.*, meta.team
+      FROM markets m
+      JOIN world_cup_market_meta meta ON meta.symbol = m.symbol
+      WHERE m.status = 'open'
+        AND m.symbol LIKE $1
+      FOR UPDATE OF m
+    `,
+    [`${WORLD_CUP_SYMBOL_PREFIX}%`],
+  );
+
+  let resolvedCount = 0;
+  for (const market of openResult.rows) {
+    const winner = winnerByTeam.get(normalizeWorldCupTeamKey(market.team));
+    if (!winner) {
+      continue;
+    }
+
+    await cancelOpenLimitOrdersForMarket(client, market.id, "market_closed");
+    const yesClose = winner === "YES" ? 1 : 0;
+    await client.query(
+      `
+        UPDATE markets
+        SET close_price = $2,
+            current_price = $2,
+            yes_price = $2,
+            no_price = $3,
+            status = 'resolved',
+            winner = $4,
+            resolved_at = now()
+        WHERE id = $1
+      `,
+      [market.id, yesClose, 1 - yesClose, winner],
+    );
+    await settleOpenMarketPositions(client, market, winner);
+    resolvedCount += 1;
+  }
+
+  return resolvedCount;
+}
+
 async function performWorldCupSync() {
   const feed = await getWorldCupFeedMarkets();
   const endTime = new Date("2026-07-20T00:00:00Z");
   const now = new Date();
+
+  if (feed.source === "polymarket") {
+    activeWorldCupTeamKeys = new Set(
+      feed.markets.map((market) => normalizeWorldCupTeamKey(market.team)),
+    );
+  }
 
   await withTransaction(async (client) => {
     for (const feedMarket of feed.markets) {
@@ -5813,6 +5869,8 @@ async function performWorldCupSync() {
       const market = marketResult.rows[0];
       await persistPriceTick(client, symbol, toNumber(market.yes_price), feed.source);
     }
+
+    await resolveWorldCupFeedMarkets(client, feed.resolutions);
   });
 
   return feed.source;
@@ -7086,6 +7144,115 @@ export async function sellOutcome(input) {
   });
 }
 
+async function settleOpenMarketPositions(client, market, winner) {
+  const positions = await client.query(
+    `
+      SELECT *
+      FROM positions
+      WHERE market_id = $1
+        AND status = 'open'
+      FOR UPDATE
+    `,
+    [market.id],
+  );
+  const economySettings = await getEconomySettingsWithClient(client);
+
+  for (const position of positions.rows) {
+    const currency = normalizeCurrency(position.currency);
+    const reasonSuffix = balanceReasonSuffix(currency);
+    const shares = toNumber(position.shares);
+    const spent = toNumber(position.spent);
+    const grossPayout = position.side === winner ? shares : 0;
+    const grossProfit = grossPayout - spent;
+    const fee = calculateProfitFeeFromSettings(grossProfit, economySettings);
+    const basePayout = Math.max(0, roundMoney(grossPayout - fee));
+    const basePnl = roundMoney(basePayout - spent);
+    const luckySpent = Math.min(toNumber(position.lucky_spent), spent);
+    const luckyShare = market.is_lucky
+      ? 1
+      : spent > 0 ? luckySpent / spent : 0;
+    const luckyBonus = basePnl > 0 && luckyShare > 0
+      ? roundMoney(basePnl * luckyShare)
+      : 0;
+    const payout = roundMoney(basePayout + luckyBonus);
+    const pnl = roundMoney(basePnl + luckyBonus);
+
+    await client.query(
+      `
+        UPDATE positions
+        SET payout = $2,
+            pnl = $3,
+            status = 'resolved',
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [position.id, payout, pnl],
+    );
+
+    if (basePayout > 0) {
+      await creditCurrencyBalance(
+        client,
+        position.user_id,
+        currency,
+        basePayout,
+        `market_payout${reasonSuffix}`,
+        `market:${market.id}`,
+        getBonusRatioForAmount(position.bonus_spent, position.spent),
+      );
+    }
+
+    if (fee > 0) {
+      await distributeProfitFee(client, {
+        settings: economySettings,
+        userId: position.user_id,
+        marketId: market.id,
+        positionId: position.id,
+        currency,
+        grossProfit,
+        totalFee: fee,
+        reason: "market_settlement_profit_fee",
+        source: `market:${market.id}:settlement`,
+        eventKey: `position:${position.id}:settlement_profit_fee`,
+      });
+    }
+
+    if (currency === "USDT" && pnl < 0) {
+      await createUsdtLossRefundOffer(client, position, pnl);
+    }
+
+    if (luckyBonus > 0) {
+      if (currency === "USDT") {
+        await adjustUsdtBonusBalance(
+          client,
+          position.user_id,
+          luckyBonus,
+          "lucky_round_bonus",
+          `market:${market.id}:lucky`,
+        );
+      } else {
+        await adjustBalance(
+          client,
+          position.user_id,
+          luckyBonus,
+          "lucky_round_bonus",
+          `market:${market.id}:lucky`,
+        );
+      }
+    }
+
+    if (currency === "USDT") {
+      await awardClanPoints(
+        client,
+        position.user_id,
+        market.id,
+        position.side === winner ? 3 : -1,
+        "market_result",
+        currency,
+      );
+    }
+  }
+}
+
 async function refundMarket(client, market, message) {
   await cancelOpenLimitOrdersForMarket(client, market.id, "market_refund");
 
@@ -7200,119 +7367,7 @@ export async function resolveExpiredMarkets() {
         [currentMarket.id, closePrice, winner],
       );
 
-      const positions = await client.query(
-        `
-          SELECT *
-          FROM positions
-          WHERE market_id = $1
-            AND status = 'open'
-          FOR UPDATE
-        `,
-        [currentMarket.id],
-      );
-      const economySettings = await getEconomySettingsWithClient(client);
-
-      for (const position of positions.rows) {
-        const currency = normalizeCurrency(position.currency);
-        const reasonSuffix = balanceReasonSuffix(currency);
-        const shares = toNumber(position.shares);
-        const spent = toNumber(position.spent);
-        const grossPayout = position.side === winner ? shares : 0;
-        const grossProfit = grossPayout - spent;
-        const fee = calculateProfitFeeFromSettings(grossProfit, economySettings);
-        const basePayout = Math.max(0, roundMoney(grossPayout - fee));
-        const basePnl = roundMoney(basePayout - spent);
-        // Lucky x2 is a promo boost for net profit only: stake is not doubled.
-        // Новая механика: бонус пропорционален доле ставки, сделанной ВНУТРИ
-        // счастливого окна (lucky_spent / spent). Легаси is_lucky (флаг на
-        // весь раунд) дорезолвливается по-старому.
-        const luckySpent = Math.min(toNumber(position.lucky_spent), spent);
-        const luckyShare = currentMarket.is_lucky
-          ? 1
-          : spent > 0 ? luckySpent / spent : 0;
-        const luckyBonus = basePnl > 0 && luckyShare > 0
-          ? roundMoney(basePnl * luckyShare)
-          : 0;
-        const payout = roundMoney(basePayout + luckyBonus);
-        const pnl = roundMoney(basePnl + luckyBonus);
-
-        await client.query(
-          `
-            UPDATE positions
-            SET payout = $2,
-                pnl = $3,
-                status = 'resolved',
-                updated_at = now()
-            WHERE id = $1
-          `,
-          [position.id, payout, pnl],
-        );
-
-        if (basePayout > 0) {
-          await creditCurrencyBalance(
-            client,
-            position.user_id,
-            currency,
-            basePayout,
-            `market_payout${reasonSuffix}`,
-            `market:${currentMarket.id}`,
-            getBonusRatioForAmount(position.bonus_spent, position.spent),
-          );
-        }
-
-        if (fee > 0) {
-          await distributeProfitFee(client, {
-            settings: economySettings,
-            userId: position.user_id,
-            marketId: currentMarket.id,
-            positionId: position.id,
-            currency,
-            grossProfit,
-            totalFee: fee,
-            reason: "market_settlement_profit_fee",
-            source: `market:${currentMarket.id}:settlement`,
-            eventKey: `position:${position.id}:settlement_profit_fee`,
-          });
-        }
-
-        if (currency === "USDT" && pnl < 0) {
-          await createUsdtLossRefundOffer(client, position, pnl);
-        }
-
-        // Счастливый раунд: удваивает только чистую прибыль, не всю ставку.
-        // Бонус начисляется отдельной строкой, а positions.pnl/payout выше
-        // уже включают итоговый x2, чтобы статистика и баланс совпадали.
-        if (luckyBonus > 0) {
-          if (currency === "USDT") {
-            await adjustUsdtBonusBalance(
-              client,
-              position.user_id,
-              luckyBonus,
-              "lucky_round_bonus",
-              `market:${currentMarket.id}:lucky`,
-            );
-          } else {
-            await adjustBalance(
-              client,
-              position.user_id,
-              luckyBonus,
-              "lucky_round_bonus",
-              `market:${currentMarket.id}:lucky`,
-            );
-          }
-        }
-
-        if (currency === "USDT") {
-          await awardClanPoints(
-            client,
-            position.user_id,
-            currentMarket.id,
-            position.side === winner ? 3 : -1,
-            "market_result",
-            currency,
-          );
-        }
-      }
+      await settleOpenMarketPositions(client, currentMarket, winner);
     });
   }
 
