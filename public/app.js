@@ -1016,7 +1016,7 @@ let shakeFeedFlushTimer = 0;
 async function flushShakeFeeds() {
   shakeFeedFlushTimer = 0;
   const count = Math.min(6, pendingShakeFeeds);
-  pendingShakeFeeds = 0;
+  pendingShakeFeeds -= count; // излишек не теряем — уедет следующей пачкой
   if (!count || !state.user?.telegram_id) {
     return;
   }

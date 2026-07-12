@@ -3048,12 +3048,14 @@ export async function ingestShakeFeed(input) {
     username: input.username,
     first_name: input.first_name,
   });
+  // Касты обязательны: параметры только внутри LEAST не дают Postgres
+  // вывести тип ("could not determine data type of parameter").
   await query(
     `
       INSERT INTO user_task_events (user_id, day_key, event_key, count)
-      VALUES ($1, $2, $3, LEAST($4, $5))
+      VALUES ($1, $2, $3, LEAST($4::int, $5::int))
       ON CONFLICT (user_id, day_key, event_key)
-      DO UPDATE SET count = LEAST(user_task_events.count + $4, $5), updated_at = now()
+      DO UPDATE SET count = LEAST(user_task_events.count + $4::int, $5::int), updated_at = now()
     `,
     [user.id, getDayKey(), SHAKE_FEED_EVENT_KEY, count, SHAKE_FEED_DAILY_CAP],
   );
