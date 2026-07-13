@@ -979,6 +979,31 @@ function isSportsEventLive(market = getDisplayMarket()) {
   return !Number.isFinite(startsAt) || startsAt <= Date.now() + 2 * 60_000;
 }
 
+function abbreviateSportsOutcomeLabel(value) {
+  const label = String(value || "").trim();
+  if (!label || /^(yes|no|up|down)$/i.test(label)) {
+    return label;
+  }
+  const words = label.match(/[\p{L}\p{N}]+/gu) || [];
+  if (words.length > 1) {
+    return words
+      .map((word) => Array.from(word)[0] || "")
+      .join("")
+      .slice(0, 4)
+      .toLocaleUpperCase("ru-RU");
+  }
+  const characters = Array.from(words[0] || label);
+  return characters
+    .slice(0, characters.length > 4 ? 3 : 4)
+    .join("")
+    .toLocaleUpperCase("ru-RU");
+}
+
+function marketButtonSideLabel(market, side) {
+  const label = marketSideLabel(market, side);
+  return isSportsListMarket(market) ? abbreviateSportsOutcomeLabel(label) : label;
+}
+
 function isPredictionListMarket(market = getDisplayMarket()) {
   return isWorldCupMarket(market) || isTopMarket(market) || isSportsListMarket(market);
 }
@@ -3970,11 +3995,15 @@ function renderOrderbookPanel() {
   const yesBookButton = $("orderbookYesBtn");
   const noBookButton = $("orderbookNoBtn");
   if (yesBookButton) {
-    yesBookButton.textContent = marketSideLabel(market, "YES");
+    yesBookButton.textContent = marketButtonSideLabel(market, "YES");
+    yesBookButton.title = marketSideLabel(market, "YES");
+    yesBookButton.setAttribute("aria-label", marketSideLabel(market, "YES"));
     yesBookButton.classList.toggle("active", state.orderbookSide === "YES");
   }
   if (noBookButton) {
-    noBookButton.textContent = marketSideLabel(market, "NO");
+    noBookButton.textContent = marketButtonSideLabel(market, "NO");
+    noBookButton.title = marketSideLabel(market, "NO");
+    noBookButton.setAttribute("aria-label", marketSideLabel(market, "NO"));
     noBookButton.classList.toggle("active", state.orderbookSide === "NO");
   }
 
@@ -4385,8 +4414,10 @@ function renderMarket() {
     worldCup ? `${formatCents(yes)} ${marketSideLabel(market, "YES")}` : `${value >= 0 ? "▲" : "▼"} $${formatPrice(Math.abs(value))}`
   ));
 
-  $("yesOptionText").textContent = `${marketSideLabel(market, "YES")} ${formatCents(yes)}`;
-  $("noOptionText").textContent = `${marketSideLabel(market, "NO")} ${formatCents(no)}`;
+  $("yesOptionText").textContent = `${marketButtonSideLabel(market, "YES")} ${formatCents(yes)}`;
+  $("noOptionText").textContent = `${marketButtonSideLabel(market, "NO")} ${formatCents(no)}`;
+  $("yesOptionText").closest("button")?.setAttribute("aria-label", `${marketSideLabel(market, "YES")} ${formatCents(yes)}`);
+  $("noOptionText").closest("button")?.setAttribute("aria-label", `${marketSideLabel(market, "NO")} ${formatCents(no)}`);
   animateText($("yesVolume"), yesVolume, formatFire);
   animateText($("noVolume"), noVolume, formatFire);
   $("depthYesBar").parentElement.style.setProperty("--yes-depth", `${yesDepth}%`);
@@ -5726,11 +5757,13 @@ function renderSportsMarketsList() {
       if (chance) chance.textContent = `${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%`;
       if (yesButton) {
         yesButton.disabled = !canTrade;
-        yesButton.textContent = canTrade ? `${marketSideLabel(market, "YES")} ${formatCents(market.yes_price)}` : "Ждём итог";
+        yesButton.textContent = canTrade ? `${marketButtonSideLabel(market, "YES")} ${formatCents(market.yes_price)}` : "Ждём итог";
+        yesButton.title = marketSideLabel(market, "YES");
       }
       if (noButton) {
         noButton.disabled = !canTrade;
-        noButton.textContent = canTrade ? `${marketSideLabel(market, "NO")} ${formatCents(market.no_price)}` : "Ждём итог";
+        noButton.textContent = canTrade ? `${marketButtonSideLabel(market, "NO")} ${formatCents(market.no_price)}` : "Ждём итог";
+        noButton.title = marketSideLabel(market, "NO");
       }
     }
     return;
@@ -5750,8 +5783,8 @@ function renderSportsMarketsList() {
         <b data-sports-chance>${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%</b>
       </button>
       <div class="world-cup-actions sports-market-actions">
-        <button class="wc-yes" data-sports-buy="${market.id}" data-side="YES" type="button" ${canTrade ? "" : "disabled"}>${canTrade ? `${escapeHtml(marketSideLabel(market, "YES"))} ${formatCents(market.yes_price)}` : "Ждём итог"}</button>
-        <button class="wc-no" data-sports-buy="${market.id}" data-side="NO" type="button" ${canTrade ? "" : "disabled"}>${canTrade ? `${escapeHtml(marketSideLabel(market, "NO"))} ${formatCents(market.no_price)}` : "Ждём итог"}</button>
+        <button class="wc-yes" data-sports-buy="${market.id}" data-side="YES" type="button" title="${escapeHtml(marketSideLabel(market, "YES"))}" aria-label="${escapeHtml(marketSideLabel(market, "YES"))}" ${canTrade ? "" : "disabled"}>${canTrade ? `${escapeHtml(marketButtonSideLabel(market, "YES"))} ${formatCents(market.yes_price)}` : "Ждём итог"}</button>
+        <button class="wc-no" data-sports-buy="${market.id}" data-side="NO" type="button" title="${escapeHtml(marketSideLabel(market, "NO"))}" aria-label="${escapeHtml(marketSideLabel(market, "NO"))}" ${canTrade ? "" : "disabled"}>${canTrade ? `${escapeHtml(marketButtonSideLabel(market, "NO"))} ${formatCents(market.no_price)}` : "Ждём итог"}</button>
       </div>
     </article>
   `;
@@ -5957,8 +5990,16 @@ function renderBetSheet() {
   if ($("betPriceValue")) $("betPriceValue").textContent = formatCents(price);
   $("betSideYesBtn")?.classList.toggle("active", side === "YES");
   $("betSideNoBtn")?.classList.toggle("active", side === "NO");
-  if ($("betSideYesBtn")) $("betSideYesBtn").textContent = marketSideLabel(market, "YES");
-  if ($("betSideNoBtn")) $("betSideNoBtn").textContent = marketSideLabel(market, "NO");
+  if ($("betSideYesBtn")) {
+    $("betSideYesBtn").textContent = marketButtonSideLabel(market, "YES");
+    $("betSideYesBtn").title = marketSideLabel(market, "YES");
+    $("betSideYesBtn").setAttribute("aria-label", marketSideLabel(market, "YES"));
+  }
+  if ($("betSideNoBtn")) {
+    $("betSideNoBtn").textContent = marketButtonSideLabel(market, "NO");
+    $("betSideNoBtn").title = marketSideLabel(market, "NO");
+    $("betSideNoBtn").setAttribute("aria-label", marketSideLabel(market, "NO"));
+  }
   const amounts = getAmountsForCurrency(state.currency);
   document.querySelectorAll("[data-bet-add]").forEach((button, index) => {
     const addAmount = amounts[index] || amounts[0];
