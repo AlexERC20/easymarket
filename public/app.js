@@ -4517,19 +4517,18 @@ function renderCountdownDuration(seconds, targetAt) {
   setCountdownText($("timeLeftSeconds")?.nextElementSibling, "SECS");
 }
 
-function renderSportsElapsedTimer(seconds) {
-  const elapsed = Math.max(0, Math.floor(seconds));
-  if (elapsed >= 3_600) {
-    setCountdownText($("timeLeftMinutes"), String(Math.floor(elapsed / 3_600)).padStart(2, "0"));
-    setCountdownText($("timeLeftSeconds"), String(Math.floor((elapsed % 3_600) / 60)).padStart(2, "0"));
-    setCountdownText($("timeLeftMinutes")?.nextElementSibling, "HRS");
-    setCountdownText($("timeLeftSeconds")?.nextElementSibling, "MINS");
-    return;
-  }
-  setCountdownText($("timeLeftMinutes"), String(Math.floor(elapsed / 60)).padStart(2, "0"));
-  setCountdownText($("timeLeftSeconds"), String(elapsed % 60).padStart(2, "0"));
-  setCountdownText($("timeLeftMinutes")?.nextElementSibling, "MINS");
-  setCountdownText($("timeLeftSeconds")?.nextElementSibling, "SECS");
+function renderSportsClock(seconds, caption) {
+  const value = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(value / 3_600);
+  const minutes = Math.floor((value % 3_600) / 60);
+  const secondsPart = value % 60;
+  setCountdownText(
+    $("timeLeftMinutes"),
+    `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secondsPart).padStart(2, "0")}`,
+  );
+  setCountdownText($("timeLeftMinutes")?.nextElementSibling, caption);
+  setCountdownText($("timeLeftSeconds"), "");
+  setCountdownText($("timeLeftSeconds")?.nextElementSibling, "");
 }
 
 function setSportsTimerLabel(value = "") {
@@ -4544,26 +4543,28 @@ function updateTimer() {
   const minuteLabel = $("timeLeftMinutes")?.nextElementSibling;
   const secondLabel = $("timeLeftSeconds")?.nextElementSibling;
   const countdownEl = document.querySelector(".countdown");
-  countdownEl?.classList.remove("sports-mode", "sports-live", "sports-wait");
-  setSportsTimerLabel("");
+  const sportsMarket = isSportsListMarket(market);
+  countdownEl?.classList.toggle("sports-mode", sportsMarket);
 
-  if (isSportsListMarket(market)) {
-    countdownEl?.classList.add("sports-mode");
+  if (sportsMarket) {
     countdownEl?.classList.remove("is-urgent", "is-final");
     document.querySelector(".chart-frame")?.classList.remove("round-final");
     const startsAt = new Date(market?.starts_at || "").getTime();
     if (isSportsEventLive(market)) {
       countdownEl?.classList.add("sports-live");
+      countdownEl?.classList.remove("sports-wait");
       setSportsTimerLabel(`LIVE${market.period ? ` · ${String(market.period).slice(0, 8).toUpperCase()}` : ""}`);
-      renderSportsElapsedTimer(Number.isFinite(startsAt) ? (Date.now() - startsAt) / 1_000 : 0);
+      renderSportsClock(Number.isFinite(startsAt) ? (Date.now() - startsAt) / 1_000 : 0, "GAME TIME");
       return;
     }
     if (Number.isFinite(startsAt) && startsAt > Date.now()) {
+      countdownEl?.classList.remove("sports-live", "sports-wait");
       setSportsTimerLabel("STARTS IN");
-      renderCountdownDuration(Math.max(0, Math.ceil((startsAt - Date.now()) / 1_000)), startsAt);
+      renderSportsClock(Math.max(0, Math.ceil((startsAt - Date.now()) / 1_000)), "TO START");
       return;
     }
     if (Number.isFinite(startsAt) && Date.now() - startsAt <= 36 * 60 * 60_000) {
+      countdownEl?.classList.remove("sports-live");
       countdownEl?.classList.add("sports-wait");
       setSportsTimerLabel("FINAL");
       setCountdownText($("timeLeftMinutes"), "WAIT");
@@ -4573,6 +4574,9 @@ function updateTimer() {
       return;
     }
   }
+
+  countdownEl?.classList.remove("sports-mode", "sports-live", "sports-wait");
+  setSportsTimerLabel("");
 
   if (!market?.end_time) {
     setCountdownText($("timeLeftMinutes"), "--");

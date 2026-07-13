@@ -700,7 +700,25 @@ h2 {
 }
 
 .countdown.sports-mode {
+  display: block;
+  flex-basis: 100px;
+  width: 100px;
+  min-width: 100px;
   padding-top: 12px;
+}
+
+.countdown.sports-mode > div {
+  width: 100%;
+}
+
+.countdown.sports-mode > div:last-child {
+  display: none;
+}
+
+.countdown.sports-mode #timeLeftMinutes {
+  font-size: clamp(18px, 5.2vw, 22px);
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 
 .sports-timer-label {
