@@ -31,8 +31,11 @@ const MARKET_MAKER_SPREAD_RATE = 0.03;
 const BUY_IMPACT_MULTIPLIER = 1.08;
 const SELL_IMPACT_MULTIPLIER = 1.42;
 const MARKET_MAKER_DENSITY_MULTIPLIER = 1.4;
+const SPORTS_MARKET_MAKER_DENSITY_MULTIPLIER = 1.8;
 const MAX_SINGLE_TRADE_SHIFT = 0.46;
 const MIN_TAIL_DEPTH_FACTOR = 0.004;
+const SPORTS_MIN_TAIL_DEPTH_FACTOR = 0.2;
+const SPORTS_TAIL_DEPTH_EXPONENT = 1.45;
 const STAR_AMOUNTS = [50, 100, 500, 1000];
 const USDT_AMOUNTS = [5, 10, 25, 100];
 const MIN_OUTCOME_PRICE = 0.001;
@@ -1481,23 +1484,26 @@ function upsertLocalMarket(market) {
   if (!market?.id) {
     return;
   }
-  if (market.id === state.market?.id) {
+  const marketPatch = Object.fromEntries(
+    Object.entries(market).filter(([, value]) => value !== undefined),
+  );
+  if (marketPatch.id === state.market?.id) {
     state.market = {
       ...state.market,
-      ...market,
+      ...marketPatch,
     };
   }
-  if (market.market_type === "BTC_UPDOWN") {
-    upsertMarketListItem("btcMarkets", market);
+  if (marketPatch.market_type === "BTC_UPDOWN") {
+    upsertMarketListItem("btcMarkets", marketPatch);
   }
-  if (market.market_type === "WORLD_CUP_WINNER") {
-    upsertMarketListItem("worldCupMarkets", market);
+  if (marketPatch.market_type === "WORLD_CUP_WINNER") {
+    upsertMarketListItem("worldCupMarkets", marketPatch);
   }
-  if (market.market_type === "TOP_MARKET") {
-    upsertMarketListItem("topMarkets", market);
+  if (marketPatch.market_type === "TOP_MARKET") {
+    upsertMarketListItem("topMarkets", marketPatch);
   }
-  if (market.market_type === "SPORTS_MARKET") {
-    upsertMarketListItem("sportsMarkets", market);
+  if (marketPatch.market_type === "SPORTS_MARKET") {
+    upsertMarketListItem("sportsMarkets", marketPatch);
   }
 }
 
@@ -1951,9 +1957,15 @@ function drawMarketChartFrame(ts) {
     const frameAvatars = captureAvatars ? [] : null;
     chartTrades.forEach((trade) => {
       const x = scaleX(trade.at);
-      const nearest = nearestPathPoint(pathPoints, x);
+      const tradePath = dualSportsChart && trade.side === "NO"
+        ? secondaryPathPoints
+        : pathPoints;
+      const nearest = nearestPathPoint(tradePath, x);
       const own = String(trade.telegram_id || "") === String(state.user?.telegram_id || "");
-      const dotY = nearest.y + (own ? -8 : 7);
+      const lineDirection = dualSportsChart
+        ? (trade.side === "NO" ? 1 : -1)
+        : (own ? -1 : 1);
+      const dotY = nearest.y + lineDirection * (own ? 8 : 7);
       const avatarRadius = Math.max(own ? 5.2 : 4.2, CHART_AVATAR_RADIUS_CSS * dpr);
       const avatarY = dotY;
       if (captureAvatars) {
@@ -4370,19 +4382,32 @@ function getPreview(amount = state.selectedAmount, side = state.selectedSide) {
   };
 }
 
+function estimateMarketMakerLiquidity(market, outcomePrice) {
+  const rawLiquidity = Math.max(1, Number(market?.liquidity || 10_000));
+  const sportsEvent = isSportsListMarket(market);
+  const baseLiquidity = sportsEvent
+    ? Math.max(3_000, Math.min(45_000, Math.sqrt(rawLiquidity) * 3.2))
+    : isPredictionListMarket(market)
+      ? Math.max(1_500, Math.min(30_000, Math.sqrt(rawLiquidity) * 2.1))
+      : Math.max(1_200, Math.min(24_000, rawLiquidity));
+  const distanceFromCenter = Math.min(1, Math.abs(outcomePrice - 0.5) / 0.5);
+  const minTailDepth = sportsEvent ? SPORTS_MIN_TAIL_DEPTH_FACTOR : MIN_TAIL_DEPTH_FACTOR;
+  const tailExponent = sportsEvent ? SPORTS_TAIL_DEPTH_EXPONENT : 2.35;
+  const depthFactor = minTailDepth
+    + (1 - minTailDepth) * Math.pow(1 - distanceFromCenter, tailExponent);
+  const densityMultiplier = sportsEvent
+    ? SPORTS_MARKET_MAKER_DENSITY_MULTIPLIER
+    : MARKET_MAKER_DENSITY_MULTIPLIER;
+  return Math.max(35, baseLiquidity * densityMultiplier * depthFactor);
+}
+
 function estimateBuyQuote({ market, side, amount }) {
   const minPrice = getMarketMinOutcomePrice(market);
   const rawPrice = market
     ? Number(side === "YES" ? market.yes_price : market.no_price)
     : 0.5;
   const price = Math.max(minPrice, Math.min(1 - minPrice, rawPrice || 0.5));
-  const rawLiquidity = Math.max(1, Number(market?.liquidity || state.market?.liquidity || 10_000));
-  const baseLiquidity = isPredictionListMarket(market)
-    ? Math.max(1_500, Math.min(30_000, Math.sqrt(rawLiquidity) * 2.1))
-    : Math.max(1_200, Math.min(24_000, rawLiquidity));
-  const distanceFromCenter = Math.min(1, Math.abs(price - 0.5) / 0.5);
-  const depthFactor = MIN_TAIL_DEPTH_FACTOR + (1 - MIN_TAIL_DEPTH_FACTOR) * Math.pow(1 - distanceFromCenter, 2.35);
-  const liquidity = Math.max(35, baseLiquidity * MARKET_MAKER_DENSITY_MULTIPLIER * depthFactor);
+  const liquidity = estimateMarketMakerLiquidity(market, price);
   const impact = Math.min(MAX_SINGLE_TRADE_SHIFT, (Number(amount || 0) / liquidity) * BUY_IMPACT_MULTIPLIER);
   const nextPrice = Math.max(minPrice, Math.min(1 - minPrice, price + impact));
   const executionPrice = Math.max(minPrice, Math.min(1 - minPrice, Math.max(price, nextPrice) * (1 + MARKET_MAKER_SPREAD_RATE)));
@@ -4777,15 +4802,9 @@ function estimateSellQuote({ position, market, outcomePrice }) {
   const shares = Number(position.shares || 0);
   const minPrice = getMarketMinOutcomePrice(market);
   const price = Math.max(minPrice, Number(outcomePrice || 0));
-  const rawLiquidity = Math.max(1, Number(market?.liquidity || state.market?.liquidity || 10_000));
-  const baseLiquidity = isPredictionListMarket(market)
-    ? Math.max(1_500, Math.min(30_000, Math.sqrt(rawLiquidity) * 2.1))
-    : Math.max(1_200, Math.min(24_000, rawLiquidity));
-  const distanceFromCenter = Math.min(1, Math.abs(price - 0.5) / 0.5);
-  const depthFactor = MIN_TAIL_DEPTH_FACTOR + (1 - MIN_TAIL_DEPTH_FACTOR) * Math.pow(1 - distanceFromCenter, 2.35);
-  const liquidity = Math.max(35, baseLiquidity * MARKET_MAKER_DENSITY_MULTIPLIER * depthFactor);
+  const liquidity = estimateMarketMakerLiquidity(market, price);
   const estimatedGross = shares * price;
-  const impact = Math.min(0.42, (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER);
+  const impact = Math.min(MAX_SINGLE_TRADE_SHIFT, (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER);
   const nextPrice = Math.max(minPrice, price - impact);
   const extraExitPenalty = isPredictionListMarket(market) ? 0.03 : 0.015;
   const bidPrice = Math.max(minPrice, Math.min(price, nextPrice) * (1 - MARKET_MAKER_SPREAD_RATE - extraExitPenalty));

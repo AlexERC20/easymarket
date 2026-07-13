@@ -18,8 +18,11 @@ const DEFAULT_MARKET_MAKER_SPREAD_BPS = 300;
 const BUY_IMPACT_MULTIPLIER = 1.08;
 const SELL_IMPACT_MULTIPLIER = 1.42;
 const MARKET_MAKER_DENSITY_MULTIPLIER = 1.4;
+const SPORTS_MARKET_MAKER_DENSITY_MULTIPLIER = 1.8;
 const MAX_SINGLE_TRADE_SHIFT = 0.46;
 const MIN_TAIL_DEPTH_FACTOR = 0.004;
+const SPORTS_MIN_TAIL_DEPTH_FACTOR = 0.2;
+const SPORTS_TAIL_DEPTH_EXPONENT = 1.45;
 const REFERRAL_SIGNUP_BONUS = 100;
 const CURRENCIES = new Set(["STAR", "USDT"]);
 const WORLD_CUP_SYNC_INTERVAL_MS = 90_000;
@@ -172,8 +175,8 @@ function mapMarket(row) {
     title: btcDefinition?.title || row.title || ((isTop || isSports) ? row.question : undefined),
     team: row.team || ((isTop || isSports) ? row.title || row.question : undefined),
     icon: row.icon,
-    yes_label: row.yes_label || "Yes",
-    no_label: row.no_label || "No",
+    yes_label: row.yes_label || (isSports ? undefined : "Yes"),
+    no_label: row.no_label || (isSports ? undefined : "No"),
     label: btcDefinition?.label,
     question: row.question,
     open_price: toNumber(row.open_price),
@@ -376,6 +379,7 @@ function mapWorldCupMarket(row) {
     external_volume: externalVolume,
     yes_volume: toNumber(row.yes_volume),
     no_volume: toNumber(row.no_volume),
+    liquidity: toNumber(row.liquidity, config.marketLiquidity),
     chart: row.chart || [],
     start_time: row.start_time,
     status: row.status,
@@ -409,6 +413,7 @@ function mapTopMarket(row) {
     external_volume: externalVolume,
     yes_volume: toNumber(row.yes_volume),
     no_volume: toNumber(row.no_volume),
+    liquidity: toNumber(row.liquidity, config.marketLiquidity),
     top_rank: row.top_rank === null || row.top_rank === undefined ? null : Number(row.top_rank),
     chart: row.chart || [],
     start_time: row.start_time,
@@ -446,6 +451,7 @@ function mapSportsMarket(row) {
     external_volume: toNumber(row.meta_volume ?? row.volume),
     yes_volume: toNumber(row.yes_volume),
     no_volume: toNumber(row.no_volume),
+    liquidity: toNumber(row.liquidity, config.marketLiquidity),
     sports_rank: row.top_rank === null || row.top_rank === undefined ? null : Number(row.top_rank),
     is_live: Boolean(row.is_live),
     score: row.score || "",
@@ -562,6 +568,10 @@ function isSportsMarket(market) {
   return symbol.startsWith(WORLD_CUP_SYMBOL_PREFIX)
     || symbol.startsWith(TOP_MARKET_SYMBOL_PREFIX)
     || symbol.startsWith(SPORTS_MARKET_SYMBOL_PREFIX);
+}
+
+function isSportsEventMarket(market) {
+  return String(market?.symbol || "").startsWith(SPORTS_MARKET_SYMBOL_PREFIX);
 }
 
 function getMarketMakerYesPrice(market, currentPrice, options = {}) {
@@ -821,19 +831,32 @@ function getCurrentPriceForMarket(market) {
   return toNumber(market.current_price, toNumber(market.open_price));
 }
 
-function getTailDepthFactor(outcomePrice, minPrice = MIN_PRICE) {
+function getTailDepthFactor(outcomePrice, minPrice = MIN_PRICE, sportsEvent = false) {
   const price = clamp(Number(outcomePrice || 0.5), minPrice, 1 - minPrice);
   const distanceFromCenter = Math.min(1, Math.abs(price - 0.5) / 0.5);
-  const centerDepth = Math.pow(1 - distanceFromCenter, 2.35);
-  return MIN_TAIL_DEPTH_FACTOR + (1 - MIN_TAIL_DEPTH_FACTOR) * centerDepth;
+  const minTailDepth = sportsEvent ? SPORTS_MIN_TAIL_DEPTH_FACTOR : MIN_TAIL_DEPTH_FACTOR;
+  const exponent = sportsEvent ? SPORTS_TAIL_DEPTH_EXPONENT : 2.35;
+  const centerDepth = Math.pow(1 - distanceFromCenter, exponent);
+  return minTailDepth + (1 - minTailDepth) * centerDepth;
 }
 
 function getEffectiveMarketMakerLiquidity(market, outcomePrice) {
   const rawLiquidity = Math.max(1, toNumber(market.liquidity, config.marketLiquidity));
-  const baseLiquidity = isSportsMarket(market)
-    ? Math.max(1_500, Math.min(30_000, Math.sqrt(rawLiquidity) * 2.1))
+  const sportsEvent = isSportsEventMarket(market);
+  const baseLiquidity = sportsEvent
+    ? Math.max(3_000, Math.min(45_000, Math.sqrt(rawLiquidity) * 3.2))
+    : isSportsMarket(market)
+      ? Math.max(1_500, Math.min(30_000, Math.sqrt(rawLiquidity) * 2.1))
     : Math.max(1_200, Math.min(24_000, rawLiquidity));
-  return Math.max(35, baseLiquidity * MARKET_MAKER_DENSITY_MULTIPLIER * getTailDepthFactor(outcomePrice, getMarketMinOutcomePrice(market)));
+  const densityMultiplier = sportsEvent
+    ? SPORTS_MARKET_MAKER_DENSITY_MULTIPLIER
+    : MARKET_MAKER_DENSITY_MULTIPLIER;
+  return Math.max(
+    35,
+    baseLiquidity
+      * densityMultiplier
+      * getTailDepthFactor(outcomePrice, getMarketMinOutcomePrice(market), sportsEvent),
+  );
 }
 
 function getFairOutcomePrice(market, side, currentPrice = getCurrentPriceForMarket(market)) {
