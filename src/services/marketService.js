@@ -31,6 +31,7 @@ const SPORTS_MARKET_SYNC_INTERVAL_MS = 60_000;
 const SPORTS_CATALOG_REFRESH_INTERVAL_MS = 5 * 60_000;
 const SPORTS_MARKET_LIMIT = 20;
 const SPORTS_EVENT_FETCH_LIMIT = 100;
+const SPORTS_UPCOMING_WINDOW_MS = 48 * 60 * 60_000;
 const TOP_MARKET_BLOCKED_PATTERN = new RegExp([
   "jesus",
   "christ",
@@ -1694,11 +1695,18 @@ export async function fetchSportsMarketsFromPolymarket() {
         byEvent.set(market.eventKey, market);
       }
     }
-    const allMarkets = Array.from(byEvent.values());
-    const liveMarkets = allMarkets
+    const now = Date.now();
+    const relevantMarkets = Array.from(byEvent.values()).filter((market) => {
+      if (market.live) return true;
+      const startsAt = market.startsAt?.getTime?.();
+      return Number.isFinite(startsAt)
+        && startsAt >= now - 15 * 60_000
+        && startsAt <= now + SPORTS_UPCOMING_WINDOW_MS;
+    });
+    const liveMarkets = relevantMarkets
       .filter((market) => market.live)
       .sort((a, b) => toNumber(b.volume) - toNumber(a.volume));
-    const upcomingMarkets = allMarkets
+    const upcomingMarkets = relevantMarkets
       .filter((market) => !market.live)
       .sort((a, b) => b.activityScore - a.activityScore);
     const liveSlots = Math.min(10, liveMarkets.length);

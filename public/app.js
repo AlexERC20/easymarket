@@ -2500,6 +2500,24 @@ function setConnection(status, type = "") {
 }
 
 function formatMarketWindow(market) {
+  if (isSportsListMarket(market) && market?.starts_at) {
+    const startsAt = new Date(market.starts_at);
+    const startsAtMs = startsAt.getTime();
+    if (Number.isFinite(startsAtMs)) {
+      if (isSportsEventLive(market)) {
+        const details = [market.score, market.period].filter(Boolean).join(" · ");
+        return details ? `Сейчас · ${details}` : "Событие идёт сейчас";
+      }
+      if (startsAtMs > Date.now()) {
+        const day = startsAt.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+        const time = startsAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+        return `Начало ${day}, ${time}`;
+      }
+      if (Date.now() - startsAtMs <= 36 * 60 * 60_000) {
+        return "Событие завершилось · ждём итог";
+      }
+    }
+  }
   if (!market?.start_time || !market?.end_time) {
     return "--";
   }
@@ -4464,10 +4482,74 @@ function setCountdownText(el, value) {
   }
 }
 
+function renderCountdownDuration(seconds, targetAt) {
+  if (seconds >= 30 * 86_400) {
+    const { months, days } = getCalendarMonthDayDiff(targetAt);
+    if (months > 0) {
+      setCountdownText($("timeLeftMinutes"), String(months));
+      setCountdownText($("timeLeftSeconds"), String(days).padStart(2, "0"));
+      setCountdownText($("timeLeftMinutes")?.nextElementSibling, "MON");
+      setCountdownText($("timeLeftSeconds")?.nextElementSibling, "DAYS");
+      return;
+    }
+  }
+  if (seconds >= 86_400) {
+    const days = Math.floor(seconds / 86_400);
+    const hours = Math.floor((seconds % 86_400) / 3_600);
+    setCountdownText($("timeLeftMinutes"), String(days));
+    setCountdownText($("timeLeftSeconds"), String(hours).padStart(2, "0"));
+    setCountdownText($("timeLeftMinutes")?.nextElementSibling, "DAYS");
+    setCountdownText($("timeLeftSeconds")?.nextElementSibling, "HRS");
+    return;
+  }
+  if (seconds >= 3_600) {
+    const hours = Math.floor(seconds / 3_600);
+    const minutes = Math.floor((seconds % 3_600) / 60);
+    setCountdownText($("timeLeftMinutes"), String(hours).padStart(2, "0"));
+    setCountdownText($("timeLeftSeconds"), String(minutes).padStart(2, "0"));
+    setCountdownText($("timeLeftMinutes")?.nextElementSibling, "HRS");
+    setCountdownText($("timeLeftSeconds")?.nextElementSibling, "MINS");
+    return;
+  }
+  setCountdownText($("timeLeftMinutes"), String(Math.floor(seconds / 60)).padStart(2, "0"));
+  setCountdownText($("timeLeftSeconds"), String(seconds % 60).padStart(2, "0"));
+  setCountdownText($("timeLeftMinutes")?.nextElementSibling, "MINS");
+  setCountdownText($("timeLeftSeconds")?.nextElementSibling, "SECS");
+}
+
 function updateTimer() {
   const market = getDisplayMarket();
   const minuteLabel = $("timeLeftMinutes")?.nextElementSibling;
   const secondLabel = $("timeLeftSeconds")?.nextElementSibling;
+  const countdownEl = document.querySelector(".countdown");
+  countdownEl?.classList.remove("sports-live", "sports-wait");
+
+  if (isSportsListMarket(market)) {
+    countdownEl?.classList.remove("is-urgent", "is-final");
+    document.querySelector(".chart-frame")?.classList.remove("round-final");
+    const startsAt = new Date(market?.starts_at || "").getTime();
+    if (isSportsEventLive(market)) {
+      countdownEl?.classList.add("sports-live");
+      setCountdownText($("timeLeftMinutes"), "LIVE");
+      setCountdownText($("timeLeftSeconds"), String(market.period || "NOW").slice(0, 4).toUpperCase());
+      setCountdownText(minuteLabel, "NOW");
+      setCountdownText(secondLabel, market.period ? "PERIOD" : "EVENT");
+      return;
+    }
+    if (Number.isFinite(startsAt) && startsAt > Date.now()) {
+      renderCountdownDuration(Math.max(0, Math.ceil((startsAt - Date.now()) / 1_000)), startsAt);
+      return;
+    }
+    if (Number.isFinite(startsAt) && Date.now() - startsAt <= 36 * 60 * 60_000) {
+      countdownEl?.classList.add("sports-wait");
+      setCountdownText($("timeLeftMinutes"), "WAIT");
+      setCountdownText($("timeLeftSeconds"), "--");
+      setCountdownText(minuteLabel, "RESULT");
+      setCountdownText(secondLabel, "");
+      return;
+    }
+  }
+
   if (!market?.end_time) {
     setCountdownText($("timeLeftMinutes"), "--");
     setCountdownText($("timeLeftSeconds"), "--");
@@ -4481,7 +4563,6 @@ function updateTimer() {
   const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
   // Build tension in the final seconds of a round (pulse + red on the counter).
   const finalPhase = market.status === "open" && remainingMs > 0;
-  const countdownEl = document.querySelector(".countdown");
   countdownEl?.classList.toggle("is-urgent", finalPhase && seconds <= 10);
   countdownEl?.classList.toggle("is-final", finalPhase && seconds <= 3);
   // Красная виньетка по графику в самые последние секунды раунда.
@@ -4510,40 +4591,7 @@ function updateTimer() {
     renderTradeTicket();
     scheduleCoreRefresh({ delay: 80, includeLists: true });
   }
-  if (seconds >= 30 * 86_400) {
-    const { months, days } = getCalendarMonthDayDiff(endAt);
-    if (months > 0) {
-      setCountdownText($("timeLeftMinutes"), String(months));
-      setCountdownText($("timeLeftSeconds"), String(days).padStart(2, "0"));
-      setCountdownText(minuteLabel, "MON");
-      setCountdownText(secondLabel, "DAYS");
-      return;
-    }
-  }
-  if (seconds >= 86_400) {
-    const days = Math.floor(seconds / 86_400);
-    const hours = Math.floor((seconds % 86_400) / 3_600);
-    setCountdownText($("timeLeftMinutes"), String(days));
-    setCountdownText($("timeLeftSeconds"), String(hours).padStart(2, "0"));
-    setCountdownText(minuteLabel, "DAYS");
-    setCountdownText(secondLabel, "HRS");
-    return;
-  }
-  if (seconds >= 3_600) {
-    const hours = Math.floor(seconds / 3_600);
-    const minutes = Math.floor((seconds % 3_600) / 60);
-    setCountdownText($("timeLeftMinutes"), String(hours).padStart(2, "0"));
-    setCountdownText($("timeLeftSeconds"), String(minutes).padStart(2, "0"));
-    setCountdownText(minuteLabel, "HRS");
-    setCountdownText(secondLabel, "MINS");
-    return;
-  }
-  const minutesPart = String(Math.floor(seconds / 60)).padStart(2, "0");
-  const secondsPart = String(seconds % 60).padStart(2, "0");
-  setCountdownText($("timeLeftMinutes"), minutesPart);
-  setCountdownText($("timeLeftSeconds"), secondsPart);
-  setCountdownText(minuteLabel, "MINS");
-  setCountdownText(secondLabel, "SECS");
+  renderCountdownDuration(seconds, endAt);
 }
 
 function setSectionToggle(id, total, key) {

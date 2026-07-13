@@ -707,6 +707,18 @@ h2 {
   display: block;
 }
 
+.countdown.sports-live strong,
+.countdown.sports-wait strong {
+  color: var(--yes);
+  font-size: 15px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.countdown.sports-wait strong {
+  color: var(--muted);
+}
+
 .countdown strong {
   color: var(--no);
   font-size: clamp(24px, 7.2vw, 37px);
