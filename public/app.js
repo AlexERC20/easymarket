@@ -971,6 +971,14 @@ function isSportsListMarket(market = getDisplayMarket()) {
     || String(market?.symbol || market?.market_symbol || "").startsWith("SPORT:");
 }
 
+function isSportsEventLive(market = getDisplayMarket()) {
+  if (!isSportsListMarket(market) || !(market?.is_live === true || market?.is_live === "true")) {
+    return false;
+  }
+  const startsAt = new Date(market.starts_at || market.start_time || "").getTime();
+  return !Number.isFinite(startsAt) || startsAt <= Date.now() + 2 * 60_000;
+}
+
 function isPredictionListMarket(market = getDisplayMarket()) {
   return isWorldCupMarket(market) || isTopMarket(market) || isSportsListMarket(market);
 }
@@ -4319,8 +4327,11 @@ function renderMarket() {
   document.querySelector(".market-card")?.classList.toggle("sports-market-card", sportsMarket);
 
   const marketStatus = $("marketStatus");
-  marketStatus.textContent = marketStatusLabel(canBuyMarket ? market?.status : (market ? "closed" : market?.status));
-  marketStatus.classList.toggle("live", canBuyMarket);
+  const sportsEventLive = sportsMarket && isSportsEventLive(market);
+  marketStatus.textContent = canBuyMarket && sportsMarket
+    ? (sportsEventLive ? "LIVE" : "OPEN")
+    : marketStatusLabel(canBuyMarket ? market?.status : (market ? "closed" : market?.status));
+  marketStatus.classList.toggle("live", canBuyMarket && (!sportsMarket || sportsEventLive));
   $("marketTitle").textContent = worldCup
     ? ((topMarket || sportsMarket) ? (market.title || market.question) : `${market.team} Winner`)
     : (market?.title || "BTC Up or Down 5m");
@@ -5676,7 +5687,7 @@ function renderTopMarketsList() {
 }
 
 function formatSportsMarketMeta(market) {
-  if (market.is_live) {
+  if (isSportsEventLive(market)) {
     const details = [market.score, market.period].filter(Boolean).join(" · ");
     return `<i class="sports-live-badge">LIVE</i>${details ? ` · ${escapeHtml(details)}` : ""}`;
   }
@@ -5710,6 +5721,7 @@ function renderSportsMarketsList() {
       const yesButton = row.querySelector("[data-side='YES']");
       const noButton = row.querySelector("[data-side='NO']");
       const canTrade = isMarketOpenForBuy(market);
+      row.classList.toggle("is-live", isSportsEventLive(market));
       if (meta) meta.innerHTML = formatSportsMarketMeta(market);
       if (chance) chance.textContent = `${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%`;
       if (yesButton) {
@@ -5728,7 +5740,7 @@ function renderSportsMarketsList() {
   container.innerHTML = state.sportsMarkets.map((market) => {
     const canTrade = isMarketOpenForBuy(market);
     return `
-    <article class="world-cup-row top-market-row sports-market-row${market.is_live ? " is-live" : ""}" data-market-id="${market.id}">
+    <article class="world-cup-row top-market-row sports-market-row${isSportsEventLive(market) ? " is-live" : ""}" data-market-id="${market.id}">
       <button class="world-cup-main" data-sports-open="${market.id}" type="button">
         <span class="team-flag">${teamIconMarkup(market.icon, market.event_title || market.title)}</span>
         <span>

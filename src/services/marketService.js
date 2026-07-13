@@ -1616,9 +1616,17 @@ function normalizeSportsFeedEvent(event) {
     effectiveEndTime.setTime(Date.now() + 4 * 60 * 60_000);
   }
   const eventVolume24h = toNumber(event.volume24hr) || selected.volume24h;
-  const live = event?.live === true;
+  const now = Date.now();
+  const startsAtMs = startsAt.getTime();
+  const hasLiveGameState = Boolean(String(event.score || "").trim() || String(event.period || event.elapsed || "").trim());
+  const hasStarted = !Number.isFinite(startsAtMs) || startsAtMs <= now + 2 * 60_000;
+  const hasRecentStart = !Number.isFinite(startsAtMs) || startsAtMs >= now - 36 * 60 * 60_000;
+  // Gamma's `live` flag is occasionally present on an active future/season market.
+  // Treat it as a live sporting event only after kickoff and with a recent start
+  // or an actual score/period signal from the feed.
+  const live = event?.live === true && hasStarted && (hasRecentStart || hasLiveGameState);
   const hoursUntilStart = Number.isFinite(startsAt.getTime())
-    ? (startsAt.getTime() - Date.now()) / 3_600_000
+    ? (startsAt.getTime() - now) / 3_600_000
     : Number.POSITIVE_INFINITY;
   const timingRank = live ? 3 : (hoursUntilStart >= -2 && hoursUntilStart <= 24 * 7 ? 2 : 1);
   const displayTitle = labelsAreYesNo
