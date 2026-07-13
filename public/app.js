@@ -1723,6 +1723,9 @@ function drawMarketChartFrame(ts) {
   const { dpr, width, height } = resizeCanvas(canvas);
   const appBg = getAppBgColor();
   const worldCup = isPredictionListMarket(market);
+  const dualSportsChart = isSportsListMarket(market)
+    && isNamedSportsOutcome(market, "YES")
+    && isNamedSportsOutcome(market, "NO");
   const aquariumAllowed = syncAquariumRuntimeForMarket(market);
   const openPrice = worldCup
     ? Math.max(0.1, Math.min(99.9, Number(market.yes_price || 0.5) * 100))
@@ -1774,12 +1777,21 @@ function drawMarketChartFrame(ts) {
     };
   }
 
-  const prices = [...rawPoints.map((point) => point.price), openPrice].filter(Number.isFinite);
+  const secondaryRawPoints = dualSportsChart
+    ? rawPoints.map((point) => ({ ...point, price: 100 - point.price }))
+    : [];
+  const prices = [
+    ...rawPoints.map((point) => point.price),
+    ...secondaryRawPoints.map((point) => point.price),
+    openPrice,
+  ].filter(Number.isFinite);
   const minPrice = Math.min(...prices);
   const maxPrice = Math.max(...prices);
-  const padding = worldCup ? Math.max(1.8, (maxPrice - minPrice) * 0.56) : Math.max(4, (maxPrice - minPrice) * 0.42);
-  const targetMin = minPrice - padding;
-  const targetMax = maxPrice + padding;
+  const padding = dualSportsChart
+    ? Math.max(2.5, (maxPrice - minPrice) * 0.08)
+    : (worldCup ? Math.max(1.8, (maxPrice - minPrice) * 0.56) : Math.max(4, (maxPrice - minPrice) * 0.42));
+  const targetMin = dualSportsChart ? Math.max(-2, minPrice - padding) : minPrice - padding;
+  const targetMax = dualSportsChart ? Math.min(102, maxPrice + padding) : maxPrice + padding;
   state.chartYMin = state.chartYMin === null ? targetMin : state.chartYMin + (targetMin - state.chartYMin) * 0.08;
   state.chartYMax = state.chartYMax === null ? targetMax : state.chartYMax + (targetMax - state.chartYMax) * 0.08;
 
@@ -1852,23 +1864,26 @@ function drawMarketChartFrame(ts) {
   }
 
   const openY = scaleY(openPrice);
+  const referenceY = dualSportsChart ? scaleY(50) : openY;
   ctx.setLineDash([8, 9]);
   ctx.strokeStyle = "rgba(255,255,255,0.24)";
   ctx.lineWidth = 1.2;
   ctx.beginPath();
-  ctx.moveTo(left, openY);
-  ctx.lineTo(right, openY);
+  ctx.moveTo(left, referenceY);
+  ctx.lineTo(right, referenceY);
   ctx.stroke();
   ctx.setLineDash([]);
 
   const targetAbove = openY < scaleY(state.smoothedPrice || currentPrice);
-  const targetLabel = worldCup
-    ? `${formatCents((state.smoothedPrice || currentPrice) / 100)} YES`
+  const targetLabel = dualSportsChart
+    ? "50%"
+    : worldCup
+      ? `${formatCents((state.smoothedPrice || currentPrice) / 100)} YES`
     : `TARGET ${targetAbove ? "↑" : "↓"}`;
   ctx.font = `${Math.max(10, width * 0.026)}px Inter, system-ui, sans-serif`;
   const targetTextWidth = ctx.measureText(targetLabel).width + 20;
   const targetX = Math.min(right - targetTextWidth, Math.max(left, currentX + width * 0.08));
-  const targetY = Math.max(top + 4, Math.min(bottom - 22, openY - 14));
+  const targetY = Math.max(top + 4, Math.min(bottom - 22, referenceY - 14));
   ctx.fillStyle = "rgba(101, 113, 132, 0.88)";
   ctx.beginPath();
   roundedRectPath(ctx, targetX, targetY, targetTextWidth, 24, 10);
@@ -1881,9 +1896,13 @@ function drawMarketChartFrame(ts) {
     x: scaleX(point.at),
     y: scaleY(point.price),
   }));
+  const secondaryPathPoints = secondaryRawPoints.map((point) => ({
+    x: scaleX(point.at),
+    y: scaleY(point.price),
+  }));
   const isUp = state.smoothedPrice >= openPrice;
   const gradient = ctx.createLinearGradient(0, top, 0, bottom);
-  gradient.addColorStop(0, isUp ? "rgba(25,195,125,0.24)" : "rgba(239,70,111,0.22)");
+  gradient.addColorStop(0, dualSportsChart || isUp ? "rgba(25,195,125,0.20)" : "rgba(239,70,111,0.22)");
   gradient.addColorStop(1, "rgba(8,13,22,0)");
 
   const wipeActive = intro < 1 && pathPoints.length > 1;
@@ -1907,11 +1926,23 @@ function drawMarketChartFrame(ts) {
     ctx.fill();
     ctx.restore();
 
-    ctx.strokeStyle = isUp ? "#19c37d" : "#ef466f";
+    ctx.strokeStyle = dualSportsChart || isUp ? "#19c37d" : "#ef466f";
     ctx.lineWidth = 4;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     drawSmoothPath(ctx, pathPoints);
+
+    if (secondaryPathPoints.length > 1) {
+      ctx.save();
+      ctx.strokeStyle = "#ef466f";
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.shadowColor = "rgba(239,70,111,0.24)";
+      ctx.shadowBlur = 7;
+      drawSmoothPath(ctx, secondaryPathPoints);
+      ctx.restore();
+    }
 
     const chartTrades = getChartTradesForMarket(market, windowStart, windowEnd);
     // Only snapshot avatars when the aquarium is on, and at most ~3x/sec, so the
@@ -1949,8 +1980,9 @@ function drawMarketChartFrame(ts) {
   }
 
   const latest = pathPoints[pathPoints.length - 1];
+  const secondaryLatest = secondaryPathPoints[secondaryPathPoints.length - 1];
   if (latest) {
-    const headRgb = isUp ? "25,195,125" : "239,70,111";
+    const headRgb = dualSportsChart || isUp ? "25,195,125" : "239,70,111";
     const pulse = 0.5 + 0.5 * Math.sin(nowTs * 0.005);
 
     // Хвост кометы: последние ~44px пути подсвечены градиентом к голове.
@@ -1981,8 +2013,8 @@ function drawMarketChartFrame(ts) {
     }
 
     // Пульсирующее ядро с дышащим ореолом.
-    ctx.fillStyle = isUp ? "#19c37d" : "#ef466f";
-    ctx.shadowColor = isUp ? "rgba(25,195,125,0.55)" : "rgba(239,70,111,0.52)";
+    ctx.fillStyle = dualSportsChart || isUp ? "#19c37d" : "#ef466f";
+    ctx.shadowColor = dualSportsChart || isUp ? "rgba(25,195,125,0.55)" : "rgba(239,70,111,0.52)";
     ctx.shadowBlur = 18;
     ctx.beginPath();
     ctx.arc(latest.x, latest.y, 5.5 + pulse * 1.3, 0, Math.PI * 2);
@@ -1994,19 +2026,46 @@ function drawMarketChartFrame(ts) {
     ctx.arc(latest.x, latest.y, 9 + pulse * 4.5, 0, Math.PI * 2);
     ctx.stroke();
 
-    const currentLabel = worldCup
-      ? `${(state.smoothedPrice || currentPrice).toFixed(1)}%`
+    const currentLabel = dualSportsChart
+      ? `${marketButtonSideLabel(market, "YES")} ${(state.smoothedPrice || currentPrice).toFixed(1)}%`
+      : worldCup
+        ? `${(state.smoothedPrice || currentPrice).toFixed(1)}%`
       : `$${formatPrice(state.smoothedPrice || currentPrice)}`;
     ctx.font = `${Math.max(12, width * 0.034)}px Inter, system-ui, sans-serif`;
     const currentTextWidth = ctx.measureText(currentLabel).width + 18;
     const labelX = Math.min(width - currentTextWidth - 8, latest.x + 12);
-    const labelY = Math.max(top + 4, Math.min(bottom - 28, latest.y - 14));
-    ctx.fillStyle = isUp ? "#19c37d" : "#ef466f";
+    let labelY = Math.max(top + 4, Math.min(bottom - 28, latest.y - 14));
+    let secondaryLabelY = secondaryLatest
+      ? Math.max(top + 4, Math.min(bottom - 28, secondaryLatest.y - 14))
+      : 0;
+    if (secondaryLatest && Math.abs(labelY - secondaryLabelY) < 24) {
+      labelY = Math.max(top + 2, labelY - 13);
+      secondaryLabelY = Math.min(bottom - 24, secondaryLabelY + 13);
+    }
+    ctx.fillStyle = dualSportsChart || isUp ? "#19c37d" : "#ef466f";
     ctx.shadowColor = "rgba(0,0,0,0.42)";
     ctx.shadowBlur = 9;
     ctx.textBaseline = "middle";
     ctx.fillText(currentLabel, labelX + 9, labelY + 14);
     ctx.shadowBlur = 0;
+
+    if (dualSportsChart && secondaryLatest) {
+      const secondaryPrice = 100 - (state.smoothedPrice || currentPrice);
+      const secondaryLabel = `${marketButtonSideLabel(market, "NO")} ${secondaryPrice.toFixed(1)}%`;
+      const secondaryTextWidth = ctx.measureText(secondaryLabel).width + 18;
+      const secondaryLabelX = Math.min(width - secondaryTextWidth - 8, secondaryLatest.x + 12);
+      const secondaryPulse = 0.5 + 0.5 * Math.sin(nowTs * 0.005 + Math.PI);
+      ctx.fillStyle = "#ef466f";
+      ctx.shadowColor = "rgba(239,70,111,0.48)";
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.arc(secondaryLatest.x, secondaryLatest.y, 4.8 + secondaryPulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowColor = "rgba(0,0,0,0.42)";
+      ctx.shadowBlur = 9;
+      ctx.fillText(secondaryLabel, secondaryLabelX + 9, secondaryLabelY + 14);
+      ctx.shadowBlur = 0;
+    }
   }
 
   if (wipeActive) {
@@ -2020,7 +2079,7 @@ function drawMarketChartFrame(ts) {
   if (myBet) {
     const sideColor = myBet.side === "YES" ? "#19c37d" : "#ef466f";
     const seg1 = "Твоя ставка: ";
-    const seg2 = `${marketSideLabel(market, myBet.side)} ${formatCurrencyAmount(myBet.spent, myBet.currency)}`;
+    const seg2 = `${marketButtonSideLabel(market, myBet.side)} ${formatCurrencyAmount(myBet.spent, myBet.currency)}`;
     const seg3 = ` Win ${formatCurrencyAmount(myBet.shares, myBet.currency)}`;
     const fontPx = Math.max(11, width * 0.024);
     ctx.font = `${fontPx}px Inter, system-ui, sans-serif`;
