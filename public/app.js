@@ -1870,33 +1870,32 @@ function drawMarketChartFrame(ts) {
   }
 
   const openY = scaleY(openPrice);
-  const referenceY = dualSportsChart ? scaleY(50) : openY;
-  ctx.setLineDash([8, 9]);
-  ctx.strokeStyle = "rgba(255,255,255,0.24)";
-  ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  ctx.moveTo(left, referenceY);
-  ctx.lineTo(right, referenceY);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  if (!dualSportsChart) {
+    ctx.setLineDash([8, 9]);
+    ctx.strokeStyle = "rgba(255,255,255,0.24)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(left, openY);
+    ctx.lineTo(right, openY);
+    ctx.stroke();
+    ctx.setLineDash([]);
 
-  const targetAbove = openY < scaleY(state.smoothedPrice || currentPrice);
-  const targetLabel = dualSportsChart
-    ? "50%"
-    : worldCup
+    const targetAbove = openY < scaleY(state.smoothedPrice || currentPrice);
+    const targetLabel = worldCup
       ? `${formatCents((state.smoothedPrice || currentPrice) / 100)} YES`
-    : `TARGET ${targetAbove ? "↑" : "↓"}`;
-  ctx.font = `${Math.max(10, width * 0.026)}px Inter, system-ui, sans-serif`;
-  const targetTextWidth = ctx.measureText(targetLabel).width + 20;
-  const targetX = Math.min(right - targetTextWidth, Math.max(left, currentX + width * 0.08));
-  const targetY = Math.max(top + 4, Math.min(bottom - 22, referenceY - 14));
-  ctx.fillStyle = "rgba(101, 113, 132, 0.88)";
-  ctx.beginPath();
-  roundedRectPath(ctx, targetX, targetY, targetTextWidth, 24, 10);
-  ctx.fill();
-  ctx.fillStyle = "#f3f6fb";
-  ctx.textBaseline = "middle";
-  ctx.fillText(targetLabel, targetX + 10, targetY + 12);
+      : `TARGET ${targetAbove ? "↑" : "↓"}`;
+    ctx.font = `${Math.max(10, width * 0.026)}px Inter, system-ui, sans-serif`;
+    const targetTextWidth = ctx.measureText(targetLabel).width + 20;
+    const targetX = Math.min(right - targetTextWidth, Math.max(left, currentX + width * 0.08));
+    const targetY = Math.max(top + 4, Math.min(bottom - 22, openY - 14));
+    ctx.fillStyle = "rgba(101, 113, 132, 0.88)";
+    ctx.beginPath();
+    roundedRectPath(ctx, targetX, targetY, targetTextWidth, 24, 10);
+    ctx.fill();
+    ctx.fillStyle = "#f3f6fb";
+    ctx.textBaseline = "middle";
+    ctx.fillText(targetLabel, targetX + 10, targetY + 12);
+  }
 
   const pathPoints = rawPoints.map((point) => ({
     x: scaleX(point.at),
