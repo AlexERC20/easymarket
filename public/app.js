@@ -1004,6 +1004,18 @@ function marketButtonSideLabel(market, side) {
   return isSportsListMarket(market) ? abbreviateSportsOutcomeLabel(label) : label;
 }
 
+function isNamedSportsOutcome(market, side) {
+  return isSportsListMarket(market) && !/^(yes|no)$/i.test(marketSideLabel(market, side));
+}
+
+function sportsBetPrompt(market, side, action) {
+  const outcome = marketButtonSideLabel(market, side);
+  const subject = isNamedSportsOutcome(market, side)
+    ? `Ставка на победу ${outcome}`
+    : `Прогноз ${outcome}`;
+  return `${subject}. ${action}`;
+}
+
 function isPredictionListMarket(market = getDisplayMarket()) {
   return isWorldCupMarket(market) || isTopMarket(market) || isSportsListMarket(market);
 }
@@ -4384,7 +4396,7 @@ function renderMarket() {
   if (priceLabels[0]) priceLabels[0].textContent = worldCup ? "Volume" : "Target Price";
   if (priceLabels[1]) {
     priceLabels[1].childNodes[0].nodeValue = worldCup
-      ? (sportsMarket ? "Chance " : `${marketSideLabel(market, "YES")} Chance `)
+      ? (sportsMarket ? `${marketButtonSideLabel(market, "YES")} Chance ` : `${marketSideLabel(market, "YES")} Chance `)
       : "Current Price ";
   }
   animateText($("openPrice"), worldCup ? Number(market?.volume || 0) : openPrice, (value) => (
@@ -4411,7 +4423,9 @@ function renderMarket() {
   moveElement.classList.toggle("positive", priceMove >= 0);
   moveElement.classList.toggle("negative", priceMove < 0);
   animateText(moveElement, priceMove, (value) => (
-    worldCup ? `${formatCents(yes)} ${marketSideLabel(market, "YES")}` : `${value >= 0 ? "▲" : "▼"} $${formatPrice(Math.abs(value))}`
+    worldCup
+      ? `${formatCents(yes)} · ${sportsMarket ? marketButtonSideLabel(market, "YES") : marketSideLabel(market, "YES")}`
+      : `${value >= 0 ? "▲" : "▼"} $${formatPrice(Math.abs(value))}`
   ));
 
   $("yesOptionText").textContent = `${marketButtonSideLabel(market, "YES")} ${formatCents(yes)}`;
@@ -4872,9 +4886,15 @@ function renderTradeTicket() {
   });
 
   $("ticketTitle").textContent = canBuyMarket
-    ? (state.quickBetMode === "confirm"
-      ? `Сумма для ${marketSideLabel(market, side)}`
-      : `Нажми сумму для ${marketSideLabel(market, side)}`)
+    ? (isSportsListMarket(market)
+      ? sportsBetPrompt(
+        market,
+        side,
+        state.quickBetMode === "confirm" ? "Выбери сумму и подтверди" : "Нажми сумму",
+      )
+      : (state.quickBetMode === "confirm"
+        ? `Сумма для ${marketSideLabel(market, side)}`
+        : `Нажми сумму для ${marketSideLabel(market, side)}`))
     : "Рынок завершён, обновляю...";
   $("ticketPrice").textContent = "";
   $("ticketPrice").classList.add("hidden");
@@ -5978,11 +5998,18 @@ function renderBetSheet() {
   const quote = estimateBuyQuote({ market, side, amount });
   const price = quote.executionPrice;
   const shares = Number(amount || 0) / price;
+  const sportsMarket = isSportsListMarket(market);
   setTeamIconElement($("betTeamIcon"), isBtc ? "₿" : market.icon, isBtc ? "BTC" : market.team);
   if ($("betMarketTitle")) $("betMarketTitle").textContent = market.title || (isBtc ? "Bitcoin Up / Down" : "World Cup Winner");
-  if ($("betTeamName")) $("betTeamName").textContent = isBtc ? (market.title || "BTC Up or Down") : (market.team || "Team");
+  if ($("betTeamName")) {
+    $("betTeamName").textContent = sportsMarket
+      ? (isNamedSportsOutcome(market, side) ? "Ставка на победу" : "Прогноз")
+      : (isBtc ? (market.title || "BTC Up or Down") : (market.team || "Team"));
+  }
+  if ($("betSideSeparator")) $("betSideSeparator").textContent = sportsMarket ? " " : " · ";
   if ($("betSideName")) {
-    $("betSideName").textContent = marketSideLabel(market, side);
+    $("betSideName").textContent = sportsMarket ? marketButtonSideLabel(market, side) : marketSideLabel(market, side);
+    $("betSideName").title = marketSideLabel(market, side);
     $("betSideName").className = side === "YES" ? "positive" : "negative";
   }
   if ($("betAmountValue")) $("betAmountValue").textContent = formatCurrencyAmount(amount, state.currency);
