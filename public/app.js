@@ -4517,31 +4517,55 @@ function renderCountdownDuration(seconds, targetAt) {
   setCountdownText($("timeLeftSeconds")?.nextElementSibling, "SECS");
 }
 
+function renderSportsElapsedTimer(seconds) {
+  const elapsed = Math.max(0, Math.floor(seconds));
+  if (elapsed >= 3_600) {
+    setCountdownText($("timeLeftMinutes"), String(Math.floor(elapsed / 3_600)).padStart(2, "0"));
+    setCountdownText($("timeLeftSeconds"), String(Math.floor((elapsed % 3_600) / 60)).padStart(2, "0"));
+    setCountdownText($("timeLeftMinutes")?.nextElementSibling, "HRS");
+    setCountdownText($("timeLeftSeconds")?.nextElementSibling, "MINS");
+    return;
+  }
+  setCountdownText($("timeLeftMinutes"), String(Math.floor(elapsed / 60)).padStart(2, "0"));
+  setCountdownText($("timeLeftSeconds"), String(elapsed % 60).padStart(2, "0"));
+  setCountdownText($("timeLeftMinutes")?.nextElementSibling, "MINS");
+  setCountdownText($("timeLeftSeconds")?.nextElementSibling, "SECS");
+}
+
+function setSportsTimerLabel(value = "") {
+  const label = $("sportsTimerLabel");
+  if (!label) return;
+  setCountdownText(label, value);
+  label.classList.toggle("hidden", !value);
+}
+
 function updateTimer() {
   const market = getDisplayMarket();
   const minuteLabel = $("timeLeftMinutes")?.nextElementSibling;
   const secondLabel = $("timeLeftSeconds")?.nextElementSibling;
   const countdownEl = document.querySelector(".countdown");
-  countdownEl?.classList.remove("sports-live", "sports-wait");
+  countdownEl?.classList.remove("sports-mode", "sports-live", "sports-wait");
+  setSportsTimerLabel("");
 
   if (isSportsListMarket(market)) {
+    countdownEl?.classList.add("sports-mode");
     countdownEl?.classList.remove("is-urgent", "is-final");
     document.querySelector(".chart-frame")?.classList.remove("round-final");
     const startsAt = new Date(market?.starts_at || "").getTime();
     if (isSportsEventLive(market)) {
       countdownEl?.classList.add("sports-live");
-      setCountdownText($("timeLeftMinutes"), "LIVE");
-      setCountdownText($("timeLeftSeconds"), String(market.period || "NOW").slice(0, 4).toUpperCase());
-      setCountdownText(minuteLabel, "NOW");
-      setCountdownText(secondLabel, market.period ? "PERIOD" : "EVENT");
+      setSportsTimerLabel(`LIVE${market.period ? ` · ${String(market.period).slice(0, 8).toUpperCase()}` : ""}`);
+      renderSportsElapsedTimer(Number.isFinite(startsAt) ? (Date.now() - startsAt) / 1_000 : 0);
       return;
     }
     if (Number.isFinite(startsAt) && startsAt > Date.now()) {
+      setSportsTimerLabel("STARTS IN");
       renderCountdownDuration(Math.max(0, Math.ceil((startsAt - Date.now()) / 1_000)), startsAt);
       return;
     }
     if (Number.isFinite(startsAt) && Date.now() - startsAt <= 36 * 60 * 60_000) {
       countdownEl?.classList.add("sports-wait");
+      setSportsTimerLabel("FINAL");
       setCountdownText($("timeLeftMinutes"), "WAIT");
       setCountdownText($("timeLeftSeconds"), "--");
       setCountdownText(minuteLabel, "RESULT");

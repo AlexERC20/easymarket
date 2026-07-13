@@ -691,11 +691,36 @@ h2 {
 }
 
 .countdown {
+  position: relative;
   display: flex;
   flex: 0 0 auto;
   gap: 12px;
   min-width: 92px;
   text-align: center;
+}
+
+.countdown.sports-mode {
+  padding-top: 12px;
+}
+
+.sports-timer-label {
+  position: absolute;
+  top: -2px;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 950;
+  line-height: 1;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.countdown.sports-live .sports-timer-label {
+  color: var(--yes);
+  text-shadow: 0 0 9px rgba(25, 195, 125, 0.38);
 }
 
 .countdown div {
@@ -707,16 +732,16 @@ h2 {
   display: block;
 }
 
-.countdown.sports-live strong,
-.countdown.sports-wait strong {
+.countdown.sports-live strong {
   color: var(--yes);
-  font-size: 15px;
-  line-height: 1.25;
-  letter-spacing: 0;
+  text-shadow: 0 0 10px rgba(25, 195, 125, 0.18);
 }
 
 .countdown.sports-wait strong {
   color: var(--muted);
+  font-size: 15px;
+  line-height: 1.25;
+  letter-spacing: 0;
 }
 
 .countdown strong {
