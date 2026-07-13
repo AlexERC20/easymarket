@@ -1016,6 +1016,17 @@ function sportsBetPrompt(market, side, action) {
   return `${subject}. ${action}`;
 }
 
+function compactSportsMarketLabel(market) {
+  if (!isSportsListMarket(market)) {
+    return "";
+  }
+  if (isNamedSportsOutcome(market, "YES") || isNamedSportsOutcome(market, "NO")) {
+    return `${marketButtonSideLabel(market, "YES")}–${marketButtonSideLabel(market, "NO")}`;
+  }
+  const title = String(market?.title || market?.question || "SPORT").trim();
+  return title.length > 34 ? `${title.slice(0, 33).trim()}…` : title;
+}
+
 function isPredictionListMarket(market = getDisplayMarket()) {
   return isWorldCupMarket(market) || isTopMarket(market) || isSportsListMarket(market);
 }
@@ -3921,7 +3932,8 @@ function renderLimitOrderControls(market, side) {
   submitButton.disabled = !canSubmit;
   submitButton.textContent = state.orderbook.pending
     ? "Placing..."
-    : `${orderSide === "SELL" ? "Sell" : "Buy"} ${marketSideLabel(market, side)}`;
+    : `${orderSide === "SELL" ? "Sell" : "Buy"} ${marketButtonSideLabel(market, side)}`;
+  submitButton.title = marketSideLabel(market, side);
 }
 
 function renderMyLimitOrders() {
@@ -3950,7 +3962,7 @@ function renderMyLimitOrders() {
     </button>
     ${state.orderbook.myOrdersOpen ? orders.map((order) => `
         <div class="my-limit-order">
-          <span class="lo-side ${order.order_side === "SELL" ? "sell" : "buy"}">${order.order_side === "SELL" ? "Sell" : "Buy"} ${escapeHtml(marketSideLabel(getDisplayMarket(), order.side))}</span>
+          <span class="lo-side ${order.order_side === "SELL" ? "sell" : "buy"}" title="${escapeHtml(marketSideLabel(getDisplayMarket(), order.side))}">${order.order_side === "SELL" ? "Sell" : "Buy"} ${escapeHtml(marketButtonSideLabel(getDisplayMarket(), order.side))}</span>
           <b>${formatCents(order.limit_price)}</b>
           <small>${formatCurrencyAmount(order.remaining_reserved, order.currency)}</small>
           <button type="button" data-cancel-limit-order="${order.id}" ${state.orderbook.cancelPendingId === order.id ? "disabled" : ""}>Cancel</button>
@@ -4042,7 +4054,7 @@ function renderOrderbookPanel() {
   // Same side and row structure already present: update values in place so the
   // depth bars glide via their CSS transition instead of being recreated (which
   // would kill the animation and reset the scroll).
-  const bookKey = `${side}:${state.currency}:${realRows.length}`;
+  const bookKey = `${market.id}:${side}:${state.currency}:${realRows.length}`;
   if (list.dataset.bookSide === bookKey && existingRows.length === rows.length) {
     const headEl = list.querySelector(".orderbook-head b");
     if (headEl) headEl.textContent = headPrice;
@@ -4069,7 +4081,7 @@ function renderOrderbookPanel() {
 
   list.innerHTML = `
     <div class="orderbook-head">
-      <span>${marketSideLabel(market, side)} book</span>
+      <span title="${escapeHtml(marketSideLabel(market, side))}">${escapeHtml(marketButtonSideLabel(market, side))} book</span>
       <b>${headPrice}</b>
       <small>${state.orderbook.loading ? "loading" : `${realRows.length} limits`}</small>
     </div>
@@ -4560,6 +4572,9 @@ function getPositionMarket(position) {
 }
 
 function getPositionMarketLabel(position, market = getPositionMarket(position)) {
+  if (isSportsListMarket(market || position)) {
+    return compactSportsMarketLabel(market || position);
+  }
   if (market?.team || position.team) {
     return market?.team || position.team;
   }
@@ -4733,13 +4748,15 @@ function renderMe() {
         ? ` · ${formatDurationShort(secondsLeft)}`
         : " · закрывается";
     const marketLabel = getPositionMarketLabel(position, activeMarket);
+    const positionSideLabel = marketButtonSideLabel(activeMarket, position.side);
+    const fullPositionLabel = `${activeMarket?.title || activeMarket?.question || marketLabel} · ${marketSideLabel(activeMarket, position.side)}`;
     // A freshly-opened position slides in with a glow so you see "my bet landed".
     const isNew = state.positionsWarmedUp && !prefersReducedMotion()
       && !state.renderedPositionIds.has(position.id);
     return `
       <div class="mini-row${isNew ? " pos-enter" : ""}"${isNew ? ` style="animation-delay:${Math.min(index, 5) * 55}ms"` : ""}>
         <div>
-          <strong class="side-${position.side}">${escapeHtml(marketLabel)} · ${marketSideLabel(activeMarket, position.side)}</strong>
+          <strong class="side-${position.side}" title="${escapeHtml(fullPositionLabel)}">${escapeHtml(marketLabel)} · ${escapeHtml(positionSideLabel)}</strong>
           <br />
           <small>${payout.toFixed(2)} shares · Avg ${formatCents(position.avg_price)} · Spent ${formatCurrencyAmount(spent, currency)}${marketBadge}</small>
         </div>
