@@ -1011,9 +1011,9 @@ function isNamedSportsOutcome(market, side) {
 function sportsBetPrompt(market, side, action) {
   const outcome = marketButtonSideLabel(market, side);
   const subject = isNamedSportsOutcome(market, side)
-    ? `Ставка на победу ${outcome}`
-    : `Прогноз ${outcome}`;
-  return `${subject}. ${action}`;
+    ? `Победа ${outcome}`
+    : outcome;
+  return `${subject} · ${action}`;
 }
 
 function compactSportsMarketLabel(market) {
@@ -4950,12 +4950,14 @@ function renderTradeTicket() {
     }
   });
 
+  const sportsTicket = isSportsListMarket(market);
+  $("ticketTitle").classList.toggle("sports-ticket-title", sportsTicket);
   $("ticketTitle").textContent = canBuyMarket
-    ? (isSportsListMarket(market)
+    ? (sportsTicket
       ? sportsBetPrompt(
         market,
         side,
-        state.quickBetMode === "confirm" ? "Выбери сумму и подтверди" : "Нажми сумму",
+        state.quickBetMode === "confirm" ? "выбери сумму" : "нажми сумму",
       )
       : (state.quickBetMode === "confirm"
         ? `Сумма для ${marketSideLabel(market, side)}`
@@ -6068,9 +6070,10 @@ function renderBetSheet() {
   if ($("betMarketTitle")) $("betMarketTitle").textContent = market.title || (isBtc ? "Bitcoin Up / Down" : "World Cup Winner");
   if ($("betTeamName")) {
     $("betTeamName").textContent = sportsMarket
-      ? (isNamedSportsOutcome(market, side) ? "Ставка на победу" : "Прогноз")
+      ? (isNamedSportsOutcome(market, side) ? "Победа" : "Прогноз")
       : (isBtc ? (market.title || "BTC Up or Down") : (market.team || "Team"));
   }
+  $("betTeamName")?.closest("h2")?.classList.toggle("sports-bet-title", sportsMarket);
   if ($("betSideSeparator")) $("betSideSeparator").textContent = sportsMarket ? " " : " · ";
   if ($("betSideName")) {
     $("betSideName").textContent = sportsMarket ? marketButtonSideLabel(market, side) : marketSideLabel(market, side);
