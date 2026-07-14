@@ -418,7 +418,7 @@ const yesNoSideLabel = (side) => (side === "YES" ? "Yes" : "No");
 const sideLabel = (side) => (side === "YES" ? "UP" : "DOWN");
 const marketSideLabel = (market, side) => (
   market?.market_type === "SPECIAL_MARKET" || String(market?.symbol || market?.market_symbol || "").startsWith("SPECIAL:")
-    ? (side === "YES" ? (market.yes_label || "Меньше 8") : (market.no_label || "Больше 8"))
+    ? (side === "YES" ? (market.yes_label || "> 8") : (market.no_label || "< 8"))
     : market?.market_type === "SPORTS_MARKET" || String(market?.symbol || market?.market_symbol || "").startsWith("SPORT:")
     ? (side === "YES" ? (market.yes_label || "Yes") : (market.no_label || "No"))
     : market?.market_type === "WORLD_CUP_WINNER"

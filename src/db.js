@@ -75,6 +75,11 @@ export async function withTransaction(callback) {
 
 export async function runMigrations() {
   await query(`
+    CREATE TABLE IF NOT EXISTS app_migrations (
+      key TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS users (
       id BIGSERIAL PRIMARY KEY,
       telegram_id TEXT UNIQUE NOT NULL,

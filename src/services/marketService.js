@@ -13,8 +13,9 @@ const KYIVSTONER_MARKET_QUESTION = "Сколько лет получит Кие�
 const KYIVSTONER_MARKET_ICON = "/assets/kyivstoner.jpg";
 const KYIVSTONER_MARKET_LIQUIDITY = 7_000;
 const KYIVSTONER_MARKET_DURATION_MS = (29 * 24 + 23) * 60 * 60 * 1_000;
-const KYIVSTONER_YES_LABEL = "Меньше 8";
-const KYIVSTONER_NO_LABEL = "Больше 8";
+const KYIVSTONER_YES_LABEL = "> 8";
+const KYIVSTONER_NO_LABEL = "< 8";
+const KYIVSTONER_TEST_RESET_MIGRATION = "kyivstoner_test_market_reset_v2";
 const SPECIAL_MARKET_SPREAD_BPS = 100;
 const SPECIAL_MARKET_MAX_SHIFT = 0.2;
 const MIN_PRICE = 0.001;
@@ -130,6 +131,7 @@ let sportsMarketLastSource = "cache";
 let sportsCatalogLastFetchAt = 0;
 let sportsCatalogCache = [];
 let externalMarketSchemaReady = false;
+let kyivstonerResetPromise = null;
 
 function getBtcMarketDef(symbol) {
   return BTC_MARKET_DEFS.find((definition) => definition.symbol === symbol) || null;
@@ -944,6 +946,7 @@ function getSpecialBuyExecutionQuote(market, side, amount) {
   const depth = getSpecialMarketDepth(market);
   const shift = Math.min(SPECIAL_MARKET_MAX_SHIFT, amount / depth);
   const nextOutcomePrice = roundOutcomePrice(oldOutcomePrice + shift, minPrice);
+  const nextOppositePrice = roundOutcomePrice(1 - nextOutcomePrice, minPrice);
   const spread = SPECIAL_MARKET_SPREAD_BPS / 10_000;
   const executionPrice = roundOutcomePrice(
     ((oldOutcomePrice + nextOutcomePrice) / 2) * (1 + spread),
@@ -953,8 +956,8 @@ function getSpecialBuyExecutionQuote(market, side, amount) {
   return {
     oldOutcomePrice,
     executionPrice,
-    nextYesPrice: side === "YES" ? nextOutcomePrice : getMarketOutcomePrice(market, "YES"),
-    nextNoPrice: side === "NO" ? nextOutcomePrice : getMarketOutcomePrice(market, "NO"),
+    nextYesPrice: side === "YES" ? nextOutcomePrice : nextOppositePrice,
+    nextNoPrice: side === "NO" ? nextOutcomePrice : nextOppositePrice,
   };
 }
 
@@ -965,6 +968,7 @@ function getSpecialSellExecutionQuote(market, side, sharesToSell) {
   const depth = getSpecialMarketDepth(market);
   const shift = Math.min(SPECIAL_MARKET_MAX_SHIFT, estimatedGross / depth);
   const nextOutcomePrice = roundOutcomePrice(oldOutcomePrice - shift, minPrice);
+  const nextOppositePrice = roundOutcomePrice(1 - nextOutcomePrice, minPrice);
   const spread = SPECIAL_MARKET_SPREAD_BPS / 10_000;
   const executionPrice = roundOutcomePrice(
     ((oldOutcomePrice + nextOutcomePrice) / 2) * (1 - spread),
@@ -976,8 +980,8 @@ function getSpecialSellExecutionQuote(market, side, sharesToSell) {
     oldOutcomePrice,
     executionPrice,
     gross,
-    nextYesPrice: side === "YES" ? nextOutcomePrice : getMarketOutcomePrice(market, "YES"),
-    nextNoPrice: side === "NO" ? nextOutcomePrice : getMarketOutcomePrice(market, "NO"),
+    nextYesPrice: side === "YES" ? nextOutcomePrice : nextOppositePrice,
+    nextNoPrice: side === "NO" ? nextOutcomePrice : nextOppositePrice,
     nextYesVolume: side === "YES"
       ? Math.max(0, toNumber(market.yes_volume) - estimatedGross)
       : toNumber(market.yes_volume),
@@ -6103,6 +6107,119 @@ async function createKyivstonerMarket() {
   }
 }
 
+async function resetKyivstonerTestMarket() {
+  if (kyivstonerResetPromise) {
+    return kyivstonerResetPromise;
+  }
+
+  kyivstonerResetPromise = withTransaction(async (client) => {
+    const migrationResult = await client.query(
+      `
+        INSERT INTO app_migrations (key)
+        VALUES ($1)
+        ON CONFLICT (key) DO NOTHING
+        RETURNING key
+      `,
+      [KYIVSTONER_TEST_RESET_MIGRATION],
+    );
+    if (!migrationResult.rows[0]) {
+      return false;
+    }
+
+    const marketResult = await client.query(
+      `
+        SELECT *
+        FROM markets
+        WHERE symbol = $1
+        ORDER BY id DESC
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [KYIVSTONER_MARKET_SYMBOL],
+    );
+    const market = marketResult.rows[0];
+    if (!market) {
+      throw new Error("kyivstoner_market_not_found");
+    }
+
+    await cancelOpenLimitOrdersForMarket(client, market.id, "kyivstoner_test_reset");
+
+    const refundResult = await client.query(
+      `
+        SELECT
+          user_id,
+          currency,
+          SUM(
+            CASE
+              WHEN UPPER(COALESCE(action, 'BUY')) = 'SELL' THEN -amount
+              ELSE amount
+            END
+          ) AS refund_amount
+        FROM trades
+        WHERE market_id = $1
+        GROUP BY user_id, currency
+      `,
+      [market.id],
+    );
+
+    for (const refundRow of refundResult.rows) {
+      const refundAmount = Math.max(0, roundMoney(refundRow.refund_amount));
+      if (refundAmount <= 0) {
+        continue;
+      }
+      await creditCurrencyBalance(
+        client,
+        refundRow.user_id,
+        refundRow.currency,
+        refundAmount,
+        "kyivstoner_test_reset",
+        `migration:${KYIVSTONER_TEST_RESET_MIGRATION}`,
+      );
+    }
+
+    await client.query("DELETE FROM profit_fee_distributions WHERE market_id = $1", [market.id]);
+    await client.query("DELETE FROM clan_score_events WHERE market_id = $1", [market.id]);
+    await client.query("DELETE FROM limit_orders WHERE market_id = $1", [market.id]);
+    await client.query("DELETE FROM trades WHERE market_id = $1", [market.id]);
+    await client.query("DELETE FROM positions WHERE market_id = $1", [market.id]);
+    await client.query(
+      "DELETE FROM price_ticks WHERE symbol = $1 OR symbol = $2",
+      [KYIVSTONER_MARKET_SYMBOL, `${KYIVSTONER_MARKET_SYMBOL}:NO`],
+    );
+
+    const resetResult = await client.query(
+      `
+        UPDATE markets
+        SET open_price = 0.5,
+            current_price = 0.5,
+            yes_price = 0.5,
+            no_price = 0.5,
+            yes_volume = 0,
+            no_volume = 0,
+            winner = NULL,
+            status = 'open',
+            resolved_at = NULL
+        WHERE id = $1
+        RETURNING *
+      `,
+      [market.id],
+    );
+    await persistSpecialMarketTicks(
+      client,
+      resetResult.rows[0],
+      0.5,
+      0.5,
+      "special_market_reset",
+    );
+    return true;
+  }).catch((error) => {
+    kyivstonerResetPromise = null;
+    throw error;
+  });
+
+  return kyivstonerResetPromise;
+}
+
 async function ensureKyivstonerMarket() {
   const result = await query(
     `
@@ -6114,7 +6231,10 @@ async function ensureKyivstonerMarket() {
     `,
     [KYIVSTONER_MARKET_SYMBOL],
   );
-  return mapMarket(result.rows[0]) || createKyivstonerMarket();
+  const market = mapMarket(result.rows[0]) || await createKyivstonerMarket();
+  await resetKyivstonerTestMarket();
+  const refreshedResult = await query("SELECT * FROM markets WHERE id = $1", [market.id]);
+  return mapMarket(refreshedResult.rows[0]);
 }
 
 async function getSpecialMarketChart(symbol, since, limit = 260) {
