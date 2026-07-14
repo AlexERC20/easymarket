@@ -38,8 +38,61 @@
   height: 100%;
 }
 
+.icon-button.kyivstoner-action::before,
+.icon-button.kyivstoner-action::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.icon-button.kyivstoner-action::before {
+  top: -22%;
+  bottom: -22%;
+  left: -68%;
+  width: 42%;
+  border-radius: 50%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(183, 255, 77, 0.24) 24%,
+    rgba(255, 255, 255, 0.94) 52%,
+    rgba(53, 246, 255, 0.38) 76%,
+    transparent
+  );
+  filter: blur(0.7px) drop-shadow(0 0 5px rgba(53, 246, 255, 0.72));
+  opacity: 0;
+  transform: skewX(-18deg);
+  animation: kyivstonerIdleSheen 7.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.icon-button.kyivstoner-action::after {
+  top: 0;
+  left: 3px;
+  right: 3px;
+  height: 8px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 8% 48%, #fff 0 0.8px, #b7ff4d 1px, transparent 2.8px),
+    radial-gradient(circle at 31% 14%, #fff 0 0.7px, #35f6ff 1px, transparent 2.5px),
+    radial-gradient(circle at 58% 52%, #fff 0 0.9px, #a56cff 1.2px, transparent 3px),
+    radial-gradient(circle at 84% 20%, #fff 0 0.7px, #35f6ff 1px, transparent 2.5px);
+  filter:
+    drop-shadow(0 0 3px rgba(53, 246, 255, 0.9))
+    drop-shadow(0 0 5px rgba(165, 108, 255, 0.46));
+  opacity: 0;
+  transform: translateY(-2px) scaleX(0.72);
+  animation: kyivstonerIdleSparks 7.4s ease-out infinite;
+}
+
 .icon-button.kyivstoner-action.kyivstoner-motion-trigger {
   animation: kyivstonerTriggerPulse 760ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.icon-button.kyivstoner-action.kyivstoner-motion-trigger::before,
+.icon-button.kyivstoner-action.kyivstoner-motion-trigger::after {
+  animation-play-state: paused;
+  opacity: 0;
 }
 
 @keyframes kyivstonerSceneBackdrop {
@@ -70,9 +123,60 @@
   }
 }
 
+@keyframes kyivstonerIdleSheen {
+  0% {
+    left: -68%;
+    opacity: 0;
+  }
+  2% {
+    opacity: 0.26;
+  }
+  7% {
+    opacity: 0.94;
+  }
+  14% {
+    left: 126%;
+    opacity: 0.18;
+  }
+  17%,
+  100% {
+    left: 126%;
+    opacity: 0;
+  }
+}
+
+@keyframes kyivstonerIdleSparks {
+  0%,
+  3% {
+    opacity: 0;
+    transform: translateY(-2px) scaleX(0.72);
+  }
+  5% {
+    opacity: 1;
+    transform: translateY(0) scaleX(0.92);
+  }
+  7% {
+    opacity: 0.24;
+  }
+  9% {
+    opacity: 0.9;
+    transform: translateY(1px) scaleX(1);
+  }
+  13%,
+  100% {
+    opacity: 0;
+    transform: translateY(-1px) scaleX(1.04);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .kyivstoner-motion-scene::before,
   .icon-button.kyivstoner-action.kyivstoner-motion-trigger {
     animation-duration: 600ms;
+  }
+
+  .icon-button.kyivstoner-action::before,
+  .icon-button.kyivstoner-action::after {
+    animation: none;
   }
 }
