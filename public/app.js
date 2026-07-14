@@ -494,7 +494,7 @@ function setInnerHtmlIfChanged(element, html) {
 }
 
 function isImageUrl(value) {
-  return /^https?:\/\//i.test(String(value || ""));
+  return /^(?:https?:\/\/|\/assets\/)/i.test(String(value || ""));
 }
 
 function teamIconMarkup(icon, alt = "team") {

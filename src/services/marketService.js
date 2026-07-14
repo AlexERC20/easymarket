@@ -9,7 +9,7 @@ const TOP_MARKET_SYMBOL_PREFIX = "TOP:";
 const SPORTS_MARKET_SYMBOL_PREFIX = "SPORT:";
 const SPECIAL_MARKET_SYMBOL_PREFIX = "SPECIAL:";
 const KYIVSTONER_MARKET_SYMBOL = `${SPECIAL_MARKET_SYMBOL_PREFIX}KYIVSTONER_8`;
-const KYIVSTONER_MARKET_QUESTION = "Сколько лет получит Киевстонер";
+const KYIVSTONER_MARKET_QUESTION = "Сколько лет получит Киевстонер?";
 const KYIVSTONER_MARKET_ICON = "/assets/kyivstoner-mask-logo.jpg";
 const KYIVSTONER_MARKET_LIQUIDITY = 7_000;
 const KYIVSTONER_MARKET_DURATION_MS = (29 * 24 + 23) * 60 * 60 * 1_000;
@@ -6233,6 +6233,10 @@ async function ensureKyivstonerMarket() {
   );
   const market = mapMarket(result.rows[0]) || await createKyivstonerMarket();
   await resetKyivstonerTestMarket();
+  await query(
+    "UPDATE markets SET question = $2 WHERE id = $1 AND question IS DISTINCT FROM $2",
+    [market.id, KYIVSTONER_MARKET_QUESTION],
+  );
   const refreshedResult = await query("SELECT * FROM markets WHERE id = $1", [market.id]);
   return mapMarket(refreshedResult.rows[0]);
 }
