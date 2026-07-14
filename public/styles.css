@@ -1908,6 +1908,36 @@ h2 {
   white-space: nowrap;
 }
 
+.market-card.special-market-card .outcome-button strong.stacked {
+  display: flex;
+  min-height: 39px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1;
+}
+
+.market-card.special-market-card .outcome-option-name {
+  display: block;
+  color: rgba(243, 246, 251, 0.76);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.market-card.special-market-card .outcome-option-price {
+  display: block;
+  color: rgba(243, 246, 251, 0.96);
+  font-size: 20px;
+  font-weight: 950;
+  font-variant-numeric: tabular-nums;
+}
+
+.market-card.special-market-card .outcome-button.active .outcome-option-name,
+.market-card.special-market-card .outcome-button.active .outcome-option-price {
+  color: #fff;
+}
+
 .outcome-button.yes.active {
   background: #329b5f;
 }

@@ -428,6 +428,39 @@ const marketSideLabel = (market, side) => (
     ? yesNoSideLabel(side)
     : sideLabel(side)
 );
+
+function renderOutcomeOptionLabel(element, label, price, stacked = false) {
+  if (!element) {
+    return;
+  }
+
+  const formattedPrice = formatCents(price);
+  element.classList.toggle("stacked", stacked);
+  if (!stacked) {
+    const text = `${label} ${formattedPrice}`;
+    if (element.textContent !== text) {
+      element.textContent = text;
+    }
+    return;
+  }
+
+  let nameElement = element.querySelector(".outcome-option-name");
+  let priceElement = element.querySelector(".outcome-option-price");
+  if (!nameElement || !priceElement) {
+    nameElement = document.createElement("span");
+    nameElement.className = "outcome-option-name";
+    priceElement = document.createElement("span");
+    priceElement.className = "outcome-option-price";
+    element.replaceChildren(nameElement, priceElement);
+  }
+  if (nameElement.textContent !== label) {
+    nameElement.textContent = label;
+  }
+  if (priceElement.textContent !== formattedPrice) {
+    priceElement.textContent = formattedPrice;
+  }
+}
+
 const sideClass = (side) => (side === "YES" ? "yes" : "no");
 const actionLabel = (action) => (action === "SELL" ? "продал" : "купил");
 const marketStatusLabel = (status) => {
@@ -4728,8 +4761,8 @@ function renderMarket() {
       : `${value >= 0 ? "▲" : "▼"} $${formatPrice(Math.abs(value))}`
   ));
 
-  $("yesOptionText").textContent = `${marketButtonSideLabel(market, "YES")} ${formatCents(yes)}`;
-  $("noOptionText").textContent = `${marketButtonSideLabel(market, "NO")} ${formatCents(no)}`;
+  renderOutcomeOptionLabel($("yesOptionText"), marketButtonSideLabel(market, "YES"), yes, specialMarket);
+  renderOutcomeOptionLabel($("noOptionText"), marketButtonSideLabel(market, "NO"), no, specialMarket);
   $("yesOptionText").closest("button")?.setAttribute("aria-label", `${marketSideLabel(market, "YES")} ${formatCents(yes)}`);
   $("noOptionText").closest("button")?.setAttribute("aria-label", `${marketSideLabel(market, "NO")} ${formatCents(no)}`);
   animateText($("yesVolume"), yesVolume, formatFire);
