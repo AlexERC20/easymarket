@@ -1,0 +1,78 @@
+.kyivstoner-motion-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+  isolation: isolate;
+  opacity: 0;
+  transition: opacity 120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.kyivstoner-motion-scene::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 39%, rgba(53, 246, 255, 0.1), transparent 32%),
+    radial-gradient(circle at 46% 42%, rgba(165, 108, 255, 0.08), transparent 48%),
+    rgba(3, 5, 9, 0.2);
+  opacity: 0;
+  animation: kyivstonerSceneBackdrop 2.08s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.kyivstoner-motion-scene.is-active {
+  opacity: 1;
+}
+
+.kyivstoner-motion-scene.is-leaving {
+  opacity: 0;
+}
+
+.kyivstoner-motion-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.icon-button.kyivstoner-action.kyivstoner-motion-trigger {
+  animation: kyivstonerTriggerPulse 760ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes kyivstonerSceneBackdrop {
+  0% { opacity: 0; }
+  24% { opacity: 0.76; }
+  62% { opacity: 0.92; }
+  100% { opacity: 0; }
+}
+
+@keyframes kyivstonerTriggerPulse {
+  0% {
+    transform: scale(1);
+    box-shadow: inset 0 0 0 rgba(53, 246, 255, 0);
+  }
+  30% {
+    transform: scale(0.91);
+    box-shadow: inset 0 0 16px rgba(53, 246, 255, 0.52);
+  }
+  58% {
+    transform: scale(1.08);
+    box-shadow:
+      inset 0 0 18px rgba(183, 255, 77, 0.42),
+      0 0 22px rgba(53, 246, 255, 0.34);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: inset 0 0 0 rgba(53, 246, 255, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kyivstoner-motion-scene::before,
+  .icon-button.kyivstoner-action.kyivstoner-motion-trigger {
+    animation-duration: 600ms;
+  }
+}

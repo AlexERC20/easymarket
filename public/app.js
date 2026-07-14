@@ -25,6 +25,7 @@ import {
 } from "./aquarium.js?v=20260712-01";
 import { getActiveSceneKey, setActiveScene, setShakeSceneListener } from "./shake-scenes.js?v=20260712-01";
 import "./basketball-scene.js?v=20260712-03"; // регистрирует сцену «Легенда 24»
+import { playKyivstonerMotion, preloadKyivstonerMotion } from "./kyivstoner-motion.js?v=20260714-01";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -296,6 +297,7 @@ function markTelegramShellEarly() {
 
 markTelegramShellEarly();
 initLightningMotion();
+void preloadKyivstonerMotion();
 initAquarium();
 // «Шейк, шейк!»: каждая встряска-кормление засчитывается в задание.
 setShakeSceneListener(onShakeFeedShake);
@@ -8006,7 +8008,11 @@ $("walletBtn").addEventListener("click", () => {
 $("kyivstonerMarketBtn")?.addEventListener("click", async () => {
   triggerHaptic("selection");
   closeTopMoreMenu();
-  showButtonPressed($("kyivstonerMarketBtn"));
+  const button = $("kyivstonerMarketBtn");
+  showButtonPressed(button);
+  void playKyivstonerMotion(button, {
+    onImpact: () => playMotionSound("success"),
+  });
   try {
     const market = state.specialMarkets[0]
       || await runSingleFlight("specialMarket", loadSpecialMarket);
