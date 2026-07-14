@@ -416,6 +416,22 @@ h2 {
   color: rgba(243, 246, 251, 0.8);
 }
 
+.icon-button.kyivstoner-action {
+  overflow: hidden;
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(225, 229, 236, 0.08);
+  padding: 3px;
+}
+
+.icon-button.kyivstoner-action img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 7px;
+  object-fit: cover;
+  filter: grayscale(1) contrast(1.12) brightness(0.94);
+}
+
 .icon-button.btc-action {
   border-color: rgba(255, 184, 77, 0.28);
   background: rgba(255, 184, 77, 0.08);
@@ -639,6 +655,15 @@ h2 {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.coin-badge.special img {
+  filter: grayscale(1) contrast(1.12) brightness(0.94);
+}
+
+.market-card.special-market-card .market-heading h2 {
+  font-size: 19px;
+  line-height: 1.08;
 }
 
 .team-flag {

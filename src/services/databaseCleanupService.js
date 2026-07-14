@@ -50,11 +50,20 @@ async function deleteOldPriceTicks() {
   const otherDeleted = await deleteInBatches(
     `
       WITH doomed AS (
-        SELECT id
-        FROM price_ticks
-        WHERE symbol <> 'BTCUSDT'
-          AND created_at < now() - ($1::int * interval '1 hour')
-        ORDER BY id ASC
+        SELECT ticks.id
+        FROM price_ticks ticks
+        WHERE ticks.symbol <> 'BTCUSDT'
+          AND ticks.created_at < now() - ($1::int * interval '1 hour')
+          AND NOT (
+            ticks.symbol LIKE 'SPECIAL:%'
+            AND EXISTS (
+              SELECT 1
+              FROM markets market
+              WHERE market.status = 'open'
+                AND (ticks.symbol = market.symbol OR ticks.symbol = market.symbol || ':NO')
+            )
+          )
+        ORDER BY ticks.id ASC
         LIMIT $2
       )
       DELETE FROM price_ticks ticks
@@ -92,10 +101,19 @@ async function trimPriceTicksIfTooLarge() {
   await deleteInBatches(
     `
       WITH doomed AS (
-        SELECT id
-        FROM price_ticks
-        WHERE symbol <> 'BTCUSDT'
-        ORDER BY id ASC
+        SELECT ticks.id
+        FROM price_ticks ticks
+        WHERE ticks.symbol <> 'BTCUSDT'
+          AND NOT (
+            ticks.symbol LIKE 'SPECIAL:%'
+            AND EXISTS (
+              SELECT 1
+              FROM markets market
+              WHERE market.status = 'open'
+                AND (ticks.symbol = market.symbol OR ticks.symbol = market.symbol || ':NO')
+            )
+          )
+        ORDER BY ticks.id ASC
         LIMIT $1
       )
       DELETE FROM price_ticks ticks
@@ -151,9 +169,23 @@ export async function runStartupDatabaseRescue() {
   if (size.exists && size.bytes >= maxMb * 1024 * 1024) {
     await query(
       `
-        DELETE FROM price_ticks
-        WHERE symbol <> 'BTCUSDT'
-           OR created_at < now() - ($1::int * interval '1 day')
+        DELETE FROM price_ticks ticks
+        WHERE (
+          ticks.symbol <> 'BTCUSDT'
+          AND NOT (
+            ticks.symbol LIKE 'SPECIAL:%'
+            AND EXISTS (
+              SELECT 1
+              FROM markets market
+              WHERE market.status = 'open'
+                AND (ticks.symbol = market.symbol OR ticks.symbol = market.symbol || ':NO')
+            )
+          )
+        )
+        OR (
+          ticks.symbol = 'BTCUSDT'
+          AND ticks.created_at < now() - ($1::int * interval '1 day')
+        )
       `,
       [Math.round(config.cleanupBtcPriceTicksDays)],
     );

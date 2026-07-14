@@ -7,6 +7,16 @@ const WORLD_CUP_EVENT_SLUG = "world-cup-winner";
 const WORLD_CUP_SYMBOL_PREFIX = "WCUP:";
 const TOP_MARKET_SYMBOL_PREFIX = "TOP:";
 const SPORTS_MARKET_SYMBOL_PREFIX = "SPORT:";
+const SPECIAL_MARKET_SYMBOL_PREFIX = "SPECIAL:";
+const KYIVSTONER_MARKET_SYMBOL = `${SPECIAL_MARKET_SYMBOL_PREFIX}KYIVSTONER_8`;
+const KYIVSTONER_MARKET_QUESTION = "Сколько лет получит Киевстонер";
+const KYIVSTONER_MARKET_ICON = "/assets/kyivstoner.jpg";
+const KYIVSTONER_MARKET_LIQUIDITY = 7_000;
+const KYIVSTONER_MARKET_DURATION_MS = (29 * 24 + 23) * 60 * 60 * 1_000;
+const KYIVSTONER_YES_LABEL = "Меньше 8";
+const KYIVSTONER_NO_LABEL = "Больше 8";
+const SPECIAL_MARKET_SPREAD_BPS = 100;
+const SPECIAL_MARKET_MAX_SHIFT = 0.2;
 const MIN_PRICE = 0.001;
 const MAX_PRICE = 0.999;
 const BTC_MIN_PRICE = 0.001;
@@ -129,6 +139,14 @@ function isBtcMarketSymbol(symbol) {
   return Boolean(getBtcMarketDef(symbol));
 }
 
+function isKyivstonerMarketSymbol(symbol) {
+  return String(symbol || "") === KYIVSTONER_MARKET_SYMBOL;
+}
+
+function isSpecialMarket(market) {
+  return isKyivstonerMarketSymbol(market?.symbol);
+}
+
 function normalizeCurrency(value) {
   const normalized = String(value || "STAR").trim().toUpperCase();
   return CURRENCIES.has(normalized) ? normalized : "STAR";
@@ -162,6 +180,7 @@ function mapMarket(row) {
   const isWorldCup = String(row.symbol || "").startsWith(WORLD_CUP_SYMBOL_PREFIX);
   const isTop = String(row.symbol || "").startsWith(TOP_MARKET_SYMBOL_PREFIX);
   const isSports = String(row.symbol || "").startsWith(SPORTS_MARKET_SYMBOL_PREFIX);
+  const isKyivstoner = isKyivstonerMarketSymbol(row.symbol);
   const minPrice = btcDefinition ? BTC_MIN_PRICE : MIN_PRICE;
   const yesPrice = roundOutcomePrice(toNumber(row.yes_price), minPrice);
   const noPrice = roundOutcomePrice(toNumber(row.no_price, 1 - yesPrice), minPrice);
@@ -171,12 +190,20 @@ function mapMarket(row) {
     symbol: row.symbol,
     market_type: btcDefinition
       ? "BTC_UPDOWN"
-      : (isWorldCup ? "WORLD_CUP_WINNER" : (isTop ? "TOP_MARKET" : (isSports ? "SPORTS_MARKET" : undefined))),
-    title: btcDefinition?.title || row.title || ((isTop || isSports) ? row.question : undefined),
-    team: row.team || ((isTop || isSports) ? row.title || row.question : undefined),
-    icon: row.icon,
-    yes_label: row.yes_label || (isSports ? undefined : "Yes"),
-    no_label: row.no_label || (isSports ? undefined : "No"),
+      : (isWorldCup
+        ? "WORLD_CUP_WINNER"
+        : (isTop
+          ? "TOP_MARKET"
+          : (isSports ? "SPORTS_MARKET" : (isKyivstoner ? "SPECIAL_MARKET" : undefined)))),
+    title: isKyivstoner
+      ? KYIVSTONER_MARKET_QUESTION
+      : (btcDefinition?.title || row.title || ((isTop || isSports) ? row.question : undefined)),
+    team: isKyivstoner
+      ? "Киевстонер"
+      : (row.team || ((isTop || isSports) ? row.title || row.question : undefined)),
+    icon: isKyivstoner ? KYIVSTONER_MARKET_ICON : row.icon,
+    yes_label: isKyivstoner ? KYIVSTONER_YES_LABEL : (row.yes_label || (isSports ? undefined : "Yes")),
+    no_label: isKyivstoner ? KYIVSTONER_NO_LABEL : (row.no_label || (isSports ? undefined : "No")),
     label: btcDefinition?.label,
     question: row.question,
     open_price: toNumber(row.open_price),
@@ -186,6 +213,7 @@ function mapMarket(row) {
     no_price: noPrice,
     yes_volume: toNumber(row.yes_volume),
     no_volume: toNumber(row.no_volume),
+    volume: toNumber(row.yes_volume) + toNumber(row.no_volume),
     liquidity: toNumber(row.liquidity),
     start_time: row.start_time,
     end_time: row.end_time,
@@ -195,6 +223,7 @@ function mapMarket(row) {
     lucky_until: row.lucky_until ?? null,
     created_at: row.created_at,
     resolved_at: row.resolved_at,
+    resolution_mode: isKyivstoner ? "MANUAL" : undefined,
   };
 }
 
@@ -219,6 +248,7 @@ function mapUser(row) {
 }
 
 function mapPosition(row) {
+  const isKyivstoner = isKyivstonerMarketSymbol(row.market_symbol);
   return {
     id: Number(row.id),
     user_id: Number(row.user_id),
@@ -239,10 +269,10 @@ function mapPosition(row) {
     market_status: row.market_status,
     market_end_time: row.market_end_time,
     market_symbol: row.market_symbol,
-    team: row.team,
-    icon: row.icon,
-    yes_label: row.yes_label || undefined,
-    no_label: row.no_label || undefined,
+    team: isKyivstoner ? "Киевстонер" : row.team,
+    icon: isKyivstoner ? KYIVSTONER_MARKET_ICON : row.icon,
+    yes_label: isKyivstoner ? KYIVSTONER_YES_LABEL : (row.yes_label || undefined),
+    no_label: isKyivstoner ? KYIVSTONER_NO_LABEL : (row.no_label || undefined),
     yes_price: row.yes_price === undefined ? undefined : toNumber(row.yes_price),
     no_price: row.no_price === undefined ? undefined : toNumber(row.no_price),
   };
@@ -296,6 +326,7 @@ function mapLimitOrder(row) {
 }
 
 function mapMarketActivity(row) {
+  const isKyivstoner = isKyivstonerMarketSymbol(row.market_symbol);
   return {
     id: Number(row.id),
     market_id: Number(row.market_id),
@@ -303,9 +334,9 @@ function mapMarketActivity(row) {
     market_question: row.market_question,
     market_status: row.market_status,
     market_winner: row.market_winner,
-    team: row.team,
-    yes_label: row.yes_label || undefined,
-    no_label: row.no_label || undefined,
+    team: isKyivstoner ? "Киевстонер" : row.team,
+    yes_label: isKyivstoner ? KYIVSTONER_YES_LABEL : (row.yes_label || undefined),
+    no_label: isKyivstoner ? KYIVSTONER_NO_LABEL : (row.no_label || undefined),
     telegram_id: row.telegram_id,
     username: row.username,
     first_name: row.first_name,
@@ -546,6 +577,14 @@ async function persistPriceTick(db, symbol, price, source) {
     `,
     [symbol, price, source],
   );
+}
+
+async function persistSpecialMarketTicks(db, market, yesPrice, noPrice, source = "special_market_trade") {
+  if (!isSpecialMarket(market)) {
+    return;
+  }
+  await persistPriceTick(db, market.symbol, yesPrice, source);
+  await persistPriceTick(db, `${market.symbol}:NO`, noPrice, source);
 }
 
 function questionForPrice(price, definition = getBtcMarketDef(MARKET_SYMBOL)) {
@@ -895,7 +934,63 @@ function buildDualBookPrices(market, side, nextSidePrice, options = {}) {
   };
 }
 
+function getSpecialMarketDepth(market) {
+  return Math.max(100, toNumber(market?.liquidity, KYIVSTONER_MARKET_LIQUIDITY));
+}
+
+function getSpecialBuyExecutionQuote(market, side, amount) {
+  const minPrice = getMarketMinOutcomePrice(market);
+  const oldOutcomePrice = getMarketOutcomePrice(market, side);
+  const depth = getSpecialMarketDepth(market);
+  const shift = Math.min(SPECIAL_MARKET_MAX_SHIFT, amount / depth);
+  const nextOutcomePrice = roundOutcomePrice(oldOutcomePrice + shift, minPrice);
+  const spread = SPECIAL_MARKET_SPREAD_BPS / 10_000;
+  const executionPrice = roundOutcomePrice(
+    ((oldOutcomePrice + nextOutcomePrice) / 2) * (1 + spread),
+    minPrice,
+  );
+
+  return {
+    oldOutcomePrice,
+    executionPrice,
+    nextYesPrice: side === "YES" ? nextOutcomePrice : getMarketOutcomePrice(market, "YES"),
+    nextNoPrice: side === "NO" ? nextOutcomePrice : getMarketOutcomePrice(market, "NO"),
+  };
+}
+
+function getSpecialSellExecutionQuote(market, side, sharesToSell) {
+  const minPrice = getMarketMinOutcomePrice(market);
+  const oldOutcomePrice = getMarketOutcomePrice(market, side);
+  const estimatedGross = Math.max(0, sharesToSell * oldOutcomePrice);
+  const depth = getSpecialMarketDepth(market);
+  const shift = Math.min(SPECIAL_MARKET_MAX_SHIFT, estimatedGross / depth);
+  const nextOutcomePrice = roundOutcomePrice(oldOutcomePrice - shift, minPrice);
+  const spread = SPECIAL_MARKET_SPREAD_BPS / 10_000;
+  const executionPrice = roundOutcomePrice(
+    ((oldOutcomePrice + nextOutcomePrice) / 2) * (1 - spread),
+    minPrice,
+  );
+  const gross = roundMoney(sharesToSell * executionPrice);
+
+  return {
+    oldOutcomePrice,
+    executionPrice,
+    gross,
+    nextYesPrice: side === "YES" ? nextOutcomePrice : getMarketOutcomePrice(market, "YES"),
+    nextNoPrice: side === "NO" ? nextOutcomePrice : getMarketOutcomePrice(market, "NO"),
+    nextYesVolume: side === "YES"
+      ? Math.max(0, toNumber(market.yes_volume) - estimatedGross)
+      : toNumber(market.yes_volume),
+    nextNoVolume: side === "NO"
+      ? Math.max(0, toNumber(market.no_volume) - estimatedGross)
+      : toNumber(market.no_volume),
+  };
+}
+
 function getBuyExecutionQuote(market, side, amount) {
+  if (isSpecialMarket(market)) {
+    return getSpecialBuyExecutionQuote(market, side, amount);
+  }
   const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
   const fairOutcomePrice = getFairOutcomePrice(market, side);
@@ -930,6 +1025,9 @@ function getBuyExecutionQuote(market, side, amount) {
 }
 
 function getSellExecutionQuote(market, side, sharesToSell) {
+  if (isSpecialMarket(market)) {
+    return getSpecialSellExecutionQuote(market, side, sharesToSell);
+  }
   const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
   const estimatedGross = Math.max(0, sharesToSell * oldOutcomePrice);
@@ -3307,10 +3405,19 @@ async function getUserMarketStats(userId, limit = 40) {
             WHEN m.symbol LIKE '${WORLD_CUP_SYMBOL_PREFIX}%' THEN 'WORLD_CUP_WINNER'
             WHEN m.symbol LIKE '${TOP_MARKET_SYMBOL_PREFIX}%' THEN 'TOP_MARKET'
             WHEN m.symbol LIKE '${SPORTS_MARKET_SYMBOL_PREFIX}%' THEN 'SPORTS_MARKET'
+            WHEN m.symbol LIKE '${SPECIAL_MARKET_SYMBOL_PREFIX}%' THEN 'SPECIAL_MARKET'
             ELSE NULL
           END AS market_type,
-          COALESCE(meta.team, top_meta.title) AS team,
-          COALESCE(meta.icon, top_meta.icon) AS icon,
+          COALESCE(
+            meta.team,
+            top_meta.title,
+            CASE WHEN m.symbol = '${KYIVSTONER_MARKET_SYMBOL}' THEN 'Киевстонер' END
+          ) AS team,
+          COALESCE(
+            meta.icon,
+            top_meta.icon,
+            CASE WHEN m.symbol = '${KYIVSTONER_MARKET_SYMBOL}' THEN '${KYIVSTONER_MARKET_ICON}' END
+          ) AS icon,
           top_meta.title AS top_title,
           m.question,
           m.status AS market_status,
@@ -3362,7 +3469,9 @@ async function getUserMarketStats(userId, limit = 40) {
     const btcDefinition = getBtcMarketDef(row.symbol);
     return mapUserMarketStat({
       ...row,
-      title: btcDefinition?.title || row.top_title,
+      title: btcDefinition?.title
+        || row.top_title
+        || (isKyivstonerMarketSymbol(row.symbol) ? KYIVSTONER_MARKET_QUESTION : undefined),
       label: btcDefinition?.label,
     });
   });
@@ -5946,6 +6055,109 @@ export async function getBtcMarkets() {
   }));
 }
 
+async function createKyivstonerMarket() {
+  const startTime = new Date();
+  const endTime = new Date(startTime.getTime() + KYIVSTONER_MARKET_DURATION_MS);
+
+  try {
+    return await withTransaction(async (client) => {
+      const result = await client.query(
+        `
+          INSERT INTO markets (
+            symbol,
+            question,
+            open_price,
+            current_price,
+            yes_price,
+            no_price,
+            yes_volume,
+            no_volume,
+            liquidity,
+            start_time,
+            end_time,
+            status
+          )
+          VALUES ($1, $2, 0.5, 0.5, 0.5, 0.5, 0, 0, $3, $4, $5, 'open')
+          RETURNING *
+        `,
+        [
+          KYIVSTONER_MARKET_SYMBOL,
+          KYIVSTONER_MARKET_QUESTION,
+          KYIVSTONER_MARKET_LIQUIDITY,
+          startTime,
+          endTime,
+        ],
+      );
+      const market = result.rows[0];
+      await persistSpecialMarketTicks(client, market, 0.5, 0.5, "special_market_open");
+      return mapMarket(market);
+    });
+  } catch (error) {
+    if (error?.code === "23505") {
+      const existing = await getOpenMarket(KYIVSTONER_MARKET_SYMBOL);
+      if (existing) {
+        return existing;
+      }
+    }
+    throw error;
+  }
+}
+
+async function ensureKyivstonerMarket() {
+  const result = await query(
+    `
+      SELECT *
+      FROM markets
+      WHERE symbol = $1
+      ORDER BY id DESC
+      LIMIT 1
+    `,
+    [KYIVSTONER_MARKET_SYMBOL],
+  );
+  return mapMarket(result.rows[0]) || createKyivstonerMarket();
+}
+
+async function getSpecialMarketChart(symbol, since, limit = 260) {
+  const result = await query(
+    `
+      SELECT price, source, created_at
+      FROM (
+        SELECT price, source, created_at
+        FROM price_ticks
+        WHERE symbol = $1
+          AND created_at >= $2
+        ORDER BY created_at DESC
+        LIMIT $3
+      ) recent_ticks
+      ORDER BY created_at ASC
+    `,
+    [symbol, since, Math.max(30, Math.min(600, Number(limit) || 260))],
+  );
+  return result.rows.map(mapMarketChartPoint);
+}
+
+export async function getKyivstonerMarket() {
+  const market = await ensureKyivstonerMarket();
+  const [chart, chartNo] = await Promise.all([
+    getSpecialMarketChart(market.symbol, market.start_time),
+    getSpecialMarketChart(`${market.symbol}:NO`, market.start_time),
+  ]);
+  const initialPoint = {
+    price: 0.5,
+    source: "special_market_open",
+    created_at: market.start_time,
+  };
+
+  return {
+    source: "local_order_flow",
+    market: {
+      ...market,
+      chart: chart.length ? chart : [initialPoint],
+      chart_no: chartNo.length ? chartNo : [initialPoint],
+    },
+  };
+}
+
 export async function getMarketActivity(marketId, limit = 20) {
   const result = await query(
     `
@@ -7718,6 +7930,7 @@ export async function buyOutcome(input) {
         side === "NO" ? netAmount : 0,
       ],
     );
+    await persistSpecialMarketTicks(client, market, nextYesPrice, nextNoPrice);
 
     // Ставка внутри счастливого окна: только эта часть позиции получит x2.
     const luckySpentPart = isLuckyWindowActive(market) ? amount : 0;
@@ -8035,6 +8248,7 @@ export async function sellOutcome(input) {
         quote.nextNoVolume,
       ],
     );
+    await persistSpecialMarketTicks(client, market, nextYesPrice, nextNoPrice);
 
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 

@@ -32,6 +32,8 @@ const BUY_IMPACT_MULTIPLIER = 1.08;
 const SELL_IMPACT_MULTIPLIER = 1.42;
 const MARKET_MAKER_DENSITY_MULTIPLIER = 1.4;
 const SPORTS_MARKET_MAKER_DENSITY_MULTIPLIER = 1.8;
+const SPECIAL_MARKET_SPREAD_RATE = 0.01;
+const SPECIAL_MARKET_MAX_SHIFT = 0.2;
 const MAX_SINGLE_TRADE_SHIFT = 0.46;
 const MIN_TAIL_DEPTH_FACTOR = 0.004;
 const SPORTS_MIN_TAIL_DEPTH_FACTOR = 0.2;
@@ -51,6 +53,7 @@ let chartBetLabelCache = null; // cached measureText widths for the "your bet" p
 let chartTickerLabelCache = null; // cached measureText widths for the live ticker pill
 const ACTIVE_MARKET_POLL_MS = 1_500;
 const MARKET_LIST_POLL_MS = 10_000;
+const SPECIAL_MARKET_POLL_MS = 3_000;
 const COMMENTS_POLL_MS = 10_000;
 const LEADERBOARD_CACHE_MS = 90_000;
 const LEADERBOARD_MODES = ["BEST_24H", "WINS_24H", "BALANCE", "CLANS"];
@@ -116,6 +119,10 @@ const state = {
   sportsMarkets: [],
   sportsMarketsListRenderedOrder: "",
   selectedSportsMarketId: null,
+  specialMarkets: [],
+  selectedSpecialMarketId: null,
+  specialMarketCharts: new Map(),
+  specialNoMarketCharts: new Map(),
   comments: [],
   commentsMarketId: null,
   commentsOnlineCount: 0,
@@ -260,6 +267,7 @@ const state = {
   streak: null, // «Заряд молнии» (POST /api/streak/checkin)
   chartRaf: null,
   smoothedPrice: null,
+  smoothedNoPrice: null,
   chartYMin: null,
   chartYMax: null,
   chartLastMarketId: null,
@@ -409,7 +417,9 @@ const centsInputToOutcomePrice = (value) => Number(value) / 100;
 const yesNoSideLabel = (side) => (side === "YES" ? "Yes" : "No");
 const sideLabel = (side) => (side === "YES" ? "UP" : "DOWN");
 const marketSideLabel = (market, side) => (
-  market?.market_type === "SPORTS_MARKET" || String(market?.symbol || market?.market_symbol || "").startsWith("SPORT:")
+  market?.market_type === "SPECIAL_MARKET" || String(market?.symbol || market?.market_symbol || "").startsWith("SPECIAL:")
+    ? (side === "YES" ? (market.yes_label || "Меньше 8") : (market.no_label || "Больше 8"))
+    : market?.market_type === "SPORTS_MARKET" || String(market?.symbol || market?.market_symbol || "").startsWith("SPORT:")
     ? (side === "YES" ? (market.yes_label || "Yes") : (market.no_label || "No"))
     : market?.market_type === "WORLD_CUP_WINNER"
     || market?.market_type === "TOP_MARKET"
@@ -949,6 +959,10 @@ function getDisplayMarket() {
     return state.sportsMarkets.find((market) => market.id === state.selectedSportsMarketId) || state.market;
   }
 
+  if (state.selectedSpecialMarketId) {
+    return state.specialMarkets.find((market) => market.id === state.selectedSpecialMarketId) || state.market;
+  }
+
   return state.market;
 }
 
@@ -958,6 +972,7 @@ function findMarketById(marketId) {
     || state.worldCupMarkets.find((market) => market.id === id)
     || state.topMarkets.find((market) => market.id === id)
     || state.sportsMarkets.find((market) => market.id === id)
+    || state.specialMarkets.find((market) => market.id === id)
     || (state.market?.id === id ? state.market : null);
 }
 
@@ -972,6 +987,11 @@ function isTopMarket(market = getDisplayMarket()) {
 function isSportsListMarket(market = getDisplayMarket()) {
   return market?.market_type === "SPORTS_MARKET"
     || String(market?.symbol || market?.market_symbol || "").startsWith("SPORT:");
+}
+
+function isSpecialMarket(market = getDisplayMarket()) {
+  return market?.market_type === "SPECIAL_MARKET"
+    || String(market?.symbol || market?.market_symbol || "").startsWith("SPECIAL:");
 }
 
 function isSportsEventLive(market = getDisplayMarket()) {
@@ -1031,7 +1051,7 @@ function compactSportsMarketLabel(market) {
 }
 
 function isPredictionListMarket(market = getDisplayMarket()) {
-  return isWorldCupMarket(market) || isTopMarket(market) || isSportsListMarket(market);
+  return isWorldCupMarket(market) || isTopMarket(market) || isSportsListMarket(market) || isSpecialMarket(market);
 }
 
 function isBtcMarket(market = getDisplayMarket()) {
@@ -1394,20 +1414,24 @@ function pruneClosedLocalMarkets({ renderLists = false } = {}) {
   const beforeWorld = state.worldCupMarkets.map((market) => market.id).join(",");
   const beforeTop = state.topMarkets.map((market) => market.id).join(",");
   const beforeSports = state.sportsMarkets.map((market) => market.id).join(",");
+  const beforeSpecial = state.specialMarkets.map((market) => market.id).join(",");
 
   state.btcMarkets = openCarouselMarkets(state.btcMarkets);
   state.worldCupMarkets = retainPendingExternalMarkets(state.worldCupMarkets);
   state.topMarkets = retainPendingExternalMarkets(state.topMarkets);
   state.sportsMarkets = retainPendingExternalMarkets(state.sportsMarkets);
+  state.specialMarkets = retainPendingExternalMarkets(state.specialMarkets);
 
   const afterBtc = state.btcMarkets.map((market) => market.id).join(",");
   const afterWorld = state.worldCupMarkets.map((market) => market.id).join(",");
   const afterTop = state.topMarkets.map((market) => market.id).join(",");
   const afterSports = state.sportsMarkets.map((market) => market.id).join(",");
+  const afterSpecial = state.specialMarkets.map((market) => market.id).join(",");
   const btcChanged = beforeBtc !== afterBtc;
   const worldChanged = beforeWorld !== afterWorld;
   const topChanged = beforeTop !== afterTop;
   const sportsChanged = beforeSports !== afterSports;
+  const specialChanged = beforeSpecial !== afterSpecial;
   let selectionChanged = false;
 
   if (
@@ -1438,6 +1462,13 @@ function pruneClosedLocalMarkets({ renderLists = false } = {}) {
     state.selectedSportsMarketId = null;
     selectionChanged = true;
   }
+  if (
+    state.selectedSpecialMarketId
+    && !state.specialMarkets.some((market) => market.id === state.selectedSpecialMarketId)
+  ) {
+    state.selectedSpecialMarketId = null;
+    selectionChanged = true;
+  }
 
   if (btcChanged) {
     state.btcMarketsListRenderedOrder = "";
@@ -1458,7 +1489,7 @@ function pruneClosedLocalMarkets({ renderLists = false } = {}) {
     if (sportsChanged) renderSportsMarketsList();
   }
 
-  return { changed: btcChanged || worldChanged || topChanged || sportsChanged, selectionChanged };
+  return { changed: btcChanged || worldChanged || topChanged || sportsChanged || specialChanged, selectionChanged };
 }
 
 function getMarketMinOutcomePrice(market = getDisplayMarket()) {
@@ -1505,6 +1536,10 @@ function upsertLocalMarket(market) {
   if (marketPatch.market_type === "SPORTS_MARKET") {
     upsertMarketListItem("sportsMarkets", marketPatch);
   }
+  if (marketPatch.market_type === "SPECIAL_MARKET") {
+    upsertMarketListItem("specialMarkets", marketPatch);
+    mergeSpecialMarketChartPoints(marketPatch);
+  }
 }
 
 function getDisplayChartPoints(market) {
@@ -1538,7 +1573,9 @@ function getDisplayChartPoints(market) {
     });
   }
 
-  const points = (isTopMarket(market) || isSportsListMarket(market))
+  const points = isSpecialMarket(market)
+    ? state.specialMarketCharts.get(market.id) || []
+    : (isTopMarket(market) || isSportsListMarket(market))
     ? state.topMarketCharts.get(market.id) || []
     : state.worldCupCharts.get(market.id) || [];
   if (points.length) {
@@ -1551,6 +1588,12 @@ function getDisplayChartPoints(market) {
     price: Math.max(0.1, Math.min(99.9, base + Math.sin(index / 2.3) * 0.35)),
     at: now - (11 - index) * 850,
   }));
+}
+
+function getDisplaySecondaryChartPoints(market) {
+  return isSpecialMarket(market)
+    ? state.specialNoMarketCharts.get(market.id) || []
+    : [];
 }
 
 function normalizeChartPrice(value) {
@@ -1732,6 +1775,8 @@ function drawMarketChartFrame(ts) {
   const dualSportsChart = isSportsListMarket(market)
     && isNamedSportsOutcome(market, "YES")
     && isNamedSportsOutcome(market, "NO");
+  const dualSpecialChart = isSpecialMarket(market);
+  const dualOutcomeChart = dualSportsChart || dualSpecialChart;
   const aquariumAllowed = syncAquariumRuntimeForMarket(market);
   const openPrice = worldCup
     ? Math.max(0.1, Math.min(99.9, Number(market.yes_price || 0.5) * 100))
@@ -1743,6 +1788,16 @@ function drawMarketChartFrame(ts) {
     state.smoothedPrice = currentPrice;
   } else {
     state.smoothedPrice += (currentPrice - state.smoothedPrice) * 0.045;
+  }
+  const currentNoPrice = dualSpecialChart
+    ? Math.max(0.1, Math.min(99.9, Number(market.no_price || 0.5) * 100))
+    : 100 - currentPrice;
+  if (dualSpecialChart) {
+    if (!state.smoothedNoPrice || Math.abs(state.smoothedNoPrice - currentNoPrice) > 25) {
+      state.smoothedNoPrice = currentNoPrice;
+    } else {
+      state.smoothedNoPrice += (currentNoPrice - state.smoothedNoPrice) * 0.045;
+    }
   }
   if (!worldCup && Number.isFinite(openPrice) && openPrice > 0) {
     detectTargetCross(market, openPrice);
@@ -1783,9 +1838,21 @@ function drawMarketChartFrame(ts) {
     };
   }
 
-  const secondaryRawPoints = dualSportsChart
-    ? rawPoints.map((point) => ({ ...point, price: 100 - point.price }))
-    : [];
+  const secondaryRawPoints = dualSpecialChart
+    ? getSortedSecondaryChartPoints(market)
+      .filter((point) => fullHistoryChart || (point.at >= windowStart - 1_500 && point.at <= windowEnd + 1_500))
+      .map((point) => ({ ...point }))
+    : (dualSportsChart ? rawPoints.map((point) => ({ ...point, price: 100 - point.price })) : []);
+  if (dualSpecialChart && secondaryRawPoints.length === 0) {
+    secondaryRawPoints.push({ price: currentNoPrice, at: windowEnd });
+  }
+  if (dualSpecialChart && secondaryRawPoints.length > 0) {
+    secondaryRawPoints[secondaryRawPoints.length - 1] = {
+      ...secondaryRawPoints[secondaryRawPoints.length - 1],
+      price: state.smoothedNoPrice,
+      at: windowEnd,
+    };
+  }
   const prices = [
     ...rawPoints.map((point) => point.price),
     ...secondaryRawPoints.map((point) => point.price),
@@ -1793,11 +1860,11 @@ function drawMarketChartFrame(ts) {
   ].filter(Number.isFinite);
   const minPrice = Math.min(...prices);
   const maxPrice = Math.max(...prices);
-  const padding = dualSportsChart
+  const padding = dualOutcomeChart
     ? Math.max(2.5, (maxPrice - minPrice) * 0.08)
     : (worldCup ? Math.max(1.8, (maxPrice - minPrice) * 0.56) : Math.max(4, (maxPrice - minPrice) * 0.42));
-  const targetMin = dualSportsChart ? Math.max(-2, minPrice - padding) : minPrice - padding;
-  const targetMax = dualSportsChart ? Math.min(102, maxPrice + padding) : maxPrice + padding;
+  const targetMin = dualOutcomeChart ? Math.max(-2, minPrice - padding) : minPrice - padding;
+  const targetMax = dualOutcomeChart ? Math.min(102, maxPrice + padding) : maxPrice + padding;
   state.chartYMin = state.chartYMin === null ? targetMin : state.chartYMin + (targetMin - state.chartYMin) * 0.08;
   state.chartYMax = state.chartYMax === null ? targetMax : state.chartYMax + (targetMax - state.chartYMax) * 0.08;
 
@@ -1870,7 +1937,7 @@ function drawMarketChartFrame(ts) {
   }
 
   const openY = scaleY(openPrice);
-  const referenceY = dualSportsChart ? scaleY(50) : openY;
+  const referenceY = dualOutcomeChart ? scaleY(50) : openY;
   ctx.setLineDash([8, 9]);
   ctx.strokeStyle = "rgba(255,255,255,0.24)";
   ctx.lineWidth = 1.2;
@@ -1881,7 +1948,7 @@ function drawMarketChartFrame(ts) {
   ctx.setLineDash([]);
 
   const targetAbove = openY < scaleY(state.smoothedPrice || currentPrice);
-  const targetLabel = dualSportsChart
+  const targetLabel = dualOutcomeChart
     ? "50%"
     : worldCup
       ? `${formatCents((state.smoothedPrice || currentPrice) / 100)} YES`
@@ -1908,7 +1975,7 @@ function drawMarketChartFrame(ts) {
   }));
   const isUp = state.smoothedPrice >= openPrice;
   const gradient = ctx.createLinearGradient(0, top, 0, bottom);
-  gradient.addColorStop(0, dualSportsChart || isUp ? "rgba(25,195,125,0.20)" : "rgba(239,70,111,0.22)");
+  gradient.addColorStop(0, dualOutcomeChart || isUp ? "rgba(25,195,125,0.20)" : "rgba(239,70,111,0.22)");
   gradient.addColorStop(1, "rgba(8,13,22,0)");
 
   const wipeActive = intro < 1 && pathPoints.length > 1;
@@ -1932,7 +1999,7 @@ function drawMarketChartFrame(ts) {
     ctx.fill();
     ctx.restore();
 
-    ctx.strokeStyle = dualSportsChart || isUp ? "#19c37d" : "#ef466f";
+    ctx.strokeStyle = dualOutcomeChart || isUp ? "#19c37d" : "#ef466f";
     ctx.lineWidth = 4;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -1957,12 +2024,12 @@ function drawMarketChartFrame(ts) {
     const frameAvatars = captureAvatars ? [] : null;
     chartTrades.forEach((trade) => {
       const x = scaleX(trade.at);
-      const tradePath = dualSportsChart && trade.side === "NO"
+      const tradePath = dualOutcomeChart && trade.side === "NO"
         ? secondaryPathPoints
         : pathPoints;
       const nearest = nearestPathPoint(tradePath, x);
       const own = String(trade.telegram_id || "") === String(state.user?.telegram_id || "");
-      const lineDirection = dualSportsChart
+      const lineDirection = dualOutcomeChart
         ? (trade.side === "NO" ? 1 : -1)
         : (own ? -1 : 1);
       const dotY = nearest.y + lineDirection * (own ? 8 : 7);
@@ -1994,7 +2061,7 @@ function drawMarketChartFrame(ts) {
   const latest = pathPoints[pathPoints.length - 1];
   const secondaryLatest = secondaryPathPoints[secondaryPathPoints.length - 1];
   if (latest) {
-    const headRgb = dualSportsChart || isUp ? "25,195,125" : "239,70,111";
+    const headRgb = dualOutcomeChart || isUp ? "25,195,125" : "239,70,111";
     const pulse = 0.5 + 0.5 * Math.sin(nowTs * 0.005);
 
     // Хвост кометы: последние ~44px пути подсвечены градиентом к голове.
@@ -2025,8 +2092,8 @@ function drawMarketChartFrame(ts) {
     }
 
     // Пульсирующее ядро с дышащим ореолом.
-    ctx.fillStyle = dualSportsChart || isUp ? "#19c37d" : "#ef466f";
-    ctx.shadowColor = dualSportsChart || isUp ? "rgba(25,195,125,0.55)" : "rgba(239,70,111,0.52)";
+    ctx.fillStyle = dualOutcomeChart || isUp ? "#19c37d" : "#ef466f";
+    ctx.shadowColor = dualOutcomeChart || isUp ? "rgba(25,195,125,0.55)" : "rgba(239,70,111,0.52)";
     ctx.shadowBlur = 18;
     ctx.beginPath();
     ctx.arc(latest.x, latest.y, 5.5 + pulse * 1.3, 0, Math.PI * 2);
@@ -2038,7 +2105,7 @@ function drawMarketChartFrame(ts) {
     ctx.arc(latest.x, latest.y, 9 + pulse * 4.5, 0, Math.PI * 2);
     ctx.stroke();
 
-    const currentLabel = dualSportsChart
+    const currentLabel = dualOutcomeChart
       ? `${marketButtonSideLabel(market, "YES")} ${(state.smoothedPrice || currentPrice).toFixed(1)}%`
       : worldCup
         ? `${(state.smoothedPrice || currentPrice).toFixed(1)}%`
@@ -2054,15 +2121,17 @@ function drawMarketChartFrame(ts) {
       labelY = Math.max(top + 2, labelY - 13);
       secondaryLabelY = Math.min(bottom - 24, secondaryLabelY + 13);
     }
-    ctx.fillStyle = dualSportsChart || isUp ? "#19c37d" : "#ef466f";
+    ctx.fillStyle = dualOutcomeChart || isUp ? "#19c37d" : "#ef466f";
     ctx.shadowColor = "rgba(0,0,0,0.42)";
     ctx.shadowBlur = 9;
     ctx.textBaseline = "middle";
     ctx.fillText(currentLabel, labelX + 9, labelY + 14);
     ctx.shadowBlur = 0;
 
-    if (dualSportsChart && secondaryLatest) {
-      const secondaryPrice = 100 - (state.smoothedPrice || currentPrice);
+    if (dualOutcomeChart && secondaryLatest) {
+      const secondaryPrice = dualSpecialChart
+        ? (state.smoothedNoPrice || currentNoPrice)
+        : 100 - (state.smoothedPrice || currentPrice);
       const secondaryLabel = `${marketButtonSideLabel(market, "NO")} ${secondaryPrice.toFixed(1)}%`;
       const secondaryTextWidth = ctx.measureText(secondaryLabel).width + 18;
       const secondaryLabelX = Math.min(width - secondaryTextWidth - 8, secondaryLatest.x + 12);
@@ -2163,7 +2232,13 @@ function drawMarketChartFrame(ts) {
     ctx.restore();
   }
 
-  if ((market.status === "open" && btc) || Math.abs((state.smoothedPrice || 0) - currentPrice) > 0.04 || intro < 1 || chartCrossFx) {
+  if (
+    (market.status === "open" && btc)
+    || Math.abs((state.smoothedPrice || 0) - currentPrice) > 0.04
+    || (dualSpecialChart && Math.abs((state.smoothedNoPrice || 0) - currentNoPrice) > 0.04)
+    || intro < 1
+    || chartCrossFx
+  ) {
     state.chartRaf = requestAnimationFrame(drawMarketChartFrame);
     return;
   }
@@ -2187,6 +2262,8 @@ function getAppBgColor() {
 // приходят раз в ~1.5с, ключ (id, длина, крайние at) ловит каждое обновление.
 let chartPointsCacheKey = "";
 let chartPointsCacheList = [];
+let secondaryChartPointsCacheKey = "";
+let secondaryChartPointsCacheList = [];
 
 function getSortedChartPoints(market) {
   const source = getDisplayChartPoints(market);
@@ -2199,6 +2276,19 @@ function getSortedChartPoints(market) {
       .sort((a, b) => a.at - b.at);
   }
   return chartPointsCacheList;
+}
+
+function getSortedSecondaryChartPoints(market) {
+  const source = getDisplaySecondaryChartPoints(market);
+  const length = source.length;
+  const key = `${market.id}:${length}:${length ? source[0].at : 0}:${length ? source[length - 1].at : 0}`;
+  if (secondaryChartPointsCacheKey !== key) {
+    secondaryChartPointsCacheKey = key;
+    secondaryChartPointsCacheList = source
+      .filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at))
+      .sort((a, b) => a.at - b.at);
+  }
+  return secondaryChartPointsCacheList;
 }
 
 // Live-тикер сделок в правом нижнем углу графика. Показывает по очереди
@@ -3311,6 +3401,10 @@ function shouldRefreshSportsMarkets() {
   return Boolean(state.selectedSportsMarketId) || isSheetOpen("sportsMarketsSheet");
 }
 
+function shouldRefreshSpecialMarket() {
+  return Boolean(state.selectedSpecialMarketId);
+}
+
 function maybeLoadComments(force = false) {
   const now = Date.now();
   if (!force && now - state.lastCommentsLoadAt < COMMENTS_POLL_MS) {
@@ -3345,6 +3439,9 @@ function scheduleCoreRefresh({ delay = 120, includeLists = true, includeComments
       }
       if (shouldRefreshSportsMarkets()) {
         jobs.push(runSingleFlight("sportsMarkets", loadSportsMarkets).catch(() => undefined));
+      }
+      if (shouldRefreshSpecialMarket()) {
+        jobs.push(runSingleFlight("specialMarket", loadSpecialMarket).catch(() => undefined));
       }
     }
 
@@ -3906,6 +4003,19 @@ function buildSyntheticOrderbook(market, side) {
   const depthBase = Math.max(12, Math.sqrt(liquidity + volume) * 0.7 * MARKET_MAKER_DENSITY_MULTIPLIER);
   const minPrice = getMarketMinOutcomePrice(market);
 
+  if (isSpecialMarket(market)) {
+    const weights = [0.22, 0.18, 0.1, 0.1, 0.18, 0.22];
+    return weights.map((weight, index) => {
+      const direction = index < 3 ? -1 : 1;
+      const distance = index < 3 ? 3 - index : index - 2;
+      return {
+        price: Math.min(1 - minPrice, Math.max(minPrice, price + direction * distance * 0.01)),
+        size: Math.round(liquidity * weight),
+        type: direction < 0 ? "bid" : "ask",
+      };
+    }).sort((a, b) => b.price - a.price);
+  }
+
   return Array.from({ length: 5 }, (_, index) => {
     const distance = index + 1;
     const direction = index < 2 ? -1 : 1;
@@ -4234,6 +4344,35 @@ function mergeTopMarketChartPoint(market) {
   state.topMarketCharts.set(market.id, points.slice(-260));
 }
 
+function mergeSpecialMarketChartPoints(market) {
+  if (!market?.id) {
+    return;
+  }
+
+  const mergeSide = (map, source, currentPrice) => {
+    const existing = map.get(market.id) || [];
+    const history = (source || [])
+      .map((point) => ({
+        price: normalizeChartPrice(point.price),
+        at: new Date(point.created_at).getTime(),
+      }))
+      .filter((point) => Number.isFinite(point.price) && Number.isFinite(point.at));
+    const points = existing.length ? existing : history;
+    const nextPoint = {
+      price: Math.max(0.1, Math.min(99.9, Number(currentPrice || 0.5) * 100)),
+      at: Date.now(),
+    };
+    const lastPoint = points[points.length - 1];
+    if (!lastPoint || nextPoint.at - lastPoint.at > 700 || Math.abs(nextPoint.price - lastPoint.price) > 0.02) {
+      points.push(nextPoint);
+    }
+    map.set(market.id, points.slice(-260));
+  };
+
+  mergeSide(state.specialMarketCharts, market.chart, market.yes_price);
+  mergeSide(state.specialNoMarketCharts, market.chart_no, market.no_price);
+}
+
 function mergeBtcChartPoint(market) {
   if (!market?.id) {
     return;
@@ -4344,6 +4483,27 @@ async function loadSportsMarkets() {
   }
 }
 
+async function loadSpecialMarket() {
+  const data = await api("/api/special/kyivstoner");
+  const market = data.market;
+  state.specialMarkets = market?.status === "open" ? [market] : [];
+  if (market) {
+    mergeSpecialMarketChartPoints(market);
+  }
+  if (
+    state.selectedSpecialMarketId
+    && !state.specialMarkets.some((item) => item.id === state.selectedSpecialMarketId)
+  ) {
+    state.selectedSpecialMarketId = null;
+  }
+  if (state.selectedSpecialMarketId) {
+    renderMarket();
+    renderTradeTicket();
+    renderMarketChart();
+  }
+  return market;
+}
+
 function getSelectedPrice() {
   const market = getDisplayMarket();
   if (!market) {
@@ -4407,6 +4567,18 @@ function estimateBuyQuote({ market, side, amount }) {
     ? Number(side === "YES" ? market.yes_price : market.no_price)
     : 0.5;
   const price = Math.max(minPrice, Math.min(1 - minPrice, rawPrice || 0.5));
+  if (isSpecialMarket(market)) {
+    const depth = Math.max(100, Number(market?.liquidity || 7_000));
+    const impact = Math.min(SPECIAL_MARKET_MAX_SHIFT, Number(amount || 0) / depth);
+    const nextPrice = Math.max(minPrice, Math.min(1 - minPrice, price + impact));
+    return {
+      executionPrice: Math.max(
+        minPrice,
+        Math.min(1 - minPrice, ((price + nextPrice) / 2) * (1 + SPECIAL_MARKET_SPREAD_RATE)),
+      ),
+      nextPrice,
+    };
+  }
   const liquidity = estimateMarketMakerLiquidity(market, price);
   const impact = Math.min(MAX_SINGLE_TRADE_SHIFT, (Number(amount || 0) / liquidity) * BUY_IMPACT_MULTIPLIER);
   const nextPrice = Math.max(minPrice, Math.min(1 - minPrice, price + impact));
@@ -4426,21 +4598,31 @@ function applyBuyIntentSelection(intent) {
   const btcMarket = state.btcMarkets.find((market) => market.id === marketId);
   const worldMarket = state.worldCupMarkets.find((market) => market.id === marketId);
   const sportsMarket = state.sportsMarkets.find((market) => market.id === marketId);
+  const specialMarket = state.specialMarkets.find((market) => market.id === marketId);
   if (btcMarket) {
     state.selectedBtcMarketId = btcMarket.id === state.market?.id ? null : btcMarket.id;
     state.selectedWorldCupMarketId = null;
     state.selectedTopMarketId = null;
     state.selectedSportsMarketId = null;
+    state.selectedSpecialMarketId = null;
   } else if (worldMarket) {
     state.selectedWorldCupMarketId = worldMarket.id;
     state.selectedBtcMarketId = null;
     state.selectedTopMarketId = null;
     state.selectedSportsMarketId = null;
+    state.selectedSpecialMarketId = null;
   } else if (sportsMarket) {
     state.selectedSportsMarketId = sportsMarket.id;
     state.selectedBtcMarketId = null;
     state.selectedWorldCupMarketId = null;
     state.selectedTopMarketId = null;
+    state.selectedSpecialMarketId = null;
+  } else if (specialMarket) {
+    state.selectedSpecialMarketId = specialMarket.id;
+    state.selectedBtcMarketId = null;
+    state.selectedWorldCupMarketId = null;
+    state.selectedTopMarketId = null;
+    state.selectedSportsMarketId = null;
   } else {
     const topMarket = state.topMarkets.find((market) => market.id === marketId);
     if (topMarket) {
@@ -4448,6 +4630,7 @@ function applyBuyIntentSelection(intent) {
       state.selectedBtcMarketId = null;
       state.selectedWorldCupMarketId = null;
       state.selectedSportsMarketId = null;
+      state.selectedSpecialMarketId = null;
     }
   }
   state.selectedSide = intent.side;
@@ -4463,6 +4646,7 @@ function renderMarket() {
   const worldCup = isPredictionListMarket(market);
   const topMarket = isTopMarket(market);
   const sportsMarket = isSportsListMarket(market);
+  const specialMarket = isSpecialMarket(market);
   const currentPrice = worldCup
     ? Number(market?.yes_price || 0.5) * 100
     : Number(market?.current_price || market?.open_price || 0);
@@ -4478,8 +4662,9 @@ function renderMarket() {
   const yesDepth = Math.max(6, Math.min(94, (yesVolume / volumeTotal) * 100));
   const canBuyMarket = isMarketOpenForBuy(market);
 
-  document.querySelector(".market-card")?.classList.toggle("top-market-card", topMarket || sportsMarket);
+  document.querySelector(".market-card")?.classList.toggle("top-market-card", topMarket || sportsMarket || specialMarket);
   document.querySelector(".market-card")?.classList.toggle("sports-market-card", sportsMarket);
+  document.querySelector(".market-card")?.classList.toggle("special-market-card", specialMarket);
 
   const marketStatus = $("marketStatus");
   const sportsEventLive = sportsMarket && isSportsEventLive(market);
@@ -4488,7 +4673,7 @@ function renderMarket() {
     : marketStatusLabel(canBuyMarket ? market?.status : (market ? "closed" : market?.status));
   marketStatus.classList.toggle("live", canBuyMarket && (!sportsMarket || sportsEventLive));
   $("marketTitle").textContent = worldCup
-    ? ((topMarket || sportsMarket) ? (market.title || market.question) : `${market.team} Winner`)
+    ? ((topMarket || sportsMarket || specialMarket) ? (market.title || market.question) : `${market.team} Winner`)
     : (market?.title || "BTC Up or Down 5m");
   const coinBadge = document.querySelector(".coin-badge");
   if (coinBadge) {
@@ -4500,6 +4685,7 @@ function renderMarket() {
       coinBadge.textContent = "₿";
     }
     coinBadge.classList.toggle("team", worldCup);
+    coinBadge.classList.toggle("special", specialMarket);
   }
   const marketQuestion = $("marketQuestion");
   if (marketQuestion) {
@@ -4727,6 +4913,7 @@ function getPositionMarket(position) {
   return state.worldCupMarkets.find((market) => market.id === position.market_id)
     || state.topMarkets.find((market) => market.id === position.market_id)
     || state.sportsMarkets.find((market) => market.id === position.market_id)
+    || state.specialMarkets.find((market) => market.id === position.market_id)
     || state.btcMarkets.find((market) => market.id === position.market_id)
     || (position.market_id === state.market?.id ? state.market : null);
 }
@@ -4740,6 +4927,9 @@ function getPositionMarketLabel(position, market = getPositionMarket(position)) 
   }
   if (market?.market_type === "TOP_MARKET" || market?.market_type === "SPORTS_MARKET") {
     return market.title || market.question || `TOP #${market.id}`;
+  }
+  if (market?.market_type === "SPECIAL_MARKET" || String(position.market_symbol || "").startsWith("SPECIAL:")) {
+    return market?.title || position.question || "Киевстонер";
   }
   if (market?.market_type === "BTC_UPDOWN") {
     return market.title || `BTC ${market.label || ""}`;
@@ -4762,6 +4952,9 @@ function getActivityMarketLabel(trade) {
   if (String(trade.market_symbol || "").startsWith("SPORT:")) {
     return trade.market_question || "Спортивный рынок";
   }
+  if (String(trade.market_symbol || "").startsWith("SPECIAL:")) {
+    return trade.market_question || "Киевстонер";
+  }
   if (String(trade.market_symbol || "").startsWith("BTCUSDT")) {
     const suffix = String(trade.market_symbol).replace("BTCUSDT", "").replace(/^_/, "").toLowerCase();
     return `BTC ${suffix || "5m"}`;
@@ -4775,8 +4968,10 @@ function isPredictionTrade(trade) {
     || trade?.market_type === "WORLD_CUP_WINNER"
     || trade?.market_type === "TOP_MARKET"
     || trade?.market_type === "SPORTS_MARKET"
+    || trade?.market_type === "SPECIAL_MARKET"
     || symbol.startsWith("TOP:")
-    || symbol.startsWith("SPORT:");
+    || symbol.startsWith("SPORT:")
+    || symbol.startsWith("SPECIAL:");
 }
 
 function getActivitySideLabel(trade) {
@@ -4795,6 +4990,9 @@ function getRecentMarketLabel(market) {
   if (String(market.symbol || "").startsWith("SPORT:")) {
     return `#${market.id} · ${winner} SPORT`;
   }
+  if (String(market.symbol || "").startsWith("SPECIAL:")) {
+    return `#${market.id} · ${winner} КИЕВСТОНЕР`;
+  }
   return `#${market.id} · ${winner} ${market.symbol}`;
 }
 
@@ -4802,6 +5000,25 @@ function estimateSellQuote({ position, market, outcomePrice }) {
   const shares = Number(position.shares || 0);
   const minPrice = getMarketMinOutcomePrice(market);
   const price = Math.max(minPrice, Number(outcomePrice || 0));
+  if (isSpecialMarket(market)) {
+    const depth = Math.max(100, Number(market?.liquidity || 7_000));
+    const estimatedGross = shares * price;
+    const impact = Math.min(SPECIAL_MARKET_MAX_SHIFT, estimatedGross / depth);
+    const nextPrice = Math.max(minPrice, price - impact);
+    const bidPrice = Math.max(
+      minPrice,
+      Math.min(1 - minPrice, ((price + nextPrice) / 2) * (1 - SPECIAL_MARKET_SPREAD_RATE)),
+    );
+    const grossExitValue = shares * bidPrice;
+    const spent = Number(position.spent || 0);
+    const exitProfit = grossExitValue - spent;
+    const exitValue = Math.max(0, grossExitValue - Math.max(0, exitProfit) * PROFIT_FEE_RATE);
+    return {
+      bidPrice,
+      exitValue,
+      pnl: exitValue - spent,
+    };
+  }
   const liquidity = estimateMarketMakerLiquidity(market, price);
   const estimatedGross = shares * price;
   const impact = Math.min(MAX_SINGLE_TRADE_SHIFT, (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER);
@@ -6058,7 +6275,9 @@ function selectBtcMarket(marketId) {
   state.selectedWorldCupMarketId = null;
   state.selectedTopMarketId = null;
   state.selectedSportsMarketId = null;
+  state.selectedSpecialMarketId = null;
   state.smoothedPrice = null;
+  state.smoothedNoPrice = null;
   state.chartYMin = null;
   state.chartYMax = null;
   state.commentsMarketId = null;
@@ -6089,7 +6308,9 @@ function selectWorldCupMarket(marketId) {
   state.selectedBtcMarketId = null;
   state.selectedTopMarketId = null;
   state.selectedSportsMarketId = null;
+  state.selectedSpecialMarketId = null;
   state.smoothedPrice = null;
+  state.smoothedNoPrice = null;
   state.chartYMin = null;
   state.chartYMax = null;
   state.commentsMarketId = null;
@@ -6120,7 +6341,9 @@ function selectTopMarket(marketId) {
   state.selectedBtcMarketId = null;
   state.selectedWorldCupMarketId = null;
   state.selectedSportsMarketId = null;
+  state.selectedSpecialMarketId = null;
   state.smoothedPrice = null;
+  state.smoothedNoPrice = null;
   state.chartYMin = null;
   state.chartYMax = null;
   state.commentsMarketId = null;
@@ -6149,12 +6372,36 @@ function selectSportsMarket(marketId) {
   state.selectedBtcMarketId = null;
   state.selectedWorldCupMarketId = null;
   state.selectedTopMarketId = null;
+  state.selectedSpecialMarketId = null;
   state.smoothedPrice = null;
+  state.smoothedNoPrice = null;
   state.chartYMin = null;
   state.chartYMax = null;
   state.commentsMarketId = null;
   state.sideSelectedMarketId = null;
   setSportsMarketsSheetOpen(false);
+  animateMarketSwitch();
+  renderMarket();
+  renderTradeTicket();
+  renderMarketChart();
+  maybeLoadComments(true);
+}
+
+function selectSpecialMarket(marketId) {
+  const id = Number(marketId);
+  const market = state.specialMarkets.find((item) => item.id === id);
+  if (!market) return;
+  state.selectedSpecialMarketId = id;
+  state.selectedBtcMarketId = null;
+  state.selectedWorldCupMarketId = null;
+  state.selectedTopMarketId = null;
+  state.selectedSportsMarketId = null;
+  state.smoothedPrice = null;
+  state.smoothedNoPrice = null;
+  state.chartYMin = null;
+  state.chartYMax = null;
+  state.commentsMarketId = null;
+  state.sideSelectedMarketId = null;
   animateMarketSwitch();
   renderMarket();
   renderTradeTicket();
@@ -7661,6 +7908,7 @@ async function refreshAll({ includeLists = false } = {}) {
       await loadWorldCupMarkets().catch(() => undefined);
       await loadTopMarkets().catch(() => undefined);
       await loadSportsMarkets().catch(() => undefined);
+      await loadSpecialMarket().catch(() => undefined);
     }
     await loadActivity();
     await loadMe();
@@ -7720,6 +7968,21 @@ $("walletBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   closeTopMoreMenu();
   openTopupSheet("", "", "topup");
+});
+
+$("kyivstonerMarketBtn")?.addEventListener("click", async () => {
+  triggerHaptic("selection");
+  closeTopMoreMenu();
+  showButtonPressed($("kyivstonerMarketBtn"));
+  try {
+    const market = state.specialMarkets[0]
+      || await runSingleFlight("specialMarket", loadSpecialMarket);
+    if (market?.id) {
+      selectSpecialMarket(market.id);
+    }
+  } catch {
+    showToast("Рынок Киевстонера пока не загрузился.");
+  }
 });
 
 $("topMoreBtn")?.addEventListener("click", (event) => {
@@ -9745,21 +10008,31 @@ $("betConfirmBtn")?.addEventListener("click", async () => {
     state.selectedWorldCupMarketId = null;
     state.selectedTopMarketId = null;
     state.selectedSportsMarketId = null;
+    state.selectedSpecialMarketId = null;
   } else if (isTopMarket(market)) {
     state.selectedTopMarketId = market.id;
     state.selectedBtcMarketId = null;
     state.selectedWorldCupMarketId = null;
     state.selectedSportsMarketId = null;
+    state.selectedSpecialMarketId = null;
   } else if (isSportsListMarket(market)) {
     state.selectedSportsMarketId = market.id;
     state.selectedBtcMarketId = null;
     state.selectedWorldCupMarketId = null;
     state.selectedTopMarketId = null;
+    state.selectedSpecialMarketId = null;
+  } else if (isSpecialMarket(market)) {
+    state.selectedSpecialMarketId = market.id;
+    state.selectedBtcMarketId = null;
+    state.selectedWorldCupMarketId = null;
+    state.selectedTopMarketId = null;
+    state.selectedSportsMarketId = null;
   } else {
     state.selectedWorldCupMarketId = market.id;
     state.selectedBtcMarketId = null;
     state.selectedTopMarketId = null;
     state.selectedSportsMarketId = null;
+    state.selectedSpecialMarketId = null;
   }
   state.selectedSide = side;
   state.selectedAmount = amount;
@@ -9781,7 +10054,7 @@ document.querySelector(".market-card")?.addEventListener("touchend", (event) => 
   if (touchStartX === null || touchStartY === null) {
     return;
   }
-  if (!state.worldCupMarkets.length && !state.btcMarkets.length && !state.topMarkets.length && !state.sportsMarkets.length) {
+  if (!state.worldCupMarkets.length && !state.btcMarkets.length && !state.topMarkets.length && !state.sportsMarkets.length && !state.specialMarkets.length) {
     touchStartX = null;
     touchStartY = null;
     return;
@@ -9810,11 +10083,16 @@ document.querySelector(".market-card")?.addEventListener("touchend", (event) => 
     ...state.sportsMarkets
       .filter((market) => !isMarketClosedForCarousel(market))
       .map((market) => ({ type: "sports", id: market.id })),
+    ...state.specialMarkets
+      .filter((market) => !isMarketClosedForCarousel(market))
+      .map((market) => ({ type: "special", id: market.id })),
   ];
   if (markets.length <= 1) {
     return;
   }
-  const currentKey = state.selectedSportsMarketId
+  const currentKey = state.selectedSpecialMarketId
+    ? `special:${state.selectedSpecialMarketId}`
+    : state.selectedSportsMarketId
     ? `sports:${state.selectedSportsMarketId}`
     : state.selectedTopMarketId
     ? `top:${state.selectedTopMarketId}`
@@ -9832,7 +10110,9 @@ document.querySelector(".market-card")?.addEventListener("touchend", (event) => 
   state.selectedBtcMarketId = nextMarket.type === "btc" ? nextMarket.id : null;
   state.selectedTopMarketId = nextMarket.type === "top" ? nextMarket.id : null;
   state.selectedSportsMarketId = nextMarket.type === "sports" ? nextMarket.id : null;
+  state.selectedSpecialMarketId = nextMarket.type === "special" ? nextMarket.id : null;
   state.smoothedPrice = null;
+  state.smoothedNoPrice = null;
   state.chartYMin = null;
   state.chartYMax = null;
   state.commentsMarketId = null;
@@ -9947,6 +10227,12 @@ setInterval(() => {
 }, MARKET_LIST_POLL_MS);
 setInterval(() => {
   if (isAppInBackground() || isBlockingSheetOpen()) return;
+  if (shouldRefreshSpecialMarket()) {
+    void runSingleFlight("specialMarket", loadSpecialMarket).catch(() => undefined);
+  }
+}, SPECIAL_MARKET_POLL_MS);
+setInterval(() => {
+  if (isAppInBackground() || isBlockingSheetOpen()) return;
   maybeLoadComments(true);
 }, COMMENTS_POLL_MS);
 setInterval(() => {
@@ -10000,6 +10286,9 @@ loadPublicConfig()
         window.setTimeout(() => {
           void runSingleFlight("sportsMarkets", loadSportsMarkets).catch(() => undefined);
         }, 2_400);
+        window.setTimeout(() => {
+          void runSingleFlight("specialMarket", loadSpecialMarket).catch(() => undefined);
+        }, 3_000);
         window.setTimeout(showReferralNudge, 150_000);
       })
       .finally(hideLightningLoader);

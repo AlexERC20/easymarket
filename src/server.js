@@ -36,6 +36,7 @@ import {
   getClans,
   getFireLedgerEvents,
   getLeaderboard,
+  getKyivstonerMarket,
   getMarketActivity,
   getMarketComments,
   getMarketOrderBook,
@@ -668,6 +669,18 @@ app.get("/api/top/markets", async (_req, res) => {
 app.get("/api/sports/markets", async (_req, res) => {
   try {
     const result = await getSportsMarkets();
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/special/kyivstoner", async (_req, res) => {
+  try {
+    const result = await getKyivstonerMarket();
     res.status(200).json({
       ok: true,
       ...result,
@@ -1520,6 +1533,7 @@ async function startMarketEngine() {
     }
     await runMigrations();
     await ensureActiveMarket();
+    await getKyivstonerMarket();
     void clanRewardDistributionTick("startup");
   } catch (error) {
     console.warn("[easymarket] startup market check failed:", error instanceof Error ? error.message : "unknown error");
