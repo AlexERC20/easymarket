@@ -26,7 +26,7 @@ import {
 import { getActiveSceneKey, setActiveScene, setShakeSceneListener } from "./shake-scenes.js?v=20260712-01";
 import "./basketball-scene.js?v=20260712-03"; // регистрирует сцену «Легенда 24»
 import { playKyivstonerMotion, preloadKyivstonerMotion } from "./kyivstoner-motion.js?v=20260714-01";
-import { playFootball3DMotion, preloadFootball3DMotion } from "./football-3d-motion.js?v=20260716-02";
+import { playFootballWow } from "./football-wow.js?v=20260716-01";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -299,9 +299,6 @@ function markTelegramShellEarly() {
 markTelegramShellEarly();
 initLightningMotion();
 void preloadKyivstonerMotion();
-window.setTimeout(() => {
-  void preloadFootball3DMotion();
-}, 350);
 initAquarium();
 // «Шейк, шейк!»: каждая встряска-кормление засчитывается в задание.
 setShakeSceneListener(onShakeFeedShake);
@@ -9885,14 +9882,20 @@ $("btcMarketsList")?.addEventListener("click", (event) => {
 
 $("worldCupBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
-  const button = $("worldCupBtn");
-  showButtonPressed(button);
-  void playFootball3DMotion(button, {
-    onKick: () => playMotionSound("success"),
-  });
+  showButtonPressed($("worldCupBtn"));
   closeTopMoreMenu();
-  setWorldCupSheetOpen(true);
-  renderWorldCupList();
+  // Шит открывается в момент «гола» — сцена сама дёрнет onReveal; finally —
+  // страховка, если анимация не запустилась или прервалась.
+  let revealed = false;
+  const reveal = () => {
+    if (revealed) {
+      return;
+    }
+    revealed = true;
+    setWorldCupSheetOpen(true);
+    renderWorldCupList();
+  };
+  void playFootballWow({ onReveal: reveal }).finally(reveal);
   postTaskEvent("visit_football"); // дейлик «Разведка рынков»
   void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => showToast("Маркеты пока не загрузились."));
 });
