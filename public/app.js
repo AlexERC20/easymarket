@@ -26,6 +26,7 @@ import {
 import { getActiveSceneKey, setActiveScene, setShakeSceneListener } from "./shake-scenes.js?v=20260712-01";
 import "./basketball-scene.js?v=20260712-03"; // регистрирует сцену «Легенда 24»
 import { playKyivstonerMotion, preloadKyivstonerMotion } from "./kyivstoner-motion.js?v=20260714-01";
+import { playFootballMotion } from "./football-motion.js?v=20260716-01";
 
 const PROFIT_FEE_RATE = 0.05;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
@@ -9881,6 +9882,11 @@ $("btcMarketsList")?.addEventListener("click", (event) => {
 
 $("worldCupBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
+  const button = $("worldCupBtn");
+  showButtonPressed(button);
+  playFootballMotion(button, {
+    onKick: () => playMotionSound("success"),
+  });
   closeTopMoreMenu();
   setWorldCupSheetOpen(true);
   renderWorldCupList();

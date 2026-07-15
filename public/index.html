@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/styles.css?v=20260714-05" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260711-03" />
     <link rel="stylesheet" href="/kyivstoner-motion.css?v=20260714-02" />
+    <link rel="stylesheet" href="/football-motion.css?v=20260716-01" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -34,6 +35,16 @@
             </button>
             <button id="kyivstonerMarketBtn" class="icon-button kyivstoner-action" type="button" aria-label="Рынок Киевстонера">
               <img src="/assets/kyivstoner-mask-logo.jpg" alt="Киевстонер" />
+            </button>
+            <button id="worldCupBtn" class="icon-button football-action" type="button" aria-label="Футбольный финал">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="7.5" />
+                <path d="m12 6.8 3.2 2.3-1.2 3.8h-4L8.8 9.1 12 6.8Z" />
+                <path d="M5.8 10.2 8.8 9" />
+                <path d="m15.2 9 3 1.2" />
+                <path d="m10 12.9-1.8 2.7" />
+                <path d="m14 12.9 1.8 2.7" />
+              </svg>
             </button>
             <button id="topMoreBtn" class="icon-button more-action" type="button" aria-label="Меню" aria-expanded="false" aria-controls="topMoreMenu">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -64,17 +75,6 @@
                   <path d="M13.2 17.6v2.1" />
                 </svg>
                 <span>BTC</span>
-              </button>
-              <button id="worldCupBtn" class="top-more-item sport-action" type="button" role="menuitem" aria-label="World Cup markets">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="12" cy="12" r="7.5" />
-                  <path d="m12 6.8 3.2 2.3-1.2 3.8h-4L8.8 9.1 12 6.8Z" />
-                  <path d="M5.8 10.2 8.8 9" />
-                  <path d="m15.2 9 3 1.2" />
-                  <path d="m10 12.9-1.8 2.7" />
-                  <path d="m14 12.9 1.8 2.7" />
-                </svg>
-                <span>Футбол</span>
               </button>
               <button id="sportsMarketsBtn" class="top-more-item sports-market-action" type="button" role="menuitem" aria-label="Спортивные рынки">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -872,6 +872,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260714-08" type="module"></script>
+    <script src="/app.js?v=20260716-01" type="module"></script>
   </body>
 </html>
