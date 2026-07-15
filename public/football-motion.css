@@ -19,7 +19,14 @@
     radial-gradient(circle at 56% 38%, rgba(53, 246, 255, 0.09), transparent 48%),
     linear-gradient(180deg, rgba(3, 8, 10, 0.12), rgba(3, 8, 10, 0.34));
   opacity: 0;
-  animation: footballSceneBackdrop 2.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: footballSceneBackdrop 3.15s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.football-motion-scene-3d::before {
+  background:
+    radial-gradient(circle at 52% 43%, rgba(123, 255, 104, 0.14), transparent 29%),
+    radial-gradient(circle at 42% 36%, rgba(53, 246, 255, 0.11), transparent 46%),
+    linear-gradient(180deg, rgba(1, 7, 8, 0.22), rgba(2, 8, 10, 0.5));
 }
 
 .football-motion-scene.is-active {

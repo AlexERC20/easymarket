@@ -84,11 +84,16 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "..", "public");
+const threeBuildDir = path.join(__dirname, "..", "node_modules", "three", "build");
 
 const app = express();
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: "128kb" }));
+app.use("/vendor/three", express.static(threeBuildDir, {
+  immutable: true,
+  maxAge: "30d",
+}));
 app.use(express.static(publicDir, {
   setHeaders(res, filePath) {
     if (/\.(html|js|css)$/i.test(filePath)) {
