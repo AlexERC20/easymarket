@@ -2459,6 +2459,43 @@ async function getReferrerForUser(client, userId) {
   return referrerResult.rows[0] || null;
 }
 
+async function wouldCreateReferralCycle(client, telegramId, referrerTelegramId) {
+  const result = await client.query(
+    `
+      WITH RECURSIVE referral_chain AS (
+        SELECT
+          users.telegram_id,
+          users.referred_by_telegram_id,
+          ARRAY[users.telegram_id]::text[] AS path,
+          1 AS depth
+        FROM users
+        WHERE users.telegram_id = $1
+
+        UNION ALL
+
+        SELECT
+          parent.telegram_id,
+          parent.referred_by_telegram_id,
+          referral_chain.path || parent.telegram_id,
+          referral_chain.depth + 1
+        FROM users parent
+        JOIN referral_chain
+          ON parent.telegram_id = referral_chain.referred_by_telegram_id
+        WHERE referral_chain.depth < 100
+          AND NOT parent.telegram_id = ANY(referral_chain.path)
+      )
+      SELECT EXISTS (
+        SELECT 1
+        FROM referral_chain
+        WHERE telegram_id = $2
+           OR referred_by_telegram_id = $2
+      ) AS would_cycle
+    `,
+    [referrerTelegramId, telegramId],
+  );
+  return result.rows[0]?.would_cycle === true;
+}
+
 function getMonthKey(date = new Date()) {
   return date.toISOString().slice(0, 7);
 }
@@ -2891,11 +2928,32 @@ export async function upsertUser(input) {
   const referredByTelegramId = String(input.referred_by_telegram_id ?? input.ref ?? "")
     .trim()
     .replace(/^ref_/, "");
-  const safeReferredBy = referredByTelegramId && referredByTelegramId !== telegramId
+  const isAdminUser = config.telegramAdminUserIds.includes(telegramId);
+  const safeReferredBy = !isAdminUser && referredByTelegramId && referredByTelegramId !== telegramId
     ? referredByTelegramId
     : null;
 
   return withTransaction(async (client) => {
+    let validatedReferredBy = safeReferredBy;
+    if (validatedReferredBy) {
+      // Referral assignment is rare, so serializing it keeps two simultaneous
+      // sign-ups from creating a cycle before either transaction can see the other.
+      await client.query("SELECT pg_advisory_xact_lock(68432719)");
+      const existingResult = await client.query(
+        `
+          SELECT referred_by_telegram_id
+          FROM users
+          WHERE telegram_id = $1
+          LIMIT 1
+        `,
+        [telegramId],
+      );
+      const alreadyHasReferrer = Boolean(String(existingResult.rows[0]?.referred_by_telegram_id || "").trim());
+      if (alreadyHasReferrer || await wouldCreateReferralCycle(client, telegramId, validatedReferredBy)) {
+        validatedReferredBy = null;
+      }
+    }
+
     const userResult = await client.query(
       `
         INSERT INTO users (telegram_id, username, first_name, referred_by_telegram_id, updated_at)
@@ -2911,7 +2969,7 @@ export async function upsertUser(input) {
         telegramId,
         input.username ? String(input.username).replace(/^@/, "") : null,
         input.first_name ? String(input.first_name) : null,
-        safeReferredBy,
+        validatedReferredBy,
       ],
     );
     const user = userResult.rows[0];
@@ -3501,40 +3559,57 @@ async function getUserReferralStats(userId, telegramId) {
       ),
       activated AS (
         SELECT COUNT(DISTINCT referred_user_id)::int AS total
-        FROM fire_referral_bonuses
-        WHERE inviter_user_id = $1
+        FROM fire_referral_bonuses bonuses
+        JOIN users referred ON referred.id = bonuses.referred_user_id
+        WHERE bonuses.inviter_user_id = $1
+          AND referred.referred_by_telegram_id = $2
       ),
       star_rewards AS (
-        SELECT
-          COALESCE(SUM(amount) FILTER (WHERE reason = 'referral_bet_bonus'), 0) AS first_bet_bonus,
-          COALESCE(SUM(amount) FILTER (WHERE reason = 'profit_fee_referral'), 0) AS profit_share
-        FROM fire_ledger
-        WHERE user_id = $1
-          AND amount > 0
-          AND reason IN ('referral_bet_bonus', 'profit_fee_referral')
+        SELECT COALESCE(SUM(ledger.amount), 0) AS first_bet_bonus
+        FROM fire_ledger ledger
+        JOIN users referred
+          ON referred.telegram_id = split_part(ledger.source, ':', 2)
+        WHERE ledger.user_id = $1
+          AND ledger.amount > 0
+          AND ledger.reason = 'referral_bet_bonus'
+          AND referred.referred_by_telegram_id = $2
+      ),
+      star_profit_rewards AS (
+        SELECT COALESCE(SUM(distributions.referral_fee), 0) AS profit_share
+        FROM profit_fee_distributions distributions
+        JOIN users referred ON referred.id = distributions.user_id
+        WHERE distributions.referrer_user_id = $1
+          AND distributions.currency = 'STAR'
+          AND distributions.referral_fee > 0
+          AND referred.referred_by_telegram_id = $2
       ),
       usdt_bonus_rewards AS (
-        SELECT COALESCE(SUM(amount), 0) AS first_bet_bonus
-        FROM usdt_bonus_ledger
-        WHERE user_id = $1
-          AND amount > 0
-          AND reason = 'referral_bet_bonus_usdt'
+        SELECT COALESCE(SUM(ledger.amount), 0) AS first_bet_bonus
+        FROM usdt_bonus_ledger ledger
+        JOIN users referred
+          ON referred.telegram_id = split_part(ledger.source, ':', 2)
+        WHERE ledger.user_id = $1
+          AND ledger.amount > 0
+          AND ledger.reason = 'referral_bet_bonus_usdt'
+          AND referred.referred_by_telegram_id = $2
       ),
       usdt_profit_rewards AS (
-        SELECT COALESCE(SUM(amount), 0) AS profit_share
-        FROM usdt_ledger
-        WHERE user_id = $1
-          AND amount > 0
-          AND reason = 'profit_fee_referral_usdt'
+        SELECT COALESCE(SUM(distributions.referral_fee), 0) AS profit_share
+        FROM profit_fee_distributions distributions
+        JOIN users referred ON referred.id = distributions.user_id
+        WHERE distributions.referrer_user_id = $1
+          AND distributions.currency = 'USDT'
+          AND distributions.referral_fee > 0
+          AND referred.referred_by_telegram_id = $2
       )
       SELECT
         invited.total AS total_referrals,
         activated.total AS activated_referrals,
         star_rewards.first_bet_bonus AS star_first_bet_bonus,
-        star_rewards.profit_share AS star_profit_share,
+        star_profit_rewards.profit_share AS star_profit_share,
         usdt_bonus_rewards.first_bet_bonus AS usdt_first_bet_bonus,
         usdt_profit_rewards.profit_share AS usdt_profit_share
-      FROM invited, activated, star_rewards, usdt_bonus_rewards, usdt_profit_rewards
+      FROM invited, activated, star_rewards, star_profit_rewards, usdt_bonus_rewards, usdt_profit_rewards
     `,
     [userId, String(telegramId || "")],
   );
@@ -8780,8 +8855,10 @@ export async function getLeaderboard(options = {}) {
           COUNT(DISTINCT distributions.user_id)::int AS active_referrals
         FROM profit_fee_distributions distributions
         JOIN users ON users.id = distributions.referrer_user_id
+        JOIN users referred ON referred.id = distributions.user_id
         WHERE distributions.currency = $2
           AND distributions.referral_fee > 0
+          AND referred.referred_by_telegram_id = users.telegram_id
         GROUP BY users.id, users.telegram_id, users.username, users.first_name
         ORDER BY
           SUM(distributions.referral_fee) DESC,

@@ -667,6 +667,10 @@ export async function runMigrations() {
     ALTER TABLE users
       ADD COLUMN IF NOT EXISTS referred_by_telegram_id TEXT;
 
+    CREATE INDEX IF NOT EXISTS idx_users_referred_by_telegram_id
+      ON users(referred_by_telegram_id)
+      WHERE referred_by_telegram_id IS NOT NULL;
+
     ALTER TABLE positions
       ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'STAR';
 
@@ -690,6 +694,24 @@ export async function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_trades_currency_created
       ON trades(currency, created_at DESC);
+
+    -- A returning account could previously accept a newer user's referral link,
+    -- creating A -> B and B -> A. Keep the chronologically valid direction:
+    -- the newer account may be referred by the older account, never vice versa.
+    WITH reciprocal_referrals AS (
+      SELECT older.id
+      FROM users older
+      JOIN users newer
+        ON newer.telegram_id = older.referred_by_telegram_id
+       AND newer.referred_by_telegram_id = older.telegram_id
+      WHERE older.created_at < newer.created_at
+         OR (older.created_at = newer.created_at AND older.id < newer.id)
+    )
+    UPDATE users
+    SET referred_by_telegram_id = NULL,
+        updated_at = now()
+    FROM reciprocal_referrals
+    WHERE users.id = reciprocal_referrals.id;
   `);
 }
 
