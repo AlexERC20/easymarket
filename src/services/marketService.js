@@ -8684,7 +8684,7 @@ export async function getRecentMarkets(limit = 10) {
 
 function normalizeLeaderboardMode(modeInput) {
   const mode = String(modeInput || "BEST_24H").trim().toUpperCase();
-  if (["BEST_24H", "WINS_24H", "BALANCE", "CLANS"].includes(mode)) {
+  if (["BEST_24H", "WINS_24H", "BALANCE", "REFERRALS", "CLANS"].includes(mode)) {
     return mode;
   }
   return "BEST_24H";
@@ -8704,6 +8704,9 @@ function mapLeaderboardPlayer(row, currency, mode = "BALANCE") {
     total_pnl_24h: toNumber(row.total_pnl_24h),
     total_payout_24h: toNumber(row.total_payout_24h),
     wins_24h: Number(row.wins_24h || 0),
+    referral_earnings: toNumber(row.referral_earnings),
+    referral_payments: Number(row.referral_payments || 0),
+    active_referrals: Number(row.active_referrals || 0),
     bet_count: Number(row.bet_count || 0),
     settled_count: settledCount,
     win_count: winCount,
@@ -8761,6 +8764,40 @@ export async function getLeaderboard(options = {}) {
       currency,
       players: [],
       clans: result.rows.map(mapClan),
+    };
+  }
+
+  if (mode === "REFERRALS") {
+    const result = await query(
+      `
+        SELECT
+          users.telegram_id,
+          users.username,
+          users.first_name,
+          0 AS balance,
+          SUM(distributions.referral_fee) AS referral_earnings,
+          COUNT(*)::int AS referral_payments,
+          COUNT(DISTINCT distributions.user_id)::int AS active_referrals
+        FROM profit_fee_distributions distributions
+        JOIN users ON users.id = distributions.referrer_user_id
+        WHERE distributions.currency = $2
+          AND distributions.referral_fee > 0
+        GROUP BY users.id, users.telegram_id, users.username, users.first_name
+        ORDER BY
+          SUM(distributions.referral_fee) DESC,
+          COUNT(DISTINCT distributions.user_id) DESC,
+          COUNT(*) DESC,
+          users.id ASC
+        LIMIT $1
+      `,
+      [safeLimit, currency],
+    );
+
+    return {
+      mode,
+      currency,
+      players: result.rows.map((row) => mapLeaderboardPlayer(row, currency, mode)),
+      clans: [],
     };
   }
 

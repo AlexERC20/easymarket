@@ -58,7 +58,7 @@ const MARKET_LIST_POLL_MS = 10_000;
 const SPECIAL_MARKET_POLL_MS = 3_000;
 const COMMENTS_POLL_MS = 10_000;
 const LEADERBOARD_CACHE_MS = 90_000;
-const LEADERBOARD_MODES = ["BEST_24H", "WINS_24H", "BALANCE", "CLANS"];
+const LEADERBOARD_MODES = ["BEST_24H", "WINS_24H", "BALANCE", "REFERRALS", "CLANS"];
 const LEADERBOARD_CURRENCIES = ["USDT", "STAR"];
 const SHEET_CLOSE_MS = 360;
 const SHEET_HEIGHT_MORPH_MS = 360;
@@ -319,7 +319,7 @@ const formatFireDecimal = (value) => Number(value || 0).toLocaleString("ru-RU", 
 const normalizeCurrency = (value) => (String(value || "STAR").toUpperCase() === "USDT" ? "USDT" : "STAR");
 const normalizeLeaderboardMode = (value) => {
   const mode = String(value || "BEST_24H").toUpperCase();
-  return ["BEST_24H", "WINS_24H", "BALANCE", "CLANS"].includes(mode) ? mode : "BEST_24H";
+  return ["BEST_24H", "WINS_24H", "BALANCE", "REFERRALS", "CLANS"].includes(mode) ? mode : "BEST_24H";
 };
 const getLeaderboardCacheKey = (mode = state.leaderboardMode, currency = state.leaderboardCurrency) => `${normalizeLeaderboardMode(mode)}:${normalizeCurrency(currency)}`;
 const getAmountsForCurrency = (currency = state.currency) => (normalizeCurrency(currency) === "USDT" ? USDT_AMOUNTS : STAR_AMOUNTS);
@@ -5527,9 +5527,14 @@ function renderLeaderboard() {
   }
 
   if (!state.leaderboard.length) {
+    const emptyText = mode === "REFERRALS"
+      ? "Реферальных отчислений пока нет."
+      : mode === "BALANCE"
+        ? "В этом рейтинге пока нет участников."
+        : "За последние 24 часа пока нет победителей.";
     container.innerHTML = state.leaderboardLoading
       ? '<p class="muted">Загружаю рейтинг...</p>'
-      : '<p class="muted">За последние 24 часа пока нет победителей.</p>';
+      : `<p class="muted">${emptyText}</p>`;
     return;
   }
 
@@ -5545,12 +5550,16 @@ function renderLeaderboard() {
       ? Number(player.best_pnl_24h || 0)
       : mode === "WINS_24H"
         ? Number(player.total_pnl_24h || 0)
-        : Number(player.balance || 0);
+        : mode === "REFERRALS"
+          ? Number(player.referral_earnings || 0)
+          : Number(player.balance || 0);
     const meta = mode === "BEST_24H"
       ? `${escapeHtml(player.market_label || player.market_title || "market")} · ${escapeHtml(isPredictionTrade(player) ? yesNoSideLabel(player.side || "") : sideLabel(player.side || ""))} · всего +${formatCurrencyAmount(player.total_pnl_24h || player.best_pnl_24h || 0, player.currency || state.leaderboardCurrency)}`
       : mode === "WINS_24H"
         ? `${formatFire(player.wins_24h)} побед · лучший ${formatCurrencyAmount(player.best_pnl_24h || 0, player.currency || state.leaderboardCurrency)}`
-        : `${formatFire(player.bet_count)} ставок · WR ${winRate.toFixed(0)}%`;
+        : mode === "REFERRALS"
+          ? `${formatFire(player.active_referrals)} рефералов · ${formatFire(player.referral_payments)} начислений`
+          : `${formatFire(player.bet_count)} ставок · WR ${winRate.toFixed(0)}%`;
     const valueClass = mode === "BALANCE" ? "" : " profit";
     return `
       <div class="leaderboard-row${rankClass}${isMe ? " is-me" : ""}">

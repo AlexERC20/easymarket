@@ -524,6 +524,10 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_profit_fee_distributions_market_created
       ON profit_fee_distributions(market_id, created_at DESC);
 
+    CREATE INDEX IF NOT EXISTS idx_profit_fee_distributions_referrer_currency
+      ON profit_fee_distributions(currency, referrer_user_id)
+      WHERE referral_fee > 0 AND referrer_user_id IS NOT NULL;
+
     CREATE TABLE IF NOT EXISTS clan_reward_fund_ledger (
       id BIGSERIAL PRIMARY KEY,
       clan_id BIGINT REFERENCES clans(id) ON DELETE SET NULL,

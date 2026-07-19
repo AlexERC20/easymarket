@@ -286,12 +286,12 @@ body.telegram-desktop-shell {
 }
 
 .leaderboard-mode-tabs {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .leaderboard-mode-tabs button {
   min-width: 0;
-  padding: 0 7px;
+  padding: 0 4px;
   font-size: 10px;
   white-space: nowrap;
 }
