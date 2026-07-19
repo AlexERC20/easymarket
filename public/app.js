@@ -9089,6 +9089,7 @@ const CORE_DAILY_TASK_KEYS = [
   "daily_btc_5_predictions",
   "daily_win_1",
   "daily_win_streak_5",
+  "daily_share_story",
 ];
 
 const DAILY_TASK_META = {
@@ -9107,7 +9108,7 @@ const DAILY_TASK_META = {
   daily_feed_fish: { title: "Покорми рыбок", desc: "Встряхни телефон на BTC 5m", icon: "fish" },
   daily_comment: { title: "Голос рынка", desc: "Оставь комментарий под рынком", icon: "chat" },
   daily_explore_3: { title: "Разведка рынков", desc: "Открой BTC-лист, рынок из него и футбол", icon: "compass" },
-  daily_share_story: { title: "Сторис с выигрышем", desc: "Поделись выигрышем в сторис", icon: "share" },
+  daily_share_story: { title: "Сторис с выигрышем", desc: "Шэрни выигрыш — можно из истории в статистике", icon: "share" },
 };
 
 function getDailyTaskAmount(taskKey, fallback = 0) {

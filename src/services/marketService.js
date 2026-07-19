@@ -4560,6 +4560,9 @@ const CORE_DAILY_TASK_KEYS = new Set([
   "daily_btc_5_predictions",
   "daily_win_1",
   "daily_win_streak_5",
+  // Сторис — каждый день: вирусная механика, награда сознательно маленькая
+  // (25★ после изи-скейла), потому что сам факт шэра мы проверить не можем.
+  "daily_share_story",
 ]);
 
 // Пул ротации: 3 бонусных задания в день, детерминированно от даты — у всех одинаковые.
@@ -4570,7 +4573,6 @@ const DAILY_ROTATION_POOL = [
   "daily_feed_fish",
   "daily_comment",
   "daily_explore_3",
-  "daily_share_story",
 ];
 
 const TASK_EVENT_KEYS = new Set([
