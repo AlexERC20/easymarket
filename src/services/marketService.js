@@ -5,6 +5,7 @@ import { getBtcPrice, PriceUnavailableError } from "./priceService.js";
 const MARKET_SYMBOL = "BTCUSDT";
 const WORLD_CUP_EVENT_SLUG = "world-cup-winner";
 const WORLD_CUP_SYMBOL_PREFIX = "WCUP:";
+const WORLD_CUP_WINNER_TEAM = "Spain";
 const TOP_MARKET_SYMBOL_PREFIX = "TOP:";
 const SPORTS_MARKET_SYMBOL_PREFIX = "SPORT:";
 const SPECIAL_MARKET_SYMBOL_PREFIX = "SPECIAL:";
@@ -120,6 +121,8 @@ let activeWorldCupTeamKeys = new Set([
 let worldCupSyncPromise = null;
 let worldCupLastSyncAt = 0;
 let worldCupLastSource = "cache";
+let worldCupRetirementPromise = null;
+let worldCupRetirementResult = null;
 let topMarketSyncPromise = null;
 let topMarketLastSyncAt = 0;
 let topMarketLastSource = "cache";
@@ -6655,6 +6658,74 @@ async function resolveWorldCupFeedMarkets(client, resolutions) {
   return resolvedCount;
 }
 
+async function performWorldCupRetirement() {
+  return withTransaction(async (client) => {
+    const openResult = await client.query(
+      `
+        SELECT m.*, meta.team
+        FROM markets m
+        LEFT JOIN world_cup_market_meta meta ON meta.symbol = m.symbol
+        WHERE m.status = 'open'
+          AND m.symbol LIKE $1
+        ORDER BY m.id ASC
+        FOR UPDATE OF m
+      `,
+      [`${WORLD_CUP_SYMBOL_PREFIX}%`],
+    );
+
+    let resolvedCount = 0;
+    for (const market of openResult.rows) {
+      const team = market.team || normalizeWorldCupTeam(market.question);
+      const winner = normalizeWorldCupTeamKey(team) === normalizeWorldCupTeamKey(WORLD_CUP_WINNER_TEAM)
+        ? "YES"
+        : "NO";
+      const yesClose = winner === "YES" ? 1 : 0;
+
+      await cancelOpenLimitOrdersForMarket(client, market.id, "market_closed");
+      await client.query(
+        `
+          UPDATE markets
+          SET close_price = $2,
+              current_price = $2,
+              yes_price = $2,
+              no_price = $3,
+              status = 'resolved',
+              winner = $4,
+              resolved_at = now()
+          WHERE id = $1
+            AND status = 'open'
+        `,
+        [market.id, yesClose, 1 - yesClose, winner],
+      );
+      await settleOpenMarketPositions(client, market, winner);
+      resolvedCount += 1;
+    }
+
+    return {
+      source: "finished",
+      winning_team: WORLD_CUP_WINNER_TEAM,
+      resolved_count: resolvedCount,
+    };
+  });
+}
+
+export async function finalizeWorldCupMarkets() {
+  if (worldCupRetirementResult) {
+    return worldCupRetirementResult;
+  }
+  if (!worldCupRetirementPromise) {
+    worldCupRetirementPromise = performWorldCupRetirement()
+      .then((result) => {
+        worldCupRetirementResult = result;
+        return result;
+      })
+      .finally(() => {
+        worldCupRetirementPromise = null;
+      });
+  }
+  return worldCupRetirementPromise;
+}
+
 async function performWorldCupSync() {
   const feed = await getWorldCupFeedMarkets();
   const endTime = new Date("2026-07-20T00:00:00Z");
@@ -6769,28 +6840,12 @@ async function performWorldCupSync() {
   return feed.source;
 }
 
-export async function syncWorldCupMarkets({ force = false } = {}) {
-  const now = Date.now();
-  if (!force && worldCupLastSyncAt && now - worldCupLastSyncAt < WORLD_CUP_SYNC_INTERVAL_MS) {
-    return worldCupLastSource;
-  }
-
-  if (!worldCupSyncPromise) {
-    worldCupSyncPromise = performWorldCupSync()
-      .then((source) => {
-        worldCupLastSyncAt = Date.now();
-        worldCupLastSource = source;
-        return source;
-      })
-      .finally(() => {
-        worldCupSyncPromise = null;
-      });
-  }
-
-  return worldCupSyncPromise;
+export async function syncWorldCupMarkets() {
+  const result = await finalizeWorldCupMarkets();
+  return result.source;
 }
 
-export async function getWorldCupMarkets() {
+async function getLegacyWorldCupMarkets() {
   const source = await syncWorldCupMarkets();
   const result = await query(
     `
@@ -6848,6 +6903,14 @@ export async function getWorldCupMarkets() {
       ...row,
       chart: chartBySymbol.get(row.symbol) || [],
     })),
+  };
+}
+
+export async function getWorldCupMarkets() {
+  const result = await finalizeWorldCupMarkets();
+  return {
+    ...result,
+    markets: [],
   };
 }
 

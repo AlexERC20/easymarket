@@ -35,7 +35,7 @@
             <button id="kyivstonerMarketBtn" class="icon-button kyivstoner-action" type="button" aria-label="Рынок Киевстонера">
               <img src="/assets/kyivstoner-mask-logo.jpg" alt="Киевстонер" />
             </button>
-            <button id="worldCupBtn" class="icon-button football-action" type="button" aria-label="Футбольный финал">
+            <button id="sportsMarketsBtn" class="icon-button football-action" type="button" aria-label="Спорт">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="12" cy="12" r="7.5" />
                 <path d="m12 6.8 3.2 2.3-1.2 3.8h-4L8.8 9.1 12 6.8Z" />
@@ -74,17 +74,6 @@
                   <path d="M13.2 17.6v2.1" />
                 </svg>
                 <span>BTC</span>
-              </button>
-              <button id="sportsMarketsBtn" class="top-more-item sports-market-action" type="button" role="menuitem" aria-label="Спортивные рынки">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M8 4.5h8v3.2c0 2.7-1.7 4.8-4 4.8s-4-2.1-4-4.8V4.5Z" />
-                  <path d="M8 6H5.2v1.2c0 2 1.3 3.5 3.2 3.7" />
-                  <path d="M16 6h2.8v1.2c0 2-1.3 3.5-3.2 3.7" />
-                  <path d="M12 12.5V17" />
-                  <path d="M8.5 19.5h7" />
-                  <path d="M9.5 17h5" />
-                </svg>
-                <span>Спорт</span>
               </button>
               <button id="topMarketsBtn" class="top-more-item top-market-action" type="button" role="menuitem" aria-label="Top markets">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -613,17 +602,6 @@
         </div>
       </section>
 
-      <section id="worldCupSheet" class="task-sheet hidden" aria-label="World Cup markets">
-        <div class="task-panel world-cup-panel">
-          <div class="task-head sheet-close-only">
-            <button id="worldCupCloseBtn" class="icon-button" type="button" aria-label="Закрыть World Cup">×</button>
-          </div>
-          <div id="worldCupList" class="world-cup-list">
-            <p class="muted">Загружаю команды...</p>
-          </div>
-        </div>
-      </section>
-
       <section id="topMarketsSheet" class="task-sheet hidden" aria-label="Top markets">
         <div class="task-panel world-cup-panel">
           <div class="task-head sheet-close-only">
@@ -652,7 +630,7 @@
           <div class="bet-sheet-head">
             <span id="betTeamIcon" class="team-flag">🏆</span>
             <div>
-              <p id="betMarketTitle" class="eyebrow">World Cup Winner</p>
+              <p id="betMarketTitle" class="eyebrow">Спортивный рынок</p>
               <h2><span id="betTeamName">Team</span><span id="betSideSeparator"> · </span><span id="betSideName">Yes</span></h2>
             </div>
             <button id="betCloseBtn" class="icon-button" type="button" aria-label="Закрыть ставку">×</button>
@@ -872,6 +850,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260719-02" type="module"></script>
+    <script src="/app.js?v=20260720-01" type="module"></script>
   </body>
 </html>

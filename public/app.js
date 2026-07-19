@@ -9915,56 +9915,6 @@ $("btcMarketsList")?.addEventListener("click", (event) => {
   }
 });
 
-$("worldCupBtn")?.addEventListener("click", () => {
-  triggerHaptic("selection");
-  showButtonPressed($("worldCupBtn"));
-  closeTopMoreMenu();
-  // Шит открывается в момент «гола» — сцена сама дёрнет onReveal; finally —
-  // страховка, если анимация не запустилась или прервалась.
-  let revealed = false;
-  const reveal = () => {
-    if (revealed) {
-      return;
-    }
-    revealed = true;
-    setWorldCupSheetOpen(true);
-    renderWorldCupList();
-  };
-  void playFootballWow({ onReveal: reveal }).finally(reveal);
-  postTaskEvent("visit_football"); // дейлик «Разведка рынков»
-  void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => showToast("Маркеты пока не загрузились."));
-});
-
-$("worldCupCloseBtn")?.addEventListener("click", () => {
-  triggerHaptic("selection");
-  setWorldCupSheetOpen(false);
-});
-
-$("worldCupSheet")?.addEventListener("click", (event) => {
-  if (event.target === $("worldCupSheet")) {
-    setWorldCupSheetOpen(false);
-  }
-});
-
-$("worldCupList")?.addEventListener("click", (event) => {
-  const buyButton = event.target.closest("[data-world-cup-buy]");
-  if (buyButton) {
-    event.preventDefault();
-    event.stopPropagation();
-    const market = state.worldCupMarkets.find((item) => item.id === Number(buyButton.dataset.worldCupBuy));
-    if (market) {
-      requestMarketBuy(market, buyButton.dataset.side || "YES", state.selectedAmount);
-    }
-    return;
-  }
-
-  const openButton = event.target.closest("[data-world-cup-open]");
-  if (openButton) {
-    triggerHaptic("selection");
-    selectWorldCupMarket(openButton.dataset.worldCupOpen);
-  }
-});
-
 $("topMarketsBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   closeTopMoreMenu();
@@ -10007,9 +9957,17 @@ $("topMarketsList")?.addEventListener("click", (event) => {
 
 $("sportsMarketsBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
+  showButtonPressed($("sportsMarketsBtn"));
   closeTopMoreMenu();
-  setSportsMarketsSheetOpen(true);
-  renderSportsMarketsList();
+  let revealed = false;
+  const reveal = () => {
+    if (revealed) return;
+    revealed = true;
+    setSportsMarketsSheetOpen(true);
+    renderSportsMarketsList();
+  };
+  void playFootballWow({ onReveal: reveal }).finally(reveal);
+  postTaskEvent("visit_football");
   void runSingleFlight("sportsMarkets", loadSportsMarkets).catch(() => showToast("Спортивные рынки пока не загрузились."));
 });
 
@@ -10364,17 +10322,14 @@ loadPublicConfig()
           void runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => undefined);
         }, 600);
         window.setTimeout(() => {
-          void runSingleFlight("worldCupMarkets", loadWorldCupMarkets).catch(() => undefined);
+          void runSingleFlight("topMarkets", loadTopMarkets).catch(() => undefined);
         }, 1_200);
         window.setTimeout(() => {
-          void runSingleFlight("topMarkets", loadTopMarkets).catch(() => undefined);
+          void runSingleFlight("sportsMarkets", loadSportsMarkets).catch(() => undefined);
         }, 1_800);
         window.setTimeout(() => {
-          void runSingleFlight("sportsMarkets", loadSportsMarkets).catch(() => undefined);
-        }, 2_400);
-        window.setTimeout(() => {
           void runSingleFlight("specialMarket", loadSpecialMarket).catch(() => undefined);
-        }, 3_000);
+        }, 2_400);
         window.setTimeout(showReferralNudge, 150_000);
       })
       .finally(hideLightningLoader);

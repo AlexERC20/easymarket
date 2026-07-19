@@ -49,13 +49,13 @@ import {
   getUserSnapshot,
   getUsdtLedgerEvents,
   getWorldCupMarkets,
+  finalizeWorldCupMarkets,
   joinClan,
   resetUserMarketStateByUsername,
   resolveExpiredMarkets,
   sellOutcome,
   syncTopMarkets,
   syncSportsMarkets,
-  syncWorldCupMarkets,
   syncFireBalanceByUsername,
   syncFireBalance,
   updateProjectEconomySettings,
@@ -1438,7 +1438,6 @@ async function marketTick() {
   try {
     await resolveExpiredMarkets();
     await ensureActiveMarket();
-    await syncWorldCupMarkets();
     await syncSportsMarkets();
     await syncTopMarkets();
   } catch (error) {
@@ -1537,6 +1536,8 @@ async function startMarketEngine() {
       console.log("[easymarket] startup database rescue finished", rescueSummary);
     }
     await runMigrations();
+    const worldCupResult = await finalizeWorldCupMarkets();
+    console.log("[easymarket] World Cup markets finalized", worldCupResult);
     await ensureActiveMarket();
     await getKyivstonerMarket();
     void clanRewardDistributionTick("startup");
