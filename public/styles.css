@@ -3843,6 +3843,28 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   min-width: 0;
 }
 
+/* Выигранный маркет можно расшарить из истории: строка тапабельна и мягко
+   подсвечена, подсказка «в сторис» — лаймовая. */
+.task-stat-row.task-stat-shareable {
+  cursor: pointer;
+  border-color: rgba(183, 255, 77, 0.22);
+}
+
+.task-stat-row.task-stat-shareable:active {
+  background: rgba(183, 255, 77, 0.07);
+}
+
+.task-stat-numbers .task-stat-share-hint {
+  color: rgba(183, 255, 77, 0.9);
+  font-weight: 850;
+  text-align: right;
+}
+
+/* Шит шэринга должен всплывать ПОВЕРХ шита заданий (у того z-index 34). */
+#shareWinSheet {
+  z-index: 56;
+}
+
 .task-stat-main strong,
 .task-stat-numbers strong {
   font-size: 13px;

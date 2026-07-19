@@ -3253,8 +3253,14 @@ function renderTaskStats() {
       `${stat.positions_count || 0} поз.${limitText}`,
       currency,
     ].filter(Boolean).join(" · ");
+    // Выигранный закрытый маркет можно расшарить из истории: тап по строке
+    // открывает ту же сторис-карточку, что и в момент победы.
+    const shareable = stat.status === "resolved" && pnl > 0 && Number(stat.open_positions_count || 0) === 0;
+    const shareAttrs = shareable
+      ? ` data-share-pnl="${pnl}" data-share-currency="${escapeHtml(currency)}" data-share-ticker="${escapeHtml(getMarketStatTitle(stat))}"`
+      : "";
     return `
-      <div class="task-stat-row pnl-${pnl >= 0 ? "up" : "down"}">
+      <div class="task-stat-row pnl-${pnl >= 0 ? "up" : "down"}${shareable ? " task-stat-shareable" : ""}"${shareAttrs}>
         <div class="task-stat-main">
           <strong>${escapeHtml(getMarketStatTitle(stat))}</strong>
           <small>${escapeHtml(resultText)}</small>
@@ -3262,6 +3268,7 @@ function renderTaskStats() {
         <div class="task-stat-numbers">
           <strong class="${pnl >= 0 ? "profit" : "loss"}">${formatSignedCurrencyAmount(pnl, currency)}</strong>
           <small>ставка ${formatCurrencyAmount(stat.spent || 0, currency)} · выплата ${formatCurrencyAmount(stat.payout || 0, currency)}</small>
+          ${shareable ? '<small class="task-stat-share-hint">в сторис ↗</small>' : ""}
         </div>
       </div>
     `;
@@ -8147,6 +8154,32 @@ $("shareWinSheet")?.addEventListener("click", (event) => {
 
 $("shareToStoryBtn")?.addEventListener("click", () => shareWinToStory());
 $("shareToChatBtn")?.addEventListener("click", () => shareWinToChat());
+
+// Шэр из истории: тап по выигранному маркету в «Моей статистике» собирает
+// ту же карточку победы и открывает шит шэринга поверх статистики.
+$("taskStatsList")?.addEventListener("click", (event) => {
+  const row = event.target.closest?.(".task-stat-shareable");
+  if (!row) {
+    return;
+  }
+  const pnl = Number(row.dataset.sharePnl || 0);
+  if (!(pnl > 0)) {
+    return;
+  }
+  const currency = normalizeCurrency(row.dataset.shareCurrency);
+  triggerHaptic("selection");
+  state.lastWin = {
+    amountLabel: formatSignedCurrencyAmount(pnl, currency),
+    primaryValue: Math.abs(pnl),
+    primaryCurrency: currency,
+    label: formatSignedCurrencyAmount(pnl, currency),
+    ticker: row.dataset.shareTicker || "BTC · 5 мин",
+    side: "",
+    tier: getTierForAmount(pnl, currency),
+    at: Date.now(),
+  };
+  openShareWinSheet();
+});
 $("shareCopyBtn")?.addEventListener("click", () => shareWinCopy());
 $("winOverlay")?.addEventListener("click", () => {
   if (state.lastWin && isShareWinsEnabled()) {
