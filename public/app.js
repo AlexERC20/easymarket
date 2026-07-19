@@ -6007,8 +6007,8 @@ function getStoryMediaUrl() {
     const themeKey = SHARE_THEMES[state.lastWin?.theme] ? state.lastWin.theme : "btc";
     const taglineIndex = Number(state.lastWin?.taglineIndex);
     const taglinePart = Number.isInteger(taglineIndex) ? `&t=${taglineIndex}` : "";
-    // v бампается при смене текстов фраз: URL с immutable-кэшем должен смениться.
-    return `${window.location.origin}/api/share/story?value=${encodeURIComponent(value)}&currency=${encodeURIComponent(currency)}&theme=${themeKey}${taglinePart}&v=2`;
+    // v бампается при смене дизайна/текстов: URL с immutable-кэшем должен смениться.
+    return `${window.location.origin}/api/share/story?value=${encodeURIComponent(value)}&currency=${encodeURIComponent(currency)}&theme=${themeKey}${taglinePart}&v=3`;
   }
   return `${window.location.origin}/share/story-win.png`;
 }
