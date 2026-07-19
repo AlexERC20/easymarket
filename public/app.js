@@ -3114,6 +3114,22 @@ function getMarketStatTitle(stat) {
   return stat?.question || stat?.symbol || `Маркет #${stat?.market_id || ""}`;
 }
 
+function getMarketStatSideLabel(stat, side) {
+  const label = marketSideLabel(stat, side);
+  return isSportsListMarket(stat) ? abbreviateSportsOutcomeLabel(label) : label;
+}
+
+function getMarketStatPositionLabel(stat) {
+  const labels = [];
+  if (stat?.has_yes_position) {
+    labels.push(getMarketStatSideLabel(stat, "YES"));
+  }
+  if (stat?.has_no_position) {
+    labels.push(getMarketStatSideLabel(stat, "NO"));
+  }
+  return labels.join(" + ");
+}
+
 function renderTaskTabs() {
   const isStats = state.taskTab === "stats";
   morphSheetContent("tasksSheet", `tasks:${isStats ? "stats" : "rewards"}`, () => {
@@ -3227,11 +3243,21 @@ function renderTaskStats() {
     const limitText = limitCount > 0
       ? ` · limit ${filledLimitCount ? `${filledLimitCount}/${limitCount}` : limitCount}`
       : "";
+    const positionLabel = getMarketStatPositionLabel(stat);
+    const winnerLabel = stat.status === "resolved" && /^(YES|NO)$/.test(String(stat.winner || ""))
+      ? getMarketStatSideLabel(stat, stat.winner)
+      : "";
+    const resultText = [
+      positionLabel ? `ставка ${positionLabel}` : "",
+      winnerLabel ? `исход ${winnerLabel}` : status,
+      `${stat.positions_count || 0} поз.${limitText}`,
+      currency,
+    ].filter(Boolean).join(" · ");
     return `
       <div class="task-stat-row pnl-${pnl >= 0 ? "up" : "down"}">
         <div class="task-stat-main">
           <strong>${escapeHtml(getMarketStatTitle(stat))}</strong>
-          <small>${escapeHtml(status)} · ${stat.positions_count || 0} поз.${escapeHtml(limitText)} · ${escapeHtml(currency)}</small>
+          <small>${escapeHtml(resultText)}</small>
         </div>
         <div class="task-stat-numbers">
           <strong class="${pnl >= 0 ? "profit" : "loss"}">${formatSignedCurrencyAmount(pnl, currency)}</strong>
