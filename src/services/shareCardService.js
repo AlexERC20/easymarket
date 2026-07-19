@@ -20,6 +20,62 @@ const GRADIENT_STOPS = [
   { at: 1, rgb: [53, 246, 255] },
 ];
 
+// Тематика карточки по типу рынка. Тэглайн выбирает клиент (индекс в query),
+// чтобы превью в приложении и сторис-картинка совпадали дословно.
+export const STORY_THEMES = {
+  btc: {
+    subtitle: "BTC вверх или вниз за 5 минут",
+    taglines: [
+      "Выигрыш есть — можно поесть",
+      "Поймал свечу — забрал профит",
+      "5 минут — и я в плюсе",
+      "Рынок дёрнулся — я успел",
+    ],
+  },
+  football: {
+    subtitle: "Спортивные исходы в EasyMarket",
+    taglines: [
+      "Прогноз — как пас в девятку",
+      "Гол! И баланс подрос",
+      "Поле знает, кто прав",
+      "Читаю игру до свистка",
+    ],
+  },
+  top: {
+    subtitle: "Горячие рынки в EasyMarket",
+    taglines: [
+      "Увидел тренд раньше всех",
+      "Прогноз зашёл по красоте",
+      "Тренд мой — профит мой",
+    ],
+  },
+  kyivstoner: {
+    subtitle: "Специальный рынок в EasyMarket",
+    taglines: [
+      "Сказал — сделал",
+      "Зашло как надо",
+      "Прогноз уровня легенды",
+    ],
+  },
+};
+
+function resolveStoryTheme(themeKey) {
+  return STORY_THEMES[String(themeKey || "").toLowerCase()] || STORY_THEMES.btc;
+}
+
+function pickTagline(theme, taglineIndex, amountLabel) {
+  const idx = Number(taglineIndex);
+  if (Number.isInteger(idx) && idx >= 0 && idx < theme.taglines.length) {
+    return theme.taglines[idx];
+  }
+  // Без индекса — детерминированно от суммы, чтобы кэш оставался стабильным.
+  let hash = 0;
+  for (const ch of normalizeAmount(amountLabel)) {
+    hash = (hash * 31 + ch.charCodeAt(0)) % 997;
+  }
+  return theme.taglines[hash % theme.taglines.length];
+}
+
 function escapeXml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -185,10 +241,13 @@ function buildDust(rand) {
 // собранная из частиц, кометы сборки, вордмарк и выигрыш. Сознательно БЕЗ
 // SVG-фильтров (feGaussianBlur/feDropShadow) — librsvg через sharp рендерит их
 // ненадёжно; всё свечение сделано слоями полупрозрачных градиентных фигур.
-export function buildStoryCardSvg(amountLabel) {
+export function buildStoryCardSvg(amountLabel, themeKey = "btc", taglineIndex = null) {
   const raw = normalizeAmount(amountLabel);
   const amount = escapeXml(raw);
   const amountSize = amountFontSize(raw);
+  const theme = resolveStoryTheme(themeKey);
+  const tagline = escapeXml(pickTagline(theme, taglineIndex, amountLabel));
+  const subtitle = escapeXml(theme.subtitle);
   // Сид зависит от суммы: у одной суммы стабильная картинка, у разных — свой
   // рисунок частиц.
   let seed = 0x9e3779b9;
@@ -273,9 +332,9 @@ export function buildStoryCardSvg(amountLabel) {
     font-size="${amountSize}" fill="#b7ff4d">${amount}</text>
 
   <text x="540" y="1364" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
-    font-size="56" fill="#ffe66d">Выигрыш есть — можно поесть</text>
+    font-size="56" fill="#ffe66d">${tagline}</text>
   <text x="540" y="1448" text-anchor="middle" font-family="DejaVu Sans"
-    font-size="44" fill="#c9d4e5" fill-opacity="0.85">BTC вверх или вниз за 5 минут</text>
+    font-size="44" fill="#c9d4e5" fill-opacity="0.85">${subtitle}</text>
 
   <ellipse cx="540" cy="1624" rx="330" ry="110" fill="url(#glowLime)"/>
   <rect x="280" y="1560" width="520" height="120" rx="60" fill="url(#cta)"/>
@@ -296,13 +355,13 @@ export function buildStoryCardSvg(amountLabel) {
 const storyCardCache = new Map();
 const STORY_CARD_CACHE_MAX = 60;
 
-export async function renderStoryCardJpeg(amountLabel) {
-  const key = normalizeAmount(amountLabel);
+export async function renderStoryCardJpeg(amountLabel, themeKey = "btc", taglineIndex = null) {
+  const key = `${String(themeKey || "btc")}:${taglineIndex ?? "-"}:${normalizeAmount(amountLabel)}`;
   const cached = storyCardCache.get(key);
   if (cached) {
     return cached;
   }
-  const svg = buildStoryCardSvg(amountLabel);
+  const svg = buildStoryCardSvg(amountLabel, themeKey, taglineIndex);
   const buffer = await sharp(Buffer.from(svg)).jpeg({ quality: 88, mozjpeg: true }).toBuffer();
   if (storyCardCache.size >= STORY_CARD_CACHE_MAX) {
     storyCardCache.delete(storyCardCache.keys().next().value);

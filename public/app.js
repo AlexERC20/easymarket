@@ -3257,7 +3257,7 @@ function renderTaskStats() {
     // открывает ту же сторис-карточку, что и в момент победы.
     const shareable = stat.status === "resolved" && pnl > 0 && Number(stat.open_positions_count || 0) === 0;
     const shareAttrs = shareable
-      ? ` data-share-pnl="${pnl}" data-share-currency="${escapeHtml(currency)}" data-share-ticker="${escapeHtml(getMarketStatTitle(stat))}"`
+      ? ` data-share-pnl="${pnl}" data-share-currency="${escapeHtml(currency)}" data-share-ticker="${escapeHtml(getMarketStatTitle(stat))}" data-share-theme="${getShareThemeKey(stat.symbol)}"`
       : "";
     return `
       <div class="task-stat-row pnl-${pnl >= 0 ? "up" : "down"}${shareable ? " task-stat-shareable" : ""}"${shareAttrs}>
@@ -3746,6 +3746,7 @@ function handleSettlements(positions) {
         ticker: primaryPosition ? getPositionMarketLabel(primaryPosition, primaryMarket) : "BTC · 5 мин",
         side: primaryPosition?.side || "",
         tier: winTier,
+        theme: getShareThemeKey(primaryMarket?.symbol),
         at: Date.now(),
       };
       showToast(`Есть выигрыш: ${label}`);
@@ -5926,10 +5927,73 @@ function getShareWinUrl() {
     : buildTelegramMiniAppLaunchUrl("easymarket");
 }
 
+// Тематика шэир-карточки по типу рынка. Пулы тэглайнов ДОЛЖНЫ совпадать с
+// STORY_THEMES в shareCardService.js: клиент выбирает индекс и передаёт его
+// серверу, чтобы превью и сторис-картинка говорили одну и ту же фразу.
+const SHARE_THEMES = {
+  btc: {
+    eyebrow: "Ставка сыграла",
+    line: "на BTC за 5 минут",
+    taglines: [
+      "Выигрыш есть — можно поесть",
+      "Поймал свечу — забрал профит",
+      "5 минут — и я в плюсе",
+      "Рынок дёрнулся — я успел",
+    ],
+  },
+  football: {
+    eyebrow: "Матч сыгран",
+    line: "на футболе",
+    taglines: [
+      "Прогноз — как пас в девятку",
+      "Гол! И баланс подрос",
+      "Поле знает, кто прав",
+      "Читаю игру до свистка",
+    ],
+  },
+  top: {
+    eyebrow: "Прогноз зашёл",
+    line: "на горячем рынке",
+    taglines: [
+      "Увидел тренд раньше всех",
+      "Прогноз зашёл по красоте",
+      "Тренд мой — профит мой",
+    ],
+  },
+  kyivstoner: {
+    eyebrow: "Спешл зашёл",
+    line: "на рынке Киевстонера",
+    taglines: [
+      "Сказал — сделал",
+      "Зашло как надо",
+      "Прогноз уровня легенды",
+    ],
+  },
+};
+
+function getShareThemeKey(symbol) {
+  const s = String(symbol || "");
+  if (s.startsWith("WCUP:")) return "football";
+  if (s.startsWith("TOP:")) return "top";
+  if (s.startsWith("SPECIAL:")) return "kyivstoner";
+  return "btc";
+}
+
+function getShareTheme() {
+  return SHARE_THEMES[state.lastWin?.theme] || SHARE_THEMES.btc;
+}
+
+function getShareTagline() {
+  const theme = getShareTheme();
+  const idx = Number(state.lastWin?.taglineIndex);
+  return theme.taglines[Number.isInteger(idx) ? Math.min(Math.max(idx, 0), theme.taglines.length - 1) : 0];
+}
+
 function getShareWinText() {
   const amount = state.lastWin?.amountLabel || state.lastWin?.label || "";
-  const head = amount ? `${amount} на BTC за 5 минут. ` : "";
-  return `Выигрыш есть — можно поесть. ${head}Играй и ты в EasyMarket →`;
+  const theme = getShareTheme();
+  const head = amount ? `${amount} ${theme.line}. ` : "";
+  return `${head}${getShareTagline()}. Играй и ты в EasyMarket →`;
 }
 
 function getStoryMediaUrl() {
@@ -5938,8 +6002,12 @@ function getStoryMediaUrl() {
   if (value > 0) {
     // ONLY digits/dot/letters — URL-safe even if Telegram re-encodes the media URL.
     // Never pass free-form text (Cyrillic ticker/username) here: it would double-
-    // encode into raw %-codes on the card. All other text is baked server-side.
-    return `${window.location.origin}/api/share/story?value=${encodeURIComponent(value)}&currency=${encodeURIComponent(currency)}`;
+    // encode into raw %-codes on the card. All other text is baked server-side;
+    // theme и t — латинский слаг и цифра, они выбирают тексты на сервере.
+    const themeKey = SHARE_THEMES[state.lastWin?.theme] ? state.lastWin.theme : "btc";
+    const taglineIndex = Number(state.lastWin?.taglineIndex);
+    const taglinePart = Number.isInteger(taglineIndex) ? `&t=${taglineIndex}` : "";
+    return `${window.location.origin}/api/share/story?value=${encodeURIComponent(value)}&currency=${encodeURIComponent(currency)}&theme=${themeKey}${taglinePart}`;
   }
   return `${window.location.origin}/share/story-win.png`;
 }
@@ -6014,10 +6082,22 @@ function openShareWinSheet() {
   if (!win || !sheet) {
     return;
   }
+  // Тэглайн выбираем один раз на открытие: превью, текст шэра и серверная
+  // сторис-картинка говорят одну и ту же тематическую фразу.
+  const themePool = getShareTheme().taglines;
+  if (!Number.isInteger(Number(win.taglineIndex))) {
+    win.taglineIndex = Math.floor(Math.random() * themePool.length);
+  }
   // Прогреваем серверный рендер сторис-карточки заранее: пока юзер смотрит
   // шит, картинка рендерится и оседает в серверном кэше — тап "В сторис"
   // получает её мгновенно, а не ждёт генерацию.
   fetch(getStoryMediaUrl()).catch(() => undefined);
+  if ($("shareCardEyebrow")) {
+    $("shareCardEyebrow").textContent = getShareTheme().eyebrow;
+  }
+  if ($("shareCardTagline")) {
+    $("shareCardTagline").textContent = getShareTagline();
+  }
   const bolt = $("shareCardBolt");
   if (bolt && bolt.dataset.particled !== "1") {
     bolt.dataset.particled = "1";
@@ -8176,6 +8256,7 @@ $("taskStatsList")?.addEventListener("click", (event) => {
     ticker: row.dataset.shareTicker || "BTC · 5 мин",
     side: "",
     tier: getTierForAmount(pnl, currency),
+    theme: row.dataset.shareTheme || "btc",
     at: Date.now(),
   };
   openShareWinSheet();

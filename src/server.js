@@ -724,7 +724,8 @@ app.get("/api/share/story", async (req, res) => {
   try {
     const label = formatStoryAmount(req.query.value, req.query.currency)
       || String(req.query.amount || "");
-    const jpeg = await renderStoryCardJpeg(label);
+    // theme/t — только латинский слаг и цифра, свободный текст не принимаем.
+    const jpeg = await renderStoryCardJpeg(label, req.query.theme, req.query.t);
     res.setHeader("Content-Type", "image/jpeg");
     // Картинка детерминирована суммой в query — можно кэшировать надолго.
     res.setHeader("Cache-Control", "public, max-age=86400, immutable");
