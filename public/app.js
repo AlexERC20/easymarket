@@ -5936,28 +5936,28 @@ const SHARE_THEMES = {
     line: "на BTC за 5 минут",
     taglines: [
       "Выигрыш есть — можно поесть",
-      "Поймал свечу — забрал профит",
-      "5 минут — и я в плюсе",
-      "Рынок дёрнулся — я успел",
+      "Это не лудка — это аналитика",
+      "Пока ты думал, я забрал",
+      "Минус? Не, не слышал",
     ],
   },
   football: {
     eyebrow: "Матч сыгран",
     line: "на футболе",
     taglines: [
-      "Прогноз — как пас в девятку",
-      "Гол! И баланс подрос",
-      "Поле знает, кто прав",
-      "Читаю игру до свистка",
+      "Счёт на табло",
+      "Я знал ещё до свистка",
+      "Даже VAR не поспорит",
+      "Положил прогноз в девятку",
     ],
   },
   top: {
     eyebrow: "Прогноз зашёл",
     line: "на горячем рынке",
     taglines: [
-      "Увидел тренд раньше всех",
-      "Прогноз зашёл по красоте",
-      "Тренд мой — профит мой",
+      "Увидел раньше, чем стало модно",
+      "Инсайдов нет — есть чуйка",
+      "Тренд отработал как надо",
     ],
   },
   kyivstoner: {
@@ -5965,8 +5965,8 @@ const SHARE_THEMES = {
     line: "на рынке Киевстонера",
     taglines: [
       "Сказал — сделал",
-      "Зашло как надо",
-      "Прогноз уровня легенды",
+      "Чуйка не подвела",
+      "Зашло? Ещё как зашло",
     ],
   },
 };
@@ -6007,7 +6007,8 @@ function getStoryMediaUrl() {
     const themeKey = SHARE_THEMES[state.lastWin?.theme] ? state.lastWin.theme : "btc";
     const taglineIndex = Number(state.lastWin?.taglineIndex);
     const taglinePart = Number.isInteger(taglineIndex) ? `&t=${taglineIndex}` : "";
-    return `${window.location.origin}/api/share/story?value=${encodeURIComponent(value)}&currency=${encodeURIComponent(currency)}&theme=${themeKey}${taglinePart}`;
+    // v бампается при смене текстов фраз: URL с immutable-кэшем должен смениться.
+    return `${window.location.origin}/api/share/story?value=${encodeURIComponent(value)}&currency=${encodeURIComponent(currency)}&theme=${themeKey}${taglinePart}&v=2`;
   }
   return `${window.location.origin}/share/story-win.png`;
 }
