@@ -1651,10 +1651,6 @@ function localizeSportsTitle(value, { regulationOnly = false } = {}) {
 }
 
 function hasRegulationOnlySportsRules(event, market) {
-  if (getSportsTag(event) !== "soccer") {
-    return false;
-  }
-
   const rules = `${market?.description || ""}\n${event?.description || ""}`;
   return /\b(?:first\s+)?90\s+minutes?\b|\bregular(?:\s+play|\s+time)\s+plus\s+(?:injury|stoppage)\s+time\b/i.test(rules);
 }
@@ -1678,7 +1674,7 @@ function getSportsMarketPriority(market) {
   return 1;
 }
 
-function getSportsTag(event) {
+function getSportsTag(event, market = null) {
   const tags = getPolymarketTagSlugs(event);
   const priority = [
     "soccer",
@@ -1695,7 +1691,14 @@ function getSportsTag(event) {
   ];
   const tagged = priority.find((tag) => tags.includes(tag));
   if (tagged) return tagged;
-  const hint = `${event?.slug || ""} ${event?.title || ""}`.toLowerCase();
+  if (hasRegulationOnlySportsRules(event, market)) return "soccer";
+  const hint = [
+    event?.slug,
+    event?.title,
+    market?.slug,
+    market?.question,
+    market?.description,
+  ].filter(Boolean).join(" ").toLowerCase();
   if (/\b(atp|wta|tennis|wimbledon)\b/.test(hint)) return "tennis";
   if (/\b(mlb|baseball)\b/.test(hint)) return "baseball";
   if (/\b(nba|wnba|basketball)\b/.test(hint)) return "basketball";
@@ -1761,6 +1764,7 @@ function normalizeSportsFeedEvent(event) {
 
   const market = selected.raw;
   const labelsAreYesNo = selected.outcomes[0].toLowerCase() === "yes" && selected.outcomes[1].toLowerCase() === "no";
+  const sport = getSportsTag(event, market);
   const regulationOnly = labelsAreYesNo && hasRegulationOnlySportsRules(event, market);
   const startsAt = new Date(market.gameStartTime || event.gameStartTime || event.startDate || event.startDateIso || Date.now());
   const effectiveEndTime = new Date(selected.endTime);
@@ -1809,7 +1813,7 @@ function normalizeSportsFeedEvent(event) {
     live,
     score: String(event.score || ""),
     period: String(event.period || event.elapsed || ""),
-    sport: getSportsTag(event),
+    sport,
     timingRank,
     activityScore: timingRank * 1_000_000_000_000 + eventVolume24h * 1_000 + selected.liquidity,
     eventKey: getSportsEventKey(event),
@@ -1918,7 +1922,24 @@ function getResolvedPolymarketWinner(market) {
   if (prices.length !== 2 || !prices.every(Number.isFinite)) return null;
   if (prices[0] >= MAX_PRICE && prices[1] <= MIN_PRICE) return "YES";
   if (prices[1] >= MAX_PRICE && prices[0] <= MIN_PRICE) return "NO";
-  return prices.every((price) => price >= 0 && price <= 1) ? "REFUND" : null;
+
+  const resolutionStatus = String(
+    market.umaResolutionStatus
+      || market.resolutionStatus
+      || market.resolution_status
+      || "",
+  ).trim().toLowerCase();
+  const finalized = market.automaticallyResolved === true
+    || market.resolved === true
+    || resolutionStatus === "resolved"
+    || resolutionStatus === "finalized";
+  const splitResolution = Math.abs(prices[0] - 0.5) <= MIN_PRICE
+    && Math.abs(prices[1] - 0.5) <= MIN_PRICE;
+
+  // Closed markets can remain pending while their final outcome is disputed.
+  // Refund only an explicit finalized 50/50 resolution, never an arbitrary
+  // intermediate pair such as 0.6/0.4.
+  return finalized && splitResolution ? "REFUND" : null;
 }
 
 async function getSportsFeedMarkets() {

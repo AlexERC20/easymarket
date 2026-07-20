@@ -771,6 +771,54 @@ export async function runMigrations() {
       END IF;
     END
     $clarify_spain_argentina_regulation$;
+
+    -- The Spain YES sports contract was presented without its regulation-time
+    -- condition. Return only the two affected $5 stakes to bonus USDT while
+    -- preserving the official result and historical PnL.
+    DO $refund_spain_regulation_label$
+    DECLARE
+      refund_row RECORD;
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM app_migrations
+        WHERE key = 'refund_spain_regulation_label_v1'
+      ) THEN
+        FOR refund_row IN
+          SELECT
+            p.user_id,
+            SUM(p.spent) AS amount
+          FROM positions AS p
+          JOIN markets AS m ON m.id = p.market_id
+          JOIN users AS u ON u.id = p.user_id
+          WHERE m.symbol = 'SPORT:2941974'
+            AND u.telegram_id IN ('7388665721', '411913273')
+            AND p.side = 'YES'
+            AND p.currency = 'USDT'
+            AND p.status = 'resolved'
+            AND p.payout = 0
+          GROUP BY p.user_id
+        LOOP
+          INSERT INTO usdt_bonus_balances (user_id, balance, updated_at)
+          VALUES (refund_row.user_id, refund_row.amount, now())
+          ON CONFLICT (user_id) DO UPDATE SET
+            balance = usdt_bonus_balances.balance + EXCLUDED.balance,
+            updated_at = now();
+
+          INSERT INTO usdt_bonus_ledger (user_id, amount, reason, source)
+          VALUES (
+            refund_row.user_id,
+            refund_row.amount,
+            'market_rule_clarification_refund',
+            'market:SPORT:2941974:regulation_label'
+          );
+        END LOOP;
+
+        INSERT INTO app_migrations (key)
+        VALUES ('refund_spain_regulation_label_v1');
+      END IF;
+    END
+    $refund_spain_regulation_label$;
   `);
 }
 
