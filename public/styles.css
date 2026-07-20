@@ -162,7 +162,7 @@ body.telegram-desktop-shell {
   display: block;
   margin: -13px 0 8px;
   min-height: 74px;
-  padding-top: clamp(29px, calc(6.8vw + 5px), 37px);
+  padding-top: clamp(25px, calc(6.8vw + 1px), 33px);
   overflow-anchor: none;
 }
 
