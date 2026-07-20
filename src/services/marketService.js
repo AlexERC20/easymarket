@@ -1614,9 +1614,9 @@ function sportsMarketSymbol(input) {
   return `${SPORTS_MARKET_SYMBOL_PREFIX}${normalizeTopMarketSlug(input.polymarketId || input.slug || input.title)}`;
 }
 
-function localizeSportsTitle(value) {
+function localizeSportsTitle(value, { regulationOnly = false } = {}) {
   const localized = localizeTopMarketTitle(value);
-  const input = String(localized || "")
+  let input = String(localized || "")
     .replace(/^World Cup:\s*Golden Ball Winner$/i, "Чемпионат мира: обладатель Золотого мяча")
     .replace(/^World Cup:\s*Golden Boot Winner$/i, "Чемпионат мира: лучший бомбардир")
     .replace(/^World Cup:\s*Nation to Reach Final$/i, "Чемпионат мира: сборная выйдет в финал")
@@ -1632,7 +1632,31 @@ function localizeSportsTitle(value) {
   match = input.match(/^Will\s+(.+?)\s+win the Golden Ball at the 2026 FIFA World Cup\?$/i);
   if (match) return `${localizeTopMarketName(match[1])} получит Золотой мяч ЧМ-2026?`;
   if (/^World Cup:\s*Unbeaten Champion\?$/i.test(input)) return "Чемпион мира пройдет турнир без поражений?";
+
+  if (regulationOnly) {
+    match = input.match(/^(.+?)\s+победит\s+(\d{2}\.\d{2}\.\d{4})\?$/i);
+    if (match) {
+      return `${match[1]} победит в основное время ${match[2]}?`;
+    }
+
+    match = input.match(/^Матч\s+(.+?)\s+закончится вничью\?$/i);
+    if (match) {
+      return `Ничья в основное время: ${match[1]}?`;
+    }
+
+    input = `${input.replace(/\?$/, "")} · основное время${input.endsWith("?") ? "?" : ""}`;
+  }
+
   return input;
+}
+
+function hasRegulationOnlySportsRules(event, market) {
+  if (getSportsTag(event) !== "soccer") {
+    return false;
+  }
+
+  const rules = `${market?.description || ""}\n${event?.description || ""}`;
+  return /\b(?:first\s+)?90\s+minutes?\b|\bregular(?:\s+play|\s+time)\s+plus\s+(?:injury|stoppage)\s+time\b/i.test(rules);
 }
 
 function getSportsEventKey(event) {
@@ -1737,6 +1761,7 @@ function normalizeSportsFeedEvent(event) {
 
   const market = selected.raw;
   const labelsAreYesNo = selected.outcomes[0].toLowerCase() === "yes" && selected.outcomes[1].toLowerCase() === "no";
+  const regulationOnly = labelsAreYesNo && hasRegulationOnlySportsRules(event, market);
   const startsAt = new Date(market.gameStartTime || event.gameStartTime || event.startDate || event.startDateIso || Date.now());
   const effectiveEndTime = new Date(selected.endTime);
   if (
@@ -1763,7 +1788,7 @@ function normalizeSportsFeedEvent(event) {
     : Number.POSITIVE_INFINITY;
   const timingRank = live ? 3 : (hoursUntilStart >= -2 && hoursUntilStart <= 24 * 7 ? 2 : 1);
   const displayTitle = labelsAreYesNo
-    ? localizeSportsTitle(market.question || eventTitle)
+    ? localizeSportsTitle(market.question || eventTitle, { regulationOnly })
     : localizeSportsTitle(eventTitle);
 
   return {

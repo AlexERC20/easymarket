@@ -712,6 +712,65 @@ export async function runMigrations() {
         updated_at = now()
     FROM reciprocal_referrals
     WHERE users.id = reciprocal_referrals.id;
+
+    -- Polymarket football moneyline contracts settle after regulation time only.
+    -- Earlier localized titles dropped that condition, so clarify the affected
+    -- Spain - Argentina contracts in every history/statistics data source.
+    DO $clarify_spain_argentina_regulation$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM app_migrations
+        WHERE key = 'clarify_spain_argentina_regulation_v1'
+      ) THEN
+        UPDATE top_market_meta
+        SET title = CASE polymarket_id
+              WHEN '2941974' THEN 'Испания победит в основное время 19.07.2026?'
+              WHEN '2941975' THEN 'Ничья в основное время: Испания - Аргентина?'
+              WHEN '2941976' THEN 'Аргентина победит в основное время 19.07.2026?'
+              ELSE title
+            END,
+            updated_at = now()
+        WHERE feed_group = 'SPORT'
+          AND polymarket_id IN ('2941974', '2941975', '2941976');
+
+        UPDATE markets AS market
+        SET question = CASE meta.polymarket_id
+              WHEN '2941974' THEN 'Испания победит в основное время 19.07.2026?'
+              WHEN '2941975' THEN 'Ничья в основное время: Испания - Аргентина?'
+              WHEN '2941976' THEN 'Аргентина победит в основное время 19.07.2026?'
+              ELSE market.question
+            END
+        FROM top_market_meta AS meta
+        WHERE meta.symbol = market.symbol
+          AND meta.feed_group = 'SPORT'
+          AND meta.polymarket_id IN ('2941974', '2941975', '2941976');
+
+        UPDATE markets
+        SET question = CASE question
+              WHEN 'Испания победит 19.07.2026?' THEN 'Испания победит в основное время 19.07.2026?'
+              WHEN 'Will Spain win on 2026-07-19?' THEN 'Испания победит в основное время 19.07.2026?'
+              WHEN 'Матч Испания - Аргентина закончится вничью?' THEN 'Ничья в основное время: Испания - Аргентина?'
+              WHEN 'Will Spain vs. Argentina end in a draw?' THEN 'Ничья в основное время: Испания - Аргентина?'
+              WHEN 'Аргентина победит 19.07.2026?' THEN 'Аргентина победит в основное время 19.07.2026?'
+              WHEN 'Will Argentina win on 2026-07-19?' THEN 'Аргентина победит в основное время 19.07.2026?'
+              ELSE question
+            END
+        WHERE symbol LIKE 'SPORT:%'
+          AND question IN (
+            'Испания победит 19.07.2026?',
+            'Will Spain win on 2026-07-19?',
+            'Матч Испания - Аргентина закончится вничью?',
+            'Will Spain vs. Argentina end in a draw?',
+            'Аргентина победит 19.07.2026?',
+            'Will Argentina win on 2026-07-19?'
+          );
+
+        INSERT INTO app_migrations (key)
+        VALUES ('clarify_spain_argentina_regulation_v1');
+      END IF;
+    END
+    $clarify_spain_argentina_regulation$;
   `);
 }
 
