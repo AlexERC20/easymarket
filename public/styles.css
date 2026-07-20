@@ -1150,6 +1150,26 @@ h2 {
   border-radius: 0;
   background: var(--bg);
   isolation: isolate;
+  /* Канва рисует сплошную заливку --bg на весь свой прямоугольник, а карточка
+     вокруг — свой градиент (светлее у краёв). На стыке это давало резкую
+     полосу. Растворяем верх/низ рамки в альфу — сквозь них проступает
+     собственный фон .market-card, шва не видно ни при каком градиенте.
+     Высота фейда (~12%/18% канвы) укладывается в уже пустые поля графика
+     (chart top=12%, bottom=18% в отрисовке), так что сами свечи не задеты. */
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 22px,
+    #000 calc(100% - 30px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 22px,
+    #000 calc(100% - 30px),
+    transparent 100%
+  );
 }
 
 .market-chart {
