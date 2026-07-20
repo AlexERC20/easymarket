@@ -160,8 +160,9 @@ body.telegram-desktop-shell {
 
 .topbar {
   display: block;
-  margin: -6px 0 8px;
-  min-height: 39px;
+  margin: -13px 0 8px;
+  min-height: 74px;
+  padding-top: clamp(29px, calc(6.8vw + 5px), 37px);
   overflow-anchor: none;
 }
 
