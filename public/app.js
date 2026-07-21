@@ -230,6 +230,7 @@ const state = {
   buyQueue: [],
   inFlight: new Set(),
   refreshTimer: null,
+  promoClaimTimer: null,
   lastCommentsLoadAt: 0,
   expiryRefreshMarketId: null,
   lastRoundTransitionMarketId: null,
@@ -3579,11 +3580,22 @@ async function upsertMe() {
   $("authCard").classList.add("hidden");
   setConnection("LIVE", "online");
   renderTaskButtonStates();
+  if (state.promoClaimTimer) {
+    window.clearTimeout(state.promoClaimTimer);
+    state.promoClaimTimer = null;
+  }
   if (data.promo_reward?.claimed) {
     window.setTimeout(() => {
       showToast(`+${formatCurrencyAmount(data.promo_reward.amount || 5, "USDT")}`);
       showTopupSuccessAnimation("+$5");
     }, 180);
+  } else if (data.promo_reward?.status === "scheduled" && data.promo_reward?.starts_at) {
+    const claimAt = new Date(data.promo_reward.starts_at).getTime() + 250;
+    const delay = Math.max(500, claimAt - Date.now());
+    state.promoClaimTimer = window.setTimeout(() => {
+      state.promoClaimTimer = null;
+      void upsertMe().catch(() => undefined);
+    }, delay);
   }
   return true;
 }
