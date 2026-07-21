@@ -1220,7 +1220,9 @@ app.post("/api/bridge/promo-campaigns", requireBridgeSecret, async (req, res) =>
       campaign,
     });
   } catch (error) {
-    sendApiError(res, error);
+    const message = error instanceof Error ? error.message : "promo_campaign_create_failed";
+    console.warn(`[easymarket] promo campaign create failed: ${message}`);
+    res.status(400).json({ ok: false, message });
   }
 });
 
