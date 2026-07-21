@@ -1,4 +1,5 @@
 import express from "express";
+import compression from "compression";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,20 +85,22 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "..", "public");
-const threeBuildDir = path.join(__dirname, "..", "node_modules", "three", "build");
 
 const app = express();
 
 app.disable("x-powered-by");
+app.use(compression());
 app.use(express.json({ limit: "128kb" }));
-app.use("/vendor/three", express.static(threeBuildDir, {
-  immutable: true,
-  maxAge: "30d",
-}));
 app.use(express.static(publicDir, {
   setHeaders(res, filePath) {
-    if (/\.(html|js|css)$/i.test(filePath)) {
+    // index.html указывает актуальные версии через ?v=, поэтому сам он должен
+    // всегда перепроверяться. Версионированные js/css, наоборот, безопасно
+    // кешировать надолго: при любом изменении файла ?v= в index.html/app.js
+    // бампается, и браузер запросит уже новый URL.
+    if (/\.html$/i.test(filePath)) {
       res.setHeader("Cache-Control", "no-store, max-age=0");
+    } else if (/\.(js|css)$/i.test(filePath)) {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     }
   },
 }));
@@ -185,6 +188,41 @@ function sendApiError(res, error, fallbackStatus = 500) {
     ok: false,
     message: publicErrors.has(message) ? message : "Request failed.",
   });
+}
+
+// Кэш для GET-эндпоинтов, у которых ответ одинаков для всех пользователей
+// (глобальные списки маркетов). Клиенты опрашивают их независимо друг от
+// друга каждые 1.5-10с, и при N одновременных пользователей это N одинаковых
+// запросов в БД в один и тот же момент. TTL держим короче или вровень с
+// кадансом обновления цены на сервере (pricePollMs), поэтому свежесть данных
+// не страдает — они и так не могут обновиться быстрее. Плюс single-flight:
+// пока идёт загрузка на "промах", параллельные запросы ждут тот же промис,
+// а не плодят повторные запросы к БД.
+const readThroughCache = new Map();
+function cachedJsonRoute(cacheKey, ttlMs, loader) {
+  return async (_req, res) => {
+    try {
+      const now = Date.now();
+      const entry = readThroughCache.get(cacheKey);
+      if (entry && entry.expiresAt > now) {
+        res.status(200).json(entry.payload);
+        return;
+      }
+      if (entry && entry.pending) {
+        res.status(200).json(await entry.pending);
+        return;
+      }
+      const pending = loader();
+      readThroughCache.set(cacheKey, { expiresAt: entry?.expiresAt ?? 0, payload: entry?.payload, pending });
+      const payload = await pending;
+      readThroughCache.set(cacheKey, { expiresAt: Date.now() + ttlMs, payload, pending: null });
+      res.status(200).json(payload);
+    } catch (error) {
+      const entry = readThroughCache.get(cacheKey);
+      if (entry) entry.pending = null;
+      sendApiError(res, error);
+    }
+  };
 }
 
 function getSafePublicErrorDetail(message) {
@@ -597,31 +635,22 @@ app.get("/api/me", async (req, res) => {
   }
 });
 
-app.get("/api/market/active", async (_req, res) => {
-  try {
-    const market = await getActiveMarket();
-    let activity = [];
-    let chart = [];
-    if (market) {
-      try {
-        [activity, chart] = await Promise.all([
-          getMarketActivity(market.id, 24),
-          getMarketChart(market, 260),
-        ]);
-      } catch (error) {
-        console.warn("[easymarket] active market extras failed:", error instanceof Error ? error.message : "unknown error");
-      }
+app.get("/api/market/active", cachedJsonRoute("market/active", config.pricePollMs, async () => {
+  const market = await getActiveMarket();
+  let activity = [];
+  let chart = [];
+  if (market) {
+    try {
+      [activity, chart] = await Promise.all([
+        getMarketActivity(market.id, 24),
+        getMarketChart(market, 260),
+      ]);
+    } catch (error) {
+      console.warn("[easymarket] active market extras failed:", error instanceof Error ? error.message : "unknown error");
     }
-    res.status(200).json({
-      ok: true,
-      market,
-      activity,
-      chart,
-    });
-  } catch (error) {
-    sendApiError(res, error);
   }
-});
+  return { ok: true, market, activity, chart };
+}));
 
 app.get("/api/market/:marketId/activity", async (req, res) => {
   try {
@@ -647,65 +676,30 @@ app.get("/api/activity/recent", async (req, res) => {
   }
 });
 
-app.get("/api/world-cup/markets", async (_req, res) => {
-  try {
-    const result = await getWorldCupMarkets();
-    res.status(200).json({
-      ok: true,
-      ...result,
-    });
-  } catch (error) {
-    sendApiError(res, error);
-  }
-});
+app.get("/api/world-cup/markets", cachedJsonRoute("world-cup/markets", 3_000, async () => {
+  const result = await getWorldCupMarkets();
+  return { ok: true, ...result };
+}));
 
-app.get("/api/top/markets", async (_req, res) => {
-  try {
-    const result = await getTopMarkets();
-    res.status(200).json({
-      ok: true,
-      ...result,
-    });
-  } catch (error) {
-    sendApiError(res, error);
-  }
-});
+app.get("/api/top/markets", cachedJsonRoute("top/markets", 3_000, async () => {
+  const result = await getTopMarkets();
+  return { ok: true, ...result };
+}));
 
-app.get("/api/sports/markets", async (_req, res) => {
-  try {
-    const result = await getSportsMarkets();
-    res.status(200).json({
-      ok: true,
-      ...result,
-    });
-  } catch (error) {
-    sendApiError(res, error);
-  }
-});
+app.get("/api/sports/markets", cachedJsonRoute("sports/markets", 3_000, async () => {
+  const result = await getSportsMarkets();
+  return { ok: true, ...result };
+}));
 
-app.get("/api/special/kyivstoner", async (_req, res) => {
-  try {
-    const result = await getKyivstonerMarket();
-    res.status(200).json({
-      ok: true,
-      ...result,
-    });
-  } catch (error) {
-    sendApiError(res, error);
-  }
-});
+app.get("/api/special/kyivstoner", cachedJsonRoute("special/kyivstoner", 2_000, async () => {
+  const result = await getKyivstonerMarket();
+  return { ok: true, ...result };
+}));
 
-app.get("/api/btc/markets", async (_req, res) => {
-  try {
-    const markets = await getBtcMarkets();
-    res.status(200).json({
-      ok: true,
-      markets,
-    });
-  } catch (error) {
-    sendApiError(res, error);
-  }
-});
+app.get("/api/btc/markets", cachedJsonRoute("btc/markets", 2_000, async () => {
+  const markets = await getBtcMarkets();
+  return { ok: true, markets };
+}));
 
 app.get("/api/clans", async (req, res) => {
   try {
