@@ -3790,6 +3790,42 @@ function handleSettlements(positions) {
   state.settlementsLoaded = true;
 }
 
+// Полоска истории последних раундов над кнопками Up/Down — только для BTC 5m,
+// у остальных типов маркетов раунды разовые и история не несёт смысла.
+// Перерисовываем DOM только когда список реально поменялся (новый раунд
+// закрылся), а не на каждый тик поллинга активного маркета.
+let roundHistoryStripSignature = null;
+function renderRoundHistoryStrip(market, recentOutcomes) {
+  const el = $("roundHistoryStrip");
+  if (!el) {
+    return;
+  }
+  if (!isBtcFiveMinuteMarket(market)) {
+    if (roundHistoryStripSignature !== null) {
+      roundHistoryStripSignature = null;
+      el.classList.add("hidden");
+      el.replaceChildren();
+    }
+    return;
+  }
+  const signature = recentOutcomes.join(",");
+  if (signature === roundHistoryStripSignature) {
+    return;
+  }
+  roundHistoryStripSignature = signature;
+  const fragment = document.createDocumentFragment();
+  for (const outcome of recentOutcomes) {
+    const chip = document.createElement("span");
+    chip.className = `round-history-chip ${outcome === "YES" ? "up" : "down"}`;
+    fragment.appendChild(chip);
+  }
+  const live = document.createElement("span");
+  live.className = "round-history-chip live";
+  fragment.appendChild(live);
+  el.replaceChildren(fragment);
+  el.classList.remove("hidden");
+}
+
 async function loadMarket() {
   const data = await api("/api/market/active");
   const previousMarketId = state.market?.id || null;
@@ -3801,6 +3837,7 @@ async function loadMarket() {
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
+  renderRoundHistoryStrip(data.market, data.recentOutcomes || []);
   if (activeMarketChanged || pruned.changed) {
     const listLoader = isWorldCupMarket(data.market) ? loadWorldCupMarkets : loadBtcMarkets;
     void runSingleFlight(isWorldCupMarket(data.market) ? "worldCupMarkets" : "btcMarkets", listLoader)

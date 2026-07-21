@@ -1893,6 +1893,50 @@ h2 {
   }
 }
 
+.round-history-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  height: 14px;
+}
+
+.round-history-strip.hidden {
+  display: none;
+}
+
+.round-history-chip {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  flex: 0 0 auto;
+  opacity: 0.9;
+}
+
+.round-history-chip.up {
+  border-bottom: 8px solid #19c37d;
+}
+
+.round-history-chip.down {
+  border-top: 8px solid #ef466f;
+}
+
+.round-history-chip.live {
+  width: 7px;
+  height: 7px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(141, 152, 170, 0.55);
+  animation: roundHistoryLivePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes roundHistoryLivePulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
 .outcome-grid {
   align-items: stretch;
   gap: 10px;

@@ -6174,6 +6174,26 @@ export async function getActiveMarket() {
   return market;
 }
 
+// Полоска истории раундов над кнопками Up/Down на BTC 5m: последние N
+// закрытых раундов этого символа, от старых к новым (свежий — последним,
+// ближе к кнопкам). Только для быстрых повторяющихся раундов — у топ/спорт/
+// world-cup маркетов история одноразовая и смысла не несёт.
+export async function getRecentMarketOutcomes(symbol, limit = 12) {
+  const result = await query(
+    `
+      SELECT winner
+      FROM markets
+      WHERE symbol = $1
+        AND status = 'resolved'
+        AND winner IS NOT NULL
+      ORDER BY end_time DESC
+      LIMIT $2
+    `,
+    [symbol, limit],
+  );
+  return result.rows.map((row) => row.winner).reverse();
+}
+
 export async function getBtcMarkets() {
   await ensureActiveBtcMarkets();
   const result = await query(

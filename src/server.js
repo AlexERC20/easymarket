@@ -44,6 +44,7 @@ import {
   getMarketChart,
   getProjectEconomySettings,
   getRecentActivity,
+  getRecentMarketOutcomes,
   getRecentMarkets,
   getSportsMarkets,
   getTopMarkets,
@@ -639,17 +640,19 @@ app.get("/api/market/active", cachedJsonRoute("market/active", config.pricePollM
   const market = await getActiveMarket();
   let activity = [];
   let chart = [];
+  let recentOutcomes = [];
   if (market) {
     try {
-      [activity, chart] = await Promise.all([
+      [activity, chart, recentOutcomes] = await Promise.all([
         getMarketActivity(market.id, 24),
         getMarketChart(market, 260),
+        getRecentMarketOutcomes(market.symbol, 12),
       ]);
     } catch (error) {
       console.warn("[easymarket] active market extras failed:", error instanceof Error ? error.message : "unknown error");
     }
   }
-  return { ok: true, market, activity, chart };
+  return { ok: true, market, activity, chart, recentOutcomes };
 }));
 
 app.get("/api/market/:marketId/activity", async (req, res) => {
