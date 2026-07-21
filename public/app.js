@@ -106,6 +106,7 @@ const state = {
   leaderboardPreloadPromise: null,
   activity: [],
   chartPoints: [],
+  recentOutcomes: [],
   btcMarkets: [],
   selectedBtcMarketId: null,
   btcCharts: new Map(),
@@ -2510,6 +2511,11 @@ function renderMarketChart() {
   if (syncAquariumRuntimeForMarket()) {
     primeAquarium();
   }
+  // Перед ранним return-ом: полоска истории раундов зависит от того, КАКОЙ
+  // маркет сейчас показан (переключение реюзает эту же карточку), а не от
+  // того, идёт ли уже цикл отрисовки канвы — иначе при свитче на другой
+  // маркет во время уже запущенного rAF-цикла полоска не обновится.
+  renderRoundHistoryStrip(getDisplayMarket(), state.recentOutcomes);
   if (state.chartRaf || isBlockingSheetOpen()) {
     return;
   }
@@ -3833,11 +3839,11 @@ async function loadMarket() {
   const activeMarketChanged = previousMarketId && data.market?.id && previousMarketId !== data.market.id;
   const pruned = pruneClosedLocalMarkets({ renderLists: true });
   state.chartPoints = mergeChartPoints(data.chart, data.market);
+  state.recentOutcomes = data.recentOutcomes || [];
   handleMarketActivity(data.activity || []);
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
-  renderRoundHistoryStrip(data.market, data.recentOutcomes || []);
   if (activeMarketChanged || pruned.changed) {
     const listLoader = isWorldCupMarket(data.market) ? loadWorldCupMarkets : loadBtcMarkets;
     void runSingleFlight(isWorldCupMarket(data.market) ? "worldCupMarkets" : "btcMarkets", listLoader)
