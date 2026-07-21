@@ -2218,7 +2218,10 @@ function drawMarketChartFrame(ts) {
     const pillH = Math.max(22, height * 0.105);
     const pillW = w1 + w2 + w3 + padX * 2;
     const pillX = left;
-    const pillY = height - pillH - Math.max(4, height * 0.02);
+    // Отступ больше косметического минимума: нижние ~12px рамки уходят в
+    // альфа-фейд шва карточки (см. .chart-frame в styles.css), плашку нужно
+    // держать выше этой зоны, иначе текст в ней теряет читаемость.
+    const pillY = height - pillH - Math.max(16, height * 0.02);
     // Без рамки-обводки, в пару к live-тикеру справа: форму держит чуть более
     // контрастная заливка + волна цвета своей стороны.
     ctx.fillStyle = "rgba(13, 19, 30, 0.88)";
@@ -2415,7 +2418,10 @@ function drawLiveTickerPill(ctx, { width, height, nowTs, myBetPillEnd }) {
   // Отступ от правого края зеркален левой плашке (4% ширины): кромка графика
   // (2%) слишком близко — плашка липла к стенке.
   const pillX = width * 0.96 - pillW;
-  const pillY = height - pillH - Math.max(4, height * 0.02);
+  // Отступ больше косметического минимума: нижние ~12px рамки уходят в
+  // альфа-фейд шва карточки (см. .chart-frame в styles.css), плашку нужно
+  // держать выше этой зоны, иначе текст в ней теряет читаемость.
+  const pillY = height - pillH - Math.max(16, height * 0.02);
 
   // Не наезжаем на плашку своей ставки слева: если тесно, тикер не рисуем.
   if (pillX < myBetPillEnd + Math.max(6, width * 0.012)) {
