@@ -18,6 +18,7 @@ import {
   claimDailyTask,
   claimDepositBonus,
   claimLossRefundWithStars,
+  claimPromoCampaignReward,
   claimShakeFeedBonus,
   ingestShakeFeed,
   claimShareTask,
@@ -43,6 +44,7 @@ import {
   getMarketOrderBook,
   getMarketChart,
   getProjectEconomySettings,
+  getPromoCampaignStatus,
   getRecentActivity,
   getRecentMarketOutcomes,
   getRecentMarkets,
@@ -62,6 +64,7 @@ import {
   syncFireBalance,
   updateProjectEconomySettings,
   updateLiveBtcPrice,
+  upsertPromoCampaign,
   upsertUser,
 } from "./services/marketService.js";
 import { PriceUnavailableError } from "./services/priceService.js";
@@ -165,6 +168,11 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "clan_exists",
     "clan_default_locked",
     "invalid_economy_settings",
+    "invalid_promo_campaign_code",
+    "invalid_promo_campaign_start",
+    "invalid_promo_campaign_end",
+    "invalid_promo_campaign_window",
+    "promo_campaign_reward_too_large",
   ]);
 
   if (message === "DATABASE_URL is not configured.") {
@@ -601,10 +609,18 @@ app.post("/api/me/upsert", async (req, res) => {
       first_name: req.body?.first_name,
       referred_by_telegram_id: req.body?.referred_by_telegram_id,
     });
+    const campaignCode = String(req.body?.campaign_code || "").trim();
+    const promoReward = campaignCode
+      ? await claimPromoCampaignReward({
+        user_id: user.id,
+        campaign_code: campaignCode,
+      })
+      : null;
     const snapshot = await getUserSnapshot(user.telegram_id);
     res.status(200).json({
       ok: true,
       ...snapshot,
+      promo_reward: promoReward,
     });
   } catch (error) {
     sendApiError(res, error);
@@ -1184,6 +1200,40 @@ app.post("/api/bridge/users/upsert", requireBridgeSecret, async (req, res) => {
     res.status(200).json({
       ok: true,
       user,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/promo-campaigns", requireBridgeSecret, async (req, res) => {
+  try {
+    const campaign = await upsertPromoCampaign({
+      code: req.body?.code,
+      reward_usdt: req.body?.reward_usdt,
+      starts_at: req.body?.starts_at,
+      ends_at: req.body?.ends_at,
+      is_active: req.body?.is_active,
+    });
+    res.status(200).json({
+      ok: true,
+      campaign,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/promo-campaigns/:code", requireBridgeSecret, async (req, res) => {
+  try {
+    const campaign = await getPromoCampaignStatus(req.params.code);
+    if (!campaign) {
+      res.status(404).json({ ok: false, message: "promo_campaign_not_found" });
+      return;
+    }
+    res.status(200).json({
+      ok: true,
+      campaign,
     });
   } catch (error) {
     sendApiError(res, error);

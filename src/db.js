@@ -145,6 +145,34 @@ export async function runMigrations() {
       UNIQUE(user_id, task_key)
     );
 
+    CREATE TABLE IF NOT EXISTS promo_campaigns (
+      id BIGSERIAL PRIMARY KEY,
+      code TEXT UNIQUE NOT NULL,
+      reward_usdt NUMERIC(20, 8) NOT NULL,
+      starts_at TIMESTAMPTZ NOT NULL,
+      ends_at TIMESTAMPTZ NOT NULL,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      CHECK (reward_usdt > 0),
+      CHECK (ends_at > starts_at)
+    );
+
+    CREATE TABLE IF NOT EXISTS promo_campaign_claims (
+      id BIGSERIAL PRIMARY KEY,
+      campaign_id BIGINT NOT NULL REFERENCES promo_campaigns(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount NUMERIC(20, 8) NOT NULL,
+      claimed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(campaign_id, user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_promo_campaigns_window
+      ON promo_campaigns(is_active, starts_at, ends_at);
+
+    CREATE INDEX IF NOT EXISTS idx_promo_campaign_claims_campaign
+      ON promo_campaign_claims(campaign_id, claimed_at DESC);
+
     CREATE TABLE IF NOT EXISTS usdt_referral_bonuses (
       id BIGSERIAL PRIMARY KEY,
       inviter_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

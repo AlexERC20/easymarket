@@ -2918,6 +2918,10 @@ function getTelegramUser() {
     const normalized = String(value || "").trim().replace(/^ref_/, "");
     return /^\d+$/.test(normalized) ? normalized : null;
   };
+  const normalizeCampaign = (value) => {
+    const normalized = String(value || "").trim().toLowerCase();
+    return /^(?:promo|stress)_[a-z0-9_-]{1,56}$/.test(normalized) ? normalized : null;
+  };
 
   if (tg) {
     const platform = String(tg.platform || "").toLowerCase();
@@ -2962,9 +2966,11 @@ function getTelegramUser() {
       || launchDataParams.get("start_param");
     const normalizedUser = normalizeTelegramUser(user, "telegram");
     if (normalizedUser) {
+      const launchParam = telegramRef || refParam;
       return {
         ...normalizedUser,
-        referred_by_telegram_id: normalizeRef(telegramRef) || normalizeRef(refParam),
+        referred_by_telegram_id: normalizeRef(launchParam),
+        campaign_code: normalizeCampaign(launchParam),
       };
     }
   }
@@ -2972,9 +2978,11 @@ function getTelegramUser() {
   const launchUser = parseTelegramUserFromParams(launchDataParams);
   const normalizedLaunchUser = normalizeTelegramUser(launchUser, "telegram_hash");
   if (normalizedLaunchUser) {
+    const launchParam = launchDataParams.get("start_param") || refParam;
     return {
       ...normalizedLaunchUser,
-      referred_by_telegram_id: normalizeRef(launchDataParams.get("start_param")) || normalizeRef(refParam),
+      referred_by_telegram_id: normalizeRef(launchParam),
+      campaign_code: normalizeCampaign(launchParam),
     };
   }
 
@@ -2986,6 +2994,7 @@ function getTelegramUser() {
       first_name: params.get("first_name"),
       auth_source: "dev",
       referred_by_telegram_id: normalizeRef(refParam),
+      campaign_code: normalizeCampaign(refParam),
     };
   }
 
@@ -3570,6 +3579,12 @@ async function upsertMe() {
   $("authCard").classList.add("hidden");
   setConnection("LIVE", "online");
   renderTaskButtonStates();
+  if (data.promo_reward?.claimed) {
+    window.setTimeout(() => {
+      showToast(`+${formatCurrencyAmount(data.promo_reward.amount || 5, "USDT")}`);
+      showTopupSuccessAnimation("+$5");
+    }, 180);
+  }
   return true;
 }
 

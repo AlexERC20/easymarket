@@ -36,6 +36,7 @@ const MIN_TAIL_DEPTH_FACTOR = 0.004;
 const SPORTS_MIN_TAIL_DEPTH_FACTOR = 0.2;
 const SPORTS_TAIL_DEPTH_EXPONENT = 1.45;
 const REFERRAL_SIGNUP_BONUS = 100;
+const PROMO_CAMPAIGN_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{2,63}$/;
 const CURRENCIES = new Set(["STAR", "USDT"]);
 const WORLD_CUP_SYNC_INTERVAL_MS = 90_000;
 const TOP_MARKET_SYNC_INTERVAL_MS = 60_000;
@@ -4127,6 +4128,189 @@ export async function addUsdtToUser(input) {
     balance: result,
     usdt_balance: result,
   };
+}
+
+function normalizePromoCampaignCode(value) {
+  const code = String(value || "").trim().toLowerCase();
+  if (!PROMO_CAMPAIGN_CODE_PATTERN.test(code)) {
+    throw new Error("invalid_promo_campaign_code");
+  }
+  return code;
+}
+
+function parsePromoCampaignDate(value, errorCode) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    throw new Error(errorCode);
+  }
+  return date;
+}
+
+function mapPromoCampaign(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    id: Number(row.id),
+    code: row.code,
+    reward_usdt: toNumber(row.reward_usdt),
+    starts_at: row.starts_at,
+    ends_at: row.ends_at,
+    is_active: Boolean(row.is_active),
+    claims_count: Number(row.claims_count || 0),
+    claimed_usdt: toNumber(row.claimed_usdt),
+  };
+}
+
+export async function upsertPromoCampaign(input) {
+  const code = normalizePromoCampaignCode(input.code);
+  const rewardUsdt = Math.round(ensurePositiveAmount(input.reward_usdt ?? input.rewardUsdt) * 100) / 100;
+  const startsAt = parsePromoCampaignDate(input.starts_at ?? input.startsAt, "invalid_promo_campaign_start");
+  const endsAt = parsePromoCampaignDate(input.ends_at ?? input.endsAt, "invalid_promo_campaign_end");
+  if (endsAt.getTime() <= startsAt.getTime()) {
+    throw new Error("invalid_promo_campaign_window");
+  }
+  if (rewardUsdt > 1_000) {
+    throw new Error("promo_campaign_reward_too_large");
+  }
+
+  const result = await query(
+    `
+      INSERT INTO promo_campaigns (
+        code,
+        reward_usdt,
+        starts_at,
+        ends_at,
+        is_active,
+        updated_at
+      )
+      VALUES ($1, $2::numeric, $3::timestamptz, $4::timestamptz, $5, now())
+      ON CONFLICT (code) DO UPDATE SET
+        reward_usdt = EXCLUDED.reward_usdt,
+        starts_at = EXCLUDED.starts_at,
+        ends_at = EXCLUDED.ends_at,
+        is_active = EXCLUDED.is_active,
+        updated_at = now()
+      RETURNING *
+    `,
+    [code, rewardUsdt, startsAt.toISOString(), endsAt.toISOString(), input.is_active !== false],
+  );
+
+  return mapPromoCampaign(result.rows[0]);
+}
+
+export async function getPromoCampaignStatus(value) {
+  const code = normalizePromoCampaignCode(value);
+  const result = await query(
+    `
+      SELECT
+        campaign.*,
+        COUNT(claim.id)::bigint AS claims_count,
+        COALESCE(SUM(claim.amount), 0)::numeric AS claimed_usdt
+      FROM promo_campaigns AS campaign
+      LEFT JOIN promo_campaign_claims AS claim ON claim.campaign_id = campaign.id
+      WHERE campaign.code = $1
+      GROUP BY campaign.id
+      LIMIT 1
+    `,
+    [code],
+  );
+  return mapPromoCampaign(result.rows[0]);
+}
+
+export async function claimPromoCampaignReward(input) {
+  const code = normalizePromoCampaignCode(input.campaign_code ?? input.campaignCode);
+  const userId = Number(input.user_id ?? input.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    throw new Error("user_not_found");
+  }
+
+  return withTransaction(async (client) => {
+    const inserted = await client.query(
+      `
+        INSERT INTO promo_campaign_claims (campaign_id, user_id, amount)
+        SELECT campaign.id, $2, campaign.reward_usdt
+        FROM promo_campaigns AS campaign
+        WHERE campaign.code = $1
+          AND campaign.is_active = TRUE
+          AND now() >= campaign.starts_at
+          AND now() < campaign.ends_at
+        ON CONFLICT (campaign_id, user_id) DO NOTHING
+        RETURNING campaign_id, amount, claimed_at
+      `,
+      [code, userId],
+    );
+
+    if (inserted.rows[0]) {
+      const amount = toNumber(inserted.rows[0].amount);
+      await adjustUsdtBonusBalance(
+        client,
+        userId,
+        amount,
+        "promo_campaign_reward",
+        `promo_campaign:${code}`,
+      );
+      return {
+        code,
+        status: "claimed",
+        claimed: true,
+        amount,
+        claimed_at: inserted.rows[0].claimed_at,
+      };
+    }
+
+    const statusResult = await client.query(
+      `
+        SELECT
+          campaign.id,
+          campaign.reward_usdt,
+          campaign.starts_at,
+          campaign.ends_at,
+          campaign.is_active,
+          claim.amount AS claimed_amount,
+          claim.claimed_at
+        FROM promo_campaigns AS campaign
+        LEFT JOIN promo_campaign_claims AS claim
+          ON claim.campaign_id = campaign.id
+         AND claim.user_id = $2
+        WHERE campaign.code = $1
+        LIMIT 1
+      `,
+      [code, userId],
+    );
+    const campaign = statusResult.rows[0];
+    if (!campaign) {
+      return { code, status: "not_found", claimed: false, amount: 0 };
+    }
+    if (campaign.claimed_at) {
+      return {
+        code,
+        status: "already_claimed",
+        claimed: false,
+        amount: toNumber(campaign.claimed_amount),
+        claimed_at: campaign.claimed_at,
+      };
+    }
+
+    const now = Date.now();
+    const startsAt = new Date(campaign.starts_at).getTime();
+    const endsAt = new Date(campaign.ends_at).getTime();
+    const status = !campaign.is_active
+      ? "inactive"
+      : now < startsAt
+        ? "scheduled"
+        : now >= endsAt
+          ? "expired"
+          : "unavailable";
+    return {
+      code,
+      status,
+      claimed: false,
+      amount: 0,
+      starts_at: campaign.starts_at,
+      ends_at: campaign.ends_at,
+    };
+  });
 }
 
 export async function syncFireBalance(input) {
