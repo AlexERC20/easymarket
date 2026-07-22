@@ -624,20 +624,16 @@ h2 {
   align-items: center;
   justify-content: center;
   padding: 0 0 2px;
-  border: 1px solid rgba(53, 246, 255, 0.24);
-  border-radius: 50%;
-  background: rgba(9, 14, 32, 0.72);
-  color: rgba(226, 242, 255, 0.85);
-  font-size: 22px;
+  border: none;
+  background: none;
+  color: rgba(226, 242, 255, 0.32);
+  font-size: 24px;
   line-height: 1;
   cursor: pointer;
   transform: translateY(-50%);
   transition:
-    background var(--motion-fast) var(--ease-default),
-    border-color var(--motion-fast) var(--ease-default),
     color var(--motion-fast) var(--ease-default),
-    opacity var(--motion-fast) var(--ease-default),
-    transform var(--motion-fast) var(--ease-default);
+    opacity var(--motion-fast) var(--ease-default);
 }
 
 .market-nav-prev {
@@ -649,14 +645,11 @@ h2 {
 }
 
 .market-nav-arrow:hover:not(:disabled) {
-  background: rgba(53, 246, 255, 0.18);
-  border-color: rgba(53, 246, 255, 0.5);
-  color: #ffffff;
-  transform: translateY(-50%) scale(1.08);
+  color: rgba(226, 242, 255, 0.75);
 }
 
 .market-nav-arrow:disabled {
-  opacity: 0.22;
+  opacity: 0.3;
   cursor: default;
   pointer-events: none;
 }
