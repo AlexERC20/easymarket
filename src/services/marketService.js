@@ -1,5 +1,10 @@
 import { clamp, config } from "../config.js";
 import { query, toNumber, withTransaction } from "../db.js";
+import {
+  fundBonusUnlockReserve,
+  getBonusUnlockStatusForUser,
+  unlockBonusAfterResolvedMarket,
+} from "./bonusEconomyService.js";
 import { getBtcPrice, PriceUnavailableError } from "./priceService.js";
 
 const MARKET_SYMBOL = "BTCUSDT";
@@ -26,6 +31,7 @@ const DEFAULT_FEE_BPS = 200;
 const DEFAULT_PROFIT_FEE_BPS = 700;
 const DEFAULT_REFERRAL_PROFIT_SHARE_BPS = 100;
 const DEFAULT_CLAN_PROFIT_SHARE_BPS = 100;
+const DEFAULT_BONUS_UNLOCK_SHARE_BPS = 100;
 const DEFAULT_MARKET_MAKER_SPREAD_BPS = 300;
 const BUY_IMPACT_MULTIPLIER = 1.08;
 const SELL_IMPACT_MULTIPLIER = 1.42;
@@ -707,14 +713,26 @@ function normalizeEconomySettings(row = {}) {
     row.clan_profit_share_bps,
     DEFAULT_CLAN_PROFIT_SHARE_BPS,
   )));
+  const bonusUnlockShareBps = Math.max(0, Math.round(toNumber(
+    row.bonus_unlock_share_bps,
+    DEFAULT_BONUS_UNLOCK_SHARE_BPS,
+  )));
   const cappedReferralBps = Math.min(referralProfitShareBps, profitFeeBps);
   const cappedClanBps = Math.min(clanProfitShareBps, Math.max(0, profitFeeBps - cappedReferralBps));
+  const cappedBonusUnlockBps = Math.min(
+    bonusUnlockShareBps,
+    Math.max(0, profitFeeBps - cappedReferralBps - cappedClanBps),
+  );
 
   return {
     profit_fee_bps: profitFeeBps,
     referral_profit_share_bps: cappedReferralBps,
     clan_profit_share_bps: cappedClanBps,
-    project_profit_share_bps: Math.max(0, profitFeeBps - cappedReferralBps - cappedClanBps),
+    bonus_unlock_share_bps: cappedBonusUnlockBps,
+    project_profit_share_bps: Math.max(
+      0,
+      profitFeeBps - cappedReferralBps - cappedClanBps - cappedBonusUnlockBps,
+    ),
     updated_by_telegram_id: row.updated_by_telegram_id ?? null,
     updated_by_username: row.updated_by_username ?? null,
     updated_at: row.updated_at ?? null,
@@ -728,9 +746,10 @@ async function getEconomySettingsWithClient(client) {
         id,
         profit_fee_bps,
         referral_profit_share_bps,
-        clan_profit_share_bps
+        clan_profit_share_bps,
+        bonus_unlock_share_bps
       )
-      VALUES (1, $1, $2, $3)
+      VALUES (1, $1, $2, $3, $4)
       ON CONFLICT (id) DO NOTHING
       RETURNING *
     `,
@@ -738,6 +757,7 @@ async function getEconomySettingsWithClient(client) {
       DEFAULT_PROFIT_FEE_BPS,
       DEFAULT_REFERRAL_PROFIT_SHARE_BPS,
       DEFAULT_CLAN_PROFIT_SHARE_BPS,
+      DEFAULT_BONUS_UNLOCK_SHARE_BPS,
     ],
   );
 
@@ -807,11 +827,21 @@ export async function updateProjectEconomySettings(input = {}) {
     input.clan_profit_share_bps ?? input.clanProfitShareBps,
     current.clan_profit_share_bps,
   );
+  const bonusUnlockShareBps = parsePercentOrBps(
+    input.bonus_unlock_share_pct ?? input.bonusUnlockSharePct,
+    input.bonus_unlock_share_bps ?? input.bonusUnlockShareBps,
+    current.bonus_unlock_share_bps,
+  );
 
-  if (profitFeeBps > 5_000 || referralProfitShareBps > 5_000 || clanProfitShareBps > 5_000) {
+  if (
+    profitFeeBps > 5_000
+    || referralProfitShareBps > 5_000
+    || clanProfitShareBps > 5_000
+    || bonusUnlockShareBps > 5_000
+  ) {
     throw new Error("invalid_economy_settings");
   }
-  if (referralProfitShareBps + clanProfitShareBps > profitFeeBps) {
+  if (referralProfitShareBps + clanProfitShareBps + bonusUnlockShareBps > profitFeeBps) {
     throw new Error("invalid_economy_settings");
   }
 
@@ -822,15 +852,17 @@ export async function updateProjectEconomySettings(input = {}) {
         profit_fee_bps,
         referral_profit_share_bps,
         clan_profit_share_bps,
+        bonus_unlock_share_bps,
         updated_by_telegram_id,
         updated_by_username,
         updated_at
       )
-      VALUES (1, $1, $2, $3, $4, $5, now())
+      VALUES (1, $1, $2, $3, $4, $5, $6, now())
       ON CONFLICT (id) DO UPDATE SET
         profit_fee_bps = EXCLUDED.profit_fee_bps,
         referral_profit_share_bps = EXCLUDED.referral_profit_share_bps,
         clan_profit_share_bps = EXCLUDED.clan_profit_share_bps,
+        bonus_unlock_share_bps = EXCLUDED.bonus_unlock_share_bps,
         updated_by_telegram_id = EXCLUDED.updated_by_telegram_id,
         updated_by_username = EXCLUDED.updated_by_username,
         updated_at = now()
@@ -840,6 +872,7 @@ export async function updateProjectEconomySettings(input = {}) {
       profitFeeBps,
       referralProfitShareBps,
       clanProfitShareBps,
+      bonusUnlockShareBps,
       input.admin_telegram_id ? String(input.admin_telegram_id) : null,
       input.admin_username ? String(input.admin_username).replace(/^@/, "") : null,
     ],
@@ -859,6 +892,10 @@ function getMarketMakerSpreadBps() {
 
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function floorMoney(value) {
+  return Math.floor(Math.max(0, Number(value || 0)) * 100 + Number.EPSILON) / 100;
 }
 
 function roundOutcomePrice(value, minPrice = MIN_PRICE) {
@@ -2553,26 +2590,44 @@ function getMonthKey(date = new Date()) {
 async function distributeProfitFee(client, input) {
   const grossProfit = Math.max(0, Math.round(Number(input.grossProfit || 0) * 100) / 100);
   const totalFee = Math.max(0, Math.round(Number(input.totalFee || 0) * 100) / 100);
+  const currency = normalizeCurrency(input.currency);
+  const fundedRatio = currency === "USDT"
+    ? clamp(Number(input.cashRatio ?? 1), 0, 1)
+    : 1;
+  const fundedGrossProfit = Math.max(0, roundMoney(grossProfit * fundedRatio));
+  const distributableFee = Math.min(totalFee, Math.max(0, floorMoney(totalFee * fundedRatio)));
+  const bonusFee = Math.max(0, roundMoney(totalFee - distributableFee));
   if (grossProfit <= 0 || totalFee <= 0) {
     return {
       total_fee: 0,
+      distributable_fee: 0,
+      bonus_fee: 0,
       project_fee: 0,
       referral_fee: 0,
       clan_fee: 0,
+      bonus_unlock_fee: 0,
     };
   }
 
-  const currency = normalizeCurrency(input.currency);
   const settings = input.settings || await getEconomySettingsWithClient(client);
   let referralFee = Math.min(
-    totalFee,
-    Math.round(grossProfit * (settings.referral_profit_share_bps / 10_000) * 100) / 100,
+    distributableFee,
+    Math.round(fundedGrossProfit * (settings.referral_profit_share_bps / 10_000) * 100) / 100,
   );
   let clanFee = Math.min(
-    Math.max(0, totalFee - referralFee),
-    Math.round(grossProfit * (settings.clan_profit_share_bps / 10_000) * 100) / 100,
+    Math.max(0, distributableFee - referralFee),
+    Math.round(fundedGrossProfit * (settings.clan_profit_share_bps / 10_000) * 100) / 100,
   );
-  let projectFee = Math.max(0, Math.round((totalFee - referralFee - clanFee) * 100) / 100);
+  let bonusUnlockFee = currency === "USDT"
+    ? Math.min(
+      Math.max(0, distributableFee - referralFee - clanFee),
+      Math.round(fundedGrossProfit * (settings.bonus_unlock_share_bps / 10_000) * 100) / 100,
+    )
+    : 0;
+  let projectFee = Math.max(
+    0,
+    Math.round((distributableFee - referralFee - clanFee - bonusUnlockFee) * 100) / 100,
+  );
   const reason = String(input.reason || "profit_fee");
   const source = String(input.source || `market:${input.marketId || "unknown"}`);
   const eventKey = String(input.eventKey || `${reason}:${input.positionId || "-"}:${input.tradeId || "-"}`);
@@ -2588,12 +2643,19 @@ async function distributeProfitFee(client, input) {
         currency,
         gross_profit,
         total_fee,
+        distributable_fee,
+        bonus_fee,
         project_fee,
         referral_fee,
         clan_fee,
+        bonus_unlock_fee,
         reason
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $8::numeric, 0, 0, $9)
+      VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7::numeric, $8::numeric, $9::numeric, $10::numeric,
+        $9::numeric, 0, 0, 0, $11
+      )
       ON CONFLICT (event_key) DO NOTHING
       RETURNING id
     `,
@@ -2606,13 +2668,24 @@ async function distributeProfitFee(client, input) {
       currency,
       grossProfit,
       totalFee,
+      distributableFee,
+      bonusFee,
       reason,
     ],
   );
   if (!reservationResult.rows[0]) {
     const existingResult = await client.query(
       `
-        SELECT total_fee, project_fee, referral_fee, clan_fee, referrer_user_id, clan_id
+        SELECT
+          total_fee,
+          distributable_fee,
+          bonus_fee,
+          project_fee,
+          referral_fee,
+          clan_fee,
+          bonus_unlock_fee,
+          referrer_user_id,
+          clan_id
         FROM profit_fee_distributions
         WHERE event_key = $1
         LIMIT 1
@@ -2622,9 +2695,12 @@ async function distributeProfitFee(client, input) {
     const existing = existingResult.rows[0] || {};
     return {
       total_fee: toNumber(existing.total_fee),
+      distributable_fee: toNumber(existing.distributable_fee),
+      bonus_fee: toNumber(existing.bonus_fee),
       project_fee: toNumber(existing.project_fee),
       referral_fee: toNumber(existing.referral_fee),
       clan_fee: toNumber(existing.clan_fee),
+      bonus_unlock_fee: toNumber(existing.bonus_unlock_fee),
       referrer_user_id: existing.referrer_user_id ? Number(existing.referrer_user_id) : null,
       clan_id: existing.clan_id ? Number(existing.clan_id) : null,
       already_distributed: true,
@@ -2685,6 +2761,19 @@ async function distributeProfitFee(client, input) {
     }
   }
 
+  if (bonusUnlockFee > 0) {
+    const funded = await fundBonusUnlockReserve(client, {
+      eventKey: `profit_fee_distribution:${distributionId}`,
+      profitFeeDistributionId: distributionId,
+      amount: bonusUnlockFee,
+      source,
+    });
+    if (funded <= 0) {
+      projectFee = roundMoney(projectFee + bonusUnlockFee);
+      bonusUnlockFee = 0;
+    }
+  }
+
   await client.query(
     `
       UPDATE profit_fee_distributions
@@ -2692,10 +2781,11 @@ async function distributeProfitFee(client, input) {
         project_fee,
         referral_fee,
         clan_fee,
+        bonus_unlock_fee,
         referrer_user_id,
         clan_id,
         reason
-      ) = ROW($2::numeric, $3::numeric, $4::numeric, $5, $6, $7)
+      ) = ROW($2::numeric, $3::numeric, $4::numeric, $5::numeric, $6, $7, $8)
       WHERE id = $1
     `,
     [
@@ -2703,6 +2793,7 @@ async function distributeProfitFee(client, input) {
       projectFee,
       referralFee,
       clanFee,
+      bonusUnlockFee,
       referrer?.id || null,
       topClan?.id || null,
       reason,
@@ -2711,9 +2802,12 @@ async function distributeProfitFee(client, input) {
 
   return {
     total_fee: totalFee,
+    distributable_fee: distributableFee,
+    bonus_fee: bonusFee,
     project_fee: projectFee,
     referral_fee: referralFee,
     clan_fee: clanFee,
+    bonus_unlock_fee: bonusUnlockFee,
     referrer_user_id: referrer ? Number(referrer.id) : null,
     clan_id: topClan ? Number(topClan.id) : null,
   };
@@ -2743,6 +2837,7 @@ async function distributeLimitSellOrderProfitFee(client, order, settings = null)
     currency: normalizeCurrency(order.currency),
     grossProfit,
     totalFee: fee,
+    cashRatio: 1 - getBonusRatioForAmount(order.reserved_bonus_spent, order.reserved_spent),
     reason: "limit_sell_profit_fee",
     source: `limit_order:${order.id}`,
     eventKey: `limit_order:${order.id}:profit_fee`,
@@ -3244,39 +3339,54 @@ async function getLockedCurrencyBalance(client, userId, currency) {
     };
   }
 
-  const cashResult = await client.query(
+  const result = await client.query(
     `
-      SELECT balance
-      FROM usdt_balances
-      WHERE user_id = $1
-      FOR UPDATE
+      SELECT
+        cash.balance AS cash_balance,
+        bonus.balance AS bonus_balance,
+        EXISTS (
+          SELECT 1
+          FROM usdt_deposit_intents deposits
+          WHERE deposits.user_id = users.id
+            AND deposits.status = 'credited'
+            AND COALESCE(deposits.credited_amount, 0) > 0
+        ) OR EXISTS (
+          SELECT 1
+          FROM usdt_ledger ledger
+          WHERE ledger.user_id = users.id
+            AND ledger.reason = 'usdt_onchain_deposit'
+            AND ledger.amount > 0
+        ) AS has_confirmed_deposit
+      FROM users
+      JOIN usdt_balances cash ON cash.user_id = users.id
+      JOIN usdt_bonus_balances bonus ON bonus.user_id = users.id
+      WHERE users.id = $1
+      FOR UPDATE OF cash, bonus
     `,
     [userId],
   );
-  const bonusResult = await client.query(
-    `
-      SELECT balance
-      FROM usdt_bonus_balances
-      WHERE user_id = $1
-      FOR UPDATE
-    `,
-    [userId],
-  );
-  const cash = toNumber(cashResult.rows[0]?.balance);
-  const bonus = toNumber(bonusResult.rows[0]?.balance);
+  const cash = toNumber(result.rows[0]?.cash_balance);
+  const bonus = toNumber(result.rows[0]?.bonus_balance);
   return {
     cash,
     bonus,
     total: Math.round((cash + bonus) * 100) / 100,
+    has_confirmed_deposit: result.rows[0]?.has_confirmed_deposit === true,
   };
 }
 
 function splitUsdtSpend(amount, balances) {
   const total = Math.round(Number(amount || 0) * 100) / 100;
-  const bonus = Math.min(Math.max(0, balances.bonus), total);
+  const spendCashFirst = balances.has_confirmed_deposit === true;
+  const cash = spendCashFirst
+    ? Math.min(Math.max(0, balances.cash), total)
+    : Math.max(0, total - Math.min(Math.max(0, balances.bonus), total));
+  const bonus = spendCashFirst
+    ? Math.max(0, total - cash)
+    : Math.min(Math.max(0, balances.bonus), total);
   return {
     bonus: Math.round(bonus * 100) / 100,
-    cash: Math.round((total - bonus) * 100) / 100,
+    cash: Math.round(cash * 100) / 100,
   };
 }
 
@@ -3908,7 +4018,7 @@ export async function getUserSnapshot(telegramId) {
     [user.id],
   );
 
-  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, premiumFishResult, lossRefundOffersResult, depositTotalResult, depositBonusClaimsResult, shakeFeedTotal] = await Promise.all([
+  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, premiumFishResult, lossRefundOffersResult, depositTotalResult, depositBonusClaimsResult, shakeFeedTotal, bonusUnlockStatus] = await Promise.all([
     getBalanceByUserId(user.id),
     getUsdtBalanceByUserId(user.id),
     getUsdtBonusBalanceByUserId(user.id),
@@ -4011,6 +4121,7 @@ export async function getUserSnapshot(telegramId) {
       [user.id],
     ),
     getShakeFeedTotal({ query }, user.id),
+    getBonusUnlockStatusForUser(user.id),
   ]);
   const usdtTotalBalance = Math.round((usdtCashBalance + usdtBonusBalance) * 100) / 100;
   const depositTotal = Math.round(toNumber(depositTotalResult.rows[0]?.total) * 100) / 100;
@@ -4023,6 +4134,7 @@ export async function getUserSnapshot(telegramId) {
     usdt_balance: usdtTotalBalance,
     usdt_cash_balance: usdtCashBalance,
     usdt_bonus_balance: usdtBonusBalance,
+    bonus_unlock: bonusUnlockStatus,
     positions: positionsResult.rows.map(mapPosition),
     recent_trades: tradesResult.rows.map(mapTrade),
     market_stats: marketStats,
@@ -4090,9 +4202,9 @@ export async function addFireToUser(input) {
   };
 }
 
-export async function addUsdtToUser(input) {
+export async function addUsdtBonusToUser(input) {
   const amount = ensurePositiveAmount(input.amount);
-  const reason = input.reason || "admin_usdt_adjustment";
+  const reason = input.reason || "admin_usdt_bonus_adjustment";
   const user = await upsertUser({
     telegram_id: input.telegram_id,
     username: input.username,
@@ -4102,7 +4214,7 @@ export async function addUsdtToUser(input) {
   const result = await withTransaction(async (client) => {
     await client.query(
       `
-        UPDATE usdt_balances
+        UPDATE usdt_bonus_balances
         SET balance = balance + $2::numeric,
             updated_at = now()
         WHERE user_id = $1
@@ -4111,22 +4223,38 @@ export async function addUsdtToUser(input) {
     );
     await client.query(
       `
-        INSERT INTO usdt_ledger (user_id, amount, reason, source)
+        INSERT INTO usdt_bonus_ledger (user_id, amount, reason, source)
         VALUES ($1, $2::numeric, $3, $4)
       `,
       [user.id, amount, reason, input.source || "api"],
     );
     const balanceResult = await client.query(
-      "SELECT balance FROM usdt_balances WHERE user_id = $1",
+      `
+        SELECT
+          cash.balance AS cash_balance,
+          bonus.balance AS bonus_balance
+        FROM usdt_balances cash
+        JOIN usdt_bonus_balances bonus ON bonus.user_id = cash.user_id
+        WHERE cash.user_id = $1
+      `,
       [user.id],
     );
-    return toNumber(balanceResult.rows[0]?.balance);
+    const cashBalance = toNumber(balanceResult.rows[0]?.cash_balance);
+    const bonusBalance = toNumber(balanceResult.rows[0]?.bonus_balance);
+    return {
+      cash: cashBalance,
+      bonus: bonusBalance,
+      total: roundMoney(cashBalance + bonusBalance),
+    };
   });
 
   return {
     user,
-    balance: result,
-    usdt_balance: result,
+    balance: result.total,
+    usdt_balance: result.total,
+    usdt_cash_balance: result.cash,
+    usdt_bonus_balance: result.bonus,
+    credited_to: "bonus",
   };
 }
 
@@ -8707,6 +8835,7 @@ export async function sellOutcome(input) {
       currency,
       grossProfit,
       totalFee: fee,
+      cashRatio: 1 - bonusRatio,
       reason: "market_sell_profit_fee",
       source: `market:${marketId}:sell:${tradeResult.rows[0]?.id}`,
       eventKey: `trade:${tradeResult.rows[0]?.id}:profit_fee`,
@@ -8817,6 +8946,7 @@ async function settleOpenMarketPositions(client, market, winner) {
     [market.id],
   );
   const economySettings = await getEconomySettingsWithClient(client);
+  const realResultsByUser = new Map();
 
   for (const position of positions.rows) {
     const currency = normalizeCurrency(position.currency);
@@ -8825,6 +8955,10 @@ async function settleOpenMarketPositions(client, market, winner) {
     const spent = toNumber(position.spent);
     const grossPayout = position.side === winner ? shares : 0;
     const grossProfit = grossPayout - spent;
+    const bonusRatio = getBonusRatioForAmount(position.bonus_spent, position.spent);
+    const cashSpent = currency === "USDT"
+      ? Math.max(0, roundMoney(spent - toNumber(position.bonus_spent)))
+      : 0;
     const fee = calculateProfitFeeFromSettings(grossProfit, economySettings);
     const basePayout = Math.max(0, roundMoney(grossPayout - fee));
     const basePnl = roundMoney(basePayout - spent);
@@ -8850,15 +8984,16 @@ async function settleOpenMarketPositions(client, market, winner) {
       [position.id, payout, pnl],
     );
 
+    let baseCredit = { cash: 0, bonus: 0 };
     if (basePayout > 0) {
-      await creditCurrencyBalance(
+      baseCredit = await creditCurrencyBalance(
         client,
         position.user_id,
         currency,
         basePayout,
         `market_payout${reasonSuffix}`,
         `market:${market.id}`,
-        getBonusRatioForAmount(position.bonus_spent, position.spent),
+        bonusRatio,
       );
     }
 
@@ -8871,6 +9006,7 @@ async function settleOpenMarketPositions(client, market, winner) {
         currency,
         grossProfit,
         totalFee: fee,
+        cashRatio: 1 - bonusRatio,
         reason: "market_settlement_profit_fee",
         source: `market:${market.id}:settlement`,
         eventKey: `position:${position.id}:settlement_profit_fee`,
@@ -8879,6 +9015,15 @@ async function settleOpenMarketPositions(client, market, winner) {
 
     if (currency === "USDT" && pnl < 0) {
       await createUsdtLossRefundOffer(client, position, pnl);
+    }
+
+    if (currency === "USDT" && cashSpent > 0) {
+      const current = realResultsByUser.get(String(position.user_id)) || {
+        userId: Number(position.user_id),
+        realNetPnl: 0,
+      };
+      current.realNetPnl += toNumber(baseCredit.cash) - cashSpent;
+      realResultsByUser.set(String(position.user_id), current);
     }
 
     if (luckyBonus > 0) {
@@ -8911,6 +9056,14 @@ async function settleOpenMarketPositions(client, market, winner) {
         currency,
       );
     }
+  }
+
+  for (const result of realResultsByUser.values()) {
+    await unlockBonusAfterResolvedMarket(client, {
+      userId: result.userId,
+      marketId: market.id,
+      realNetPnl: roundMoney(result.realNetPnl),
+    });
   }
 }
 

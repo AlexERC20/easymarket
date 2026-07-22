@@ -330,6 +330,9 @@ export async function confirmUsdtWithdrawalRequest(input) {
       throw new Error("withdrawal_not_found");
     }
     if (row.status !== "pending") {
+      if (row.status !== "completed") {
+        throw new Error("withdrawal_not_pending");
+      }
       return mapWithdrawal(row);
     }
 
@@ -383,6 +386,9 @@ export async function confirmUsdtWithdrawalRequestByBridge(input) {
       throw new Error("withdrawal_not_found");
     }
     if (row.status !== "pending") {
+      if (row.status !== "completed") {
+        throw new Error("withdrawal_not_pending");
+      }
       return mapWithdrawal(row);
     }
 

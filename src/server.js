@@ -10,7 +10,7 @@ import { config } from "./config.js";
 import { getPool, getSafeDatabaseErrorMessage, query, runMigrations } from "./db.js";
 import {
   addFireToUser,
-  addUsdtToUser,
+  addUsdtBonusToUser,
   addMarketComment,
   buyOutcome,
   cancelLimitOrder,
@@ -67,6 +67,7 @@ import {
   upsertPromoCampaign,
   upsertUser,
 } from "./services/marketService.js";
+import { getBonusEconomyAudit } from "./services/bonusEconomyService.js";
 import { PriceUnavailableError } from "./services/priceService.js";
 import { runDatabaseCleanup, runStartupDatabaseRescue } from "./services/databaseCleanupService.js";
 import {
@@ -1139,12 +1140,12 @@ app.post("/api/dev/fire/add", requireDevTools, async (req, res) => {
 
 app.post("/api/dev/usdt/add", requireDevTools, async (req, res) => {
   try {
-    const result = await addUsdtToUser({
+    const result = await addUsdtBonusToUser({
       telegram_id: req.body?.telegram_id,
       username: req.body?.username,
       first_name: req.body?.first_name,
       amount: req.body?.amount,
-      reason: req.body?.reason || "dev_usdt_topup",
+      reason: req.body?.reason || "dev_usdt_bonus_topup",
       source: "dev",
     });
     res.status(200).json({
@@ -1263,12 +1264,12 @@ app.post("/api/bridge/fire/add", requireBridgeSecret, async (req, res) => {
 
 app.post("/api/bridge/usdt/add", requireBridgeSecret, async (req, res) => {
   try {
-    const result = await addUsdtToUser({
+    const result = await addUsdtBonusToUser({
       telegram_id: req.body?.telegram_id,
       username: req.body?.username,
       first_name: req.body?.first_name,
       amount: req.body?.amount,
-      reason: req.body?.reason || "admin_usdt_adjustment",
+      reason: req.body?.reason || "admin_usdt_bonus_adjustment",
       source: "bridge",
     });
     res.status(200).json({
@@ -1380,12 +1381,26 @@ app.post("/api/bridge/economy/settings", requireBridgeSecret, async (req, res) =
       referral_profit_share_bps: req.body?.referral_profit_share_bps ?? req.body?.referralProfitShareBps,
       clan_profit_share_pct: req.body?.clan_profit_share_pct ?? req.body?.clanProfitSharePct,
       clan_profit_share_bps: req.body?.clan_profit_share_bps ?? req.body?.clanProfitShareBps,
+      bonus_unlock_share_pct: req.body?.bonus_unlock_share_pct ?? req.body?.bonusUnlockSharePct,
+      bonus_unlock_share_bps: req.body?.bonus_unlock_share_bps ?? req.body?.bonusUnlockShareBps,
       admin_telegram_id: req.body?.admin_telegram_id ?? req.body?.adminTelegramId,
       admin_username: req.body?.admin_username ?? req.body?.adminUsername,
     });
     res.status(200).json({
       ok: true,
       settings,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/bonus-audit", requireBridgeSecret, async (_req, res) => {
+  try {
+    const audit = await getBonusEconomyAudit();
+    res.status(200).json({
+      ok: true,
+      audit,
     });
   } catch (error) {
     sendApiError(res, error);

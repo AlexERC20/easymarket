@@ -123,6 +123,19 @@ PUBLIC_PRIVATE_CHAT_URL=https://t.me/tribute/app?startapp=stKL
 `CLEANUP_CLOSED_MARKET_COMMENTS_MINUTES` removes chat comments shortly after a market closes; balances, ledgers, withdrawals, deposits, trades, and user positions are kept.
 `MARKET_SELL_FREEZE_SECONDS` blocks only last-second exits before market resolution. Instant buy/sell pricing is handled by the internal market maker curve: liquidity is deepest near 50/50 and gets much thinner near the 0/100 tails, so large tail buys or exits reprice sharply instead of staying cheap.
 
+## USDT Balance Accounting
+
+EasyMarket keeps withdrawable and promotional USDT separate:
+
+- `usdt_balances` contains withdrawable USDT backed by confirmed on-chain deposits or funded project distributions.
+- `usdt_bonus_balances` contains promotional USDT. Admin grants through `/api/bridge/usdt/add` always credit this balance.
+- A bet records the exact cash/bonus split. Principal, winnings, refunds, market sales, and filled limit orders return in the same proportion, so bonus-funded play cannot create withdrawable USDT.
+- Users without a confirmed on-chain deposit have legacy cash, pending withdrawals, and active exposure reclassified to bonus once by migration `reclassify_unfunded_usdt_v1`.
+
+After a confirmed deposit, real cash is spent before bonus. Profitable settled real-money play can gradually convert bonus into withdrawable USDT. The default tiers are 0.25% after 15 USDT deposited, 0.50% after 50, 0.75% after 200, and 1% after 500. The lifetime conversion cap is 25% of confirmed deposits.
+
+Conversions are paid only from `bonus_unlock_reserve`. By default, one percentage point of the 7% profit fee funds this reserve; bonus-funded fee portions are burned as bonus and never counted as real project, referral, clan, or reserve income. The AV admin bot can change total/referral/clan/reserve percentages with four values such as `7 1 1 1`.
+
 ## Render
 
 Render service name: `easymarket`
@@ -207,7 +220,11 @@ POST /api/bridge/fire/add
 POST /api/bridge/fire/sync
 GET  /api/bridge/fire/balance?telegram_id=123
 GET  /api/bridge/fire/ledger?after_id=0&limit=100
+POST /api/bridge/usdt/add
+GET  /api/bridge/economy/bonus-audit
 ```
+
+`POST /api/bridge/usdt/add` is an admin promotional grant and credits bonus USDT only. `/api/bridge/economy/bonus-audit` returns aggregate cash/bonus/reclassification/reserve totals without user identities.
 
 Use `/api/bridge/fire/sync` when the local bot is the source of truth and EasyMarket must mirror the exact bot balance:
 

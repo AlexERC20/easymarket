@@ -188,37 +188,24 @@ export async function runMigrations() {
       profit_fee_bps INTEGER NOT NULL DEFAULT 700,
       referral_profit_share_bps INTEGER NOT NULL DEFAULT 100,
       clan_profit_share_bps INTEGER NOT NULL DEFAULT 100,
+      bonus_unlock_share_bps INTEGER NOT NULL DEFAULT 100,
       updated_by_telegram_id TEXT,
       updated_by_username TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    ALTER TABLE project_economy_settings
+      ADD COLUMN IF NOT EXISTS bonus_unlock_share_bps INTEGER NOT NULL DEFAULT 100;
+
     INSERT INTO project_economy_settings (
       id,
       profit_fee_bps,
       referral_profit_share_bps,
-      clan_profit_share_bps
+      clan_profit_share_bps,
+      bonus_unlock_share_bps
     )
-    VALUES (1, 700, 100, 100)
+    VALUES (1, 700, 100, 100, 100)
     ON CONFLICT (id) DO NOTHING;
-
-    CREATE TABLE IF NOT EXISTS usdt_loss_refund_offers (
-      id BIGSERIAL PRIMARY KEY,
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      position_id BIGINT REFERENCES positions(id) ON DELETE CASCADE,
-      market_id BIGINT REFERENCES markets(id) ON DELETE SET NULL,
-      offer_type TEXT NOT NULL,
-      amount NUMERIC(20, 8) NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      referred_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-      day_key TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      claimed_at TIMESTAMPTZ,
-      UNIQUE(user_id, position_id, offer_type)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_usdt_loss_refund_offers_user_status
-      ON usdt_loss_refund_offers(user_id, status, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS usdt_deposit_intents (
       id BIGSERIAL PRIMARY KEY,
@@ -540,13 +527,71 @@ export async function runMigrations() {
       currency TEXT NOT NULL,
       gross_profit NUMERIC(20, 8) NOT NULL DEFAULT 0,
       total_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      distributable_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      bonus_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
       project_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
       referral_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
       clan_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      bonus_unlock_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
       referrer_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
       clan_id BIGINT REFERENCES clans(id) ON DELETE SET NULL,
       reason TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    ALTER TABLE profit_fee_distributions
+      ADD COLUMN IF NOT EXISTS distributable_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS bonus_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS bonus_unlock_fee NUMERIC(20, 8) NOT NULL DEFAULT 0;
+
+    CREATE TABLE IF NOT EXISTS bonus_unlock_reserve (
+      currency TEXT PRIMARY KEY,
+      balance NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      funded_total NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      released_total NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    INSERT INTO bonus_unlock_reserve (currency)
+    VALUES ('USDT')
+    ON CONFLICT (currency) DO NOTHING;
+
+    CREATE TABLE IF NOT EXISTS bonus_unlock_reserve_ledger (
+      id BIGSERIAL PRIMARY KEY,
+      event_key TEXT UNIQUE NOT NULL,
+      profit_fee_distribution_id BIGINT REFERENCES profit_fee_distributions(id) ON DELETE SET NULL,
+      amount NUMERIC(20, 8) NOT NULL,
+      source TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bonus_unlock_reserve_ledger_created
+      ON bonus_unlock_reserve_ledger(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS bonus_unlock_events (
+      id BIGSERIAL PRIMARY KEY,
+      event_key TEXT UNIQUE NOT NULL,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      market_id BIGINT REFERENCES markets(id) ON DELETE SET NULL,
+      deposit_total NUMERIC(20, 8) NOT NULL,
+      unlock_rate_bps INTEGER NOT NULL,
+      real_net_pnl NUMERIC(20, 8) NOT NULL,
+      amount NUMERIC(20, 8) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bonus_unlock_events_user_created
+      ON bonus_unlock_events(user_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS usdt_balance_reclassifications (
+      batch_key TEXT NOT NULL,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      cash_amount NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      pending_withdrawal_amount NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      active_position_amount NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      open_limit_amount NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (batch_key, user_id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_profit_fee_distributions_market_created
@@ -720,6 +765,24 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_positions_market_status_currency
       ON positions(market_id, status, currency);
 
+    CREATE TABLE IF NOT EXISTS usdt_loss_refund_offers (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      position_id BIGINT REFERENCES positions(id) ON DELETE CASCADE,
+      market_id BIGINT REFERENCES markets(id) ON DELETE SET NULL,
+      offer_type TEXT NOT NULL,
+      amount NUMERIC(20, 8) NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      referred_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      day_key TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      claimed_at TIMESTAMPTZ,
+      UNIQUE(user_id, position_id, offer_type)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_loss_refund_offers_user_status
+      ON usdt_loss_refund_offers(user_id, status, created_at DESC);
+
     CREATE INDEX IF NOT EXISTS idx_trades_currency_created
       ON trades(currency, created_at DESC);
 
@@ -847,6 +910,177 @@ export async function runMigrations() {
       END IF;
     END
     $refund_spain_regulation_label$;
+
+    -- Before cash/bonus provenance was enforced, admin grants and early promo
+    -- balances could become withdrawable USDT. Reclassify every account that
+    -- has never made a confirmed on-chain deposit, including funds currently
+    -- reserved in positions, limit orders, or pending withdrawals.
+    DO $reclassify_unfunded_usdt$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM app_migrations
+        WHERE key = 'reclassify_unfunded_usdt_v1'
+      ) THEN
+        WITH candidates AS (
+          SELECT
+            users.id AS user_id,
+            GREATEST(0, COALESCE(cash.balance, 0)) AS cash_amount,
+            COALESCE((
+              SELECT SUM(requests.amount)
+              FROM usdt_withdrawal_requests requests
+              WHERE requests.user_id = users.id
+                AND requests.status = 'pending'
+            ), 0) AS pending_withdrawal_amount,
+            COALESCE((
+              SELECT SUM(positions.spent)
+              FROM positions
+              WHERE positions.user_id = users.id
+                AND positions.currency = 'USDT'
+                AND positions.status IN ('open', 'reserved')
+            ), 0) AS active_position_amount,
+            COALESCE((
+              SELECT SUM(
+                CASE
+                  WHEN orders.order_side = 'SELL' THEN orders.remaining_spent
+                  ELSE orders.remaining_reserved
+                END
+              )
+              FROM limit_orders orders
+              WHERE orders.user_id = users.id
+                AND orders.currency = 'USDT'
+                AND orders.status = 'open'
+            ), 0) AS open_limit_amount
+          FROM users
+          LEFT JOIN usdt_balances cash ON cash.user_id = users.id
+          WHERE NOT EXISTS (
+              SELECT 1
+              FROM usdt_deposit_intents deposits
+              WHERE deposits.user_id = users.id
+                AND deposits.status = 'credited'
+                AND COALESCE(deposits.credited_amount, 0) > 0
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM usdt_ledger ledger
+              WHERE ledger.user_id = users.id
+                AND ledger.reason = 'usdt_onchain_deposit'
+                AND ledger.amount > 0
+            )
+        )
+        INSERT INTO usdt_balance_reclassifications (
+          batch_key,
+          user_id,
+          cash_amount,
+          pending_withdrawal_amount,
+          active_position_amount,
+          open_limit_amount
+        )
+        SELECT
+          'reclassify_unfunded_usdt_v1',
+          candidates.user_id,
+          candidates.cash_amount,
+          candidates.pending_withdrawal_amount,
+          candidates.active_position_amount,
+          candidates.open_limit_amount
+        FROM candidates
+        WHERE candidates.cash_amount > 0
+           OR candidates.pending_withdrawal_amount > 0
+           OR candidates.active_position_amount > 0
+           OR candidates.open_limit_amount > 0
+        ON CONFLICT (batch_key, user_id) DO NOTHING;
+
+        INSERT INTO usdt_bonus_balances (user_id, balance, updated_at)
+        SELECT
+          reclassified.user_id,
+          reclassified.cash_amount + reclassified.pending_withdrawal_amount,
+          now()
+        FROM usdt_balance_reclassifications reclassified
+        WHERE reclassified.batch_key = 'reclassify_unfunded_usdt_v1'
+          AND reclassified.cash_amount + reclassified.pending_withdrawal_amount > 0
+        ON CONFLICT (user_id) DO UPDATE SET
+          balance = usdt_bonus_balances.balance + EXCLUDED.balance,
+          updated_at = now();
+
+        INSERT INTO usdt_ledger (user_id, amount, reason, source)
+        SELECT
+          reclassified.user_id,
+          -reclassified.cash_amount,
+          'legacy_cash_reclassified_to_bonus',
+          'migration:reclassify_unfunded_usdt_v1'
+        FROM usdt_balance_reclassifications reclassified
+        WHERE reclassified.batch_key = 'reclassify_unfunded_usdt_v1'
+          AND reclassified.cash_amount > 0;
+
+        INSERT INTO usdt_bonus_ledger (user_id, amount, reason, source)
+        SELECT
+          reclassified.user_id,
+          reclassified.cash_amount,
+          'legacy_cash_reclassified_to_bonus',
+          'migration:reclassify_unfunded_usdt_v1'
+        FROM usdt_balance_reclassifications reclassified
+        WHERE reclassified.batch_key = 'reclassify_unfunded_usdt_v1'
+          AND reclassified.cash_amount > 0
+        UNION ALL
+        SELECT
+          reclassified.user_id,
+          reclassified.pending_withdrawal_amount,
+          'legacy_withdrawal_reclassified_to_bonus',
+          'migration:reclassify_unfunded_usdt_v1'
+        FROM usdt_balance_reclassifications reclassified
+        WHERE reclassified.batch_key = 'reclassify_unfunded_usdt_v1'
+          AND reclassified.pending_withdrawal_amount > 0;
+
+        UPDATE usdt_balances cash
+        SET balance = 0,
+            updated_at = now()
+        FROM usdt_balance_reclassifications reclassified
+        WHERE reclassified.batch_key = 'reclassify_unfunded_usdt_v1'
+          AND reclassified.user_id = cash.user_id;
+
+        UPDATE positions
+        SET bonus_spent = spent,
+            updated_at = now()
+        FROM usdt_balance_reclassifications reclassified
+        WHERE reclassified.batch_key = 'reclassify_unfunded_usdt_v1'
+          AND reclassified.user_id = positions.user_id
+          AND positions.currency = 'USDT'
+          AND positions.status IN ('open', 'reserved');
+
+        UPDATE limit_orders orders
+        SET bonus_reserved = reserved_amount,
+            updated_at = now()
+        FROM usdt_balance_reclassifications reclassified
+        WHERE reclassified.batch_key = 'reclassify_unfunded_usdt_v1'
+          AND reclassified.user_id = orders.user_id
+          AND orders.currency = 'USDT'
+          AND orders.status = 'open'
+          AND orders.order_side = 'BUY';
+
+        UPDATE limit_orders orders
+        SET reserved_bonus_spent = reserved_spent,
+            remaining_bonus_spent = remaining_spent,
+            updated_at = now()
+        FROM usdt_balance_reclassifications reclassified
+        WHERE reclassified.batch_key = 'reclassify_unfunded_usdt_v1'
+          AND reclassified.user_id = orders.user_id
+          AND orders.currency = 'USDT'
+          AND orders.status = 'open'
+          AND orders.order_side = 'SELL';
+
+        UPDATE usdt_withdrawal_requests requests
+        SET status = 'cancelled',
+            updated_at = now()
+        FROM usdt_balance_reclassifications reclassified
+        WHERE reclassified.batch_key = 'reclassify_unfunded_usdt_v1'
+          AND reclassified.user_id = requests.user_id
+          AND requests.status = 'pending';
+
+        INSERT INTO app_migrations (key)
+        VALUES ('reclassify_unfunded_usdt_v1');
+      END IF;
+    END
+    $reclassify_unfunded_usdt$;
   `);
 }
 

@@ -92,6 +92,7 @@ const state = {
   usdtBalance: 0,
   usdtCashBalance: 0,
   usdtBonusBalance: 0,
+  bonusUnlock: null,
   positions: [],
   recentTrades: [],
   marketStats: [],
@@ -3570,6 +3571,7 @@ async function upsertMe() {
   state.usdtBalance = data.usdt_balance || 0;
   state.usdtCashBalance = data.usdt_cash_balance || 0;
   state.usdtBonusBalance = data.usdt_bonus_balance || 0;
+  state.bonusUnlock = data.bonus_unlock || null;
   state.positions = data.positions || [];
   state.marketStats = data.market_stats || [];
   state.referralStats = data.referral_stats || null;
@@ -3897,6 +3899,7 @@ async function loadMe() {
   state.usdtBalance = data.usdt_balance || 0;
   state.usdtCashBalance = data.usdt_cash_balance || 0;
   state.usdtBonusBalance = data.usdt_bonus_balance || 0;
+  state.bonusUnlock = data.bonus_unlock || null;
   state.positions = data.positions || [];
   state.recentTrades = data.recent_trades || [];
   state.marketStats = data.market_stats || [];
@@ -6980,6 +6983,16 @@ function renderTopupSheet() {
     $("walletBonusBalance").textContent = hasBonus
       ? `Бонус: ${formatCurrencyAmount(state.usdtBonusBalance, "USDT")}`
       : "";
+  }
+  if ($("walletBonusUnlock")) {
+    const unlock = state.bonusUnlock;
+    const hasBonus = isUsdt && Number(state.usdtBonusBalance || 0) > 0;
+    $("walletBonusUnlock").classList.toggle("hidden", !hasBonus);
+    $("walletBonusUnlock").textContent = !hasBonus
+      ? ""
+      : unlock?.eligible
+        ? `Разблокировка: ${Number(unlock.rate_pct || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 })}% от прибыли реальных ставок`
+        : "Разблокировка после депозита от 15 USDT";
   }
   if ($("topupCustomAmount") && document.activeElement !== $("topupCustomAmount")) {
     $("topupCustomAmount").value = hasAmount
