@@ -6217,10 +6217,13 @@ export async function getFireLedgerEvents(input = {}) {
 export async function getUsdtLedgerEvents(input = {}) {
   const limit = Math.max(1, Math.min(250, Math.floor(Number(input.limit ?? 100) || 100)));
   const rawAfterTs = input.after_ts ?? input.afterTs;
-  const afterDate = rawAfterTs
-    ? new Date(Number.isFinite(Number(rawAfterTs)) ? Number(rawAfterTs) : rawAfterTs)
-    : new Date(0);
-  const safeAfterDate = Number.isFinite(afterDate.getTime()) ? afterDate : new Date(0);
+  const numericAfterTs = Number(rawAfterTs);
+  const candidateAfterTs = rawAfterTs && Number.isFinite(numericAfterTs)
+    ? new Date(numericAfterTs).toISOString()
+    : String(rawAfterTs || new Date(0).toISOString()).trim();
+  const safeAfterTs = Number.isFinite(new Date(candidateAfterTs).getTime())
+    ? candidateAfterTs
+    : new Date(0).toISOString();
   const result = await query(
     `
       SELECT
@@ -6250,10 +6253,13 @@ export async function getUsdtLedgerEvents(input = {}) {
           ledger.amount,
           ledger.reason,
           ledger.source,
-          ledger.created_at
+          to_char(
+            ledger.created_at AT TIME ZONE 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+          ) AS created_at
         FROM usdt_ledger ledger
         JOIN users ON users.id = ledger.user_id
-        WHERE ledger.created_at > $1
+        WHERE ledger.created_at > $1::timestamptz
 
         UNION ALL
 
@@ -6268,10 +6274,13 @@ export async function getUsdtLedgerEvents(input = {}) {
           ledger.amount,
           ledger.reason,
           ledger.source,
-          ledger.created_at
+          to_char(
+            ledger.created_at AT TIME ZONE 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+          ) AS created_at
         FROM usdt_bonus_ledger ledger
         JOIN users ON users.id = ledger.user_id
-        WHERE ledger.created_at > $1
+        WHERE ledger.created_at > $1::timestamptz
       ) ledger_events
       LEFT JOIN LATERAL (
         SELECT substring(ledger_events.source from '^market:([0-9]+)')::bigint AS market_id
@@ -6293,7 +6302,7 @@ export async function getUsdtLedgerEvents(input = {}) {
       ORDER BY created_at ASC, event_id ASC
       LIMIT $2
     `,
-    [safeAfterDate, limit],
+    [safeAfterTs, limit],
   );
 
   return result.rows.map(mapUsdtLedgerEvent);
