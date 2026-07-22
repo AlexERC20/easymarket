@@ -6493,12 +6493,14 @@ function setBtcMarketsSheetOpen(open) {
   }
 }
 
-function animateMarketSwitch() {
+// mode "soft" — фейд без сдвига карточки: при клике по десктопным стрелкам
+// slide-анимация уводила бы кнопку из-под курсора.
+function animateMarketSwitch(mode = "slide") {
   const card = document.querySelector(".market-card");
   if (!card) return;
-  card.classList.remove("market-switching");
+  card.classList.remove("market-switching", "market-switching-soft");
   void card.offsetWidth;
-  card.classList.add("market-switching");
+  card.classList.add(mode === "soft" ? "market-switching-soft" : "market-switching");
 }
 
 function selectBtcMarket(marketId) {
@@ -10315,7 +10317,7 @@ function getMarketCarouselIndex(markets) {
   return Math.max(0, markets.findIndex((market) => `${market.type}:${market.id}` === currentKey));
 }
 
-function stepMarketCarousel(direction) {
+function stepMarketCarousel(direction, { soft = false } = {}) {
   const markets = getMarketCarouselEntries();
   if (markets.length <= 1) {
     return;
@@ -10337,7 +10339,7 @@ function stepMarketCarousel(direction) {
   state.commentsMarketId = null;
   state.sideSelectedMarketId = null;
   triggerHaptic("selection");
-  animateMarketSwitch();
+  animateMarketSwitch(soft ? "soft" : "slide");
   renderMarket();
   renderTradeTicket();
   renderMarketChart();
@@ -10394,12 +10396,12 @@ function updateMarketNavArrows() {
 
 $("marketNavPrev")?.addEventListener("click", () => {
   pruneClosedLocalMarkets({ renderLists: true });
-  stepMarketCarousel(-1);
+  stepMarketCarousel(-1, { soft: true });
 });
 
 $("marketNavNext")?.addEventListener("click", () => {
   pruneClosedLocalMarkets({ renderLists: true });
-  stepMarketCarousel(1);
+  stepMarketCarousel(1, { soft: true });
 });
 
 document.addEventListener("keydown", (event) => {
@@ -10419,7 +10421,7 @@ document.addEventListener("keydown", (event) => {
   }
   event.preventDefault();
   pruneClosedLocalMarkets({ renderLists: true });
-  stepMarketCarousel(event.key === "ArrowRight" ? 1 : -1);
+  stepMarketCarousel(event.key === "ArrowRight" ? 1 : -1, { soft: true });
 });
 
 document.addEventListener("click", (event) => {

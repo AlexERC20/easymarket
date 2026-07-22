@@ -613,6 +613,21 @@ h2 {
   }
 }
 
+/* Переключение десктопными стрелками: фейд без сдвига, чтобы кнопка
+   не уезжала из-под курсора. */
+.market-card.market-switching-soft {
+  animation: marketSwitchSoft var(--motion-slow) var(--ease-default) both;
+}
+
+@keyframes marketSwitchSoft {
+  0% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
 /* Десктопные стрелки переключения рынков; на телефонах остаётся только свайп.
    Лежат в .chart-frame, а не в .market-card: у рамки графика фиксированная
    высота 204px у всех рынков, поэтому стрелки не съезжают по вертикали при
