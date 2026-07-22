@@ -67,7 +67,10 @@ import {
   upsertPromoCampaign,
   upsertUser,
 } from "./services/marketService.js";
-import { getBonusEconomyAudit } from "./services/bonusEconomyService.js";
+import {
+  getBonusEconomyAudit,
+  getEconomyIntegrityAudit,
+} from "./services/bonusEconomyService.js";
 import { PriceUnavailableError } from "./services/priceService.js";
 import { runDatabaseCleanup, runStartupDatabaseRescue } from "./services/databaseCleanupService.js";
 import {
@@ -1398,6 +1401,18 @@ app.post("/api/bridge/economy/settings", requireBridgeSecret, async (req, res) =
 app.get("/api/bridge/economy/bonus-audit", requireBridgeSecret, async (_req, res) => {
   try {
     const audit = await getBonusEconomyAudit();
+    res.status(200).json({
+      ok: true,
+      audit,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/integrity-audit", requireBridgeSecret, async (_req, res) => {
+  try {
+    const audit = await getEconomyIntegrityAudit();
     res.status(200).json({
       ok: true,
       audit,

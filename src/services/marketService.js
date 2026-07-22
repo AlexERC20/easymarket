@@ -3,6 +3,7 @@ import { query, toNumber, withTransaction } from "../db.js";
 import {
   fundBonusUnlockReserve,
   getBonusUnlockStatusForUser,
+  getLightningStreakMultiplier,
   unlockBonusAfterResolvedMarket,
 } from "./bonusEconomyService.js";
 import { getBtcPrice, PriceUnavailableError } from "./priceService.js";
@@ -3094,7 +3095,16 @@ export async function upsertUser(input) {
         [telegramId],
       );
       const alreadyHasReferrer = Boolean(String(existingResult.rows[0]?.referred_by_telegram_id || "").trim());
-      if (alreadyHasReferrer || await wouldCreateReferralCycle(client, telegramId, validatedReferredBy)) {
+      const referrerResult = await client.query(
+        "SELECT 1 FROM users WHERE telegram_id = $1 LIMIT 1",
+        [validatedReferredBy],
+      );
+      const referrerExists = Boolean(referrerResult.rows[0]);
+      if (
+        alreadyHasReferrer
+        || !referrerExists
+        || await wouldCreateReferralCycle(client, telegramId, validatedReferredBy)
+      ) {
         validatedReferredBy = null;
       }
     }
@@ -3144,7 +3154,7 @@ export async function upsertUser(input) {
       [user.id],
     );
 
-    if (safeReferredBy) {
+    if (validatedReferredBy) {
       const referralSignupResult = await client.query(
         `
           INSERT INTO fire_task_claims (user_id, task_key, amount, day_key, source)
@@ -3152,7 +3162,7 @@ export async function upsertUser(input) {
           ON CONFLICT DO NOTHING
           RETURNING *
         `,
-        [user.id, REFERRAL_SIGNUP_BONUS, `referral:${safeReferredBy}`],
+        [user.id, REFERRAL_SIGNUP_BONUS, `referral:${validatedReferredBy}`],
       );
       if (referralSignupResult.rows[0]) {
         await adjustBalance(
@@ -3160,7 +3170,7 @@ export async function upsertUser(input) {
           user.id,
           REFERRAL_SIGNUP_BONUS,
           "referral_signup_bonus",
-          `referral:${safeReferredBy}`,
+          `referral:${validatedReferredBy}`,
         );
       }
       const signupBonusUsdt = Math.round(Number(config.referralSignupBonusUsdt || 0) * 100) / 100;
@@ -3172,7 +3182,7 @@ export async function upsertUser(input) {
             ON CONFLICT DO NOTHING
             RETURNING *
           `,
-          [user.id, signupBonusUsdt, `referral:${safeReferredBy}`],
+          [user.id, signupBonusUsdt, `referral:${validatedReferredBy}`],
         );
         if (usdtSignupResult.rows[0]) {
           await adjustUsdtBonusBalance(
@@ -3180,7 +3190,7 @@ export async function upsertUser(input) {
             user.id,
             signupBonusUsdt,
             "referral_signup_bonus_usdt",
-            `referral:${safeReferredBy}`,
+            `referral:${validatedReferredBy}`,
           );
         }
       }
@@ -5618,9 +5628,7 @@ function getEpochWeekKey(dayKey) {
 }
 
 function streakMultiplier(streak) {
-  if (streak > 21) return 2;
-  if (streak > 7) return 1.5;
-  return 1;
+  return getLightningStreakMultiplier(streak);
 }
 
 function mapStreakState(row, extra = {}) {
@@ -5984,7 +5992,9 @@ async function getClansWithClient(client, userId = 0) {
       subscribe_points: 5,
       private_chat_points: 10,
       create_cost: 10000,
-      weekly_prizes_usdt: [5000, 3000, 1000],
+      reward_model: "funded_monthly_bank",
+      winner_clans: 1,
+      rewarded_members_limit: CLAN_REWARD_MAX_MEMBERS,
     },
   };
 }
@@ -9030,8 +9040,10 @@ async function settleOpenMarketPositions(client, market, winner) {
       const current = realResultsByUser.get(String(position.user_id)) || {
         userId: Number(position.user_id),
         realNetPnl: 0,
+        cashSpent: 0,
       };
       current.realNetPnl += toNumber(baseCredit.cash) - cashSpent;
+      current.cashSpent += cashSpent;
       realResultsByUser.set(String(position.user_id), current);
     }
 
@@ -9055,24 +9067,25 @@ async function settleOpenMarketPositions(client, market, winner) {
       }
     }
 
-    if (currency === "USDT") {
-      await awardClanPoints(
-        client,
-        position.user_id,
-        market.id,
-        position.side === winner ? 3 : -1,
-        "market_result",
-        currency,
-      );
-    }
   }
 
   for (const result of realResultsByUser.values()) {
+    const realNetPnl = roundMoney(result.realNetPnl);
     await unlockBonusAfterResolvedMarket(client, {
       userId: result.userId,
       marketId: market.id,
-      realNetPnl: roundMoney(result.realNetPnl),
+      realNetPnl,
     });
+    if (result.cashSpent > 0 && realNetPnl !== 0) {
+      await awardClanPoints(
+        client,
+        result.userId,
+        market.id,
+        realNetPnl > 0 ? 3 : -1,
+        "market_result",
+        "USDT",
+      );
+    }
   }
 }
 

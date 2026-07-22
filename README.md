@@ -134,7 +134,11 @@ EasyMarket keeps withdrawable and promotional USDT separate:
 
 After a confirmed deposit, real cash is spent before bonus. Profitable settled real-money play can gradually convert bonus into withdrawable USDT. The default tiers are 0.25% after 15 USDT deposited, 0.50% after 50, 0.75% after 200, and 1% after 500. The lifetime conversion cap is 25% of confirmed deposits.
 
+The daily `Lightning Charge` streak accelerates the tier rate: days 1-7 use `x1`, days 8-21 use `x1.5`, and day 22 onward uses `x2`. The streak must be checked in for the current UTC day. The multiplier changes only conversion speed; every conversion is still capped by the funded reserve, bonus balance, and lifetime deposit cap.
+
 Conversions are paid only from `bonus_unlock_reserve`. By default, one percentage point of the 7% profit fee funds this reserve; bonus-funded fee portions are burned as bonus and never counted as real project, referral, clan, or reserve income. The AV admin bot can change total/referral/clan/reserve percentages with four values such as `7 1 1 1`.
+
+Referral profit share and the clan bank are also funded only from the cash-backed part of a winner's fee. Signup/first-bet referral rewards remain promotional bonus USDT. Clan market-result points require real USDT participation and are calculated once from the user's net result across both sides. The monthly clan prize is the actually funded bank, not a fixed promise. Migration `reset_clan_reward_fund_backed_v1` resets old clan accruals with compensating ledger entries instead of deleting history.
 
 ## Render
 
@@ -222,9 +226,10 @@ GET  /api/bridge/fire/balance?telegram_id=123
 GET  /api/bridge/fire/ledger?after_id=0&limit=100
 POST /api/bridge/usdt/add
 GET  /api/bridge/economy/bonus-audit
+GET  /api/bridge/economy/integrity-audit
 ```
 
-`POST /api/bridge/usdt/add` is an admin promotional grant and credits bonus USDT only. `/api/bridge/economy/bonus-audit` returns aggregate cash/bonus/reclassification/reserve totals without user identities.
+`POST /api/bridge/usdt/add` is an admin promotional grant and credits bonus USDT only. `/api/bridge/economy/bonus-audit` returns aggregate cash/bonus/reclassification/reserve totals without user identities. `/api/bridge/economy/integrity-audit` compares cash-funded fee allocations against referral, clan, and reserve ledgers from the backed-economy reset point.
 
 Use `/api/bridge/fire/sync` when the local bot is the source of truth and EasyMarket must mirror the exact bot balance:
 

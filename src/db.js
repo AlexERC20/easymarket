@@ -574,11 +574,19 @@ export async function runMigrations() {
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       market_id BIGINT REFERENCES markets(id) ON DELETE SET NULL,
       deposit_total NUMERIC(20, 8) NOT NULL,
+      base_unlock_rate_bps INTEGER NOT NULL DEFAULT 0,
       unlock_rate_bps INTEGER NOT NULL,
+      streak_days INTEGER NOT NULL DEFAULT 0,
+      streak_multiplier_bps INTEGER NOT NULL DEFAULT 10000,
       real_net_pnl NUMERIC(20, 8) NOT NULL,
       amount NUMERIC(20, 8) NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    ALTER TABLE bonus_unlock_events
+      ADD COLUMN IF NOT EXISTS base_unlock_rate_bps INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS streak_days INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS streak_multiplier_bps INTEGER NOT NULL DEFAULT 10000;
 
     CREATE INDEX IF NOT EXISTS idx_bonus_unlock_events_user_created
       ON bonus_unlock_events(user_id, created_at DESC);
@@ -1081,6 +1089,73 @@ export async function runMigrations() {
       END IF;
     END
     $reclassify_unfunded_usdt$;
+
+    -- Start the backed clan-bank economy from a clean balance without deleting
+    -- history. Negative reset entries release every old accrual while preserving
+    -- a complete audit trail; future bank entries come only from funded fees.
+    DO $reset_clan_reward_fund$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM app_migrations
+        WHERE key = 'reset_clan_reward_fund_backed_v1'
+      ) THEN
+        INSERT INTO clan_reward_fund_ledger (
+          clan_id,
+          market_id,
+          position_id,
+          trade_id,
+          currency,
+          amount,
+          month_key,
+          source
+        )
+        SELECT
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          currency,
+          -SUM(amount),
+          month_key,
+          'economy_reset:reset_clan_reward_fund_backed_v1'
+        FROM clan_reward_fund_ledger
+        GROUP BY month_key, currency
+        HAVING ABS(SUM(amount)) > 0.00000001;
+
+        INSERT INTO app_migrations (key)
+        VALUES ('reset_clan_reward_fund_backed_v1');
+      END IF;
+    END
+    $reset_clan_reward_fund$;
+
+    -- Referral rewards require a real inviter. Remove legacy self-links and
+    -- dangling ids that could only have produced promotional bonus liabilities.
+    DO $sanitize_referral_links$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM app_migrations
+        WHERE key = 'sanitize_referral_links_v1'
+      ) THEN
+        UPDATE users referred
+        SET referred_by_telegram_id = NULL,
+            updated_at = now()
+        WHERE referred.referred_by_telegram_id IS NOT NULL
+          AND (
+            referred.referred_by_telegram_id = referred.telegram_id
+            OR NOT EXISTS (
+              SELECT 1
+              FROM users referrer
+              WHERE referrer.telegram_id = referred.referred_by_telegram_id
+            )
+          );
+
+        INSERT INTO app_migrations (key)
+        VALUES ('sanitize_referral_links_v1');
+      END IF;
+    END
+    $sanitize_referral_links$;
   `);
 }
 

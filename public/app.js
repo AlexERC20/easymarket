@@ -6991,7 +6991,7 @@ function renderTopupSheet() {
     $("walletBonusUnlock").textContent = !hasBonus
       ? ""
       : unlock?.eligible
-        ? `Разблокировка: ${Number(unlock.rate_pct || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 })}% от прибыли реальных ставок`
+        ? `Разблокировка: до ${Number(unlock.rate_pct || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 })}% от прибыли${Number(unlock.streak_multiplier || 1) > 1 ? ` · заряд x${unlock.streak_multiplier}` : ""}`
         : "Разблокировка после депозита от 15 USDT";
   }
   if ($("topupCustomAmount") && document.activeElement !== $("topupCustomAmount")) {
@@ -9390,6 +9390,19 @@ async function checkinStreakDaily() {
       }),
     });
     state.streak = result;
+    if (state.bonusUnlock) {
+      const baseRateBps = Number(state.bonusUnlock.base_rate_bps ?? state.bonusUnlock.rate_bps ?? 0);
+      const multiplier = Number(result.multiplier || 1);
+      const rateBps = Math.round(baseRateBps * multiplier);
+      state.bonusUnlock = {
+        ...state.bonusUnlock,
+        rate_bps: rateBps,
+        rate_pct: rateBps / 100,
+        streak_days: Number(result.current_streak || 0),
+        streak_checked_today: true,
+        streak_multiplier: multiplier,
+      };
+    }
     if (result.golden_fish) setAquariumGoldenFish(true);
     renderStreakCard();
     if (result.lootbox?.amount) {
@@ -9430,8 +9443,8 @@ function renderStreakCard() {
   const subtitle = $("streakSubtitle");
   if (subtitle) {
     subtitle.textContent = Number(streak.multiplier || 1) > 1
-      ? `Множитель наград x${streak.multiplier} · лутбокс на 7-й день`
-      : "Заходи каждый день — на 7-й лутбокс";
+      ? `Бонус → баланс x${streak.multiplier} быстрее · лутбокс на 7-й день`
+      : "Заряжай входами — ускоряй переход бонуса в баланс";
   }
   const daysBox = $("streakDays");
   if (daysBox) {
