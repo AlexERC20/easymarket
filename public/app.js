@@ -10394,28 +10394,6 @@ function updateMarketNavArrows() {
   nextButton.disabled = markets.length <= 1 || currentIndex >= markets.length - 1;
 }
 
-// Прибивает стрелки к центру графика в px от верха карточки — один раз, а не
-// на каждый рендер: живая привязка дёргала их, когда контент вокруг графика
-// транзиентно менял высоту при смене рынка.
-function pinMarketNavArrows() {
-  const card = document.querySelector(".market-card");
-  const frame = card?.querySelector(".chart-frame");
-  if (!card || !frame) {
-    return;
-  }
-  const cardRect = card.getBoundingClientRect();
-  const frameRect = frame.getBoundingClientRect();
-  if (!frameRect.height) {
-    return;
-  }
-  const center = frameRect.top - cardRect.top + frameRect.height / 2;
-  card.style.setProperty("--market-nav-top", `${Math.round(center)}px`);
-}
-
-pinMarketNavArrows();
-window.addEventListener("load", pinMarketNavArrows);
-window.addEventListener("resize", pinMarketNavArrows);
-
 $("marketNavPrev")?.addEventListener("click", () => {
   pruneClosedLocalMarkets({ renderLists: true });
   stepMarketCarousel(-1, { soft: true });
