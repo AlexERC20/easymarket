@@ -613,6 +613,65 @@ h2 {
   }
 }
 
+/* Десктопные стрелки переключения рынков; на телефонах остаётся только свайп. */
+.market-nav-arrow {
+  display: none;
+  position: absolute;
+  top: 50%;
+  z-index: 5;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0 2px;
+  border: 1px solid rgba(53, 246, 255, 0.24);
+  border-radius: 50%;
+  background: rgba(9, 14, 32, 0.72);
+  color: rgba(226, 242, 255, 0.85);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition:
+    background var(--motion-fast) var(--ease-default),
+    border-color var(--motion-fast) var(--ease-default),
+    color var(--motion-fast) var(--ease-default),
+    opacity var(--motion-fast) var(--ease-default),
+    transform var(--motion-fast) var(--ease-default);
+}
+
+.market-nav-prev {
+  left: 10px;
+}
+
+.market-nav-next {
+  right: 10px;
+}
+
+.market-nav-arrow:hover:not(:disabled) {
+  background: rgba(53, 246, 255, 0.18);
+  border-color: rgba(53, 246, 255, 0.5);
+  color: #ffffff;
+  transform: translateY(-50%) scale(1.08);
+}
+
+.market-nav-arrow:disabled {
+  opacity: 0.22;
+  cursor: default;
+  pointer-events: none;
+}
+
+.telegram-desktop-shell .market-nav-arrow {
+  display: flex;
+}
+
+/* Обычный десктопный браузер вне Telegram (dev-режим): тоже показываем стрелки. */
+@media (hover: hover) and (pointer: fine) {
+  body:not(.telegram-shell) .market-nav-arrow {
+    display: flex;
+  }
+}
+
 .market-hero {
   align-items: flex-start;
   gap: 11px;

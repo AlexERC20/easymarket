@@ -4888,6 +4888,7 @@ function renderMarket() {
     button.disabled = !hasMarket || !state.user || !canBuyMarket;
   });
   renderOrderbookPanel();
+  updateMarketNavArrows();
 }
 
 // Пишем в DOM только при реальной смене значения: тик 250мс раньше делал
@@ -10277,34 +10278,8 @@ $("betConfirmBtn")?.addEventListener("click", async () => {
   scheduleCoreRefresh({ delay: 120, includeComments: true });
 });
 
-let touchStartX = null;
-let touchStartY = null;
-document.querySelector(".market-card")?.addEventListener("touchstart", (event) => {
-  const touch = event.touches[0];
-  touchStartX = touch?.clientX ?? null;
-  touchStartY = touch?.clientY ?? null;
-}, { passive: true });
-
-document.querySelector(".market-card")?.addEventListener("touchend", (event) => {
-  pruneClosedLocalMarkets({ renderLists: true });
-  if (touchStartX === null || touchStartY === null) {
-    return;
-  }
-  if (!state.worldCupMarkets.length && !state.btcMarkets.length && !state.topMarkets.length && !state.sportsMarkets.length && !state.specialMarkets.length) {
-    touchStartX = null;
-    touchStartY = null;
-    return;
-  }
-  const touch = event.changedTouches[0];
-  const dx = (touch?.clientX ?? touchStartX) - touchStartX;
-  const dy = (touch?.clientY ?? touchStartY) - touchStartY;
-  touchStartX = null;
-  touchStartY = null;
-  if (Math.abs(dx) < 54 || Math.abs(dx) < Math.abs(dy) * 1.3) {
-    return;
-  }
-
-  const markets = [
+function getMarketCarouselEntries() {
+  return [
     { type: "home", id: null },
     ...state.btcMarkets
       .filter((market) => !isMarketClosedForCarousel(market))
@@ -10323,9 +10298,9 @@ document.querySelector(".market-card")?.addEventListener("touchend", (event) => 
       .filter((market) => !isMarketClosedForCarousel(market))
       .map((market) => ({ type: "special", id: market.id })),
   ];
-  if (markets.length <= 1) {
-    return;
-  }
+}
+
+function getMarketCarouselIndex(markets) {
   const currentKey = state.selectedSpecialMarketId
     ? `special:${state.selectedSpecialMarketId}`
     : state.selectedSportsMarketId
@@ -10337,8 +10312,16 @@ document.querySelector(".market-card")?.addEventListener("touchend", (event) => 
     : state.selectedBtcMarketId
       ? `btc:${state.selectedBtcMarketId}`
       : "home:null";
-  const currentIndex = Math.max(0, markets.findIndex((market) => `${market.type}:${market.id}` === currentKey));
-  const nextIndex = dx < 0
+  return Math.max(0, markets.findIndex((market) => `${market.type}:${market.id}` === currentKey));
+}
+
+function stepMarketCarousel(direction) {
+  const markets = getMarketCarouselEntries();
+  if (markets.length <= 1) {
+    return;
+  }
+  const currentIndex = getMarketCarouselIndex(markets);
+  const nextIndex = direction > 0
     ? Math.min(markets.length - 1, currentIndex + 1)
     : Math.max(0, currentIndex - 1);
   const nextMarket = markets[nextIndex];
@@ -10359,7 +10342,85 @@ document.querySelector(".market-card")?.addEventListener("touchend", (event) => 
   renderTradeTicket();
   renderMarketChart();
   maybeLoadComments(true);
+}
+
+let touchStartX = null;
+let touchStartY = null;
+document.querySelector(".market-card")?.addEventListener("touchstart", (event) => {
+  const touch = event.touches[0];
+  touchStartX = touch?.clientX ?? null;
+  touchStartY = touch?.clientY ?? null;
 }, { passive: true });
+
+document.querySelector(".market-card")?.addEventListener("touchend", (event) => {
+  pruneClosedLocalMarkets({ renderLists: true });
+  if (touchStartX === null || touchStartY === null) {
+    return;
+  }
+  const touch = event.changedTouches[0];
+  const dx = (touch?.clientX ?? touchStartX) - touchStartX;
+  const dy = (touch?.clientY ?? touchStartY) - touchStartY;
+  touchStartX = null;
+  touchStartY = null;
+  if (Math.abs(dx) < 54 || Math.abs(dx) < Math.abs(dy) * 1.3) {
+    return;
+  }
+  stepMarketCarousel(dx < 0 ? 1 : -1);
+}, { passive: true });
+
+// Стрелки и клавиатура — только десктоп: CSS прячет кнопки на телефонах,
+// а isDesktopMarketNavActive повторяет ту же логику для keydown.
+function isDesktopMarketNavActive() {
+  if (document.body.classList.contains("telegram-desktop-shell")) {
+    return true;
+  }
+  if (document.body.classList.contains("telegram-shell")) {
+    return false;
+  }
+  return Boolean(window.matchMedia?.("(hover: hover) and (pointer: fine)")?.matches);
+}
+
+function updateMarketNavArrows() {
+  const prevButton = $("marketNavPrev");
+  const nextButton = $("marketNavNext");
+  if (!prevButton || !nextButton) {
+    return;
+  }
+  const markets = getMarketCarouselEntries();
+  const currentIndex = getMarketCarouselIndex(markets);
+  prevButton.disabled = markets.length <= 1 || currentIndex <= 0;
+  nextButton.disabled = markets.length <= 1 || currentIndex >= markets.length - 1;
+}
+
+$("marketNavPrev")?.addEventListener("click", () => {
+  pruneClosedLocalMarkets({ renderLists: true });
+  stepMarketCarousel(-1);
+});
+
+$("marketNavNext")?.addEventListener("click", () => {
+  pruneClosedLocalMarkets({ renderLists: true });
+  stepMarketCarousel(1);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+    return;
+  }
+  if (!isDesktopMarketNavActive()) {
+    return;
+  }
+  const target = event.target;
+  if (target instanceof HTMLElement
+    && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
+    return;
+  }
+  if (document.querySelector(".sheet-open")) {
+    return;
+  }
+  event.preventDefault();
+  pruneClosedLocalMarkets({ renderLists: true });
+  stepMarketCarousel(event.key === "ArrowRight" ? 1 : -1);
+});
 
 document.addEventListener("click", (event) => {
   const button = event.target.closest(".sell-button");
