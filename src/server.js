@@ -1474,6 +1474,19 @@ app.get("/api/bridge/usdt/ledger", requireBridgeSecret, async (req, res) => {
   }
 });
 
+app.get("/api/bridge/tasks/state", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await getEngagementState({
+      telegram_id: req.query?.telegram_id,
+      username: req.query?.username,
+      first_name: req.query?.first_name,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
 app.post("/api/bridge/tasks/complete", requireBridgeSecret, async (req, res) => {
   try {
     const result = await completeVerifiedTask({

@@ -5499,6 +5499,8 @@ async function getDailyTaskProgress(client, userId, taskKey) {
     unit: task.unit,
     level: levelIndex + 1,
     levels: task.levels.length,
+    day_key: dayKey,
+    claimed_levels: [...claimedLevels].sort((left, right) => left - right),
     amount: resolveTaskAmount(level, taskKey),
     claim_task_key: allClaimed ? null : getTaskLevelClaimKey(taskKey, levelIndex + 1),
     ready: !allClaimed && Number(value || 0) >= Number(level.target || 1),

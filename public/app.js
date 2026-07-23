@@ -5988,6 +5988,15 @@ async function handleClanLaunchLink() {
   await joinClan({ clan_id: action.clanId }, null, "Ты вошёл в клан по ссылке.");
 }
 
+async function handleAppLaunchLink() {
+  const launchValue = String(getLaunchRefValue() || "").trim();
+  if (/^tasks?$/i.test(launchValue)) {
+    setTasksSheetOpen(true);
+    return;
+  }
+  await handleClanLaunchLink();
+}
+
 async function shareClan(clan) {
   if (!clan?.id) {
     return;
@@ -10612,7 +10621,7 @@ loadPublicConfig()
     void checkinStreakDaily(); // стрик «Заряд молнии»: отметка входа + лутбокс
     void loadEngagementState();
     return refreshAll()
-      .then(() => handleClanLaunchLink().catch(() => showToast("Клан по ссылке не найден.")))
+      .then(() => handleAppLaunchLink().catch(() => showToast("Не получилось открыть нужный раздел.")))
       .then(() => {
         window.setTimeout(() => {
           void runSingleFlight("btcMarkets", loadBtcMarkets).catch(() => undefined);
