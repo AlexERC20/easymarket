@@ -5099,7 +5099,8 @@ const DAILY_PROGRESS_TASKS = {
     levels: [{ target: 1, amount: 50 }],
   },
   daily_football_prediction: {
-    unit: "футбол",
+    // Keep the legacy key so existing claims/progress remain valid.
+    unit: "спорт",
     levels: [
       { target: 1, amount: 50 },
       { target: 3, amount: 100 },
@@ -5373,14 +5374,16 @@ async function getDailyTaskValue(client, userId, taskKey) {
           AND trades.action = 'BUY'
           AND (
             markets.symbol LIKE $2
-            OR (
-              sports_meta.feed_group = 'SPORT'
-              AND sports_meta.sport = 'soccer'
-            )
+            OR markets.symbol LIKE $3
+            OR sports_meta.feed_group = 'SPORT'
           )
           AND trades.created_at >= date_trunc('day', now())
       `,
-      [userId, `${WORLD_CUP_SYMBOL_PREFIX}%`],
+      [
+        userId,
+        `${WORLD_CUP_SYMBOL_PREFIX}%`,
+        `${SPORTS_MARKET_SYMBOL_PREFIX}%`,
+      ],
     );
     return Number(result.rows[0]?.count || 0);
   }

@@ -9215,7 +9215,7 @@ const DAILY_TASK_META = {
   daily_topup_stars: { title: "Пополнить звёзды", desc: "Зачисли минимум 500 звёзд", icon: "wallet" },
   daily_topup_usdt: { title: "Пополнить USDT", desc: "Зачисли минимум 50 USDT", icon: "dollar" },
   daily_btc_prediction: { title: "Прогноз по BTC", desc: "1 прогноз в BTC-маркете", icon: "btc" },
-  daily_football_prediction: { title: "Прогноз на футбол", desc: "1 футбольный прогноз", icon: "ball" },
+  daily_football_prediction: { title: "Прогноз на спорт", desc: "1 прогноз на спортивное событие", icon: "trophy" },
   daily_btc_5_predictions: { title: "BTC-прогнозы", desc: "Лестница прогнозов по BTC", icon: "bars" },
   daily_win_1: { title: "Выиграй прогноз", desc: "Первая победа дня", icon: "trophy" },
   daily_win_streak_5: { title: "5 побед подряд", desc: "Серия из пяти побед", icon: "streak" },
@@ -9224,7 +9224,7 @@ const DAILY_TASK_META = {
   daily_no_win: { title: "Против толпы", desc: "Выиграй ставкой на NO", icon: "bear" },
   daily_feed_fish: { title: "Покорми рыбок", desc: "Встряхни телефон на BTC 5m", icon: "fish" },
   daily_comment: { title: "Голос рынка", desc: "Оставь комментарий под рынком", icon: "chat" },
-  daily_explore_3: { title: "Разведка рынков", desc: "Открой BTC-лист, рынок из него и футбол", icon: "compass" },
+  daily_explore_3: { title: "Разведка рынков", desc: "Открой BTC-лист, рынок из него и спорт", icon: "compass" },
   daily_share_story: { title: "Сторис с выигрышем", desc: "Шэрни выигрыш — можно из истории в статистике", icon: "share" },
 };
 
@@ -9346,7 +9346,9 @@ function getDailyTaskDisplayMeta(taskKey) {
     daily_topup_stars: `Пополнить ${targetText} звёзд`,
     daily_topup_usdt: `Пополнить ${targetText} USDT`,
     daily_btc_prediction: `${targetText} BTC-прогноз`,
-    daily_football_prediction: `${targetText} футбольных прогнозов`,
+    daily_football_prediction: target === 1
+      ? "1 спортивный прогноз"
+      : `${targetText} спортивных прогнозов`,
     daily_btc_5_predictions: target === 1 ? "1 BTC-прогноз" : `${targetText} BTC-прогнозов`,
     daily_win_1: `${targetText} побед за день`,
     daily_win_streak_5: `${targetText} побед подряд`,
