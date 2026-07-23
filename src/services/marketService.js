@@ -5803,6 +5803,14 @@ export async function getEngagementState(input) {
   }
 
   const once = {
+    av_channel: {
+      ready: claimed.has("av_channel:once"),
+      claimed: claimed.has("av_channel:once"),
+    },
+    av_chat: {
+      ready: claimed.has("av_chat:once"),
+      claimed: claimed.has("av_chat:once"),
+    },
     join_clan: {
       amount: TASK_AMOUNTS.join_clan(),
       ready: await isDailyTaskReady(shim, user.id, "join_clan"),
