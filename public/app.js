@@ -650,10 +650,16 @@ function buildClanInviteUrl(clan) {
   return buildTelegramMiniAppLaunchUrl(`clan_${clan?.id || ""}`);
 }
 
-function getLaunchClanId() {
+function getLaunchClanAction() {
   const raw = String(getLaunchRefValue() || "").trim();
+  if (/^clans?_create$/i.test(raw)) {
+    return { type: "create" };
+  }
+  if (/^clans?$/i.test(raw)) {
+    return { type: "list" };
+  }
   const match = raw.match(/^clan[_:-](\d+)$/i);
-  return match ? Number(match[1]) : null;
+  return match ? { type: "join", clanId: Number(match[1]) } : null;
 }
 
 function renderClanIconPicker() {
@@ -5964,13 +5970,22 @@ async function handleClanLaunchLink() {
   if (state.handledClanLaunch || !state.user?.telegram_id) {
     return;
   }
-  const clanId = getLaunchClanId();
-  if (!clanId) {
+  const action = getLaunchClanAction();
+  if (!action) {
     return;
   }
   state.handledClanLaunch = true;
+  if (action.type === "create") {
+    setClansSheetOpen(true, { view: "create" });
+    return;
+  }
+  if (action.type === "list") {
+    setClansSheetOpen(true, { view: "leaderboard" });
+    return;
+  }
+
   setClansSheetOpen(true);
-  await joinClan({ clan_id: clanId }, null, "Ты вошёл в клан по ссылке.");
+  await joinClan({ clan_id: action.clanId }, null, "Ты вошёл в клан по ссылке.");
 }
 
 async function shareClan(clan) {
