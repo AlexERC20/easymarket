@@ -97,6 +97,7 @@ const DAILY_TASK_KEYS = [
   "daily_topup_stars",
   "daily_topup_usdt",
   "daily_football_prediction",
+  "daily_kyivstoner_bet",
   "daily_btc_5_predictions",
   "daily_win_1",
   "daily_win_streak_5",
@@ -2095,6 +2096,7 @@ function getClanTaskPoints(taskKey) {
     daily_topup_usdt: 5,
     daily_btc_prediction: 3,
     daily_football_prediction: 3,
+    daily_kyivstoner_bet: 3,
     daily_btc_5_predictions: 8,
     daily_win_1: 5,
     daily_win_streak_5: 12,
@@ -2121,6 +2123,7 @@ async function getDailyBonusRemaining(client, userId) {
           'task_daily_topup_usdt',
           'task_daily_btc_prediction',
           'task_daily_football_prediction',
+          'task_daily_kyivstoner_bet',
           'task_daily_btc_5_predictions',
           'task_daily_win_1',
           'task_daily_win_streak_5',
@@ -4907,6 +4910,7 @@ const TASK_AMOUNTS = {
   daily_topup_usdt: () => scaleTaskReward(300, "daily_topup_usdt"),
   daily_btc_prediction: () => scaleTaskReward(50, "daily_btc_prediction"),
   daily_football_prediction: () => scaleTaskReward(50, "daily_football_prediction"),
+  daily_kyivstoner_bet: () => scaleTaskReward(50, "daily_kyivstoner_bet"),
   daily_btc_5_predictions: () => scaleTaskReward(300, "daily_btc_5_predictions"),
   daily_win_1: () => scaleTaskReward(50, "daily_win_1"),
   daily_win_streak_5: () => scaleTaskReward(300, "daily_win_streak_5"),
@@ -4925,6 +4929,7 @@ const CORE_DAILY_TASK_KEYS = new Set([
   "daily_topup_stars",
   "daily_topup_usdt",
   "daily_football_prediction",
+  "daily_kyivstoner_bet",
   "daily_btc_5_predictions",
   "daily_win_1",
   "daily_win_streak_5",
@@ -5107,6 +5112,14 @@ const DAILY_PROGRESS_TASKS = {
       { target: 5, amount: 180 },
       { target: 10, amount: 350 },
       { target: 20, amount: 700 },
+    ],
+  },
+  daily_kyivstoner_bet: {
+    unit: "ставок",
+    levels: [
+      { target: 1, amount: 50 },
+      { target: 3, amount: 100 },
+      { target: 5, amount: 180 },
     ],
   },
   daily_btc_5_predictions: {
@@ -5384,6 +5397,22 @@ async function getDailyTaskValue(client, userId, taskKey) {
         `${WORLD_CUP_SYMBOL_PREFIX}%`,
         `${SPORTS_MARKET_SYMBOL_PREFIX}%`,
       ],
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  if (taskKey === "daily_kyivstoner_bet") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM trades
+        JOIN markets ON markets.id = trades.market_id
+        WHERE trades.user_id = $1
+          AND trades.action = 'BUY'
+          AND markets.symbol = $2
+          AND trades.created_at >= date_trunc('day', now())
+      `,
+      [userId, KYIVSTONER_MARKET_SYMBOL],
     );
     return Number(result.rows[0]?.count || 0);
   }

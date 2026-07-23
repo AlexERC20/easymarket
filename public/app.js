@@ -9203,6 +9203,7 @@ const CORE_DAILY_TASK_KEYS = [
   "daily_topup_stars",
   "daily_topup_usdt",
   "daily_football_prediction",
+  "daily_kyivstoner_bet",
   "daily_btc_5_predictions",
   "daily_win_1",
   "daily_win_streak_5",
@@ -9216,6 +9217,7 @@ const DAILY_TASK_META = {
   daily_topup_usdt: { title: "Пополнить USDT", desc: "Зачисли минимум 50 USDT", icon: "dollar" },
   daily_btc_prediction: { title: "Прогноз по BTC", desc: "1 прогноз в BTC-маркете", icon: "btc" },
   daily_football_prediction: { title: "Прогноз на спорт", desc: "1 прогноз на спортивное событие", icon: "trophy" },
+  daily_kyivstoner_bet: { title: "Ставка на Киевстонера", desc: "1 прогноз в маркете Киевстонера", icon: "streak" },
   daily_btc_5_predictions: { title: "BTC-прогнозы", desc: "Лестница прогнозов по BTC", icon: "bars" },
   daily_win_1: { title: "Выиграй прогноз", desc: "Первая победа дня", icon: "trophy" },
   daily_win_streak_5: { title: "5 побед подряд", desc: "Серия из пяти побед", icon: "streak" },
@@ -9253,6 +9255,7 @@ function getDailyTaskAmount(taskKey, fallback = 0) {
     daily_topup_usdt: 150,
     daily_btc_prediction: 25,
     daily_football_prediction: 25,
+    daily_kyivstoner_bet: 25,
     daily_btc_5_predictions: 25,
     daily_win_1: 25,
     daily_win_streak_5: 50,
@@ -9349,6 +9352,9 @@ function getDailyTaskDisplayMeta(taskKey) {
     daily_football_prediction: target === 1
       ? "1 спортивный прогноз"
       : `${targetText} спортивных прогнозов`,
+    daily_kyivstoner_bet: target === 1
+      ? "1 ставка на Киевстонера"
+      : `${targetText} ставок на Киевстонера`,
     daily_btc_5_predictions: target === 1 ? "1 BTC-прогноз" : `${targetText} BTC-прогнозов`,
     daily_win_1: `${targetText} побед за день`,
     daily_win_streak_5: `${targetText} побед подряд`,
