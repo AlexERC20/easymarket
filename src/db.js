@@ -145,6 +145,15 @@ export async function runMigrations() {
       UNIQUE(user_id, task_key)
     );
 
+    CREATE TABLE IF NOT EXISTS admin_usdt_cash_adjustments (
+      event_key TEXT PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount NUMERIC(20, 8) NOT NULL,
+      reason TEXT NOT NULL,
+      source TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS promo_campaigns (
       id BIGSERIAL PRIMARY KEY,
       code TEXT UNIQUE NOT NULL,
@@ -186,6 +195,7 @@ export async function runMigrations() {
     CREATE TABLE IF NOT EXISTS project_economy_settings (
       id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
       profit_fee_bps INTEGER NOT NULL DEFAULT 700,
+      star_profit_fee_bps INTEGER NOT NULL DEFAULT 1500,
       referral_profit_share_bps INTEGER NOT NULL DEFAULT 100,
       clan_profit_share_bps INTEGER NOT NULL DEFAULT 100,
       bonus_unlock_share_bps INTEGER NOT NULL DEFAULT 100,
@@ -195,16 +205,18 @@ export async function runMigrations() {
     );
 
     ALTER TABLE project_economy_settings
+      ADD COLUMN IF NOT EXISTS star_profit_fee_bps INTEGER NOT NULL DEFAULT 1500,
       ADD COLUMN IF NOT EXISTS bonus_unlock_share_bps INTEGER NOT NULL DEFAULT 100;
 
     INSERT INTO project_economy_settings (
       id,
       profit_fee_bps,
+      star_profit_fee_bps,
       referral_profit_share_bps,
       clan_profit_share_bps,
       bonus_unlock_share_bps
     )
-    VALUES (1, 700, 100, 100, 100)
+    VALUES (1, 700, 1500, 100, 100, 100)
     ON CONFLICT (id) DO NOTHING;
 
     CREATE TABLE IF NOT EXISTS usdt_deposit_intents (
@@ -600,6 +612,25 @@ export async function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_bonus_unlock_events_user_created
       ON bonus_unlock_events(user_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS star_usdt_conversion_events (
+      id BIGSERIAL PRIMARY KEY,
+      event_key TEXT UNIQUE NOT NULL,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      market_id BIGINT REFERENCES markets(id) ON DELETE SET NULL,
+      deposit_total NUMERIC(20, 8) NOT NULL,
+      conversion_rate_bps INTEGER NOT NULL,
+      streak_days INTEGER NOT NULL DEFAULT 0,
+      streak_multiplier_bps INTEGER NOT NULL DEFAULT 10000,
+      real_net_pnl NUMERIC(20, 8) NOT NULL,
+      stars_per_usdt NUMERIC(20, 8) NOT NULL,
+      stars_burned NUMERIC(20, 8) NOT NULL,
+      amount NUMERIC(20, 8) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_star_usdt_conversion_events_user_created
+      ON star_usdt_conversion_events(user_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS usdt_balance_reclassifications (
       batch_key TEXT NOT NULL,

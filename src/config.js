@@ -55,6 +55,7 @@ export const config = {
   marketLiquidity: parseNumber(process.env.MARKET_LIQUIDITY, 10_000, 100),
   marketFeeBps: parseNumber(process.env.MARKET_FEE_BPS, 200, 0),
   marketProfitFeeBps: parseNumber(process.env.MARKET_PROFIT_FEE_BPS, 700, 0),
+  marketStarProfitFeeBps: parseNumber(process.env.MARKET_STAR_PROFIT_FEE_BPS, 1_500, 0),
   marketMakerSpreadBps: parseNumber(process.env.MARKET_MAKER_SPREAD_BPS, 300, 0),
   pricePollMs: parseNumber(process.env.PRICE_POLL_MS, 1_000, 250),
   priceTicksEnabled: !parseBoolean(process.env.PRICE_TICKS_DISABLED, false),
@@ -81,13 +82,24 @@ export const config = {
   referralSignupBonusUsdt: parseNumber(process.env.REFERRAL_SIGNUP_BONUS_USDT, 5, 0),
   referralBetBonusUsdt: parseNumber(process.env.REFERRAL_BET_BONUS_USDT, 30, 0),
   taskShareFire: parseNumber(process.env.TASK_SHARE_FIRE, 100, 0),
-  taskSubscribeFire: parseNumber(process.env.TASK_SUBSCRIBE_REWARD_FIRE, 150, 0),
+  taskSubscribeFire: parseNumber(process.env.TASK_SUBSCRIBE_REWARD_FIRE, 75, 0),
   taskPrivateChatFire: parseNumber(process.env.TASK_PRIVATE_CHAT_FIRE, 15_000, 0),
   taskDailyPresenceFire: parseNumber(process.env.TASK_DAILY_PRESENCE_FIRE, 50, 0),
   taskDailyBetFire: parseNumber(process.env.TASK_DAILY_BET_FIRE, 50, 0),
   taskDailyCapFire: parseNumber(process.env.TASK_DAILY_CAP_FIRE, 5_000, 0),
-  taskRewardScale: parseNumber(process.env.TASK_REWARD_SCALE, 0.3, 0),
-  taskEasyRewardScale: parseNumber(process.env.TASK_EASY_REWARD_SCALE, 0.1, 0),
+  taskRewardScale: parseNumber(process.env.TASK_REWARD_SCALE, 0.15, 0),
+  taskEasyRewardScale: parseNumber(process.env.TASK_EASY_REWARD_SCALE, 0.05, 0),
+  starUsdtConversionStarsPerUsdt: parseNumber(
+    process.env.STAR_USDT_CONVERSION_STARS_PER_USDT,
+    1_000,
+    1,
+  ),
+  starUsdtConversionRateBps: parseNumber(process.env.STAR_USDT_CONVERSION_RATE_BPS, 5, 0),
+  starUsdtConversionLifetimeCapBps: parseNumber(
+    process.env.STAR_USDT_CONVERSION_LIFETIME_CAP_BPS,
+    500,
+    0,
+  ),
   publicAvChannelUrl: (
     process.env.PUBLIC_AV_CHANNEL_URL
       || "https://t.me/erc20coin"

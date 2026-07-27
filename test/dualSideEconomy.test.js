@@ -15,6 +15,7 @@ import { calculateUsdtWithdrawalAmounts } from "../src/services/usdtWithdrawalSe
 
 const economySettings = {
   profit_fee_bps: 700,
+  star_profit_fee_bps: 1500,
 };
 
 function buildMarket(overrides = {}) {
@@ -76,6 +77,10 @@ test("opposite market buys cannot lock guaranteed profit", () => {
 });
 
 test("losing side pays zero in both STAR and USDT settlements", () => {
+  const expectedByCurrency = {
+    STAR: { fee: 15, payout: 185, pnl: 85 },
+    USDT: { fee: 7, payout: 193, pnl: 93 },
+  };
   for (const currency of ["STAR", "USDT"]) {
     const loser = calculateResolvedPositionSettlement(
       {
@@ -105,9 +110,10 @@ test("losing side pays zero in both STAR and USDT settlements", () => {
       "YES",
       economySettings,
     );
-    assert.equal(winner.fee, 7);
-    assert.equal(winner.payout, 193);
-    assert.equal(winner.pnl, 93);
+    const expected = expectedByCurrency[currency];
+    assert.equal(winner.fee, expected.fee);
+    assert.equal(winner.payout, expected.payout);
+    assert.equal(winner.pnl, expected.pnl);
   }
 });
 

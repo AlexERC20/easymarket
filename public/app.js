@@ -28,7 +28,8 @@ import "./basketball-scene.js?v=20260712-03"; // регистрирует сце
 import { playKyivstonerMotion, preloadKyivstonerMotion } from "./kyivstoner-motion.js?v=20260714-01";
 import { playFootballWow } from "./football-wow.js?v=20260716-01";
 
-const PROFIT_FEE_RATE = 0.05;
+const DEFAULT_USDT_PROFIT_FEE_RATE = 0.07;
+const DEFAULT_STAR_PROFIT_FEE_RATE = 0.15;
 const MARKET_MAKER_SPREAD_RATE = 0.03;
 const BUY_IMPACT_MULTIPLIER = 1.08;
 const SELL_IMPACT_MULTIPLIER = 1.42;
@@ -93,6 +94,7 @@ const state = {
   usdtCashBalance: 0,
   usdtBonusBalance: 0,
   bonusUnlock: null,
+  starConversion: null,
   positions: [],
   recentTrades: [],
   marketStats: [],
@@ -249,11 +251,16 @@ const state = {
     referral_signup_bonus_usdt: 5,
     referral_bet_bonus_usdt: 30,
     task_share_fire: 30,
-    task_subscribe_fire: 150,
-    task_private_chat_fire: 4500,
-    task_daily_presence_fire: 5,
-    task_daily_bet_fire: 15,
-    task_daily_cap_fire: 1500,
+    task_subscribe_fire: 75,
+    task_private_chat_fire: 2250,
+    task_daily_presence_fire: 3,
+    task_daily_bet_fire: 8,
+    task_daily_cap_fire: 750,
+    market_profit_fee_bps: 700,
+    market_star_profit_fee_bps: 1500,
+    star_usdt_conversion_stars_per_usdt: 1000,
+    star_usdt_conversion_rate_bps: 5,
+    star_usdt_conversion_lifetime_cap_bps: 500,
     usdt_deposit_minimum: 18,
     usdt_withdrawal_fee: 3,
     usdt_withdrawal_minimum: 18,
@@ -358,6 +365,23 @@ const formatHeaderCurrencyAmount = (value, currency = state.currency) => {
 };
 const getUsdtDepositMinimum = () => Math.max(0.01, Number(state.publicConfig.usdt_deposit_minimum || 18));
 const getUsdtWithdrawalMinimum = () => Math.max(0.01, Number(state.publicConfig.usdt_withdrawal_minimum || 18));
+const getProfitFeeRate = (currency = state.currency) => {
+  const safeCurrency = normalizeCurrency(currency);
+  const fallback = safeCurrency === "STAR"
+    ? DEFAULT_STAR_PROFIT_FEE_RATE
+    : DEFAULT_USDT_PROFIT_FEE_RATE;
+  const bps = Number(
+    safeCurrency === "STAR"
+      ? state.publicConfig.market_star_profit_fee_bps
+      : state.publicConfig.market_profit_fee_bps,
+  );
+  return Number.isFinite(bps) ? Math.max(0, bps / 10_000) : fallback;
+};
+const getNetResolvedPayout = (grossPayout, spent, currency = state.currency) => {
+  const gross = Math.max(0, Number(grossPayout || 0));
+  const cost = Math.max(0, Number(spent || 0));
+  return Math.max(0, gross - Math.max(0, gross - cost) * getProfitFeeRate(currency));
+};
 const normalizeTopupAmount = (value, currency = state.topup.currency) => {
   const safeCurrency = normalizeCurrency(currency);
   const numeric = Number(String(value ?? "").replace(",", "."));
@@ -2216,7 +2240,8 @@ function drawMarketChartFrame(ts) {
     const sideColor = myBet.side === "YES" ? "#19c37d" : "#ef466f";
     const seg1 = "Твоя ставка: ";
     const seg2 = `${marketButtonSideLabel(market, myBet.side)} ${formatCurrencyAmount(myBet.spent, myBet.currency)}`;
-    const seg3 = ` Win ${formatCurrencyAmount(myBet.shares, myBet.currency)}`;
+    const netWin = getNetResolvedPayout(myBet.shares, myBet.spent, myBet.currency);
+    const seg3 = ` Win ${formatCurrencyAmount(netWin, myBet.currency)}`;
     const fontPx = Math.max(11, width * 0.024);
     ctx.font = `${fontPx}px Inter, system-ui, sans-serif`;
     ctx.textBaseline = "middle";
@@ -3035,10 +3060,10 @@ async function loadPublicConfig() {
 
 function renderTaskRewards() {
   const share = Math.round(Number(state.publicConfig.task_share_fire || 30));
-  const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 150));
-  const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 4500));
+  const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 75));
+  const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 2250));
   const refUsdt = Math.round(Number(state.publicConfig.referral_bet_bonus_usdt || 30));
-  const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 5));
+  const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 3));
   if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
   if ($("channelTaskReward")) $("channelTaskReward").textContent = formatFire(sub);
   if ($("chatTaskReward")) $("chatTaskReward").textContent = formatFire(sub);
@@ -3588,6 +3613,7 @@ async function upsertMe() {
   state.usdtCashBalance = data.usdt_cash_balance || 0;
   state.usdtBonusBalance = data.usdt_bonus_balance || 0;
   state.bonusUnlock = data.bonus_unlock || null;
+  state.starConversion = data.star_conversion || null;
   state.positions = data.positions || [];
   state.marketStats = data.market_stats || [];
   state.referralStats = data.referral_stats || null;
@@ -3916,6 +3942,7 @@ async function loadMe() {
   state.usdtCashBalance = data.usdt_cash_balance || 0;
   state.usdtBonusBalance = data.usdt_bonus_balance || 0;
   state.bonusUnlock = data.bonus_unlock || null;
+  state.starConversion = data.star_conversion || null;
   state.positions = data.positions || [];
   state.recentTrades = data.recent_trades || [];
   state.marketStats = data.market_stats || [];
@@ -5189,7 +5216,10 @@ function estimateSellQuote({ position, market, outcomePrice }) {
     const grossExitValue = shares * bidPrice;
     const spent = Number(position.spent || 0);
     const exitProfit = grossExitValue - spent;
-    const exitValue = Math.max(0, grossExitValue - Math.max(0, exitProfit) * PROFIT_FEE_RATE);
+    const exitValue = Math.max(
+      0,
+      grossExitValue - Math.max(0, exitProfit) * getProfitFeeRate(position.currency),
+    );
     return {
       bidPrice,
       exitValue,
@@ -5205,7 +5235,10 @@ function estimateSellQuote({ position, market, outcomePrice }) {
   const grossExitValue = shares * bidPrice;
   const spent = Number(position.spent || 0);
   const exitProfit = grossExitValue - spent;
-  const exitValue = Math.max(0, grossExitValue - Math.max(0, exitProfit) * PROFIT_FEE_RATE);
+  const exitValue = Math.max(
+    0,
+    grossExitValue - Math.max(0, exitProfit) * getProfitFeeRate(position.currency),
+  );
 
   return {
     bidPrice,
@@ -5436,7 +5469,10 @@ function renderTradeTicket() {
     const amountPreview = getPreview(amount, side);
     const pendingKey = market ? getBuyIntentKey(market.id, side, amount, state.currency) : null;
     const nextLabel = formatWholeCurrencyAmount(amount, state.currency);
-    const nextWin = formatWholeCurrencyAmount(amountPreview.shares, state.currency);
+    const nextWin = formatWholeCurrencyAmount(
+      getNetResolvedPayout(amountPreview.shares, amount, state.currency),
+      state.currency,
+    );
     button.classList.toggle("active", amount === state.selectedAmount);
     button.classList.toggle("loading", Boolean(state.pendingBuyKey && state.pendingBuyKey === pendingKey));
     button.disabled = !market || !state.user || !canBuyMarket;
@@ -7057,7 +7093,18 @@ function renderTopupSheet() {
         ? `Разблокировка: до ${Number(unlock.rate_pct || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 })}% от прибыли${Number(unlock.streak_multiplier || 1) > 1 ? ` · заряд x${unlock.streak_multiplier}` : ""}`
         : unlock?.deposit_qualified && !unlock?.cash_play_qualified
           ? "Конвертация включится после ставки основными USDT"
-          : "Разблокировка после депозита от 15 USDT";
+          : `Разблокировка после депозита от ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`;
+  }
+  if ($("walletStarConversion")) {
+    const conversion = state.starConversion;
+    $("walletStarConversion").classList.toggle("hidden", isUsdt || !conversion);
+    $("walletStarConversion").textContent = isUsdt || !conversion
+      ? ""
+      : conversion.eligible
+        ? `${formatFire(conversion.stars_per_usdt)} звезд = $1 · конвертация ${Number(conversion.rate_pct || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 })}% от прибыли`
+        : conversion.deposit_qualified && !conversion.cash_play_qualified
+          ? "Конвертация звезд включится после ставки основными USDT"
+          : `Конвертация звезд в USDT включится после пополнения от ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`;
   }
   if ($("topupCustomAmount") && document.activeElement !== $("topupCustomAmount")) {
     $("topupCustomAmount").value = hasAmount

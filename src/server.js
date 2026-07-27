@@ -11,6 +11,7 @@ import { getPool, getSafeDatabaseErrorMessage, query, runMigrations } from "./db
 import {
   addFireToUser,
   addUsdtBonusToUser,
+  addUsdtCashToUser,
   addMarketComment,
   buyOutcome,
   cancelLimitOrder,
@@ -86,6 +87,7 @@ import {
   confirmUsdtWithdrawalRequest,
   confirmUsdtWithdrawalRequestByBridge,
   createUsdtWithdrawalRequest,
+  getPendingUsdtWithdrawals,
   getUserWithdrawals,
   getWalletHistory,
 } from "./services/usdtWithdrawalService.js";
@@ -318,11 +320,20 @@ app.get("/api/status", async (_req, res) => {
   }
 });
 
-app.get("/api/public/config", (_req, res) => {
+app.get("/api/public/config", async (_req, res) => {
   const scaleTaskReward = (amount, easy = false) => Math.max(
     0,
     Math.round(Number(amount || 0) * Number(easy ? config.taskEasyRewardScale : config.taskRewardScale)),
   );
+  let economySettings = {
+    profit_fee_bps: config.marketProfitFeeBps,
+    star_profit_fee_bps: config.marketStarProfitFeeBps,
+  };
+  try {
+    economySettings = await getProjectEconomySettings();
+  } catch {
+    // Keep the public config available during a transient database outage.
+  }
   res.status(200).json({
     ok: true,
     av_bot_url: config.publicAvBotUrl,
@@ -334,6 +345,13 @@ app.get("/api/public/config", (_req, res) => {
     task_daily_presence_fire: scaleTaskReward(config.taskDailyPresenceFire, true),
     task_daily_bet_fire: scaleTaskReward(config.taskDailyBetFire),
     task_daily_cap_fire: scaleTaskReward(config.taskDailyCapFire),
+    market_profit_fee_bps: Number(economySettings.profit_fee_bps || config.marketProfitFeeBps),
+    market_star_profit_fee_bps: Number(
+      economySettings.star_profit_fee_bps || config.marketStarProfitFeeBps,
+    ),
+    star_usdt_conversion_stars_per_usdt: config.starUsdtConversionStarsPerUsdt,
+    star_usdt_conversion_rate_bps: config.starUsdtConversionRateBps,
+    star_usdt_conversion_lifetime_cap_bps: config.starUsdtConversionLifetimeCapBps,
     usdt_deposit_minimum: config.usdtDepositMinimum,
     usdt_withdrawal_fee: config.usdtWithdrawalFee,
     usdt_withdrawal_minimum: config.usdtWithdrawalMinimum,
@@ -937,6 +955,18 @@ app.post("/api/market/:marketId/sell", async (req, res) => {
   }
 });
 
+app.get("/api/bridge/withdrawals/pending", requireBridgeSecret, async (req, res) => {
+  try {
+    const requests = await getPendingUsdtWithdrawals(req.query.limit);
+    res.status(200).json({
+      ok: true,
+      requests,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
 app.post("/api/bridge/withdrawals/:requestId/confirm", requireBridgeSecret, async (req, res) => {
   try {
     const token = String(req.body?.token ?? "").trim();
@@ -1290,6 +1320,26 @@ app.post("/api/bridge/usdt/add", requireBridgeSecret, async (req, res) => {
   }
 });
 
+app.post("/api/bridge/usdt/cash/add", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await addUsdtCashToUser({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      amount: req.body?.amount,
+      reason: req.body?.reason || "admin_usdt_cash_adjustment",
+      event_key: req.body?.event_key ?? req.body?.eventKey,
+      source: "bridge",
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
 app.post("/api/bridge/fire/sync", requireBridgeSecret, async (req, res) => {
   try {
     const result = await syncFireBalance({
@@ -1386,6 +1436,8 @@ app.post("/api/bridge/economy/settings", requireBridgeSecret, async (req, res) =
     const settings = await updateProjectEconomySettings({
       profit_fee_pct: req.body?.profit_fee_pct ?? req.body?.profitFeePct,
       profit_fee_bps: req.body?.profit_fee_bps ?? req.body?.profitFeeBps,
+      star_profit_fee_pct: req.body?.star_profit_fee_pct ?? req.body?.starProfitFeePct,
+      star_profit_fee_bps: req.body?.star_profit_fee_bps ?? req.body?.starProfitFeeBps,
       referral_profit_share_pct: req.body?.referral_profit_share_pct ?? req.body?.referralProfitSharePct,
       referral_profit_share_bps: req.body?.referral_profit_share_bps ?? req.body?.referralProfitShareBps,
       clan_profit_share_pct: req.body?.clan_profit_share_pct ?? req.body?.clanProfitSharePct,

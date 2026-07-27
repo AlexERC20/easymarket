@@ -1,3 +1,4 @@
+import { config } from "../config.js";
 import { query, toNumber } from "../db.js";
 
 const BONUS_UNLOCK_LIFETIME_CAP_BPS = 2_500;
@@ -75,6 +76,52 @@ export function buildUnlockStatus({
   };
 }
 
+export function buildStarConversionStatus({
+  depositTotal,
+  convertedTotal = 0,
+  starBalance = 0,
+  streak = {},
+  cashPlayQualified = false,
+  reserveBalance = 0,
+}) {
+  const safeDepositTotal = roundAmount(depositTotal);
+  const safeConvertedTotal = roundAmount(convertedTotal);
+  const safeStarBalance = roundAmount(starBalance);
+  const activeStreak = getActiveStreak(streak);
+  const baseRateBps = Math.max(0, Math.round(Number(config.starUsdtConversionRateBps || 0)));
+  const effectiveRateBps = Math.round(baseRateBps * activeStreak.multiplier);
+  const lifetimeCapBps = Math.max(
+    0,
+    Math.round(Number(config.starUsdtConversionLifetimeCapBps || 0)),
+  );
+  const lifetimeCap = roundAmount(safeDepositTotal * (lifetimeCapBps / 10_000));
+  const starsPerUsdt = Math.max(1, Number(config.starUsdtConversionStarsPerUsdt || 1_000));
+
+  return {
+    eligible: safeDepositTotal >= 18
+      && Boolean(cashPlayQualified)
+      && safeStarBalance >= 1
+      && effectiveRateBps > 0,
+    deposit_qualified: safeDepositTotal >= 18,
+    cash_play_qualified: Boolean(cashPlayQualified),
+    deposit_total: safeDepositTotal,
+    base_rate_bps: baseRateBps,
+    base_rate_pct: baseRateBps / 100,
+    rate_bps: effectiveRateBps,
+    rate_pct: effectiveRateBps / 100,
+    streak_days: activeStreak.days,
+    streak_checked_today: activeStreak.checked_today,
+    streak_multiplier: activeStreak.multiplier,
+    lifetime_cap: lifetimeCap,
+    converted_total: safeConvertedTotal,
+    remaining_cap: roundAmount(Math.max(0, lifetimeCap - safeConvertedTotal)),
+    star_balance: safeStarBalance,
+    stars_per_usdt: starsPerUsdt,
+    available_from_stars: roundAmount(safeStarBalance / starsPerUsdt),
+    reserve_balance: roundAmount(reserveBalance),
+  };
+}
+
 export async function getBonusUnlockStatusForUser(userId) {
   const result = await query(
     `
@@ -137,6 +184,78 @@ export async function getBonusUnlockStatusForUser(userId) {
     bonusBalance: result.rows[0]?.bonus_balance,
     streak: result.rows[0],
     cashPlayQualified: result.rows[0]?.cash_play_qualified === true,
+  });
+}
+
+export async function getStarConversionStatusForUser(userId) {
+  const result = await query(
+    `
+      SELECT
+        COALESCE(NULLIF((
+          SELECT SUM(credited_amount)
+          FROM usdt_deposit_intents
+          WHERE user_id = $1
+            AND status = 'credited'
+            AND COALESCE(credited_amount, 0) > 0
+        ), 0), (
+          SELECT SUM(amount)
+          FROM usdt_ledger
+          WHERE user_id = $1
+            AND reason = 'usdt_onchain_deposit'
+            AND amount > 0
+        ), 0) AS deposit_total,
+        COALESCE((
+          SELECT SUM(amount)
+          FROM star_usdt_conversion_events
+          WHERE user_id = $1
+        ), 0) AS converted_total,
+        COALESCE((
+          SELECT balance
+          FROM fire_balances
+          WHERE user_id = $1
+        ), 0) AS star_balance,
+        COALESCE((
+          SELECT balance
+          FROM bonus_unlock_reserve
+          WHERE currency = 'USDT'
+        ), 0) AS reserve_balance,
+        COALESCE((
+          SELECT current_streak
+          FROM user_streaks
+          WHERE user_id = $1
+        ), 0) AS current_streak,
+        (
+          SELECT last_day_key
+          FROM user_streaks
+          WHERE user_id = $1
+        ) AS last_day_key,
+        (
+          EXISTS (
+            SELECT 1
+            FROM positions
+            WHERE user_id = $1
+              AND currency = 'USDT'
+              AND spent > bonus_spent
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM usdt_ledger
+            WHERE user_id = $1
+              AND amount < 0
+              AND reason IN ('buy_yes_usdt', 'buy_no_usdt')
+          )
+        ) AS cash_play_qualified
+    `,
+    [userId],
+  );
+  const row = result.rows[0] || {};
+  return buildStarConversionStatus({
+    depositTotal: row.deposit_total,
+    convertedTotal: row.converted_total,
+    starBalance: row.star_balance,
+    reserveBalance: row.reserve_balance,
+    streak: row,
+    cashPlayQualified: row.cash_play_qualified === true,
   });
 }
 
@@ -371,6 +490,221 @@ export async function unlockBonusAfterResolvedMarket(client, input) {
   return {
     amount,
     base_rate_bps: tier.rate_bps,
+    rate_bps: effectiveRateBps,
+    streak_days: activeStreak.days,
+    streak_multiplier: activeStreak.multiplier,
+    real_net_pnl: realNetPnl,
+    remaining_cap: roundAmount(remainingCap - amount),
+  };
+}
+
+export async function convertStarsAfterResolvedMarket(client, input) {
+  const userId = Number(input.userId);
+  const marketId = Number(input.marketId);
+  const realNetPnl = Number(input.realNetPnl || 0);
+  if (!Number.isSafeInteger(userId) || userId <= 0 || !Number.isSafeInteger(marketId) || marketId <= 0) {
+    return null;
+  }
+  if (!Number.isFinite(realNetPnl) || realNetPnl <= 0) {
+    return null;
+  }
+
+  const eventKey = `market:${marketId}:user:${userId}`;
+  const existingResult = await client.query(
+    "SELECT * FROM star_usdt_conversion_events WHERE event_key = $1 LIMIT 1",
+    [eventKey],
+  );
+  if (existingResult.rows[0]) {
+    return {
+      amount: toNumber(existingResult.rows[0].amount),
+      stars_burned: toNumber(existingResult.rows[0].stars_burned),
+      already_processed: true,
+    };
+  }
+
+  const eligibilityResult = await client.query(
+    `
+      SELECT
+        COALESCE(NULLIF((
+          SELECT SUM(credited_amount)
+          FROM usdt_deposit_intents
+          WHERE user_id = $1
+            AND status = 'credited'
+            AND COALESCE(credited_amount, 0) > 0
+        ), 0), (
+          SELECT SUM(amount)
+          FROM usdt_ledger
+          WHERE user_id = $1
+            AND reason = 'usdt_onchain_deposit'
+            AND amount > 0
+        ), 0) AS deposit_total,
+        COALESCE((
+          SELECT current_streak
+          FROM user_streaks
+          WHERE user_id = $1
+        ), 0) AS current_streak,
+        (
+          SELECT last_day_key
+          FROM user_streaks
+          WHERE user_id = $1
+        ) AS last_day_key,
+        (
+          EXISTS (
+            SELECT 1
+            FROM positions
+            WHERE user_id = $1
+              AND currency = 'USDT'
+              AND spent > bonus_spent
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM usdt_ledger
+            WHERE user_id = $1
+              AND amount < 0
+              AND reason IN ('buy_yes_usdt', 'buy_no_usdt')
+          )
+        ) AS cash_play_qualified
+    `,
+    [userId],
+  );
+  const eligibility = eligibilityResult.rows[0] || {};
+  const depositTotal = roundAmount(eligibility.deposit_total);
+  if (depositTotal < 18 || eligibility.cash_play_qualified !== true) {
+    return null;
+  }
+
+  const activeStreak = getActiveStreak(eligibility);
+  const baseRateBps = Math.max(0, Math.round(Number(config.starUsdtConversionRateBps || 0)));
+  const effectiveRateBps = Math.round(baseRateBps * activeStreak.multiplier);
+  const starsPerUsdt = Math.max(1, Number(config.starUsdtConversionStarsPerUsdt || 1_000));
+  const lifetimeCapBps = Math.max(
+    0,
+    Math.round(Number(config.starUsdtConversionLifetimeCapBps || 0)),
+  );
+  if (effectiveRateBps <= 0 || lifetimeCapBps <= 0) {
+    return null;
+  }
+
+  // Keep the same lock order as bonus conversion: shared reserve first.
+  const reserveResult = await client.query(
+    "SELECT balance FROM bonus_unlock_reserve WHERE currency = 'USDT' FOR UPDATE",
+  );
+  const fireResult = await client.query(
+    "SELECT balance FROM fire_balances WHERE user_id = $1 FOR UPDATE",
+    [userId],
+  );
+  const convertedResult = await client.query(
+    "SELECT COALESCE(SUM(amount), 0) AS total FROM star_usdt_conversion_events WHERE user_id = $1",
+    [userId],
+  );
+
+  const reserveBalance = roundAmount(reserveResult.rows[0]?.balance);
+  const starBalance = Math.max(0, Math.floor(toNumber(fireResult.rows[0]?.balance)));
+  const convertedTotal = roundAmount(convertedResult.rows[0]?.total);
+  const lifetimeCap = roundAmount(depositTotal * (lifetimeCapBps / 10_000));
+  const remainingCap = roundAmount(Math.max(0, lifetimeCap - convertedTotal));
+  const activityUnlock = roundAmount(realNetPnl * (effectiveRateBps / 10_000));
+  const starsBurned = Math.max(0, Math.floor(Math.min(
+    starBalance,
+    reserveBalance * starsPerUsdt,
+    remainingCap * starsPerUsdt,
+    activityUnlock * starsPerUsdt,
+  )));
+  if (starsBurned <= 0) {
+    return null;
+  }
+  const amount = roundAmount(starsBurned / starsPerUsdt);
+
+  const eventResult = await client.query(
+    `
+      INSERT INTO star_usdt_conversion_events (
+        event_key,
+        user_id,
+        market_id,
+        deposit_total,
+        conversion_rate_bps,
+        streak_days,
+        streak_multiplier_bps,
+        real_net_pnl,
+        stars_per_usdt,
+        stars_burned,
+        amount
+      )
+      VALUES ($1, $2, $3, $4::numeric, $5, $6, $7, $8::numeric, $9::numeric, $10::numeric, $11::numeric)
+      ON CONFLICT (event_key) DO NOTHING
+      RETURNING *
+    `,
+    [
+      eventKey,
+      userId,
+      marketId,
+      depositTotal,
+      effectiveRateBps,
+      activeStreak.days,
+      Math.round(activeStreak.multiplier * 10_000),
+      realNetPnl,
+      starsPerUsdt,
+      starsBurned,
+      amount,
+    ],
+  );
+  if (!eventResult.rows[0]) {
+    return null;
+  }
+
+  await client.query(
+    `
+      UPDATE fire_balances
+      SET balance = balance - $2::numeric,
+          updated_at = now()
+      WHERE user_id = $1
+    `,
+    [userId, starsBurned],
+  );
+  await client.query(
+    `
+      INSERT INTO fire_ledger (user_id, amount, reason, source)
+      VALUES ($1, -$2::numeric, 'star_usdt_conversion', $3)
+    `,
+    [userId, starsBurned, eventKey],
+  );
+  await client.query(
+    `
+      UPDATE usdt_balances
+      SET balance = balance + $2::numeric,
+          updated_at = now()
+      WHERE user_id = $1
+    `,
+    [userId, amount],
+  );
+  await client.query(
+    `
+      INSERT INTO usdt_ledger (user_id, amount, reason, source)
+      VALUES ($1, $2::numeric, 'star_usdt_conversion', $3)
+    `,
+    [userId, amount, eventKey],
+  );
+  await client.query(
+    `
+      INSERT INTO bonus_unlock_reserve_ledger (event_key, amount, source)
+      VALUES ($1, -$2::numeric, $3)
+    `,
+    [`star_conversion:${eventKey}`, amount, eventKey],
+  );
+  await client.query(
+    `
+      UPDATE bonus_unlock_reserve
+      SET balance = balance - $1::numeric,
+          released_total = released_total + $1::numeric,
+          updated_at = now()
+      WHERE currency = 'USDT'
+    `,
+    [amount],
+  );
+
+  return {
+    amount,
+    stars_burned: starsBurned,
     rate_bps: effectiveRateBps,
     streak_days: activeStreak.days,
     streak_multiplier: activeStreak.multiplier,

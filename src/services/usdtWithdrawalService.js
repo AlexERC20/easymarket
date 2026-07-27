@@ -295,6 +295,27 @@ export async function getUserWithdrawals(telegramId, limit = 20) {
   return result.rows.map(mapWithdrawal);
 }
 
+export async function getPendingUsdtWithdrawals(limit = 30) {
+  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 30));
+  const result = await query(
+    `
+      SELECT
+        requests.*,
+        users.telegram_id,
+        users.username,
+        users.first_name
+      FROM usdt_withdrawal_requests requests
+      JOIN users ON users.id = requests.user_id
+      WHERE requests.status = 'pending'
+      ORDER BY requests.created_at ASC
+      LIMIT $1
+    `,
+    [safeLimit],
+  );
+
+  return result.rows.map(mapWithdrawal);
+}
+
 export async function getWalletHistory(telegramId, limit = 30) {
   const user = await getUserByTelegramId(telegramId);
   if (!user) {

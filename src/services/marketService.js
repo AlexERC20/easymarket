@@ -1,9 +1,11 @@
 import { clamp, config } from "../config.js";
 import { query, toNumber, withTransaction } from "../db.js";
 import {
+  convertStarsAfterResolvedMarket,
   fundBonusUnlockReserve,
   getBonusUnlockStatusForUser,
   getLightningStreakMultiplier,
+  getStarConversionStatusForUser,
   unlockBonusAfterResolvedMarket,
 } from "./bonusEconomyService.js";
 import { getBtcPrice, PriceUnavailableError } from "./priceService.js";
@@ -30,6 +32,7 @@ const MAX_PRICE = 0.999;
 const BTC_MIN_PRICE = 0.001;
 const DEFAULT_FEE_BPS = 200;
 const DEFAULT_PROFIT_FEE_BPS = 700;
+const DEFAULT_STAR_PROFIT_FEE_BPS = 1_500;
 const DEFAULT_REFERRAL_PROFIT_SHARE_BPS = 100;
 const DEFAULT_CLAN_PROFIT_SHARE_BPS = 100;
 const DEFAULT_BONUS_UNLOCK_SHARE_BPS = 100;
@@ -714,8 +717,18 @@ function getProfitFeeBps() {
   return Number.isFinite(config.marketProfitFeeBps) ? config.marketProfitFeeBps : DEFAULT_PROFIT_FEE_BPS;
 }
 
+function getStarProfitFeeBps() {
+  return Number.isFinite(config.marketStarProfitFeeBps)
+    ? config.marketStarProfitFeeBps
+    : DEFAULT_STAR_PROFIT_FEE_BPS;
+}
+
 function normalizeEconomySettings(row = {}) {
   const profitFeeBps = Math.max(0, Math.round(toNumber(row.profit_fee_bps, getProfitFeeBps())));
+  const starProfitFeeBps = Math.max(
+    0,
+    Math.round(toNumber(row.star_profit_fee_bps, getStarProfitFeeBps())),
+  );
   const referralProfitShareBps = Math.max(0, Math.round(toNumber(
     row.referral_profit_share_bps,
     DEFAULT_REFERRAL_PROFIT_SHARE_BPS,
@@ -737,12 +750,17 @@ function normalizeEconomySettings(row = {}) {
 
   return {
     profit_fee_bps: profitFeeBps,
+    star_profit_fee_bps: starProfitFeeBps,
     referral_profit_share_bps: cappedReferralBps,
     clan_profit_share_bps: cappedClanBps,
     bonus_unlock_share_bps: cappedBonusUnlockBps,
     project_profit_share_bps: Math.max(
       0,
       profitFeeBps - cappedReferralBps - cappedClanBps - cappedBonusUnlockBps,
+    ),
+    star_project_profit_share_bps: Math.max(
+      0,
+      starProfitFeeBps - Math.min(cappedReferralBps + cappedClanBps, starProfitFeeBps),
     ),
     updated_by_telegram_id: row.updated_by_telegram_id ?? null,
     updated_by_username: row.updated_by_username ?? null,
@@ -756,16 +774,18 @@ async function getEconomySettingsWithClient(client) {
       INSERT INTO project_economy_settings (
         id,
         profit_fee_bps,
+        star_profit_fee_bps,
         referral_profit_share_bps,
         clan_profit_share_bps,
         bonus_unlock_share_bps
       )
-      VALUES (1, $1, $2, $3, $4)
+      VALUES (1, $1, $2, $3, $4, $5)
       ON CONFLICT (id) DO NOTHING
       RETURNING *
     `,
     [
       DEFAULT_PROFIT_FEE_BPS,
+      DEFAULT_STAR_PROFIT_FEE_BPS,
       DEFAULT_REFERRAL_PROFIT_SHARE_BPS,
       DEFAULT_CLAN_PROFIT_SHARE_BPS,
       DEFAULT_BONUS_UNLOCK_SHARE_BPS,
@@ -828,6 +848,11 @@ export async function updateProjectEconomySettings(input = {}) {
     input.profit_fee_bps ?? input.profitFeeBps,
     current.profit_fee_bps,
   );
+  const starProfitFeeBps = parsePercentOrBps(
+    input.star_profit_fee_pct ?? input.starProfitFeePct,
+    input.star_profit_fee_bps ?? input.starProfitFeeBps,
+    current.star_profit_fee_bps,
+  );
   const referralProfitShareBps = parsePercentOrBps(
     input.referral_profit_share_pct ?? input.referralProfitSharePct,
     input.referral_profit_share_bps ?? input.referralProfitShareBps,
@@ -846,6 +871,7 @@ export async function updateProjectEconomySettings(input = {}) {
 
   if (
     profitFeeBps > 5_000
+    || starProfitFeeBps > 5_000
     || referralProfitShareBps > 5_000
     || clanProfitShareBps > 5_000
     || bonusUnlockShareBps > 5_000
@@ -855,12 +881,16 @@ export async function updateProjectEconomySettings(input = {}) {
   if (referralProfitShareBps + clanProfitShareBps + bonusUnlockShareBps > profitFeeBps) {
     throw new Error("invalid_economy_settings");
   }
+  if (referralProfitShareBps + clanProfitShareBps > starProfitFeeBps) {
+    throw new Error("invalid_economy_settings");
+  }
 
   const result = await query(
     `
       INSERT INTO project_economy_settings (
         id,
         profit_fee_bps,
+        star_profit_fee_bps,
         referral_profit_share_bps,
         clan_profit_share_bps,
         bonus_unlock_share_bps,
@@ -868,9 +898,10 @@ export async function updateProjectEconomySettings(input = {}) {
         updated_by_username,
         updated_at
       )
-      VALUES (1, $1, $2, $3, $4, $5, $6, now())
+      VALUES (1, $1, $2, $3, $4, $5, $6, $7, now())
       ON CONFLICT (id) DO UPDATE SET
         profit_fee_bps = EXCLUDED.profit_fee_bps,
+        star_profit_fee_bps = EXCLUDED.star_profit_fee_bps,
         referral_profit_share_bps = EXCLUDED.referral_profit_share_bps,
         clan_profit_share_bps = EXCLUDED.clan_profit_share_bps,
         bonus_unlock_share_bps = EXCLUDED.bonus_unlock_share_bps,
@@ -881,6 +912,7 @@ export async function updateProjectEconomySettings(input = {}) {
     `,
     [
       profitFeeBps,
+      starProfitFeeBps,
       referralProfitShareBps,
       clanProfitShareBps,
       bonusUnlockShareBps,
@@ -891,8 +923,11 @@ export async function updateProjectEconomySettings(input = {}) {
   return normalizeEconomySettings(result.rows[0]);
 }
 
-function calculateProfitFeeFromSettings(profit, settings) {
-  return Math.round(Math.max(0, Number(profit || 0)) * (settings.profit_fee_bps / 10_000) * 100) / 100;
+function calculateProfitFeeFromSettings(profit, settings, currency = "USDT") {
+  const feeBps = normalizeCurrency(currency) === "STAR"
+    ? settings.star_profit_fee_bps
+    : settings.profit_fee_bps;
+  return Math.round(Math.max(0, Number(profit || 0)) * (feeBps / 10_000) * 100) / 100;
 }
 
 function getMarketMakerSpreadBps() {
@@ -2842,7 +2877,11 @@ async function distributeLimitSellOrderProfitFee(client, order, settings = null)
   }
 
   const economySettings = settings || await getEconomySettingsWithClient(client);
-  const fee = calculateProfitFeeFromSettings(grossProfit, economySettings);
+  const fee = calculateProfitFeeFromSettings(
+    grossProfit,
+    economySettings,
+    normalizeCurrency(order.currency),
+  );
   if (fee <= 0) {
     return null;
   }
@@ -3599,10 +3638,15 @@ async function getUserMarketStats(userId, limit = 40) {
           AND order_side = 'SELL'
       ),
       economy_settings AS (
-        SELECT COALESCE(
-          (SELECT profit_fee_bps FROM project_economy_settings WHERE id = 1),
-          700
-        ) AS profit_fee_bps
+        SELECT
+          COALESCE(
+            (SELECT profit_fee_bps FROM project_economy_settings WHERE id = 1),
+            700
+          ) AS profit_fee_bps,
+          COALESCE(
+            (SELECT star_profit_fee_bps FROM project_economy_settings WHERE id = 1),
+            1500
+          ) AS star_profit_fee_bps
       ),
       position_stats AS (
         SELECT
@@ -3631,7 +3675,15 @@ async function getUserMarketStats(userId, limit = 40) {
           SUM(
             CASE
               WHEN status = 'filled' THEN
-                reserved_amount - ROUND(GREATEST(reserved_amount - reserved_spent, 0) * economy_settings.profit_fee_bps / 10000.0, 2)
+                reserved_amount - ROUND(
+                  GREATEST(reserved_amount - reserved_spent, 0)
+                  * CASE
+                      WHEN currency = 'STAR' THEN economy_settings.star_profit_fee_bps
+                      ELSE economy_settings.profit_fee_bps
+                    END
+                  / 10000.0,
+                  2
+                )
               ELSE 0
             END
           ) AS payout,
@@ -3639,7 +3691,15 @@ async function getUserMarketStats(userId, limit = 40) {
             CASE
               WHEN status = 'filled' THEN
                 reserved_amount
-                - ROUND(GREATEST(reserved_amount - reserved_spent, 0) * economy_settings.profit_fee_bps / 10000.0, 2)
+                - ROUND(
+                    GREATEST(reserved_amount - reserved_spent, 0)
+                    * CASE
+                        WHEN currency = 'STAR' THEN economy_settings.star_profit_fee_bps
+                        ELSE economy_settings.profit_fee_bps
+                      END
+                    / 10000.0,
+                    2
+                  )
                 - reserved_spent
               ELSE 0
             END
@@ -4046,7 +4106,7 @@ export async function getUserSnapshot(telegramId) {
     [user.id],
   );
 
-  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, premiumFishResult, lossRefundOffersResult, depositTotalResult, depositBonusClaimsResult, shakeFeedTotal, bonusUnlockStatus] = await Promise.all([
+  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, premiumFishResult, lossRefundOffersResult, depositTotalResult, depositBonusClaimsResult, shakeFeedTotal, bonusUnlockStatus, starConversionStatus] = await Promise.all([
     getBalanceByUserId(user.id),
     getUsdtBalanceByUserId(user.id),
     getUsdtBonusBalanceByUserId(user.id),
@@ -4150,6 +4210,7 @@ export async function getUserSnapshot(telegramId) {
     ),
     getShakeFeedTotal({ query }, user.id),
     getBonusUnlockStatusForUser(user.id),
+    getStarConversionStatusForUser(user.id),
   ]);
   const usdtTotalBalance = Math.round((usdtCashBalance + usdtBonusBalance) * 100) / 100;
   const depositTotal = Math.round(toNumber(depositTotalResult.rows[0]?.total) * 100) / 100;
@@ -4163,6 +4224,7 @@ export async function getUserSnapshot(telegramId) {
     usdt_cash_balance: usdtCashBalance,
     usdt_bonus_balance: usdtBonusBalance,
     bonus_unlock: bonusUnlockStatus,
+    star_conversion: starConversionStatus,
     positions: positionsResult.rows.map(mapPosition),
     recent_trades: tradesResult.rows.map(mapTrade),
     market_stats: marketStats,
@@ -4283,6 +4345,88 @@ export async function addUsdtBonusToUser(input) {
     usdt_cash_balance: result.cash,
     usdt_bonus_balance: result.bonus,
     credited_to: "bonus",
+  };
+}
+
+export async function addUsdtCashToUser(input) {
+  const amount = ensurePositiveAmount(input.amount);
+  const reason = String(input.reason || "admin_usdt_cash_adjustment").slice(0, 120);
+  const eventKey = String(input.event_key || input.eventKey || "").trim();
+  if (!/^[a-zA-Z0-9:_-]{6,160}$/.test(eventKey)) {
+    throw new Error("invalid_adjustment_event_key");
+  }
+  const user = await upsertUser({
+    telegram_id: input.telegram_id,
+    username: input.username,
+    first_name: input.first_name,
+  });
+
+  const result = await withTransaction(async (client) => {
+    const reservation = await client.query(
+      `
+        INSERT INTO admin_usdt_cash_adjustments (
+          event_key,
+          user_id,
+          amount,
+          reason,
+          source
+        )
+        VALUES ($1, $2, $3::numeric, $4, $5)
+        ON CONFLICT (event_key) DO NOTHING
+        RETURNING event_key
+      `,
+      [eventKey, user.id, amount, reason, input.source || "bridge"],
+    );
+    const alreadyProcessed = !reservation.rows[0];
+
+    if (!alreadyProcessed) {
+      await client.query(
+        `
+          UPDATE usdt_balances
+          SET balance = balance + $2::numeric,
+              updated_at = now()
+          WHERE user_id = $1
+        `,
+        [user.id, amount],
+      );
+      await client.query(
+        `
+          INSERT INTO usdt_ledger (user_id, amount, reason, source)
+          VALUES ($1, $2::numeric, $3, $4)
+        `,
+        [user.id, amount, reason, `cash_adjustment:${eventKey}`],
+      );
+    }
+
+    const balanceResult = await client.query(
+      `
+        SELECT
+          cash.balance AS cash_balance,
+          bonus.balance AS bonus_balance
+        FROM usdt_balances cash
+        JOIN usdt_bonus_balances bonus ON bonus.user_id = cash.user_id
+        WHERE cash.user_id = $1
+      `,
+      [user.id],
+    );
+    const cashBalance = toNumber(balanceResult.rows[0]?.cash_balance);
+    const bonusBalance = toNumber(balanceResult.rows[0]?.bonus_balance);
+    return {
+      cash: cashBalance,
+      bonus: bonusBalance,
+      total: roundMoney(cashBalance + bonusBalance),
+      already_processed: alreadyProcessed,
+    };
+  });
+
+  return {
+    user,
+    balance: result.total,
+    usdt_balance: result.total,
+    usdt_cash_balance: result.cash,
+    usdt_bonus_balance: result.bonus,
+    credited_to: "cash",
+    already_processed: result.already_processed,
   };
 }
 
@@ -8952,7 +9096,7 @@ export async function sellOutcome(input) {
     const bonusSpentSold = toNumber(position.bonus_spent) * soldRatio;
     const grossProfit = gross - spentSold;
     const economySettings = await getEconomySettingsWithClient(client);
-    const fee = calculateProfitFeeFromSettings(grossProfit, economySettings);
+    const fee = calculateProfitFeeFromSettings(grossProfit, economySettings, currency);
     const proceeds = Math.max(0, Math.round((gross - fee) * 100) / 100);
     const realizedPnl = proceeds - spentSold;
     const remainingShares = Math.max(0, positionShares - sharesToSell);
@@ -9093,7 +9237,11 @@ export function calculateResolvedPositionSettlement(position, market, winner, ec
     ? shares
     : 0;
   const grossProfit = grossPayout - spent;
-  const fee = calculateProfitFeeFromSettings(grossProfit, economySettings);
+  const fee = calculateProfitFeeFromSettings(
+    grossProfit,
+    economySettings,
+    normalizeCurrency(position.currency),
+  );
   const basePayout = Math.max(0, roundMoney(grossPayout - fee));
   const basePnl = roundMoney(basePayout - spent);
   const luckySpent = Math.min(toNumber(position.lucky_spent), spent);
@@ -9285,6 +9433,11 @@ async function settleOpenMarketPositions(client, market, winner) {
   for (const result of realResultsByUser.values()) {
     const realNetPnl = roundMoney(result.realNetPnl);
     await unlockBonusAfterResolvedMarket(client, {
+      userId: result.userId,
+      marketId: market.id,
+      realNetPnl,
+    });
+    await convertStarsAfterResolvedMarket(client, {
       userId: result.userId,
       marketId: market.id,
       realNetPnl,
