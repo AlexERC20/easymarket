@@ -95,13 +95,14 @@ PUBLIC_AV_BOT_URL=https://t.me/voit_help_bot?start=buy_stars
 PUBLIC_MINI_APP_URL=https://t.me/voit_help_bot?startapp=easymarket
 REFERRAL_BET_BONUS_FIRE=500
 TASK_SHARE_FIRE=100
-TASK_SUBSCRIBE_REWARD_FIRE=300
+TASK_SUBSCRIBE_REWARD_FIRE=150
 TASK_PRIVATE_CHAT_FIRE=15000
 TASK_DAILY_PRESENCE_FIRE=50
 TASK_DAILY_BET_FIRE=50
-TASK_DAILY_CAP_FIRE=10000
-TASK_REWARD_SCALE=0.5
-TASK_EASY_REWARD_SCALE=0.25
+TASK_DAILY_CAP_FIRE=5000
+TASK_REWARD_SCALE=0.3
+TASK_EASY_REWARD_SCALE=0.1
+USDT_WITHDRAWAL_FEE=3
 PUBLIC_AV_CHANNEL_URL=https://t.me/erc20coin
 PUBLIC_AV_CHAT_URL=https://t.me/thedaomaker
 PUBLIC_PRIVATE_CHAT_URL=https://t.me/tribute/app?startapp=stKL
@@ -117,6 +118,7 @@ PUBLIC_PRIVATE_CHAT_URL=https://t.me/tribute/app?startapp=stKL
 `TASK_PRIVATE_CHAT_FIRE` is a one-time private chat subscriber bonus completed through `/api/bridge/tasks/complete` with `task_key=private_chat`; it is not counted against the ordinary daily task cap.
 
 `TASK_REWARD_SCALE` applies to ordinary task rewards and the daily cap. `TASK_EASY_REWARD_SCALE` applies to lightweight actions such as presence, comments, market exploration, fish feeding, and story sharing. `TASK_SUBSCRIBE_REWARD_FIRE` is the fixed one-time reward for each verified public channel/chat subscription.
+`USDT_WITHDRAWAL_FEE` is deducted from each withdrawal request. USDT withdrawal is available only after a confirmed on-chain deposit, and bonus conversion additionally requires at least one cash-backed USDT prediction.
 `DATABASE_CLEANUP_*` controls the daily Postgres cleanup job. The defaults keep balances, ledgers, deposits, withdrawals, positions, and trades, while pruning old chart ticks, comments, scanner events, expired deposit requests, old daily task claims, and empty technical markets. Cleanup deletes in batches to avoid long locks on a busy database. A startup safety cleanup also runs after deploy when cleanup is enabled.
 `PRICE_TICKS_DISABLED=false` keeps chart tick persistence on. Old raw ticks are pruned automatically: `BTCUSDT` is kept for `CLEANUP_BTC_PRICE_TICKS_DAYS` days, while all other raw tick symbols are kept for `CLEANUP_OTHER_PRICE_TICKS_HOURS` hours. If `price_ticks` grows above `CLEANUP_PRICE_TICKS_TRUNCATE_ABOVE_MB`, startup/daily cleanup truncates only that disposable table to protect the 1 GB Postgres plan.
 `STARTUP_DATABASE_RESCUE_ENABLED=true` runs before migrations and can drop only the disposable `price_ticks` table when it is above `STARTUP_PRICE_TICKS_DROP_ABOVE_MB`; this protects startup on a nearly full Postgres disk.

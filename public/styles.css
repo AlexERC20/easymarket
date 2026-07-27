@@ -4099,6 +4099,11 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   color: var(--text);
 }
 
+.wallet-mode-toggle button.withdraw-locked {
+  color: rgba(148, 158, 177, 0.5);
+  filter: grayscale(1);
+}
+
 .wallet-balance-line {
   display: flex;
   align-items: center;
@@ -4158,6 +4163,55 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
 
 .wallet-mode-panel.hidden {
   display: none;
+}
+
+.withdraw-form-content {
+  display: grid;
+  gap: 12px;
+}
+
+.withdraw-form-content.hidden {
+  display: none;
+}
+
+.withdraw-locked-notice {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  border: 1px solid rgba(148, 158, 177, 0.16);
+  border-radius: 14px;
+  background: rgba(148, 158, 177, 0.055);
+  padding: 24px 18px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.withdraw-locked-notice.hidden {
+  display: none;
+}
+
+.withdraw-locked-notice svg {
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+  opacity: 0.65;
+}
+
+.withdraw-locked-notice strong {
+  color: rgba(224, 229, 239, 0.78);
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.withdraw-locked-notice span {
+  max-width: 230px;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.45;
 }
 
 .withdraw-network-toggle {

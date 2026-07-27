@@ -38,7 +38,13 @@ function getActiveStreak(row = {}) {
   };
 }
 
-function buildUnlockStatus({ depositTotal, unlockedTotal = 0, bonusBalance = 0, streak = {} }) {
+export function buildUnlockStatus({
+  depositTotal,
+  unlockedTotal = 0,
+  bonusBalance = 0,
+  streak = {},
+  cashPlayQualified = false,
+}) {
   const safeDepositTotal = roundAmount(depositTotal);
   const safeUnlockedTotal = roundAmount(unlockedTotal);
   const tier = getBonusUnlockTier(safeDepositTotal);
@@ -47,7 +53,9 @@ function buildUnlockStatus({ depositTotal, unlockedTotal = 0, bonusBalance = 0, 
   const lifetimeCap = roundAmount(safeDepositTotal * (BONUS_UNLOCK_LIFETIME_CAP_BPS / 10_000));
 
   return {
-    eligible: tier.rate_bps > 0,
+    eligible: tier.rate_bps > 0 && cashPlayQualified,
+    deposit_qualified: tier.rate_bps > 0,
+    cash_play_qualified: Boolean(cashPlayQualified),
     deposit_total: safeDepositTotal,
     base_rate_bps: tier.rate_bps,
     base_rate_pct: tier.rate_bps / 100,
@@ -103,7 +111,23 @@ export async function getBonusUnlockStatusForUser(userId) {
           SELECT last_day_key
           FROM user_streaks
           WHERE user_id = $1
-        ) AS last_day_key
+        ) AS last_day_key,
+        (
+          EXISTS (
+            SELECT 1
+            FROM positions
+            WHERE user_id = $1
+              AND currency = 'USDT'
+              AND spent > bonus_spent
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM usdt_ledger
+            WHERE user_id = $1
+              AND amount < 0
+              AND reason IN ('buy_yes_usdt', 'buy_no_usdt')
+          )
+        ) AS cash_play_qualified
     `,
     [userId],
   );
@@ -112,6 +136,7 @@ export async function getBonusUnlockStatusForUser(userId) {
     unlockedTotal: result.rows[0]?.unlocked_total,
     bonusBalance: result.rows[0]?.bonus_balance,
     streak: result.rows[0],
+    cashPlayQualified: result.rows[0]?.cash_play_qualified === true,
   });
 }
 
@@ -206,12 +231,28 @@ export async function unlockBonusAfterResolvedMarket(client, input) {
         FROM user_streaks
         WHERE user_id = $1
       ) AS last_day_key
+      , (
+        EXISTS (
+          SELECT 1
+          FROM positions
+          WHERE user_id = $1
+            AND currency = 'USDT'
+            AND spent > bonus_spent
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM usdt_ledger
+          WHERE user_id = $1
+            AND amount < 0
+            AND reason IN ('buy_yes_usdt', 'buy_no_usdt')
+        )
+      ) AS cash_play_qualified
     `,
     [userId],
   );
   const depositTotal = roundAmount(depositResult.rows[0]?.total);
   const tier = getBonusUnlockTier(depositTotal);
-  if (tier.rate_bps <= 0) {
+  if (tier.rate_bps <= 0 || depositResult.rows[0]?.cash_play_qualified !== true) {
     return null;
   }
   const activeStreak = getActiveStreak(depositResult.rows[0]);

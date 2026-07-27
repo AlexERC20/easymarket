@@ -110,6 +110,8 @@ const DAILY_TASK_KEYS = [
   "daily_share_story",
 ];
 
+const PROMO_USDT_PLAY_TARGETS = [1, 3, 5, 10, 20];
+
 const WORLD_CUP_FALLBACK_MARKETS = [
   { polymarketId: "fallback-france", team: "France", icon: "🇫🇷", yesPrice: 0.3845, volume: 97_261_093 },
   { polymarketId: "fallback-england", team: "England", icon: "🏴", yesPrice: 0.2145, volume: 84_462_721 },
@@ -5239,6 +5241,51 @@ function getTaskLevelFromClaimKey(taskKey, claimKey) {
   return Number.isSafeInteger(level) && level > 0 ? level : null;
 }
 
+export function buildPromoUsdtPlayProgress(marketCount, cashStaked = 0, dayKey = getDayKey()) {
+  const value = Math.max(0, Math.floor(Number(marketCount || 0)));
+  const claimedLevels = PROMO_USDT_PLAY_TARGETS
+    .map((target, index) => ({ target, level: index + 1 }))
+    .filter((entry) => value >= entry.target)
+    .map((entry) => entry.level);
+  const nextIndex = Math.min(claimedLevels.length, PROMO_USDT_PLAY_TARGETS.length - 1);
+  return {
+    value,
+    target: PROMO_USDT_PLAY_TARGETS[nextIndex],
+    unit: "USDT-рынков",
+    level: nextIndex + 1,
+    levels: PROMO_USDT_PLAY_TARGETS.length,
+    amount: 0,
+    claim_task_key: null,
+    ready: false,
+    claimed: claimedLevels.length === PROMO_USDT_PLAY_TARGETS.length,
+    claimed_levels: claimedLevels,
+    cash_staked: roundMoney(Math.abs(Number(cashStaked || 0))),
+    day_key: dayKey,
+  };
+}
+
+async function getPromoUsdtPlayProgress(client, userId, dayKey = getDayKey()) {
+  const result = await client.query(
+    `
+      SELECT
+        COUNT(DISTINCT source)::int AS market_count,
+        ABS(COALESCE(SUM(amount), 0)) AS cash_staked
+      FROM usdt_ledger
+      WHERE user_id = $1
+        AND created_at >= date_trunc('day', now())
+        AND amount < 0
+        AND reason IN ('buy_yes_usdt', 'buy_no_usdt')
+        AND source LIKE 'market:%'
+    `,
+    [userId],
+  );
+  return buildPromoUsdtPlayProgress(
+    result.rows[0]?.market_count,
+    result.rows[0]?.cash_staked,
+    dayKey,
+  );
+}
+
 function getProgressTaskDayKey(taskKey) {
   return DAILY_PROGRESS_TASKS[taskKey]?.claimDayKey || getDayKey();
 }
@@ -5874,6 +5921,7 @@ export async function getEngagementState(input) {
       progress[key] = taskProgress;
     }
   }
+  progress.promo_usdt_play = await getPromoUsdtPlayProgress(shim, user.id, today);
 
   const streakResult = await query("SELECT * FROM user_streaks WHERE user_id = $1", [user.id]);
 

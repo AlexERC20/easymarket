@@ -248,12 +248,13 @@ const state = {
     referral_bonus_fire: 500,
     referral_signup_bonus_usdt: 5,
     referral_bet_bonus_usdt: 30,
-    task_share_fire: 50,
-    task_subscribe_fire: 300,
-    task_private_chat_fire: 7500,
-    task_daily_presence_fire: 13,
-    task_daily_bet_fire: 25,
-    task_daily_cap_fire: 5000,
+    task_share_fire: 30,
+    task_subscribe_fire: 150,
+    task_private_chat_fire: 4500,
+    task_daily_presence_fire: 5,
+    task_daily_bet_fire: 15,
+    task_daily_cap_fire: 1500,
+    usdt_withdrawal_fee: 3,
     av_channel_url: "https://t.me/erc20coin",
     av_chat_url: "https://t.me/thedaomaker",
     private_chat_url: "https://t.me/tribute/app?startapp=stKL",
@@ -3024,11 +3025,11 @@ async function loadPublicConfig() {
 }
 
 function renderTaskRewards() {
-  const share = Math.round(Number(state.publicConfig.task_share_fire || 50));
-  const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 300));
-  const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 7500));
+  const share = Math.round(Number(state.publicConfig.task_share_fire || 30));
+  const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 150));
+  const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 4500));
   const refUsdt = Math.round(Number(state.publicConfig.referral_bet_bonus_usdt || 30));
-  const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 13));
+  const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 5));
   if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
   if ($("channelTaskReward")) $("channelTaskReward").textContent = formatFire(sub);
   if ($("chatTaskReward")) $("chatTaskReward").textContent = formatFire(sub);
@@ -6786,6 +6787,10 @@ function walletTypeLabel(type) {
   return type === "withdrawal" ? "Вывод" : "Пополнение";
 }
 
+function isWithdrawalUnlocked() {
+  return Number(state.bonusUnlock?.deposit_total || 0) > 0;
+}
+
 function renderWalletHistory() {
   const container = $("walletHistoryList");
   if (!container) {
@@ -6804,6 +6809,8 @@ function renderWalletHistory() {
 
   container.innerHTML = state.walletHistory.items.slice(0, 30).map((item) => {
     const amount = formatCurrencyAmount(item.amount, "USDT");
+    const payoutAmount = formatCurrencyAmount(item.payout_amount ?? item.amount, "USDT");
+    const feeAmount = formatCurrencyAmount(item.fee_amount || 0, "USDT");
     const network = item.network_label || item.network || "";
     const address = item.address
       ? `${String(item.address).slice(0, 7)}...${String(item.address).slice(-5)}`
@@ -6813,7 +6820,7 @@ function renderWalletHistory() {
       <div class="wallet-history-row ${item.type === "withdrawal" ? "withdrawal" : "deposit"}${isPending ? " is-pending" : ""}">
         <div>
           <strong>${walletTypeLabel(item.type)}</strong>
-          <small>${escapeHtml(network)}${address ? ` · ${escapeHtml(address)}` : ""}</small>
+          <small>${escapeHtml(network)}${address ? ` · ${escapeHtml(address)}` : ""}${item.type === "withdrawal" ? ` · получит ${payoutAmount} · комиссия ${feeAmount}` : ""}</small>
         </div>
         <div>
           <b>${item.type === "withdrawal" ? "-" : "+"}${amount}</b>
@@ -6848,6 +6855,7 @@ function renderTopupSheet() {
   const currency = normalizeCurrency(state.topup.currency);
   const isUsdt = currency === "USDT";
   const isHistoryOpen = Boolean(state.topup.historyOpen);
+  const withdrawalUnlocked = isWithdrawalUnlocked();
   const intent = state.topup.intent;
   const hasPendingIntent = isUsdt && intent?.status === "pending";
 
@@ -6879,13 +6887,15 @@ function renderTopupSheet() {
     ? "history"
     : isTopupMode
       ? `topup:${currency}:${hasPendingIntent ? "pending" : "entry"}`
-      : `withdraw:${currency}`;
+      : `withdraw:${currency}:${withdrawalUnlocked ? "ready" : "locked"}`;
   const walletMorph = beginSheetContentMorph("topupSheet", `wallet:${walletViewKey}`);
   $("topupModePanel")?.classList.toggle("hidden", isHistoryOpen || !isTopupMode);
   $("withdrawModePanel")?.classList.toggle("hidden", isHistoryOpen || isTopupMode);
   $("walletHistoryPanel")?.classList.toggle("hidden", !isHistoryOpen);
   $("walletModeTopupBtn")?.classList.toggle("active", !isHistoryOpen && isTopupMode);
   $("walletModeWithdrawBtn")?.classList.toggle("active", !isHistoryOpen && !isTopupMode);
+  $("walletModeWithdrawBtn")?.classList.toggle("withdraw-locked", !withdrawalUnlocked);
+  $("walletModeWithdrawBtn")?.setAttribute("aria-disabled", withdrawalUnlocked ? "false" : "true");
   $("walletHistoryBtn")?.classList.toggle("active", isHistoryOpen);
   // На шаге 2 тоггл Пополнить/Вывести не нужен — только детали заявки.
   document.querySelector(".wallet-mode-toggle")?.classList.toggle("hidden", isHistoryOpen || (hasPendingIntent && isTopupMode));
@@ -6896,6 +6906,14 @@ function renderTopupSheet() {
   $("usdtDepositPanel")?.classList.toggle("hidden", !isUsdt || !isTopupMode || !hasPendingIntent);
   $("usdtDepositIntentBox")?.classList.toggle("hidden", !hasPendingIntent);
   $("usdtDepositIntentBox")?.classList.toggle("is-waiting", hasPendingIntent);
+  $("withdrawLockedNotice")?.classList.toggle(
+    "hidden",
+    isHistoryOpen || isTopupMode || withdrawalUnlocked,
+  );
+  $("withdrawFormContent")?.classList.toggle(
+    "hidden",
+    !isTopupMode && !isHistoryOpen && !withdrawalUnlocked,
+  );
 
   // Степпер депозита: Заявка -> Перевод -> Зачисление.
   const stepper = $("usdtDepositStepper");
@@ -7027,7 +7045,9 @@ function renderTopupSheet() {
       ? ""
       : unlock?.eligible
         ? `Разблокировка: до ${Number(unlock.rate_pct || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 })}% от прибыли${Number(unlock.streak_multiplier || 1) > 1 ? ` · заряд x${unlock.streak_multiplier}` : ""}`
-        : "Разблокировка после депозита от 15 USDT";
+        : unlock?.deposit_qualified && !unlock?.cash_play_qualified
+          ? "Конвертация включится после ставки основными USDT"
+          : "Разблокировка после депозита от 15 USDT";
   }
   if ($("topupCustomAmount") && document.activeElement !== $("topupCustomAmount")) {
     $("topupCustomAmount").value = hasAmount
@@ -7086,9 +7106,12 @@ function renderTopupSheet() {
     const cashBalance = Number(state.usdtCashBalance || 0);
     const hasWithdrawAmount = withdrawAmountRaw !== "" && Number.isFinite(withdrawAmount) && withdrawAmount > 0;
     const overBalance = hasWithdrawAmount && withdrawAmount > cashBalance;
-    const inWithdrawView = !isTopupMode && !isHistoryOpen;
+    const fee = Math.max(0, Number(state.publicConfig.usdt_withdrawal_fee || 3));
+    const payout = Math.max(0, withdrawAmount - fee);
+    const belowFee = hasWithdrawAmount && payout <= 0;
+    const inWithdrawView = !isTopupMode && !isHistoryOpen && withdrawalUnlocked;
     $("withdrawSummary").classList.toggle("hidden", !inWithdrawView);
-    $("withdrawSummary").classList.toggle("over", overBalance);
+    $("withdrawSummary").classList.toggle("over", overBalance || belowFee);
     $("withdrawSummary").classList.toggle("idle", !hasWithdrawAmount);
     $("withdrawSummary").textContent = !inWithdrawView
       ? ""
@@ -7096,11 +7119,17 @@ function renderTopupSheet() {
         ? `Доступно: ${formatCurrencyAmount(cashBalance, "USDT")}`
         : overBalance
           ? `Доступно для вывода: ${formatCurrencyAmount(cashBalance, "USDT")} (основной баланс)`
-          : `Спишем ${formatCurrencyAmount(withdrawAmount, "USDT")} · Останется ${formatCurrencyAmount(Math.max(0, cashBalance - withdrawAmount), "USDT")}`;
+          : belowFee
+            ? `Сумма должна быть больше комиссии ${formatCurrencyAmount(fee, "USDT")}`
+            : `Комиссия ${formatCurrencyAmount(fee, "USDT")} · Получишь ${formatCurrencyAmount(payout, "USDT")} · Останется ${formatCurrencyAmount(Math.max(0, cashBalance - withdrawAmount), "USDT")}`;
   }
   renderWithdrawAddressCheck();
   if ($("withdrawSubmitBtn")) {
-    $("withdrawSubmitBtn").disabled = isHistoryOpen || isTopupMode || state.withdrawal.pending || !state.user;
+    $("withdrawSubmitBtn").disabled = isHistoryOpen
+      || isTopupMode
+      || !withdrawalUnlocked
+      || state.withdrawal.pending
+      || !state.user;
     $("withdrawSubmitBtn").textContent = state.withdrawal.pending ? "Создаю заявку..." : "Вывести";
   }
   renderWalletHistory();
@@ -7685,10 +7714,21 @@ async function createUsdtWithdrawalRequest() {
     showToast("Сначала нужен пользователь.");
     return;
   }
+  if (!isWithdrawalUnlocked()) {
+    triggerHaptic("warning");
+    showToast("Вывод разблокируется после первого пополнения USDT.");
+    return;
+  }
   const amount = Number(String(state.withdrawal.amount || "").replace(",", "."));
   if (!Number.isFinite(amount) || amount <= 0) {
     triggerHaptic("warning");
     showToast("Введи сумму вывода.");
+    return;
+  }
+  const withdrawalFee = Math.max(0, Number(state.publicConfig.usdt_withdrawal_fee || 3));
+  if (amount <= withdrawalFee) {
+    triggerHaptic("warning");
+    showToast(`Сумма вывода должна быть больше комиссии ${formatCurrencyAmount(withdrawalFee, "USDT")}.`);
     return;
   }
   if (amount > Number(state.usdtCashBalance || 0)) {
@@ -7737,6 +7777,8 @@ async function createUsdtWithdrawalRequest() {
       invalid_withdrawal_address: "Проверь кошелек получателя.",
       invalid_withdrawal_network: "Выбери сеть вывода.",
       invalid_withdrawal_amount: "Проверь сумму вывода.",
+      withdrawal_amount_below_fee: "Сумма вывода должна быть больше комиссии $3.",
+      withdrawal_deposit_required: "Вывод разблокируется после первого пополнения USDT.",
     };
     showToast(messages[error.message] || "Не получилось создать вывод.");
   } finally {

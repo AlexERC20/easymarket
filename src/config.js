@@ -81,13 +81,13 @@ export const config = {
   referralSignupBonusUsdt: parseNumber(process.env.REFERRAL_SIGNUP_BONUS_USDT, 5, 0),
   referralBetBonusUsdt: parseNumber(process.env.REFERRAL_BET_BONUS_USDT, 30, 0),
   taskShareFire: parseNumber(process.env.TASK_SHARE_FIRE, 100, 0),
-  taskSubscribeFire: parseNumber(process.env.TASK_SUBSCRIBE_REWARD_FIRE, 300, 0),
+  taskSubscribeFire: parseNumber(process.env.TASK_SUBSCRIBE_REWARD_FIRE, 150, 0),
   taskPrivateChatFire: parseNumber(process.env.TASK_PRIVATE_CHAT_FIRE, 15_000, 0),
   taskDailyPresenceFire: parseNumber(process.env.TASK_DAILY_PRESENCE_FIRE, 50, 0),
   taskDailyBetFire: parseNumber(process.env.TASK_DAILY_BET_FIRE, 50, 0),
-  taskDailyCapFire: parseNumber(process.env.TASK_DAILY_CAP_FIRE, 10_000, 0),
-  taskRewardScale: parseNumber(process.env.TASK_REWARD_SCALE, 0.5, 0),
-  taskEasyRewardScale: parseNumber(process.env.TASK_EASY_REWARD_SCALE, 0.25, 0),
+  taskDailyCapFire: parseNumber(process.env.TASK_DAILY_CAP_FIRE, 5_000, 0),
+  taskRewardScale: parseNumber(process.env.TASK_REWARD_SCALE, 0.3, 0),
+  taskEasyRewardScale: parseNumber(process.env.TASK_EASY_REWARD_SCALE, 0.1, 0),
   publicAvChannelUrl: (
     process.env.PUBLIC_AV_CHANNEL_URL
       || "https://t.me/erc20coin"
@@ -113,6 +113,7 @@ export const config = {
   usdtDepositBackfillBlocks: parseNumber(process.env.USDT_DEPOSIT_BACKFILL_BLOCKS, 6_000, 300),
   usdtDepositBackfillMs: parseNumber(process.env.USDT_DEPOSIT_BACKFILL_MS, 300_000, 60_000),
   usdtDepositMatchGraceMinutes: parseNumber(process.env.USDT_DEPOSIT_MATCH_GRACE_MINUTES, 10, 0),
+  usdtWithdrawalFee: parseNumber(process.env.USDT_WITHDRAWAL_FEE, 3, 0),
   evmScanApiUrl: (
     process.env.EVM_SCAN_API_URL
       || process.env.ETHERSCAN_API_URL

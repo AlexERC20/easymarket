@@ -400,25 +400,35 @@
               <button id="topupBuyBtn" class="trade-confirm" type="button">Купить</button>
             </div>
             <div id="withdrawModePanel" class="wallet-mode-panel hidden">
-              <div class="wallet-amount-field">
-                <label class="topup-custom-amount">
-                  <span class="wallet-field-label">Сумма вывода</span>
-                  <input id="withdrawAmountInput" type="number" min="1" max="100000" step="0.01" inputmode="decimal" placeholder="0.00" />
+              <div id="withdrawLockedNotice" class="withdraw-locked-notice hidden">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="5" y="10" width="14" height="10" rx="3" />
+                  <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+                </svg>
+                <strong>Вывод пока закрыт</strong>
+                <span>Разблокируется после первого пополнения USDT.</span>
+              </div>
+              <div id="withdrawFormContent" class="withdraw-form-content">
+                <div class="wallet-amount-field">
+                  <label class="topup-custom-amount">
+                    <span class="wallet-field-label">Сумма вывода</span>
+                    <input id="withdrawAmountInput" type="number" min="3.01" max="100000" step="0.01" inputmode="decimal" placeholder="0.00" />
+                  </label>
+                  <button id="withdrawMaxBtn" class="wallet-max-btn" type="button">MAX</button>
+                </div>
+                <div id="withdrawSummary" class="withdraw-summary hidden"></div>
+                <label class="topup-custom-amount wallet-addr-field">
+                  <span class="wallet-field-label">Адрес получателя</span>
+                  <input id="withdrawAddressInput" type="text" inputmode="text" autocomplete="off" placeholder="0x…" />
+                  <span id="withdrawAddressCheck" class="wallet-addr-check" aria-hidden="true"></span>
                 </label>
-                <button id="withdrawMaxBtn" class="wallet-max-btn" type="button">MAX</button>
+                <div class="withdraw-network-toggle" role="tablist" aria-label="Сеть вывода">
+                  <button class="active" data-withdraw-network="BSC" type="button"><strong>BEP20</strong><small>быстро и дёшево · советуем</small></button>
+                  <button data-withdraw-network="ETH" type="button"><strong>ERC20</strong><small>газ дороже</small></button>
+                </div>
+                <p id="withdrawReason"></p>
+                <button id="withdrawSubmitBtn" class="trade-confirm" type="button">Вывести</button>
               </div>
-              <div id="withdrawSummary" class="withdraw-summary hidden"></div>
-              <label class="topup-custom-amount wallet-addr-field">
-                <span class="wallet-field-label">Адрес получателя</span>
-                <input id="withdrawAddressInput" type="text" inputmode="text" autocomplete="off" placeholder="0x…" />
-                <span id="withdrawAddressCheck" class="wallet-addr-check" aria-hidden="true"></span>
-              </label>
-              <div class="withdraw-network-toggle" role="tablist" aria-label="Сеть вывода">
-                <button class="active" data-withdraw-network="BSC" type="button"><strong>BEP20</strong><small>быстро и дёшево · советуем</small></button>
-                <button data-withdraw-network="ETH" type="button"><strong>ERC20</strong><small>газ дороже</small></button>
-              </div>
-              <p id="withdrawReason"></p>
-              <button id="withdrawSubmitBtn" class="trade-confirm" type="button">Вывести</button>
             </div>
             <div id="walletHistoryPanel" class="wallet-mode-panel wallet-history-panel hidden">
               <div id="walletHistoryList" class="wallet-history-list stagger-list">
@@ -855,6 +865,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260727-01" type="module"></script>
+    <script src="/app.js?v=20260727-02" type="module"></script>
   </body>
 </html>

@@ -279,6 +279,16 @@ export async function runMigrations() {
       confirmed_at TIMESTAMPTZ
     );
 
+    ALTER TABLE usdt_withdrawal_requests
+      ADD COLUMN IF NOT EXISTS fee_amount NUMERIC(20, 8) NOT NULL DEFAULT 0;
+    ALTER TABLE usdt_withdrawal_requests
+      ADD COLUMN IF NOT EXISTS payout_amount NUMERIC(20, 8) NOT NULL DEFAULT 0;
+
+    UPDATE usdt_withdrawal_requests
+    SET payout_amount = amount
+    WHERE payout_amount = 0
+      AND amount > 0;
+
     CREATE INDEX IF NOT EXISTS idx_usdt_withdrawal_requests_user_created
       ON usdt_withdrawal_requests(user_id, created_at DESC);
 

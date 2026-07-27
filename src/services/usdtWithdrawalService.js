@@ -28,6 +28,20 @@ function ensureWithdrawalAmount(value) {
   return Math.round(amount * 100) / 100;
 }
 
+export function calculateUsdtWithdrawalAmounts(value, feeValue = config.usdtWithdrawalFee) {
+  const amount = ensureWithdrawalAmount(value);
+  const fee = Math.max(0, Math.round(Number(feeValue || 0) * 100) / 100);
+  const payout = Math.round((amount - fee) * 100) / 100;
+  if (payout <= 0) {
+    throw new Error("withdrawal_amount_below_fee");
+  }
+  return {
+    amount,
+    fee,
+    payout,
+  };
+}
+
 function normalizeEvmAddress(value) {
   const address = String(value || "").trim();
   if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
@@ -49,6 +63,10 @@ function mapWithdrawal(row) {
     first_name: row.first_name,
     status: row.status,
     amount: toNumber(row.amount),
+    fee_amount: toNumber(row.fee_amount),
+    payout_amount: row.payout_amount === null || row.payout_amount === undefined
+      ? toNumber(row.amount)
+      : toNumber(row.payout_amount),
     network: row.network,
     network_label: NETWORK_LABELS[row.network] || row.network,
     to_address: row.to_address,
@@ -79,7 +97,9 @@ async function sendAdminWithdrawalNotification(request, adminToken) {
     `💸 Вывод USDT #${request.id}`,
     "",
     name,
-    `Сумма: ${request.amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT`,
+    `Списано: ${request.amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT`,
+    `Комиссия: ${request.fee_amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT`,
+    `Отправить: ${request.payout_amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT`,
     `Сеть: ${request.network_label}`,
     "",
     "Кошелек:",
@@ -121,7 +141,7 @@ async function sendUserWithdrawalConfirmed(request) {
     return;
   }
 
-  const text = `Вывод ${request.amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT подтвержден.`;
+  const text = `Вывод ${request.payout_amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT подтвержден. Комиссия: ${request.fee_amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT.`;
   await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -134,7 +154,8 @@ async function sendUserWithdrawalConfirmed(request) {
 }
 
 export async function createUsdtWithdrawalRequest(input) {
-  const amount = ensureWithdrawalAmount(input.amount);
+  const withdrawal = calculateUsdtWithdrawalAmounts(input.amount);
+  const { amount, fee, payout } = withdrawal;
   const network = normalizeNetwork(input.network);
   const toAddress = normalizeEvmAddress(input.to_address ?? input.toAddress ?? input.wallet);
   const adminToken = randomBytes(24).toString("hex");
@@ -145,6 +166,31 @@ export async function createUsdtWithdrawalRequest(input) {
   });
 
   const result = await withTransaction(async (client) => {
+    const depositResult = await client.query(
+      `
+        SELECT (
+          EXISTS (
+            SELECT 1
+            FROM usdt_deposit_intents
+            WHERE user_id = $1
+              AND status = 'credited'
+              AND COALESCE(credited_amount, 0) > 0
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM usdt_ledger
+            WHERE user_id = $1
+              AND reason = 'usdt_onchain_deposit'
+              AND amount > 0
+          )
+        ) AS unlocked
+      `,
+      [user.id],
+    );
+    if (depositResult.rows[0]?.unlocked !== true) {
+      throw new Error("withdrawal_deposit_required");
+    }
+
     const balanceResult = await client.query(
       "SELECT balance FROM usdt_balances WHERE user_id = $1 FOR UPDATE",
       [user.id],
@@ -175,14 +221,16 @@ export async function createUsdtWithdrawalRequest(input) {
         INSERT INTO usdt_withdrawal_requests (
           user_id,
           amount,
+          fee_amount,
+          payout_amount,
           network,
           to_address,
           admin_token
         )
-        VALUES ($1, $2::numeric, $3, $4, $5)
+        VALUES ($1, $2::numeric, $3::numeric, $4::numeric, $5, $6, $7)
         RETURNING *
       `,
-      [user.id, amount, network, toAddress, adminToken],
+      [user.id, amount, fee, payout, network, toAddress, adminToken],
     );
     const updatedBalanceResult = await client.query(
       "SELECT balance FROM usdt_balances WHERE user_id = $1",
@@ -256,6 +304,8 @@ export async function getWalletHistory(telegramId, limit = 30) {
           'deposit' AS type,
           intents.status,
           intents.deposit_amount AS amount,
+          0::numeric AS fee_amount,
+          intents.deposit_amount AS payout_amount,
           intents.network,
           intents.to_address AS address,
           intents.tx_hash,
@@ -272,6 +322,8 @@ export async function getWalletHistory(telegramId, limit = 30) {
           'withdrawal' AS type,
           requests.status,
           requests.amount,
+          requests.fee_amount,
+          requests.payout_amount,
           requests.network,
           requests.to_address AS address,
           requests.tx_hash,
@@ -293,6 +345,8 @@ export async function getWalletHistory(telegramId, limit = 30) {
     currency: "USDT",
     status: row.status,
     amount: toNumber(row.amount),
+    fee_amount: toNumber(row.fee_amount),
+    payout_amount: toNumber(row.payout_amount),
     network: row.network,
     network_label: NETWORK_LABELS[row.network] || row.network,
     address: row.address,

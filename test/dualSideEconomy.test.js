@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildPromoUsdtPlayProgress,
   calculateResolvedPositionSettlement,
   getBuyExecutionQuote,
   getLuckySpentForBuy,
   getRefundableMarketLoss,
 } from "../src/services/marketService.js";
+import { buildUnlockStatus } from "../src/services/bonusEconomyService.js";
+import { calculateUsdtWithdrawalAmounts } from "../src/services/usdtWithdrawalService.js";
 
 const economySettings = {
   profit_fee_bps: 700,
@@ -127,4 +130,44 @@ test("USDT loss refund uses aggregate market loss, not the losing leg", () => {
   assert.equal(getRefundableMarketLoss(0, 100), 0);
   assert.equal(getRefundableMarketLoss(-12.346, 100), 12.35);
   assert.equal(getRefundableMarketLoss(-80, 30), 30);
+});
+
+test("USDT withdrawal deducts a fixed fee from the requested amount", () => {
+  assert.deepEqual(calculateUsdtWithdrawalAmounts(10, 3), {
+    amount: 10,
+    fee: 3,
+    payout: 7,
+  });
+  assert.throws(
+    () => calculateUsdtWithdrawalAmounts(3, 3),
+    /withdrawal_amount_below_fee/,
+  );
+});
+
+test("bonus conversion needs both a deposit and real USDT play", () => {
+  const depositedOnly = buildUnlockStatus({
+    depositTotal: 100,
+    bonusBalance: 50,
+    cashPlayQualified: false,
+  });
+  assert.equal(depositedOnly.deposit_qualified, true);
+  assert.equal(depositedOnly.cash_play_qualified, false);
+  assert.equal(depositedOnly.eligible, false);
+
+  const qualified = buildUnlockStatus({
+    depositTotal: 100,
+    bonusBalance: 50,
+    cashPlayQualified: true,
+  });
+  assert.equal(qualified.eligible, true);
+  assert.equal(qualified.rate_bps, 50);
+});
+
+test("promo USDT ladder advances by distinct cash-backed markets", () => {
+  assert.deepEqual(buildPromoUsdtPlayProgress(0).claimed_levels, []);
+  const progress = buildPromoUsdtPlayProgress(5, 125, "2026-07-27");
+  assert.deepEqual(progress.claimed_levels, [1, 2, 3]);
+  assert.equal(progress.level, 4);
+  assert.equal(progress.target, 10);
+  assert.equal(progress.cash_staked, 125);
 });
