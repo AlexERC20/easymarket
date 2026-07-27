@@ -360,7 +360,7 @@
               </div>
               <label class="topup-custom-amount">
                 <span class="wallet-field-label">Сумма пополнения</span>
-                <input id="topupCustomAmount" type="number" min="1" max="100000" step="0.01" inputmode="decimal" placeholder="0.00" />
+                <input id="topupCustomAmount" type="number" min="18" max="100000" step="0.01" inputmode="decimal" placeholder="0.00" />
               </label>
               <div id="topupPresets" class="wallet-presets" role="group" aria-label="Быстрые суммы"></div>
               <p id="topupReason">Зачислим в баланс после оплаты.</p>
@@ -412,7 +412,7 @@
                 <div class="wallet-amount-field">
                   <label class="topup-custom-amount">
                     <span class="wallet-field-label">Сумма вывода</span>
-                    <input id="withdrawAmountInput" type="number" min="3.01" max="100000" step="0.01" inputmode="decimal" placeholder="0.00" />
+                    <input id="withdrawAmountInput" type="number" min="18" max="100000" step="0.01" inputmode="decimal" placeholder="0.00" />
                   </label>
                   <button id="withdrawMaxBtn" class="wallet-max-btn" type="button">MAX</button>
                 </div>
@@ -865,6 +865,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260727-03" type="module"></script>
+    <script src="/app.js?v=20260727-04" type="module"></script>
   </body>
 </html>

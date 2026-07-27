@@ -26,9 +26,10 @@ function roundMoney(value, decimals = 2) {
   return Math.round(Number(value || 0) * multiplier) / multiplier;
 }
 
-function ensurePositiveDepositAmount(value) {
+export function normalizeUsdtDepositAmount(value, minimumValue = config.usdtDepositMinimum) {
   const amount = roundMoney(value, 2);
-  if (!Number.isFinite(amount) || amount < 15 || amount > 100_000) {
+  const minimum = roundMoney(minimumValue, 2);
+  if (!Number.isFinite(amount) || amount < minimum || amount > 100_000) {
     throw new Error("invalid_deposit_amount");
   }
   return amount;
@@ -195,7 +196,7 @@ export async function createUsdtDepositIntent(input) {
   if (!network) {
     throw new Error("invalid_deposit_network");
   }
-  const requestedAmount = ensurePositiveDepositAmount(input.amount);
+  const requestedAmount = normalizeUsdtDepositAmount(input.amount);
   const user = await upsertUser({
     telegram_id: input.telegram_id,
     username: input.username,

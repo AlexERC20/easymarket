@@ -7,8 +7,10 @@ import {
   getBuyExecutionQuote,
   getLuckySpentForBuy,
   getRefundableMarketLoss,
+  splitUsdtSpend,
 } from "../src/services/marketService.js";
 import { buildUnlockStatus } from "../src/services/bonusEconomyService.js";
+import { normalizeUsdtDepositAmount } from "../src/services/usdtDepositService.js";
 import { calculateUsdtWithdrawalAmounts } from "../src/services/usdtWithdrawalService.js";
 
 const economySettings = {
@@ -133,15 +135,40 @@ test("USDT loss refund uses aggregate market loss, not the losing leg", () => {
 });
 
 test("USDT withdrawal deducts a fixed fee from the requested amount", () => {
-  assert.deepEqual(calculateUsdtWithdrawalAmounts(10, 3), {
-    amount: 10,
+  assert.deepEqual(calculateUsdtWithdrawalAmounts(18, 3, 18), {
+    amount: 18,
     fee: 3,
-    payout: 7,
+    payout: 15,
   });
   assert.throws(
-    () => calculateUsdtWithdrawalAmounts(3, 3),
-    /withdrawal_amount_below_fee/,
+    () => calculateUsdtWithdrawalAmounts(17.99, 3, 18),
+    /withdrawal_amount_below_minimum/,
   );
+});
+
+test("USDT deposits start at 18", () => {
+  assert.equal(normalizeUsdtDepositAmount(18, 18), 18);
+  assert.throws(
+    () => normalizeUsdtDepositAmount(17.99, 18),
+    /invalid_deposit_amount/,
+  );
+});
+
+test("a USDT bet uses exactly one balance source", () => {
+  assert.deepEqual(splitUsdtSpend(5, { cash: 5, bonus: 100 }), {
+    cash: 5,
+    bonus: 0,
+  });
+  assert.deepEqual(splitUsdtSpend(5, { cash: 4.99, bonus: 100 }), {
+    cash: 0,
+    bonus: 5,
+  });
+  assert.deepEqual(splitUsdtSpend(5, { cash: 4.9999, bonus: 100 }), {
+    cash: 0,
+    bonus: 5,
+  });
+  assert.equal(splitUsdtSpend(5, { cash: 3, bonus: 2 }), null);
+  assert.equal(splitUsdtSpend(5, { cash: 4, bonus: 4 }), null);
 });
 
 test("bonus conversion needs both a deposit and real USDT play", () => {

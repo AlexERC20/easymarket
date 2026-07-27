@@ -28,9 +28,17 @@ function ensureWithdrawalAmount(value) {
   return Math.round(amount * 100) / 100;
 }
 
-export function calculateUsdtWithdrawalAmounts(value, feeValue = config.usdtWithdrawalFee) {
+export function calculateUsdtWithdrawalAmounts(
+  value,
+  feeValue = config.usdtWithdrawalFee,
+  minimumValue = config.usdtWithdrawalMinimum,
+) {
   const amount = ensureWithdrawalAmount(value);
   const fee = Math.max(0, Math.round(Number(feeValue || 0) * 100) / 100);
+  const minimum = Math.max(0, Math.round(Number(minimumValue || 0) * 100) / 100);
+  if (amount < minimum) {
+    throw new Error("withdrawal_amount_below_minimum");
+  }
   const payout = Math.round((amount - fee) * 100) / 100;
   if (payout <= 0) {
     throw new Error("withdrawal_amount_below_fee");

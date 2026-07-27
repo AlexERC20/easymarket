@@ -254,7 +254,9 @@ const state = {
     task_daily_presence_fire: 5,
     task_daily_bet_fire: 15,
     task_daily_cap_fire: 1500,
+    usdt_deposit_minimum: 18,
     usdt_withdrawal_fee: 3,
+    usdt_withdrawal_minimum: 18,
     av_channel_url: "https://t.me/erc20coin",
     av_chat_url: "https://t.me/thedaomaker",
     private_chat_url: "https://t.me/tribute/app?startapp=stKL",
@@ -354,13 +356,15 @@ const formatHeaderCurrencyAmount = (value, currency = state.currency) => {
   });
   return safeCurrency === "USDT" ? `$${formatted}` : formatted;
 };
+const getUsdtDepositMinimum = () => Math.max(0.01, Number(state.publicConfig.usdt_deposit_minimum || 18));
+const getUsdtWithdrawalMinimum = () => Math.max(0.01, Number(state.publicConfig.usdt_withdrawal_minimum || 18));
 const normalizeTopupAmount = (value, currency = state.topup.currency) => {
   const safeCurrency = normalizeCurrency(currency);
   const numeric = Number(String(value ?? "").replace(",", "."));
   if (!Number.isFinite(numeric)) {
-    return safeCurrency === "USDT" ? 15 : 1;
+    return safeCurrency === "USDT" ? getUsdtDepositMinimum() : 1;
   }
-  const capped = Math.min(100_000, Math.max(safeCurrency === "USDT" ? 15 : 1, numeric));
+  const capped = Math.min(100_000, Math.max(safeCurrency === "USDT" ? 0.01 : 1, numeric));
   return safeCurrency === "USDT"
     ? Math.round(capped * 100) / 100
     : Math.round(capped);
@@ -374,6 +378,11 @@ const hasTopupAmountValue = (value) => {
   return Number.isFinite(numeric) && numeric > 0;
 };
 const getActiveBalance = () => (state.currency === "USDT" ? state.usdtBalance : state.balance);
+const getAvailableBetBalance = (currency = state.currency) => (
+  normalizeCurrency(currency) === "USDT"
+    ? Math.max(Number(state.usdtCashBalance || 0), Number(state.usdtBonusBalance || 0))
+    : Number(state.balance || 0)
+);
 const formatSignedCurrencyAmount = (value, currency = state.currency) => {
   const numeric = Number(value || 0);
   return `${numeric > 0 ? "+" : ""}${formatCurrencyAmount(numeric, currency)}`;
@@ -7057,7 +7066,7 @@ function renderTopupSheet() {
   }
   if ($("topupCustomAmount")) {
     $("topupCustomAmount").step = currency === "USDT" ? "0.01" : "1";
-    $("topupCustomAmount").min = currency === "USDT" ? "15" : "1";
+    $("topupCustomAmount").min = currency === "USDT" ? String(getUsdtDepositMinimum()) : "1";
     $("topupCustomAmount").disabled = hasPendingIntent;
     // Шаг 2: поле суммы убираем — точная сумма с центами живёт в заявке ниже.
     $("topupCustomAmount").closest("label")?.classList.toggle("hidden", hasPendingIntent);
@@ -7089,6 +7098,9 @@ function renderTopupSheet() {
   if ($("withdrawAmountInput") && document.activeElement !== $("withdrawAmountInput")) {
     $("withdrawAmountInput").value = state.withdrawal.amount || "";
   }
+  if ($("withdrawAmountInput")) {
+    $("withdrawAmountInput").min = String(getUsdtWithdrawalMinimum());
+  }
   if ($("withdrawAddressInput") && document.activeElement !== $("withdrawAddressInput")) {
     $("withdrawAddressInput").value = state.withdrawal.address || "";
   }
@@ -7108,13 +7120,14 @@ function renderTopupSheet() {
     const hasWithdrawAmount = withdrawAmountRaw !== "" && Number.isFinite(withdrawAmount) && withdrawAmount > 0;
     const overBalance = hasWithdrawAmount && withdrawAmount > cashBalance;
     const fee = Math.max(0, Number(state.publicConfig.usdt_withdrawal_fee || 3));
+    const minimum = getUsdtWithdrawalMinimum();
     const payout = Math.max(0, withdrawAmount - fee);
-    const belowFee = hasWithdrawAmount && payout <= 0;
+    const belowMinimum = hasWithdrawAmount && withdrawAmount < minimum;
     const inWithdrawView = !isTopupMode && !isHistoryOpen && withdrawalUnlocked;
     $("withdrawSummary").classList.toggle("hidden", !inWithdrawView);
-    $("withdrawSummary").classList.toggle("over", overBalance || belowFee);
+    $("withdrawSummary").classList.toggle("over", overBalance || belowMinimum);
     $("withdrawSummary").classList.toggle("idle", !hasWithdrawAmount);
-    const showBreakdown = inWithdrawView && hasWithdrawAmount && !overBalance && !belowFee;
+    const showBreakdown = inWithdrawView && hasWithdrawAmount && !overBalance && !belowMinimum;
     $("withdrawSummary").classList.toggle("is-breakdown", showBreakdown);
     if (showBreakdown) {
       $("withdrawSummary").innerHTML = `
@@ -7129,7 +7142,7 @@ function renderTopupSheet() {
           ? `Доступно: ${formatCurrencyAmount(cashBalance, "USDT")}`
           : overBalance
             ? `Доступно для вывода: ${formatCurrencyAmount(cashBalance, "USDT")} (основной баланс)`
-            : `Сумма должна быть больше комиссии ${formatCurrencyAmount(fee, "USDT")}`;
+            : `Минимальная сумма вывода ${formatCurrencyAmount(minimum, "USDT")}`;
     }
   }
   renderWithdrawAddressCheck();
@@ -7151,7 +7164,10 @@ function openTopupSheet(amount, reason = "", mode = "topup", currencyOverride = 
   if (mode !== "withdraw" && state.topup.intent?.status === "pending") {
     targetCurrency = "USDT";
   }
-  state.topup.amount = hasTopupAmountValue(amount) ? normalizeTopupAmount(amount, targetCurrency) : "";
+  const normalizedAmount = hasTopupAmountValue(amount) ? normalizeTopupAmount(amount, targetCurrency) : "";
+  state.topup.amount = targetCurrency === "USDT" && normalizedAmount !== ""
+    ? Math.max(getUsdtDepositMinimum(), normalizedAmount)
+    : normalizedAmount;
   state.topup.reason = reason;
   state.topup.mode = mode === "withdraw" ? "withdraw" : "topup";
   state.topup.currency = targetCurrency;
@@ -7513,7 +7529,7 @@ function drawWalletQr(canvas, text) {
 }
 
 // Быстрые суммы пополнения: одно касание вместо набора.
-const WALLET_TOPUP_PRESETS = { USDT: [15, 50, 100, 500], STAR: [100, 500, 1000, 5000] };
+const WALLET_TOPUP_PRESETS = { USDT: [18, 50, 100, 500], STAR: [100, 500, 1000, 5000] };
 
 // Живая подсказка валидности адреса вывода (без полного пере-рендера).
 function renderWithdrawAddressCheck() {
@@ -7608,6 +7624,12 @@ async function createUsdtDepositIntent() {
   }
 
   const amount = normalizeTopupAmount(state.topup.amount, "USDT");
+  const minimum = getUsdtDepositMinimum();
+  if (amount < minimum) {
+    triggerHaptic("warning");
+    showToast(`Минимальное пополнение ${formatCurrencyAmount(minimum, "USDT")}.`);
+    return;
+  }
   state.topup.pending = true;
   renderTopupSheet();
   try {
@@ -7637,7 +7659,9 @@ async function createUsdtDepositIntent() {
     triggerHaptic("error");
     const message = error.message === "invalid_deposit_network"
       ? "Эта сеть сейчас недоступна."
-      : "Не получилось создать заявку.";
+      : error.message === "invalid_deposit_amount"
+        ? `Минимальное пополнение ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}.`
+        : "Не получилось создать заявку.";
     showToast(message);
   } finally {
     state.topup.pending = false;
@@ -7734,10 +7758,10 @@ async function createUsdtWithdrawalRequest() {
     showToast("Введи сумму вывода.");
     return;
   }
-  const withdrawalFee = Math.max(0, Number(state.publicConfig.usdt_withdrawal_fee || 3));
-  if (amount <= withdrawalFee) {
+  const withdrawalMinimum = getUsdtWithdrawalMinimum();
+  if (amount < withdrawalMinimum) {
     triggerHaptic("warning");
-    showToast(`Сумма вывода должна быть больше комиссии ${formatCurrencyAmount(withdrawalFee, "USDT")}.`);
+    showToast(`Минимальная сумма вывода ${formatCurrencyAmount(withdrawalMinimum, "USDT")}.`);
     return;
   }
   if (amount > Number(state.usdtCashBalance || 0)) {
@@ -7787,6 +7811,7 @@ async function createUsdtWithdrawalRequest() {
       invalid_withdrawal_network: "Выбери сеть вывода.",
       invalid_withdrawal_amount: "Проверь сумму вывода.",
       withdrawal_amount_below_fee: "Сумма вывода должна быть больше комиссии $3.",
+      withdrawal_amount_below_minimum: `Минимальная сумма вывода ${formatCurrencyAmount(getUsdtWithdrawalMinimum(), "USDT")}.`,
       withdrawal_deposit_required: "Вывод разблокируется после первого пополнения USDT.",
     };
     showToast(messages[error.message] || "Не получилось создать вывод.");
@@ -7963,8 +7988,8 @@ async function submitLimitOrder() {
       showToast("Не хватает shares для sell-лимитки.");
       return;
     }
-  } else if (amount > Number(getActiveBalance() || 0)) {
-    const missing = Math.max(1, Math.ceil(amount - Number(getActiveBalance() || 0)));
+  } else if (amount > getAvailableBetBalance(state.currency)) {
+    const missing = Math.max(1, Math.ceil(amount - getAvailableBetBalance(state.currency)));
     triggerHaptic("warning");
     openTopupSheet(missing, `Для лимитки не хватает ${formatCurrencyAmount(missing, state.currency)}.`);
     return;
@@ -7994,7 +8019,7 @@ async function submitLimitOrder() {
   } catch (error) {
     triggerHaptic("error");
     if (error.message === "insufficient_fire" || error.message === "insufficient_usdt") {
-      const missing = Math.max(1, Math.ceil(amount - Number(getActiveBalance() || 0)));
+      const missing = Math.max(1, Math.ceil(amount - getAvailableBetBalance(state.currency)));
       openTopupSheet(missing, `Для лимитки не хватает ${formatCurrencyAmount(missing, state.currency)}.`);
     } else if (error.message === "insufficient_shares" || error.message === "position_not_open") {
       showToast("Не хватает shares для sell-лимитки.");
@@ -8071,7 +8096,7 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
     renderTradeTicket();
     return;
   }
-  const activeBalance = getActiveBalance();
+  const activeBalance = getAvailableBetBalance(currency);
   if (buyAmount > Number(activeBalance || 0)) {
     state.buyQueue = [];
     const missing = Math.max(1, Math.ceil(buyAmount - Number(activeBalance || 0)));
@@ -8116,7 +8141,7 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
     triggerHaptic("error");
     if (error.message === "insufficient_fire" || error.message === "insufficient_usdt") {
       state.buyQueue = [];
-      const latestBalance = getActiveBalance();
+      const latestBalance = getAvailableBetBalance(currency);
       const missing = Math.max(1, Math.ceil(buyAmount - Number(latestBalance || 0)));
       openTopupSheet(missing, `Для ставки ${formatCurrencyAmount(buyAmount, currency)} не хватает ${formatCurrencyAmount(missing, currency)}.`);
     } else if (error.message === "market_closed" || error.message === "market_not_open") {
@@ -10353,7 +10378,7 @@ document.querySelectorAll("[data-bet-add]").forEach((button) => {
     triggerHaptic("selection");
     const addAmount = Number(button.dataset.betAdd || 0);
     const nextAmount = state.betSheet.amount + addAmount;
-    const activeBalance = getActiveBalance();
+    const activeBalance = getAvailableBetBalance(state.currency);
     if (nextAmount > Number(activeBalance || 0)) {
       const missing = Math.max(1, Math.ceil(nextAmount - Number(activeBalance || 0)));
       triggerHaptic("warning");

@@ -113,7 +113,9 @@ export const config = {
   usdtDepositBackfillBlocks: parseNumber(process.env.USDT_DEPOSIT_BACKFILL_BLOCKS, 6_000, 300),
   usdtDepositBackfillMs: parseNumber(process.env.USDT_DEPOSIT_BACKFILL_MS, 300_000, 60_000),
   usdtDepositMatchGraceMinutes: parseNumber(process.env.USDT_DEPOSIT_MATCH_GRACE_MINUTES, 10, 0),
+  usdtDepositMinimum: parseNumber(process.env.USDT_DEPOSIT_MINIMUM, 18, 0.01),
   usdtWithdrawalFee: parseNumber(process.env.USDT_WITHDRAWAL_FEE, 3, 0),
+  usdtWithdrawalMinimum: parseNumber(process.env.USDT_WITHDRAWAL_MINIMUM, 18, 0.01),
   evmScanApiUrl: (
     process.env.EVM_SCAN_API_URL
       || process.env.ETHERSCAN_API_URL

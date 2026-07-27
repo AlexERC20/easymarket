@@ -3402,19 +3402,17 @@ async function getLockedCurrencyBalance(client, userId, currency) {
   };
 }
 
-function splitUsdtSpend(amount, balances) {
+export function splitUsdtSpend(amount, balances) {
   const total = Math.round(Number(amount || 0) * 100) / 100;
-  const spendCashFirst = balances.has_confirmed_deposit === true;
-  const cash = spendCashFirst
-    ? Math.min(Math.max(0, balances.cash), total)
-    : Math.max(0, total - Math.min(Math.max(0, balances.bonus), total));
-  const bonus = spendCashFirst
-    ? Math.max(0, total - cash)
-    : Math.min(Math.max(0, balances.bonus), total);
-  return {
-    bonus: Math.round(bonus * 100) / 100,
-    cash: Math.round(cash * 100) / 100,
-  };
+  const cash = Math.max(0, Math.floor((Number(balances?.cash || 0) + 1e-9) * 100) / 100);
+  const bonus = Math.max(0, Math.floor((Number(balances?.bonus || 0) + 1e-9) * 100) / 100);
+  if (cash >= total) {
+    return { cash: total, bonus: 0 };
+  }
+  if (bonus >= total) {
+    return { cash: 0, bonus: total };
+  }
+  return null;
 }
 
 function splitUsdtCredit(amount, bonusRatio) {
@@ -3460,6 +3458,9 @@ async function debitCurrencyBalance(client, userId, currency, amount, reason, so
   }
 
   const split = splitUsdtSpend(total, balances);
+  if (!split) {
+    throw new Error(insufficientBalanceError(normalized));
+  }
   if (split.cash > 0) {
     await client.query(
       `
