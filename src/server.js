@@ -71,6 +71,8 @@ import {
 import {
   getBonusEconomyAudit,
   getEconomyIntegrityAudit,
+  getStarConversionReminderTargets,
+  markStarConversionRemindersSent,
 } from "./services/bonusEconomyService.js";
 import { PriceUnavailableError } from "./services/priceService.js";
 import { runDatabaseCleanup, runStartupDatabaseRescue } from "./services/databaseCleanupService.js";
@@ -951,6 +953,35 @@ app.post("/api/market/:marketId/sell", async (req, res) => {
       });
       return;
     }
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/star-conversion/reminder-targets", requireBridgeSecret, async (req, res) => {
+  try {
+    const targets = await getStarConversionReminderTargets({
+      limit: req.query.limit,
+      minStars: req.query.min_stars,
+    });
+    res.status(200).json({
+      ok: true,
+      targets,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/star-conversion/reminders/mark", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await markStarConversionRemindersSent(
+      Array.isArray(req.body?.telegram_ids) ? req.body.telegram_ids : [],
+    );
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
     sendApiError(res, error);
   }
 });

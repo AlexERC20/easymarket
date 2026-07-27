@@ -382,6 +382,25 @@ const getNetResolvedPayout = (grossPayout, spent, currency = state.currency) => 
   const cost = Math.max(0, Number(spent || 0));
   return Math.max(0, gross - Math.max(0, gross - cost) * getProfitFeeRate(currency));
 };
+// Мотивация через потерю: звёзды показываем как замороженные доллары,
+// а для включивших — прогресс потолка, который растёт с депозитом.
+const getStarConversionWalletText = (conversion) => {
+  if (conversion.eligible) {
+    const converted = Number(conversion.converted_total || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+    const cap = Number(conversion.lifetime_cap || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+    const mult = Number(conversion.streak_multiplier || 1);
+    const streak = mult > 1 ? ` · ⚡ заряд x${mult}` : "";
+    return `Конвертировано $${converted} из $${cap} · пополни ещё — потолок вырастет${streak}`;
+  }
+  if (conversion.deposit_qualified && !conversion.cash_play_qualified) {
+    return "💫 Конвертация почти включена — осталась ставка основными USDT";
+  }
+  const frozenUsdt = Number(conversion.available_from_stars || 0);
+  if (frozenUsdt >= 1) {
+    return `💫 ${formatFire(conversion.star_balance || 0)}⭐ — это до $${Math.floor(frozenUsdt)} · заморожено, пока нет депозита от ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`;
+  }
+  return `Конвертация звёзд в USDT включится после пополнения от ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`;
+};
 const normalizeTopupAmount = (value, currency = state.topup.currency) => {
   const safeCurrency = normalizeCurrency(currency);
   const numeric = Number(String(value ?? "").replace(",", "."));
@@ -2575,6 +2594,27 @@ function showToast(message) {
   setTimeout(() => toast.classList.add("hidden"), 2600);
 }
 
+// Надж конвертации: раз в день, после звёздного выигрыша, только пока она
+// не включена — пик эмоции от победы, задержка пропускает вперёд win-тост.
+const STAR_NUDGE_DAY_KEY = "easymarket_star_nudge_day";
+
+function maybeShowStarConversionNudge(newWins) {
+  const conversion = state.starConversion;
+  if (!conversion || conversion.eligible) return;
+  if (!newWins.some((position) => normalizeCurrency(position.currency) === "STAR")) return;
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    if (window.localStorage?.getItem(STAR_NUDGE_DAY_KEY) === today) return;
+    window.localStorage?.setItem(STAR_NUDGE_DAY_KEY, today);
+  } catch {
+    // приватный режим — покажем без дедупликации
+  }
+  const message = conversion.deposit_qualified && !conversion.cash_play_qualified
+    ? "💫 Эта победа могла капнуть в USDT — осталась ставка основными USDT"
+    : `💫 Эта победа могла капнуть в USDT — конвертация включается депозитом от ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`;
+  setTimeout(() => showToast(message), 4500);
+}
+
 function triggerLightningFlash(kind = "success", tier = 1, options = {}) {
   showSuccessLightningBurst(kind === "success" ? "Success" : "Energy", {
     tier,
@@ -3834,6 +3874,7 @@ function handleSettlements(positions) {
       };
       showToast(`Есть выигрыш: ${label}`);
       showWinOverlay(label, largestWin, winTier);
+      maybeShowStarConversionNudge(newWins);
 
       // Win streak (item 5): a clean winning round grows the combo; any loss breaks it.
       if (!newLosses.length) {
@@ -7100,11 +7141,7 @@ function renderTopupSheet() {
     $("walletStarConversion").classList.toggle("hidden", isUsdt || !conversion);
     $("walletStarConversion").textContent = isUsdt || !conversion
       ? ""
-      : conversion.eligible
-        ? `${formatFire(conversion.stars_per_usdt)} звезд = $1 · конвертация ${Number(conversion.rate_pct || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 })}% от прибыли`
-        : conversion.deposit_qualified && !conversion.cash_play_qualified
-          ? "Конвертация звезд включится после ставки основными USDT"
-          : `Конвертация звезд в USDT включится после пополнения от ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`;
+      : getStarConversionWalletText(conversion);
   }
   if ($("topupCustomAmount") && document.activeElement !== $("topupCustomAmount")) {
     $("topupCustomAmount").value = hasAmount

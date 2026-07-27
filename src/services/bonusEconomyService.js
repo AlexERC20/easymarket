@@ -259,6 +259,102 @@ export async function getStarConversionStatusForUser(userId) {
   });
 }
 
+const REMINDER_COOLDOWN_DAYS = 7;
+
+export async function getStarConversionReminderTargets(input = {}) {
+  const limit = Math.max(1, Math.min(200, Number(input.limit) || 50));
+  const minStars = Math.max(1, Number(input.minStars ?? input.min_stars) || 3_000);
+  const starsPerUsdt = Math.max(1, Number(config.starUsdtConversionStarsPerUsdt || 1_000));
+
+  const result = await query(
+    `
+      SELECT
+        users.telegram_id,
+        users.username,
+        users.first_name,
+        fire.balance AS star_balance,
+        COALESCE(NULLIF((
+          SELECT SUM(credited_amount)
+          FROM usdt_deposit_intents
+          WHERE user_id = users.id
+            AND status = 'credited'
+            AND COALESCE(credited_amount, 0) > 0
+        ), 0), (
+          SELECT SUM(amount)
+          FROM usdt_ledger
+          WHERE user_id = users.id
+            AND reason = 'usdt_onchain_deposit'
+            AND amount > 0
+        ), 0) AS deposit_total,
+        (
+          EXISTS (
+            SELECT 1
+            FROM positions
+            WHERE user_id = users.id
+              AND currency = 'USDT'
+              AND spent > bonus_spent
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM usdt_ledger
+            WHERE user_id = users.id
+              AND amount < 0
+              AND reason IN ('buy_yes_usdt', 'buy_no_usdt')
+          )
+        ) AS cash_play_qualified
+      FROM fire_balances fire
+      JOIN users ON users.id = fire.user_id
+      WHERE fire.balance >= $1
+        AND NOT EXISTS (
+          SELECT 1
+          FROM star_conversion_reminders reminders
+          WHERE reminders.user_id = users.id
+            AND reminders.sent_at > now() - make_interval(days => $2)
+        )
+      ORDER BY fire.balance DESC
+      LIMIT $3
+    `,
+    [minStars, REMINDER_COOLDOWN_DAYS, limit],
+  );
+
+  return result.rows
+    .map((row) => {
+      const starBalance = Math.max(0, Math.floor(toNumber(row.star_balance)));
+      const depositTotal = roundAmount(row.deposit_total);
+      return {
+        telegram_id: row.telegram_id,
+        username: row.username,
+        first_name: row.first_name,
+        star_balance: starBalance,
+        frozen_usdt: roundAmount(starBalance / starsPerUsdt),
+        deposit_total: depositTotal,
+        deposit_qualified: depositTotal >= 18,
+        cash_play_qualified: row.cash_play_qualified === true,
+      };
+    })
+    .filter((target) => !(target.deposit_qualified && target.cash_play_qualified));
+}
+
+export async function markStarConversionRemindersSent(telegramIds = []) {
+  const ids = [...new Set(telegramIds.map((value) => String(value || "").trim()).filter(Boolean))];
+  if (!ids.length) {
+    return { marked: 0 };
+  }
+
+  const result = await query(
+    `
+      INSERT INTO star_conversion_reminders (user_id, sent_at)
+      SELECT id, now()
+      FROM users
+      WHERE telegram_id = ANY($1::text[])
+      ON CONFLICT (user_id) DO UPDATE SET sent_at = now()
+    `,
+    [ids],
+  );
+
+  return { marked: result.rowCount || 0 };
+}
+
 export async function fundBonusUnlockReserve(client, input) {
   const amount = roundAmount(input.amount);
   if (amount <= 0) {

@@ -632,6 +632,11 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_star_usdt_conversion_events_user_created
       ON star_usdt_conversion_events(user_id, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS star_conversion_reminders (
+      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS usdt_balance_reclassifications (
       batch_key TEXT NOT NULL,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
