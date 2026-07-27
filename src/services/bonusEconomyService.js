@@ -309,7 +309,7 @@ export async function getStarConversionReminderTargets(input = {}) {
           SELECT 1
           FROM star_conversion_reminders reminders
           WHERE reminders.user_id = users.id
-            AND reminders.sent_at > now() - make_interval(days => $2)
+            AND reminders.sent_at > now() - interval '1 day' * $2::int
         )
       ORDER BY fire.balance DESC
       LIMIT $3
