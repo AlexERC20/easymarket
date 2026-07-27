@@ -47,6 +47,9 @@ const MIN_OUTCOME_PRICE = 0.001;
 const BTC_MIN_OUTCOME_PRICE = 0.001;
 const CHART_WINDOW_MS = 10_000;
 const BTC_5M_CHART_HISTORY_RATIO = 0.5;
+// Сырые тики моложе этого лага в тело линии не попадают: их место занимает
+// след сглаженной головы, чтобы точка вела линию, а не догоняла её.
+const CHART_HEAD_SMOOTH_LAG_MS = 1_600;
 const CHART_AVATAR_RADIUS_CSS = 3.8;
 const CHART_INTRO_MS = 720; // crossfade window when the chart switches markets
 const CHART_FRAME_MS = 33; // ~30fps cap for the chart loop (was uncapped 60fps)
@@ -1885,7 +1888,7 @@ function drawMarketChartFrame(ts) {
   if (!state.smoothedPrice || Math.abs(state.smoothedPrice - currentPrice) > Math.max(250, currentPrice * 0.015)) {
     state.smoothedPrice = currentPrice;
   } else {
-    state.smoothedPrice += (currentPrice - state.smoothedPrice) * 0.045;
+    state.smoothedPrice += (currentPrice - state.smoothedPrice) * 0.09;
   }
   const currentNoPrice = dualSpecialChart
     ? Math.max(0.1, Math.min(99.9, Number(market.no_price || 0.5) * 100))
@@ -1894,7 +1897,7 @@ function drawMarketChartFrame(ts) {
     if (!state.smoothedNoPrice || Math.abs(state.smoothedNoPrice - currentNoPrice) > 25) {
       state.smoothedNoPrice = currentNoPrice;
     } else {
-      state.smoothedNoPrice += (currentNoPrice - state.smoothedNoPrice) * 0.045;
+      state.smoothedNoPrice += (currentNoPrice - state.smoothedNoPrice) * 0.09;
     }
   }
   if (!worldCup && Number.isFinite(openPrice) && openPrice > 0) {
@@ -1922,8 +1925,29 @@ function drawMarketChartFrame(ts) {
     ? startTime
     : Math.max(startTime, windowEnd - (btcFiveMinute ? btcFiveMinuteWindowMs : CHART_WINDOW_MS));
   const duration = Math.max(1, windowEnd - windowStart);
-  const rawPoints = sourcePoints
+  const rawTicks = sourcePoints
     .filter((point) => fullHistoryChart || (point.at >= windowStart - 1_500 && point.at <= windowEnd + 1_500));
+
+  // Точка ведёт линию: свежий конец пути — это записанный след головы, а не
+  // сырые тики, поэтому скачок нового тика не может опередить точку.
+  if (state.chartHeadTrailMarketId !== market.id) {
+    state.chartHeadTrailMarketId = market.id;
+    state.chartHeadTrail = [];
+  }
+  const headTrail = state.chartHeadTrail;
+  const lastTrailPoint = headTrail[headTrail.length - 1];
+  if (Number.isFinite(state.smoothedPrice) && (!lastTrailPoint || nowMs - lastTrailPoint.at >= 40)) {
+    headTrail.push({ price: state.smoothedPrice, at: nowMs });
+    if (headTrail.length > 600) headTrail.splice(0, headTrail.length - 600);
+  }
+  const confirmedPoints = rawTicks.filter((point) => point.at <= windowEnd - CHART_HEAD_SMOOTH_LAG_MS);
+  const lastConfirmedAt = confirmedPoints.length
+    ? confirmedPoints[confirmedPoints.length - 1].at
+    : -Infinity;
+  const rawPoints = [
+    ...confirmedPoints,
+    ...headTrail.filter((point) => point.at > lastConfirmedAt && point.at >= windowStart && point.at < windowEnd),
+  ];
 
   if (rawPoints.length === 0 && currentPrice > 0) {
     rawPoints.push({ price: currentPrice, at: Date.now() });
