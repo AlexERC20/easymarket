@@ -105,6 +105,9 @@ export async function runMigrations() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE INDEX IF NOT EXISTS idx_fire_ledger_user_created
+      ON fire_ledger(user_id, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS usdt_balances (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       balance NUMERIC(20, 8) NOT NULL DEFAULT 0,
@@ -119,6 +122,12 @@ export async function runMigrations() {
       source TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_ledger_user_created
+      ON usdt_ledger(user_id, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_ledger_user_reason
+      ON usdt_ledger(user_id, reason);
 
     CREATE TABLE IF NOT EXISTS usdt_bonus_balances (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
