@@ -4721,7 +4721,14 @@ function estimateBuyQuote({ market, side, amount }) {
   const rawPrice = market
     ? Number(side === "YES" ? market.yes_price : market.no_price)
     : 0.5;
+  const rawOppositePrice = market
+    ? Number(side === "YES" ? market.no_price : market.yes_price)
+    : 0.5;
   const price = Math.max(minPrice, Math.min(1 - minPrice, rawPrice || 0.5));
+  const oppositePrice = Math.max(
+    minPrice,
+    Math.min(1 - minPrice, rawOppositePrice || 0.5),
+  );
   if (isSpecialMarket(market)) {
     const depth = Math.max(100, Number(market?.liquidity || 7_000));
     const impact = Math.min(SPECIAL_MARKET_MAX_SHIFT, Number(amount || 0) / depth);
@@ -4736,7 +4743,11 @@ function estimateBuyQuote({ market, side, amount }) {
   }
   const liquidity = estimateMarketMakerLiquidity(market, price);
   const impact = Math.min(MAX_SINGLE_TRADE_SHIFT, (Number(amount || 0) / liquidity) * BUY_IMPACT_MULTIPLIER);
-  const nextPrice = Math.max(minPrice, Math.min(1 - minPrice, price + impact));
+  const crossBookFloor = 1 - oppositePrice;
+  const nextPrice = Math.max(
+    minPrice,
+    Math.min(1 - minPrice, Math.max(crossBookFloor, price + impact)),
+  );
   const executionPrice = Math.max(minPrice, Math.min(1 - minPrice, Math.max(price, nextPrice) * (1 + MARKET_MAKER_SPREAD_RATE)));
   return {
     executionPrice,

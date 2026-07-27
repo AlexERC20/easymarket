@@ -245,6 +245,13 @@ function isLuckyWindowActive(marketRow) {
   return Boolean(marketRow?.lucky_until) && new Date(marketRow.lucky_until).getTime() > Date.now();
 }
 
+export function getLuckySpentForBuy(marketRow, hasOppositePosition, amount) {
+  if (hasOppositePosition || !isLuckyWindowActive(marketRow)) {
+    return 0;
+  }
+  return Math.max(0, toNumber(amount));
+}
+
 function mapUser(row) {
   if (!row) {
     return null;
@@ -1038,12 +1045,14 @@ function getSpecialSellExecutionQuote(market, side, sharesToSell) {
   };
 }
 
-function getBuyExecutionQuote(market, side, amount) {
+export function getBuyExecutionQuote(market, side, amount) {
   if (isSpecialMarket(market)) {
     return getSpecialBuyExecutionQuote(market, side, amount);
   }
   const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
+  const oppositeOutcomePrice = getMarketOutcomePrice(market, getOppositeSide(side));
+  const crossBookFloor = roundOutcomePrice(1 - oppositeOutcomePrice, minPrice);
   const fairOutcomePrice = getFairOutcomePrice(market, side);
   const bookPrice = Math.max(oldOutcomePrice, fairOutcomePrice);
   const liquidity = getEffectiveMarketMakerLiquidity(market, bookPrice);
@@ -1055,7 +1064,10 @@ function getBuyExecutionQuote(market, side, amount) {
     no_volume: toNumber(market.no_volume) + (side === "NO" ? amount : 0),
   };
   const nextOutcomePrice = roundOutcomePrice(
-    Math.max(bookPrice, oldOutcomePrice * 0.72 + fairOutcomePrice * 0.28) + tradeShift,
+    Math.max(
+      crossBookFloor,
+      Math.max(bookPrice, oldOutcomePrice * 0.72 + fairOutcomePrice * 0.28) + tradeShift,
+    ),
     minPrice,
   );
   const { nextYesPrice, nextNoPrice } = buildDualBookPrices(
@@ -8617,6 +8629,36 @@ export async function buyOutcome(input) {
     const shares = netAmount / quote.executionPrice;
     const nextYesPrice = quote.nextYesPrice;
     const nextNoPrice = quote.nextNoPrice;
+    const oppositePositionResult = await client.query(
+      `
+        SELECT id
+        FROM positions
+        WHERE user_id = $1
+          AND market_id = $2
+          AND side = $3
+          AND currency = $4
+          AND status = 'open'
+          AND shares > 0
+        FOR UPDATE
+      `,
+      [user.id, marketId, getOppositeSide(side), currency],
+    );
+    const hasOppositePosition = oppositePositionResult.rowCount > 0;
+    if (hasOppositePosition) {
+      await client.query(
+        `
+          UPDATE positions
+          SET lucky_spent = 0,
+              updated_at = now()
+          WHERE user_id = $1
+            AND market_id = $2
+            AND currency = $3
+            AND status = 'open'
+            AND lucky_spent > 0
+        `,
+        [user.id, marketId, currency],
+      );
+    }
     const debit = await debitCurrencyBalance(
       client,
       user.id,
@@ -8645,8 +8687,8 @@ export async function buyOutcome(input) {
     );
     await persistSpecialMarketTicks(client, market, nextYesPrice, nextNoPrice);
 
-    // Ставка внутри счастливого окна: только эта часть позиции получит x2.
-    const luckySpentPart = isLuckyWindowActive(market) ? amount : 0;
+    // x2 нельзя хеджировать второй стороной: иначе бонус гарантирует прибыль.
+    const luckySpentPart = getLuckySpentForBuy(market, hasOppositePosition, amount);
     const positionResult = await client.query(
       `
         INSERT INTO positions (
@@ -8995,6 +9037,51 @@ export async function sellOutcome(input) {
   });
 }
 
+export function calculateResolvedPositionSettlement(position, market, winner, economySettings) {
+  const shares = toNumber(position.shares);
+  const spent = toNumber(position.spent);
+  const grossPayout = String(position.side).toUpperCase() === String(winner).toUpperCase()
+    ? shares
+    : 0;
+  const grossProfit = grossPayout - spent;
+  const fee = calculateProfitFeeFromSettings(grossProfit, economySettings);
+  const basePayout = Math.max(0, roundMoney(grossPayout - fee));
+  const basePnl = roundMoney(basePayout - spent);
+  const luckySpent = Math.min(toNumber(position.lucky_spent), spent);
+  const luckyShare = market.is_lucky
+    ? 1
+    : spent > 0 ? luckySpent / spent : 0;
+  const luckyBonus = basePnl > 0 && luckyShare > 0
+    ? roundMoney(basePnl * luckyShare)
+    : 0;
+  const payout = roundMoney(basePayout + luckyBonus);
+  const pnl = roundMoney(basePnl + luckyBonus);
+
+  return {
+    shares,
+    spent,
+    grossPayout,
+    grossProfit,
+    fee,
+    basePayout,
+    basePnl,
+    luckyBonus,
+    payout,
+    pnl,
+  };
+}
+
+export function getRefundableMarketLoss(netPnl, totalSpent) {
+  const roundedPnl = roundMoney(netPnl);
+  if (roundedPnl >= 0) {
+    return 0;
+  }
+  return Math.min(
+    Math.max(0, toNumber(totalSpent)),
+    Math.abs(roundedPnl),
+  );
+}
+
 async function settleOpenMarketPositions(client, market, winner) {
   const positions = await client.query(
     `
@@ -9008,30 +9095,41 @@ async function settleOpenMarketPositions(client, market, winner) {
   );
   const economySettings = await getEconomySettingsWithClient(client);
   const realResultsByUser = new Map();
+  const usdtResultsByUser = new Map();
+  const sidesByUserCurrency = new Map();
+  for (const position of positions.rows) {
+    const key = `${position.user_id}:${normalizeCurrency(position.currency)}`;
+    const sides = sidesByUserCurrency.get(key) || new Set();
+    sides.add(String(position.side).toUpperCase());
+    sidesByUserCurrency.set(key, sides);
+  }
 
   for (const position of positions.rows) {
     const currency = normalizeCurrency(position.currency);
     const reasonSuffix = balanceReasonSuffix(currency);
-    const shares = toNumber(position.shares);
-    const spent = toNumber(position.spent);
-    const grossPayout = position.side === winner ? shares : 0;
-    const grossProfit = grossPayout - spent;
+    const hasOppositePosition = sidesByUserCurrency
+      .get(`${position.user_id}:${currency}`)
+      ?.size > 1;
+    const settlement = calculateResolvedPositionSettlement(
+      hasOppositePosition ? { ...position, lucky_spent: 0 } : position,
+      hasOppositePosition ? { ...market, is_lucky: false } : market,
+      winner,
+      economySettings,
+    );
+    const {
+      spent,
+      grossProfit,
+      fee,
+      basePayout,
+      basePnl,
+      luckyBonus,
+      payout,
+      pnl,
+    } = settlement;
     const bonusRatio = getBonusRatioForAmount(position.bonus_spent, position.spent);
     const cashSpent = currency === "USDT"
       ? Math.max(0, roundMoney(spent - toNumber(position.bonus_spent)))
       : 0;
-    const fee = calculateProfitFeeFromSettings(grossProfit, economySettings);
-    const basePayout = Math.max(0, roundMoney(grossPayout - fee));
-    const basePnl = roundMoney(basePayout - spent);
-    const luckySpent = Math.min(toNumber(position.lucky_spent), spent);
-    const luckyShare = market.is_lucky
-      ? 1
-      : spent > 0 ? luckySpent / spent : 0;
-    const luckyBonus = basePnl > 0 && luckyShare > 0
-      ? roundMoney(basePnl * luckyShare)
-      : 0;
-    const payout = roundMoney(basePayout + luckyBonus);
-    const pnl = roundMoney(basePnl + luckyBonus);
 
     await client.query(
       `
@@ -9074,10 +9172,6 @@ async function settleOpenMarketPositions(client, market, winner) {
       });
     }
 
-    if (currency === "USDT" && pnl < 0) {
-      await createUsdtLossRefundOffer(client, position, pnl);
-    }
-
     if (currency === "USDT" && cashSpent > 0) {
       const current = realResultsByUser.get(String(position.user_id)) || {
         userId: Number(position.user_id),
@@ -9087,6 +9181,18 @@ async function settleOpenMarketPositions(client, market, winner) {
       current.realNetPnl += toNumber(baseCredit.cash) - cashSpent;
       current.cashSpent += cashSpent;
       realResultsByUser.set(String(position.user_id), current);
+    }
+
+    if (currency === "USDT") {
+      const key = String(position.user_id);
+      const current = usdtResultsByUser.get(key) || {
+        position,
+        netPnl: 0,
+        totalSpent: 0,
+      };
+      current.netPnl += pnl;
+      current.totalSpent += spent;
+      usdtResultsByUser.set(key, current);
     }
 
     if (luckyBonus > 0) {
@@ -9109,6 +9215,22 @@ async function settleOpenMarketPositions(client, market, winner) {
       }
     }
 
+  }
+
+  for (const result of usdtResultsByUser.values()) {
+    const netPnl = roundMoney(result.netPnl);
+    if (netPnl >= 0) {
+      continue;
+    }
+    const refundableLoss = getRefundableMarketLoss(netPnl, result.totalSpent);
+    await createUsdtLossRefundOffer(
+      client,
+      {
+        ...result.position,
+        spent: refundableLoss,
+      },
+      netPnl,
+    );
   }
 
   for (const result of realResultsByUser.values()) {

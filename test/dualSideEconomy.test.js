@@ -1,0 +1,130 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  calculateResolvedPositionSettlement,
+  getBuyExecutionQuote,
+  getLuckySpentForBuy,
+  getRefundableMarketLoss,
+} from "../src/services/marketService.js";
+
+const economySettings = {
+  profit_fee_bps: 700,
+};
+
+function buildMarket(overrides = {}) {
+  return {
+    id: 1,
+    symbol: "SPORT:test-market",
+    open_price: 1,
+    current_price: 1,
+    yes_price: 0.54148438,
+    no_price: 0.23518574,
+    yes_volume: 100,
+    no_volume: 50,
+    liquidity: 10_000,
+    start_time: new Date(Date.now() - 60_000).toISOString(),
+    end_time: new Date(Date.now() + 60_000).toISOString(),
+    is_lucky: false,
+    ...overrides,
+  };
+}
+
+function executeSequentialBuys(sequence) {
+  let market = buildMarket();
+  const shares = { YES: 0, NO: 0 };
+  let totalSpent = 0;
+
+  for (const { side, amount } of sequence) {
+    const oppositePrice = Number(side === "YES" ? market.no_price : market.yes_price);
+    const quote = getBuyExecutionQuote(market, side, amount);
+    assert.ok(
+      quote.executionPrice + oppositePrice >= 1 - 1e-8,
+      `${side} ask must not create a cross-book price below 1`,
+    );
+
+    shares[side] += amount / quote.executionPrice;
+    totalSpent += amount;
+    market = {
+      ...market,
+      yes_price: quote.nextYesPrice,
+      no_price: quote.nextNoPrice,
+      yes_volume: market.yes_volume + (side === "YES" ? amount : 0),
+      no_volume: market.no_volume + (side === "NO" ? amount : 0),
+    };
+  }
+
+  return { shares, totalSpent };
+}
+
+test("opposite market buys cannot lock guaranteed profit", () => {
+  for (const sequence of [
+    [{ side: "YES", amount: 100 }, { side: "NO", amount: 50 }],
+    [{ side: "NO", amount: 50 }, { side: "YES", amount: 100 }],
+  ]) {
+    const { shares, totalSpent } = executeSequentialBuys(sequence);
+    assert.ok(
+      Math.min(shares.YES, shares.NO) <= totalSpent + 1e-8,
+      "the minimum resolved payout must not exceed the combined stake",
+    );
+  }
+});
+
+test("losing side pays zero in both STAR and USDT settlements", () => {
+  for (const currency of ["STAR", "USDT"]) {
+    const loser = calculateResolvedPositionSettlement(
+      {
+        side: "NO",
+        shares: 200,
+        spent: 100,
+        lucky_spent: 0,
+        currency,
+      },
+      buildMarket(),
+      "YES",
+      economySettings,
+    );
+    assert.equal(loser.grossPayout, 0);
+    assert.equal(loser.payout, 0);
+    assert.equal(loser.pnl, -100);
+
+    const winner = calculateResolvedPositionSettlement(
+      {
+        side: "YES",
+        shares: 200,
+        spent: 100,
+        lucky_spent: 0,
+        currency,
+      },
+      buildMarket(),
+      "YES",
+      economySettings,
+    );
+    assert.equal(winner.fee, 7);
+    assert.equal(winner.payout, 193);
+    assert.equal(winner.pnl, 93);
+  }
+});
+
+test("lucky x2 is revoked when the user holds the opposite side", () => {
+  const luckyMarket = buildMarket({
+    lucky_until: new Date(Date.now() + 30_000).toISOString(),
+  });
+  assert.equal(getLuckySpentForBuy(luckyMarket, false, 100), 100);
+  assert.equal(getLuckySpentForBuy(luckyMarket, true, 100), 0);
+  assert.equal(
+    getLuckySpentForBuy(
+      { ...luckyMarket, lucky_until: new Date(Date.now() - 1_000).toISOString() },
+      false,
+      100,
+    ),
+    0,
+  );
+});
+
+test("USDT loss refund uses aggregate market loss, not the losing leg", () => {
+  assert.equal(getRefundableMarketLoss(25, 100), 0);
+  assert.equal(getRefundableMarketLoss(0, 100), 0);
+  assert.equal(getRefundableMarketLoss(-12.346, 100), 12.35);
+  assert.equal(getRefundableMarketLoss(-80, 30), 30);
+});

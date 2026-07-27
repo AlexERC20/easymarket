@@ -773,6 +773,36 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_positions_market_status_currency
       ON positions(market_id, status, currency);
 
+    DO $revoke_dual_side_lucky$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM app_migrations
+        WHERE key = 'revoke_dual_side_lucky_v1'
+      ) THEN
+        UPDATE positions AS position
+        SET lucky_spent = 0,
+            updated_at = now()
+        WHERE position.status = 'open'
+          AND position.shares > 0
+          AND position.lucky_spent > 0
+          AND EXISTS (
+            SELECT 1
+            FROM positions AS opposite
+            WHERE opposite.user_id = position.user_id
+              AND opposite.market_id = position.market_id
+              AND opposite.currency = position.currency
+              AND opposite.side <> position.side
+              AND opposite.status = 'open'
+              AND opposite.shares > 0
+          );
+
+        INSERT INTO app_migrations (key)
+        VALUES ('revoke_dual_side_lucky_v1');
+      END IF;
+    END
+    $revoke_dual_side_lucky$;
+
     CREATE TABLE IF NOT EXISTS usdt_loss_refund_offers (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -790,6 +820,47 @@ export async function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_usdt_loss_refund_offers_user_status
       ON usdt_loss_refund_offers(user_id, status, created_at DESC);
+
+    DO $normalize_dual_side_refunds$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM app_migrations
+        WHERE key = 'normalize_dual_side_refunds_v1'
+      ) THEN
+        WITH dual_side_results AS (
+          SELECT
+            user_id,
+            market_id,
+            ROUND(SUM(pnl)::numeric, 2) AS net_pnl
+          FROM positions
+          WHERE currency = 'USDT'
+            AND status = 'resolved'
+          GROUP BY user_id, market_id
+          HAVING COUNT(DISTINCT side) > 1
+        )
+        UPDATE usdt_loss_refund_offers AS offer
+        SET amount = CASE
+              WHEN result.net_pnl < 0
+                THEN LEAST(offer.amount, ABS(result.net_pnl))
+              ELSE offer.amount
+            END,
+            status = CASE
+              WHEN result.net_pnl < 0
+                AND LEAST(offer.amount, ABS(result.net_pnl)) >= 0.01
+                THEN offer.status
+              ELSE 'cancelled'
+            END
+        FROM dual_side_results AS result
+        WHERE offer.user_id = result.user_id
+          AND offer.market_id = result.market_id
+          AND offer.status = 'pending';
+
+        INSERT INTO app_migrations (key)
+        VALUES ('normalize_dual_side_refunds_v1');
+      END IF;
+    END
+    $normalize_dual_side_refunds$;
 
     CREATE INDEX IF NOT EXISTS idx_trades_currency_created
       ON trades(currency, created_at DESC);
