@@ -47,9 +47,11 @@ const MIN_OUTCOME_PRICE = 0.001;
 const BTC_MIN_OUTCOME_PRICE = 0.001;
 const CHART_WINDOW_MS = 10_000;
 const BTC_5M_CHART_HISTORY_RATIO = 0.5;
-// Сырые тики моложе этого лага в тело линии не попадают: их место занимает
-// след сглаженной головы, чтобы точка вела линию, а не догоняла её.
-const CHART_HEAD_SMOOTH_LAG_MS = 1_600;
+// Линию рисует точка: её след — единственный источник свежей части пути,
+// нарисованное больше не переписывается ни тиками, ни новыми кадрами.
+const CHART_TRAIL_SAMPLE_MS = 200;
+const CHART_TRAIL_MAX_POINTS = 1_500;
+const CHART_TRAIL_GAP_RESET_MS = 3_000;
 const CHART_AVATAR_RADIUS_CSS = 3.8;
 const CHART_INTRO_MS = 720; // crossfade window when the chart switches markets
 const CHART_FRAME_MS = 33; // ~30fps cap for the chart loop (was uncapped 60fps)
@@ -1928,36 +1930,38 @@ function drawMarketChartFrame(ts) {
   const rawTicks = sourcePoints
     .filter((point) => fullHistoryChart || (point.at >= windowStart - 1_500 && point.at <= windowEnd + 1_500));
 
-  // Точка ведёт линию: свежий конец пути — это записанный след головы, а не
-  // сырые тики, поэтому скачок нового тика не может опередить точку.
+  // Точка рисует линию: её след — неизменяемая часть пути. Сырые тики
+  // используются только для истории до начала следа (загрузка, возврат из
+  // фона); нарисованный след никогда не подменяется другими данными.
   if (state.chartHeadTrailMarketId !== market.id) {
     state.chartHeadTrailMarketId = market.id;
     state.chartHeadTrail = [];
   }
   const headTrail = state.chartHeadTrail;
   const lastTrailPoint = headTrail[headTrail.length - 1];
-  if (Number.isFinite(state.smoothedPrice) && (!lastTrailPoint || nowMs - lastTrailPoint.at >= 40)) {
-    headTrail.push({ price: state.smoothedPrice, at: nowMs });
-    if (headTrail.length > 600) headTrail.splice(0, headTrail.length - 600);
+  if (lastTrailPoint && nowMs - lastTrailPoint.at > CHART_TRAIL_GAP_RESET_MS) {
+    // Пауза рендера (фон) — след начинаем заново, разрыв закроют тики.
+    headTrail.length = 0;
   }
-  const confirmedPoints = rawTicks.filter((point) => point.at <= windowEnd - CHART_HEAD_SMOOTH_LAG_MS);
-  const lastConfirmedAt = confirmedPoints.length
-    ? confirmedPoints[confirmedPoints.length - 1].at
-    : -Infinity;
+  const prevTrailPoint = headTrail[headTrail.length - 1];
+  if (Number.isFinite(state.smoothedPrice) && (!prevTrailPoint || nowMs - prevTrailPoint.at >= CHART_TRAIL_SAMPLE_MS)) {
+    headTrail.push({ price: state.smoothedPrice, at: nowMs });
+    if (headTrail.length > CHART_TRAIL_MAX_POINTS) {
+      headTrail.splice(0, headTrail.length - CHART_TRAIL_MAX_POINTS);
+    }
+  }
+  const trailStartAt = headTrail.length ? headTrail[0].at : Infinity;
   const rawPoints = [
-    ...confirmedPoints,
-    ...headTrail.filter((point) => point.at > lastConfirmedAt && point.at >= windowStart && point.at < windowEnd),
+    ...rawTicks.filter((point) => point.at < trailStartAt),
+    ...headTrail.filter((point) => point.at >= windowStart && point.at <= windowEnd),
   ];
 
   if (rawPoints.length === 0 && currentPrice > 0) {
     rawPoints.push({ price: currentPrice, at: Date.now() });
   }
-  if (rawPoints.length > 0) {
-    rawPoints[rawPoints.length - 1] = {
-      ...rawPoints[rawPoints.length - 1],
-      price: state.smoothedPrice,
-      at: windowEnd,
-    };
+  if (Number.isFinite(state.smoothedPrice)) {
+    // Голова дописывается в конец пути, не переписывая нарисованное.
+    rawPoints.push({ price: state.smoothedPrice, at: windowEnd });
   }
 
   const secondaryRawPoints = dualSpecialChart
