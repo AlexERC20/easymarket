@@ -6897,6 +6897,7 @@ function renderTopupSheet() {
   $("walletModeWithdrawBtn")?.classList.toggle("withdraw-locked", !withdrawalUnlocked);
   $("walletModeWithdrawBtn")?.setAttribute("aria-disabled", withdrawalUnlocked ? "false" : "true");
   $("walletHistoryBtn")?.classList.toggle("active", isHistoryOpen);
+  $("topupSheet")?.classList.toggle("wallet-withdraw-active", !isTopupMode && !isHistoryOpen);
   // На шаге 2 тоггл Пополнить/Вывести не нужен — только детали заявки.
   document.querySelector(".wallet-mode-toggle")?.classList.toggle("hidden", isHistoryOpen || (hasPendingIntent && isTopupMode));
   document.querySelector(".wallet-currency-toggle")?.classList.toggle("hidden", isHistoryOpen || !isTopupMode || hasPendingIntent);
@@ -7113,15 +7114,23 @@ function renderTopupSheet() {
     $("withdrawSummary").classList.toggle("hidden", !inWithdrawView);
     $("withdrawSummary").classList.toggle("over", overBalance || belowFee);
     $("withdrawSummary").classList.toggle("idle", !hasWithdrawAmount);
-    $("withdrawSummary").textContent = !inWithdrawView
-      ? ""
-      : !hasWithdrawAmount
-        ? `Доступно: ${formatCurrencyAmount(cashBalance, "USDT")}`
-        : overBalance
-          ? `Доступно для вывода: ${formatCurrencyAmount(cashBalance, "USDT")} (основной баланс)`
-          : belowFee
-            ? `Сумма должна быть больше комиссии ${formatCurrencyAmount(fee, "USDT")}`
-            : `Комиссия ${formatCurrencyAmount(fee, "USDT")} · Получишь ${formatCurrencyAmount(payout, "USDT")} · Останется ${formatCurrencyAmount(Math.max(0, cashBalance - withdrawAmount), "USDT")}`;
+    const showBreakdown = inWithdrawView && hasWithdrawAmount && !overBalance && !belowFee;
+    $("withdrawSummary").classList.toggle("is-breakdown", showBreakdown);
+    if (showBreakdown) {
+      $("withdrawSummary").innerHTML = `
+        <span><small>Комиссия</small><b>${formatCurrencyAmount(fee, "USDT")}</b></span>
+        <span><small>Получишь</small><b>${formatCurrencyAmount(payout, "USDT")}</b></span>
+        <span><small>Останется</small><b>${formatCurrencyAmount(Math.max(0, cashBalance - withdrawAmount), "USDT")}</b></span>
+      `;
+    } else {
+      $("withdrawSummary").textContent = !inWithdrawView
+        ? ""
+        : !hasWithdrawAmount
+          ? `Доступно: ${formatCurrencyAmount(cashBalance, "USDT")}`
+          : overBalance
+            ? `Доступно для вывода: ${formatCurrencyAmount(cashBalance, "USDT")} (основной баланс)`
+            : `Сумма должна быть больше комиссии ${formatCurrencyAmount(fee, "USDT")}`;
+    }
   }
   renderWithdrawAddressCheck();
   if ($("withdrawSubmitBtn")) {
@@ -8456,46 +8465,52 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-// Плавная клавиатура для нижних шторок. Когда Telegram сжимает вьюпорт под
-// клавиатуру, прижатая к низу панель телепортируется вверх на высоту
-// клавиатуры. Компенсируем FLIP-ом: мгновенно возвращаем панель на старое
-// место через translate (не конфликтует с transform из bottomSheetIn) и даём
-// CSS-переходу довезти её до нового.
-let sheetViewportHeight = window.innerHeight;
+// Telegram WebView handles the keyboard differently by platform: Android
+// usually shrinks the layout viewport, while iOS overlays its visual viewport.
+// Keep the sheet inside the visible area and scroll its contents instead of
+// translating the entire panel beyond the top edge.
+let restingSheetViewportHeight = Math.max(
+  window.innerHeight,
+  window.visualViewport?.height || 0,
+);
 
-function glideOpenSheetPanels(delta) {
-  document
-    .querySelectorAll(".task-sheet:not(.hidden) :is(.task-panel, .bet-panel)")
-    .forEach((panel) => {
-      // Текущий Y из computed style: если глайд ещё едет, стартуем с него.
-      const currentY = parseFloat(String(getComputedStyle(panel).translate || "").split(" ")[1] || "") || 0;
-      panel.style.transition = "none";
-      panel.style.translate = `0 ${currentY - delta}px`;
-      void panel.offsetHeight;
-      panel.style.transition = "";
-      panel.style.translate = "0 0";
-    });
+function focusedSheetInput() {
+  const active = document.activeElement;
+  return active instanceof HTMLElement
+    && active.matches("input, textarea")
+    && Boolean(active.closest(".task-sheet:not(.hidden)"));
 }
 
-window.addEventListener("resize", () => {
-  const delta = window.innerHeight - sheetViewportHeight;
-  sheetViewportHeight = window.innerHeight;
-  if (Math.abs(delta) >= 40) {
-    glideOpenSheetPanels(delta);
-  }
-});
-
-// iOS-клавиатуры-оверлеи не меняют layout-вьюпорт — фиксированная шторка не
-// прыгает, но поле оказывается под клавиатурой. Приподнимаем через --kb-inset
-// (у .task-sheet есть transition на padding-bottom).
-window.visualViewport?.addEventListener("resize", () => {
+function syncSheetKeyboardViewport() {
   const vv = window.visualViewport;
-  const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-  document.documentElement.style.setProperty("--kb-inset", `${Math.round(overlap)}px`);
-});
+  const visualHeight = Math.max(1, Number(vv?.height || window.innerHeight));
+  const focused = focusedSheetInput();
+  if (!focused) {
+    restingSheetViewportHeight = Math.max(restingSheetViewportHeight, window.innerHeight, visualHeight);
+  }
 
-// После того как клавиатура и глайд устаканились, доводим поле до видимости —
-// только если его реально перекрыло, и минимальным сдвигом, без прыжка в центр.
+  const overlayInset = focused && vv
+    ? Math.max(0, window.innerHeight - visualHeight - Number(vv.offsetTop || 0))
+    : 0;
+  const inferredInset = focused
+    ? Math.max(0, restingSheetViewportHeight - visualHeight)
+    : 0;
+  const keyboardVisible = focused && Math.max(overlayInset, inferredInset) >= 90;
+  const liftInset = keyboardVisible && overlayInset >= 40 ? overlayInset : 0;
+
+  document.documentElement.style.setProperty("--kb-inset", `${Math.round(liftInset)}px`);
+  document.documentElement.style.setProperty("--sheet-visible-height", `${Math.round(visualHeight)}px`);
+  document.querySelectorAll(".task-sheet").forEach((sheet) => {
+    sheet.classList.toggle("keyboard-visible", keyboardVisible && sheet.contains(document.activeElement));
+  });
+}
+
+window.addEventListener("resize", syncSheetKeyboardViewport);
+window.visualViewport?.addEventListener("resize", syncSheetKeyboardViewport);
+window.visualViewport?.addEventListener("scroll", syncSheetKeyboardViewport);
+
+// После открытия клавиатуры доводим поле до видимости только внутри панели,
+// минимальным скроллом и без прыжка всей страницы к центру.
 document.addEventListener("focusin", (event) => {
   const el = event.target;
   if (!(el instanceof HTMLElement) || !el.matches("input, textarea")) {
@@ -8504,6 +8519,8 @@ document.addEventListener("focusin", (event) => {
   if (!el.closest(".task-sheet")) {
     return;
   }
+  syncSheetKeyboardViewport();
+  window.setTimeout(syncSheetKeyboardViewport, 80);
   window.setTimeout(() => {
     if (document.activeElement !== el) {
       return;
@@ -8521,6 +8538,11 @@ document.addEventListener("focusin", (event) => {
       el.scrollIntoView();
     }
   }, 360);
+});
+
+document.addEventListener("focusout", () => {
+  window.setTimeout(syncSheetKeyboardViewport, 120);
+  window.setTimeout(syncSheetKeyboardViewport, 420);
 });
 
 $("clanInfoBtn")?.addEventListener("click", () => {

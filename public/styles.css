@@ -2923,12 +2923,21 @@ code {
   will-change: transform, opacity;
 }
 
-/* Плавный «доезд» шторки при открытии/закрытии клавиатуры: app.js ставит
-   стартовый сдвиг через translate, сюда возвращаемся с анимацией. Отдельное
-   свойство translate не конфликтует с transform из bottomSheetIn. */
-.task-panel,
-.bet-panel {
-  transition: translate 300ms var(--ease-default);
+#topupSheet .topup-panel {
+  max-height: calc(100dvh - max(36px, env(safe-area-inset-top)) - max(10px, env(safe-area-inset-bottom)));
+}
+
+#topupSheet.wallet-withdraw-active:not(.keyboard-visible) .topup-panel {
+  min-height: min(
+    580px,
+    calc(100dvh - max(36px, env(safe-area-inset-top)) - max(10px, env(safe-area-inset-bottom)))
+  );
+}
+
+#topupSheet.keyboard-visible .topup-panel {
+  min-height: 0;
+  max-height: calc(var(--sheet-visible-height, 100dvh) - 32px);
+  margin-bottom: 0;
 }
 
 .task-sheet.sheet-open .task-panel {
@@ -4348,7 +4357,45 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   min-height: 16px; /* место зарезервировано — набор суммы не дёргает шит */
   font-size: 12.5px;
   font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
   color: rgba(183, 255, 77, 0.85);
+}
+
+.withdraw-summary.is-breakdown {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: -2px 0 0;
+}
+
+.withdraw-summary.is-breakdown span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 7px 6px;
+  text-align: center;
+}
+
+.withdraw-summary.is-breakdown small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.withdraw-summary.is-breakdown b {
+  overflow: hidden;
+  color: rgba(183, 255, 77, 0.9);
+  font-size: 11px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .withdraw-summary.over {
