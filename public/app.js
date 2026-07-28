@@ -49,8 +49,11 @@ const CHART_WINDOW_MS = 10_000;
 const BTC_5M_CHART_HISTORY_RATIO = 0.5;
 // Линию рисует точка: её след — единственный источник свежей части пути,
 // нарисованное больше не переписывается ни тиками, ни новыми кадрами.
-const CHART_TRAIL_SAMPLE_MS = 200;
-const CHART_TRAIL_MAX_POINTS = 1_500;
+// Кадр рисуется 60 раз в секунду, поэтому след держим коротким: полсекунды
+// между точками визуально не отличить (голова сглажена), а объём работы и
+// мусора на кадр падает в несколько раз.
+const CHART_TRAIL_SAMPLE_MS = 500;
+const CHART_TRAIL_MAX_POINTS = 400;
 const CHART_TRAIL_GAP_RESET_MS = 3_000;
 const CHART_AVATAR_RADIUS_CSS = 3.8;
 const CHART_INTRO_MS = 720; // crossfade window when the chart switches markets
@@ -1927,9 +1930,6 @@ function drawMarketChartFrame(ts) {
     ? startTime
     : Math.max(startTime, windowEnd - (btcFiveMinute ? btcFiveMinuteWindowMs : CHART_WINDOW_MS));
   const duration = Math.max(1, windowEnd - windowStart);
-  const rawTicks = sourcePoints
-    .filter((point) => fullHistoryChart || (point.at >= windowStart - 1_500 && point.at <= windowEnd + 1_500));
-
   // Точка рисует линию: её след — неизменяемая часть пути. Сырые тики
   // используются только для истории до начала следа (загрузка, возврат из
   // фона); нарисованный след никогда не подменяется другими данными.
@@ -1946,15 +1946,32 @@ function drawMarketChartFrame(ts) {
   const prevTrailPoint = headTrail[headTrail.length - 1];
   if (Number.isFinite(state.smoothedPrice) && (!prevTrailPoint || nowMs - prevTrailPoint.at >= CHART_TRAIL_SAMPLE_MS)) {
     headTrail.push({ price: state.smoothedPrice, at: nowMs });
-    if (headTrail.length > CHART_TRAIL_MAX_POINTS) {
-      headTrail.splice(0, headTrail.length - CHART_TRAIL_MAX_POINTS);
+  }
+  // Чистим ушедшее за левый край на месте: фильтр каждый кадр создавал новый
+  // массив на сотни элементов и мусорил в горячем цикле отрисовки.
+  let dropCount = 0;
+  while (
+    dropCount < headTrail.length - 1
+    && (headTrail[dropCount].at < windowStart || headTrail.length - dropCount > CHART_TRAIL_MAX_POINTS)
+  ) {
+    dropCount += 1;
+  }
+  if (dropCount > 0) {
+    headTrail.splice(0, dropCount);
+  }
+
+  const trailStartAt = headTrail.length ? headTrail[0].at : Infinity;
+  const rawPoints = [];
+  for (const point of sourcePoints) {
+    if (point.at >= trailStartAt) break;
+    if (fullHistoryChart || (point.at >= windowStart - 1_500 && point.at <= windowEnd + 1_500)) {
+      rawPoints.push(point);
     }
   }
-  const trailStartAt = headTrail.length ? headTrail[0].at : Infinity;
-  const rawPoints = [
-    ...rawTicks.filter((point) => point.at < trailStartAt),
-    ...headTrail.filter((point) => point.at >= windowStart && point.at <= windowEnd),
-  ];
+  for (const point of headTrail) {
+    if (point.at > windowEnd) break;
+    rawPoints.push(point);
+  }
 
   if (rawPoints.length === 0 && currentPrice > 0) {
     rawPoints.push({ price: currentPrice, at: Date.now() });
