@@ -5024,6 +5024,33 @@ export async function completeVerifiedTask(input) {
   const dayKey = "once";
 
   return withTransaction(async (client) => {
+    // Разовое задание, засчитанное в день упёртого лимита бонусов, оставалось
+    // «выполненным» с нулевой наградой — звёзды сгорали навсегда. Если отметка
+    // есть, а начисления в ledger по ней не было, разрешаем забрать снова.
+    const staleClaim = await client.query(
+      `
+        DELETE FROM fire_task_claims
+        WHERE user_id = $1
+          AND task_key = $2
+          AND day_key = $3
+          AND NOT EXISTS (
+            SELECT 1
+            FROM fire_ledger
+            WHERE user_id = $1
+              AND source = $4
+              AND amount > 0
+          )
+        RETURNING id
+      `,
+      [user.id, taskKey, dayKey, `task:${taskKey}`],
+    );
+    if (staleClaim.rows[0]) {
+      console.log("[EasyMarket] released unpaid one-time task claim", {
+        user_id: user.id,
+        task_key: taskKey,
+      });
+    }
+
     const claimResult = await client.query(
       `
         INSERT INTO fire_task_claims (user_id, task_key, amount, day_key, source)
@@ -5063,6 +5090,28 @@ export async function completeVerifiedTask(input) {
         );
       }
       await awardClanPoints(client, user.id, null, getClanTaskPoints(taskKey), `verified_task:${taskKey}`, "STAR");
+
+      // Лимит съел награду — не запираем разовое задание, вернёмся к нему завтра.
+      if (bonus.awarded <= 0 && bonus.cap_reached) {
+        await client.query(
+          "DELETE FROM fire_task_claims WHERE user_id = $1 AND task_key = $2 AND day_key = $3",
+          [user.id, taskKey, dayKey],
+        );
+        return {
+          ok: true,
+          user,
+          task_key: taskKey,
+          already_claimed: false,
+          awarded: 0,
+          daily_remaining: bonus.daily_remaining,
+          cap_reached: true,
+          retry_tomorrow: true,
+          balance: toNumber(
+            (await client.query("SELECT balance FROM fire_balances WHERE user_id = $1", [user.id]))
+              .rows[0]?.balance,
+          ),
+        };
+      }
     }
 
     const balanceResult = await client.query(
