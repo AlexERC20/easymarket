@@ -302,11 +302,13 @@ export async function getDepositorAudit(input = {}) {
   const usersResult = await query(
     `
       WITH deposits AS (
+        -- Откаты ошибочных зачислений уменьшают сумму: строка возврата
+        -- отрицательная, поэтому просто складываем оба типа записей.
         SELECT user_id, SUM(amount) AS deposited
         FROM usdt_ledger
-        WHERE reason = 'usdt_onchain_deposit'
-          AND amount > 0
+        WHERE reason IN ('usdt_onchain_deposit', 'usdt_deposit_revert')
         GROUP BY user_id
+        HAVING SUM(amount) > 0
       ),
       withdrawals AS (
         SELECT
@@ -379,7 +381,7 @@ export async function getDepositorAudit(input = {}) {
       SELECT
         COALESCE((
           SELECT SUM(amount) FROM usdt_ledger
-          WHERE reason = 'usdt_onchain_deposit' AND amount > 0
+          WHERE reason IN ('usdt_onchain_deposit', 'usdt_deposit_revert')
         ), 0) AS deposited_total,
         COALESCE((
           SELECT SUM(amount) FROM usdt_withdrawal_requests
