@@ -390,6 +390,13 @@ export async function getDepositorAudit(input = {}) {
       cash_withdrawable: roundAmount(Math.max(0, cashWithdrawable - adminCash)),
       excluded_accounts: depositors.filter((row) => row.is_admin).length,
     },
+    // Что именно вычли, чтобы разницу в цифрах не приходилось искать руками.
+    admins: {
+      accounts: depositors.filter((row) => row.is_admin).length,
+      deposited_total: roundAmount(adminDeposited),
+      cash_balance: roundAmount(adminCash),
+      usernames: depositors.filter((row) => row.is_admin).map((row) => row.username || row.telegram_id),
+    },
     depositors,
   };
 }
