@@ -74,6 +74,7 @@ import {
 } from "./services/marketService.js";
 import {
   getBonusEconomyAudit,
+  getDepositorAudit,
   getEconomyIntegrityAudit,
   getStarConversionReminderTargets,
   markStarConversionRemindersSent,
@@ -1701,6 +1702,18 @@ app.post("/api/bridge/tasks/subscription-revoke", requireBridgeSecret, async (re
     res.status(200).json({
       ok: true,
       ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/depositor-audit", requireBridgeSecret, async (req, res) => {
+  try {
+    const audit = await getDepositorAudit({ limit: req.query.limit });
+    res.status(200).json({
+      ok: true,
+      ...audit,
     });
   } catch (error) {
     sendApiError(res, error);

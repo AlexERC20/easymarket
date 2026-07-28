@@ -269,6 +269,105 @@ export async function getStarConversionStatusForUser(userId) {
 
 const REMINDER_COOLDOWN_DAYS = 7;
 
+// Кто заносил реальные деньги, сколько занёс, сколько вывел и что у него на
+// балансах. Отдельно считаем деньги, доступные к выводу прямо сейчас: вывод
+// открыт только тем, кто хоть раз пополнялся.
+export async function getDepositorAudit(input = {}) {
+  const limit = Math.max(1, Math.min(200, Number(input.limit) || 50));
+
+  const usersResult = await query(
+    `
+      WITH deposits AS (
+        SELECT user_id, SUM(amount) AS deposited
+        FROM usdt_ledger
+        WHERE reason = 'usdt_onchain_deposit'
+          AND amount > 0
+        GROUP BY user_id
+      ),
+      withdrawals AS (
+        SELECT user_id, SUM(amount) AS withdrawn, COUNT(*)::int AS withdrawal_count
+        FROM usdt_withdrawal_requests
+        WHERE status IN ('pending', 'confirmed', 'sent')
+        GROUP BY user_id
+      )
+      SELECT
+        users.telegram_id,
+        users.username,
+        users.first_name,
+        deposits.deposited,
+        COALESCE(withdrawals.withdrawn, 0) AS withdrawn,
+        COALESCE(withdrawals.withdrawal_count, 0) AS withdrawal_count,
+        COALESCE(cash.balance, 0) AS cash_balance,
+        COALESCE(bonus.balance, 0) AS bonus_balance
+      FROM deposits
+      JOIN users ON users.id = deposits.user_id
+      LEFT JOIN withdrawals ON withdrawals.user_id = deposits.user_id
+      LEFT JOIN usdt_balances cash ON cash.user_id = deposits.user_id
+      LEFT JOIN usdt_bonus_balances bonus ON bonus.user_id = deposits.user_id
+      ORDER BY deposits.deposited DESC
+      LIMIT $1
+    `,
+    [limit],
+  );
+
+  const totalsResult = await query(
+    `
+      SELECT
+        COALESCE((
+          SELECT SUM(amount) FROM usdt_ledger
+          WHERE reason = 'usdt_onchain_deposit' AND amount > 0
+        ), 0) AS deposited_total,
+        COALESCE((
+          SELECT SUM(amount) FROM usdt_withdrawal_requests
+          WHERE status IN ('pending', 'confirmed', 'sent')
+        ), 0) AS withdrawn_total,
+        COALESCE((SELECT SUM(balance) FROM usdt_balances), 0) AS cash_total,
+        COALESCE((SELECT SUM(balance) FROM usdt_bonus_balances), 0) AS bonus_total,
+        COALESCE((
+          SELECT SUM(cash.balance)
+          FROM usdt_balances cash
+          WHERE EXISTS (
+            SELECT 1 FROM usdt_ledger
+            WHERE user_id = cash.user_id
+              AND reason = 'usdt_onchain_deposit'
+              AND amount > 0
+          )
+        ), 0) AS cash_withdrawable,
+        COALESCE((
+          SELECT balance FROM bonus_unlock_reserve WHERE currency = 'USDT'
+        ), 0) AS reserve_balance
+    `,
+  );
+  const totals = totalsResult.rows[0] || {};
+  const depositedTotal = roundAmount(totals.deposited_total);
+  const withdrawnTotal = roundAmount(totals.withdrawn_total);
+  const cashTotal = roundAmount(totals.cash_total);
+  const cashWithdrawable = roundAmount(totals.cash_withdrawable);
+
+  return {
+    totals: {
+      deposited_total: depositedTotal,
+      withdrawn_total: withdrawnTotal,
+      net_real_money: roundAmount(Math.max(0, depositedTotal - withdrawnTotal)),
+      cash_total: cashTotal,
+      cash_withdrawable: cashWithdrawable,
+      cash_locked: roundAmount(Math.max(0, cashTotal - cashWithdrawable)),
+      bonus_total: roundAmount(totals.bonus_total),
+      reserve_balance: roundAmount(totals.reserve_balance),
+    },
+    depositors: usersResult.rows.map((row) => ({
+      telegram_id: row.telegram_id,
+      username: row.username,
+      first_name: row.first_name,
+      deposited: roundAmount(row.deposited),
+      withdrawn: roundAmount(row.withdrawn),
+      withdrawal_count: Number(row.withdrawal_count || 0),
+      cash_balance: roundAmount(row.cash_balance),
+      bonus_balance: roundAmount(row.bonus_balance),
+    })),
+  };
+}
+
 export async function getStarConversionReminderTargets(input = {}) {
   const limit = Math.max(1, Math.min(200, Number(input.limit) || 50));
   const minStars = Math.max(1, Number(input.minStars ?? input.min_stars) || 3_000);
