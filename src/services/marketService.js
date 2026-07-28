@@ -5118,6 +5118,130 @@ export async function checkTelegramSubscription(chatId, telegramId) {
   }
 }
 
+const SUBSCRIPTION_TASK_CHATS = {
+  av_channel: () => config.avChannelChatId,
+  av_chat: () => config.avChatChatId,
+};
+
+// Кто забрал награду за подписку и больше не подписан. Перепроверяем у
+// Telegram по одному, с паузой — чтобы не упереться в лимиты Bot API.
+export async function auditSubscriptionTasks(input = {}) {
+  const limit = Math.max(1, Math.min(100, Number(input.limit) || 40));
+  const result = await query(
+    `
+      SELECT
+        claims.task_key,
+        users.id AS user_id,
+        users.telegram_id,
+        users.username,
+        users.first_name,
+        COALESCE((
+          SELECT SUM(amount)
+          FROM fire_ledger
+          WHERE user_id = users.id
+            AND source = 'task:' || claims.task_key
+            AND amount > 0
+        ), 0) AS awarded
+      FROM fire_task_claims claims
+      JOIN users ON users.id = claims.user_id
+      WHERE claims.task_key IN ('av_channel', 'av_chat')
+        AND claims.day_key = 'once'
+      ORDER BY claims.created_at DESC
+      LIMIT $1
+    `,
+    [limit],
+  );
+
+  const unsubscribed = [];
+  let checked = 0;
+  for (const row of result.rows) {
+    const chatId = SUBSCRIPTION_TASK_CHATS[row.task_key]?.();
+    const status = await checkTelegramSubscription(chatId, row.telegram_id);
+    if (!status.checked) {
+      continue;
+    }
+    checked += 1;
+    if (!status.subscribed) {
+      unsubscribed.push({
+        telegram_id: row.telegram_id,
+        username: row.username,
+        first_name: row.first_name,
+        task_key: row.task_key,
+        awarded: toNumber(row.awarded),
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }
+
+  return {
+    scanned: result.rows.length,
+    checked,
+    unsubscribed,
+  };
+}
+
+// Снятие награды у отписавшегося: убираем отметку о выполнении и списываем
+// ровно то, что было начислено, не загоняя баланс в минус.
+export async function revokeSubscriptionTask(input = {}) {
+  const taskKey = String(input.task_key || input.taskKey || "").trim();
+  if (!SUBSCRIPTION_TASK_CHATS[taskKey]) {
+    throw new Error("invalid_task");
+  }
+  const user = await getUserByTelegramId(input.telegram_id);
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+
+  return withTransaction(async (client) => {
+    const awardedResult = await client.query(
+      `
+        SELECT COALESCE(SUM(amount), 0) AS awarded
+        FROM fire_ledger
+        WHERE user_id = $1
+          AND source = $2
+          AND amount > 0
+      `,
+      [user.id, `task:${taskKey}`],
+    );
+    const balanceResult = await client.query(
+      "SELECT balance FROM fire_balances WHERE user_id = $1 FOR UPDATE",
+      [user.id],
+    );
+    const awarded = Math.max(0, toNumber(awardedResult.rows[0]?.awarded));
+    const balance = Math.max(0, toNumber(balanceResult.rows[0]?.balance));
+    const deducted = Math.min(awarded, balance);
+
+    if (deducted > 0) {
+      await adjustBalance(
+        client,
+        user.id,
+        -deducted,
+        `revoke_${taskKey}`,
+        `task_revoke:${taskKey}`,
+      );
+    }
+    await client.query(
+      "DELETE FROM fire_task_claims WHERE user_id = $1 AND task_key = $2 AND day_key = 'once'",
+      [user.id, taskKey],
+    );
+
+    console.log("[EasyMarket] subscription task revoked", {
+      user_id: user.id,
+      task_key: taskKey,
+      awarded,
+      deducted,
+    });
+
+    return {
+      telegram_id: user.telegram_id,
+      task_key: taskKey,
+      awarded,
+      deducted,
+      balance: roundMoney(balance - deducted),
+    };
+  });
+}
+
 export async function completeVerifiedTask(input) {
   const taskKey = String(input.task_key || input.taskKey || "").trim();
   const allowedTasks = new Set(["av_channel", "av_chat", "private_chat", "bot_start"]);

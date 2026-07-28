@@ -23,8 +23,10 @@ import {
   claimShakeFeedBonus,
   ingestShakeFeed,
   claimShareTask,
+  auditSubscriptionTasks,
   checkTelegramSubscription,
   completeVerifiedTask,
+  revokeSubscriptionTask,
   hasStartedTelegramBot,
   getEngagementState,
   ingestTaskEvent,
@@ -1672,6 +1674,33 @@ app.post("/api/bridge/economy/settings", requireBridgeSecret, async (req, res) =
     res.status(200).json({
       ok: true,
       settings,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/tasks/subscription-audit", requireBridgeSecret, async (req, res) => {
+  try {
+    const audit = await auditSubscriptionTasks({ limit: req.query.limit });
+    res.status(200).json({
+      ok: true,
+      ...audit,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/tasks/subscription-revoke", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await revokeSubscriptionTask({
+      telegram_id: req.body?.telegram_id,
+      task_key: req.body?.task_key ?? req.body?.taskKey,
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
     });
   } catch (error) {
     sendApiError(res, error);
