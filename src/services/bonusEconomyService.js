@@ -274,6 +274,15 @@ const REMINDER_COOLDOWN_DAYS = 7;
 // открыт только тем, кто хоть раз пополнялся.
 export async function getDepositorAudit(input = {}) {
   const limit = Math.max(1, Math.min(200, Number(input.limit) || 50));
+  // Служебные аккаунты не отражают реальных обязательств: их балансы —
+  // внутренняя кухня, а не деньги, которые кто-то придёт выводить.
+  const excluded = [
+    ...(config.telegramAdminUserIds || []),
+    ...String(input.exclude ?? config.economyAuditExcludedAccounts ?? "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ].map((item) => String(item).replace(/^@/, "").toLowerCase());
 
   const usersResult = await query(
     `
@@ -309,6 +318,8 @@ export async function getDepositorAudit(input = {}) {
     `,
     [limit],
   );
+  const isExcluded = (row) => excluded.includes(String(row.telegram_id || "").toLowerCase())
+    || excluded.includes(String(row.username || "").toLowerCase());
 
   const totalsResult = await query(
     `
@@ -344,6 +355,24 @@ export async function getDepositorAudit(input = {}) {
   const cashTotal = roundAmount(totals.cash_total);
   const cashWithdrawable = roundAmount(totals.cash_withdrawable);
 
+  const depositors = usersResult.rows.map((row) => ({
+    telegram_id: row.telegram_id,
+    username: row.username,
+    first_name: row.first_name,
+    is_admin: isExcluded(row),
+    deposited: roundAmount(row.deposited),
+    withdrawn: roundAmount(row.withdrawn),
+    withdrawal_count: Number(row.withdrawal_count || 0),
+    cash_balance: roundAmount(row.cash_balance),
+    bonus_balance: roundAmount(row.bonus_balance),
+  }));
+  const adminCash = depositors
+    .filter((row) => row.is_admin)
+    .reduce((sum, row) => sum + row.cash_balance, 0);
+  const adminDeposited = depositors
+    .filter((row) => row.is_admin)
+    .reduce((sum, row) => sum + row.deposited, 0);
+
   return {
     totals: {
       deposited_total: depositedTotal,
@@ -355,16 +384,13 @@ export async function getDepositorAudit(input = {}) {
       bonus_total: roundAmount(totals.bonus_total),
       reserve_balance: roundAmount(totals.reserve_balance),
     },
-    depositors: usersResult.rows.map((row) => ({
-      telegram_id: row.telegram_id,
-      username: row.username,
-      first_name: row.first_name,
-      deposited: roundAmount(row.deposited),
-      withdrawn: roundAmount(row.withdrawn),
-      withdrawal_count: Number(row.withdrawal_count || 0),
-      cash_balance: roundAmount(row.cash_balance),
-      bonus_balance: roundAmount(row.bonus_balance),
-    })),
+    // То же самое без служебных аккаунтов — реальная картина по игрокам.
+    external: {
+      deposited_total: roundAmount(Math.max(0, depositedTotal - adminDeposited)),
+      cash_withdrawable: roundAmount(Math.max(0, cashWithdrawable - adminCash)),
+      excluded_accounts: depositors.filter((row) => row.is_admin).length,
+    },
+    depositors,
   };
 }
 

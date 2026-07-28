@@ -1710,7 +1710,10 @@ app.post("/api/bridge/tasks/subscription-revoke", requireBridgeSecret, async (re
 
 app.get("/api/bridge/economy/depositor-audit", requireBridgeSecret, async (req, res) => {
   try {
-    const audit = await getDepositorAudit({ limit: req.query.limit });
+    const audit = await getDepositorAudit({
+      limit: req.query.limit,
+      exclude: req.query.exclude,
+    });
     res.status(200).json({
       ok: true,
       ...audit,

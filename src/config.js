@@ -121,6 +121,9 @@ export const config = {
   // Допуск при сопоставлении пополнений: биржи присылают на копейки больше
   // или меньше запрошенного. Зачисляем только при единственном кандидате.
   usdtDepositMatchTolerance: parseNumber(process.env.USDT_DEPOSIT_MATCH_TOLERANCE, 0.1, 0),
+  // Служебные аккаунты, которые не считаются обязательствами в аудите:
+  // @username или telegram_id через запятую.
+  economyAuditExcludedAccounts: (process.env.ECONOMY_AUDIT_EXCLUDED_ACCOUNTS || "").trim(),
   avChannelChatId: (
     process.env.AV_CHANNEL_CHAT_ID
       || telegramChatIdFromUrl(process.env.PUBLIC_AV_CHANNEL_URL || "https://t.me/erc20coin")
