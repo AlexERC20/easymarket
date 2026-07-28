@@ -2231,6 +2231,56 @@ async function awardBonusWithDailyCap(client, userId, amount, reason, source) {
   };
 }
 
+const DEPOSIT_LOSS_REFUND_RATE = 0.2;
+
+// Возврат за пополнение: закрываем все висящие офферы этого типа и начисляем
+// сумму на бонусный баланс. Вызывается из зачисления депозита.
+export async function claimDepositLossRefundOffers(client, userId) {
+  const offersResult = await client.query(
+    `
+      SELECT *
+      FROM usdt_loss_refund_offers
+      WHERE user_id = $1
+        AND status = 'pending'
+        AND offer_type = 'deposit'
+      ORDER BY created_at ASC
+      LIMIT 5
+      FOR UPDATE
+    `,
+    [userId],
+  );
+
+  let total = 0;
+  for (const offer of offersResult.rows) {
+    const amount = roundMoney(toNumber(offer.amount));
+    if (amount <= 0) {
+      continue;
+    }
+    await adjustUsdtBonusBalance(
+      client,
+      userId,
+      amount,
+      "loss_refund_deposit",
+      `loss_refund:${offer.id}:deposit`,
+    );
+    await client.query(
+      `
+        UPDATE usdt_loss_refund_offers
+        SET status = 'claimed',
+            claimed_at = now()
+        WHERE id = $1
+      `,
+      [offer.id],
+    );
+    total = roundMoney(total + amount);
+  }
+
+  if (total > 0) {
+    console.log("[EasyMarket] deposit loss refund credited", { user_id: userId, amount: total });
+  }
+  return total;
+}
+
 async function createUsdtLossRefundOffer(client, position, pnl) {
   if (normalizeCurrency(position.currency) !== "USDT" || Number(pnl || 0) >= 0) {
     return null;
@@ -2255,7 +2305,32 @@ async function createUsdtLossRefundOffer(client, position, pnl) {
   if (offerIndex >= 2) {
     return null;
   }
-  const offerType = offerIndex === 0 ? "referral" : (refundAmount <= 10 ? "stars_100" : "stars_500");
+  // Первый проигрыш за день ведём на депозит: возврат части ставки — самый
+  // понятный повод пополниться сразу после неудачи.
+  const offerType = offerIndex === 0 ? "deposit" : (refundAmount <= 10 ? "stars_100" : "stars_500");
+  if (offerType === "deposit") {
+    const depositRefund = Math.round(refundAmount * DEPOSIT_LOSS_REFUND_RATE * 100) / 100;
+    if (depositRefund <= 0) {
+      return null;
+    }
+    const depositResult = await client.query(
+      `
+        INSERT INTO usdt_loss_refund_offers (
+          user_id,
+          position_id,
+          market_id,
+          offer_type,
+          amount,
+          day_key
+        )
+        VALUES ($1, $2, $3, $4, $5::numeric, $6)
+        ON CONFLICT DO NOTHING
+        RETURNING *
+      `,
+      [position.user_id, position.id, position.market_id, offerType, depositRefund, dayKey],
+    );
+    return depositResult.rows[0] || null;
+  }
 
   const result = await client.query(
     `
@@ -9564,9 +9639,13 @@ async function settleOpenMarketPositions(client, market, winner) {
 
   }
 
-  for (const result of usdtResultsByUser.values()) {
+  for (const [userId, result] of usdtResultsByUser.entries()) {
     const netPnl = roundMoney(result.netPnl);
     if (netPnl >= 0) {
+      continue;
+    }
+    // Ставка в обе стороны — не проигрыш, а хедж: возврат по ней не предлагаем.
+    if (sidesByUserCurrency.get(`${userId}:USDT`)?.size > 1) {
       continue;
     }
     const refundableLoss = getRefundableMarketLoss(netPnl, result.totalSpent);

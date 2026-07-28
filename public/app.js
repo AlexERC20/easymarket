@@ -5513,13 +5513,21 @@ function renderLossRefundOffers() {
   const amount = Number(offer.amount || 0);
   const cost = getLossRefundCost(offer);
   const isReferral = offer.offer_type === "referral";
-  const title = isReferral ? "Вернуть проигрыш" : "Вернуть проигрыш за звезды";
-  const text = isReferral
-    ? "Позови друга. После его первой ставки вернем сумму на бонусный баланс."
-    : `Нужно пополнить ${formatFire(cost)} новых звезд. Старые звезды не списываем.`;
-  const action = isReferral
-    ? `<button class="loss-refund-action" data-loss-refund-share="${offer.id}" type="button">Позвать друга</button>`
-    : `<button class="loss-refund-action" data-loss-refund-stars="${offer.id}" data-loss-refund-cost="${cost}" type="button">Пополнить ${formatFire(cost)}</button>`;
+  const isDeposit = offer.offer_type === "deposit";
+  const depositMin = formatCurrencyAmount(getUsdtDepositMinimum(), "USDT");
+  const title = isDeposit
+    ? "Вернуть 20% ставки"
+    : isReferral ? "Вернуть проигрыш" : "Вернуть проигрыш за звезды";
+  const text = isDeposit
+    ? `Пополни от ${depositMin} — и вернём 20% проигранной ставки на баланс.`
+    : isReferral
+      ? "Позови друга. После его первой ставки вернем сумму на бонусный баланс."
+      : `Нужно пополнить ${formatFire(cost)} новых звезд. Старые звезды не списываем.`;
+  const action = isDeposit
+    ? `<button class="loss-refund-action" data-loss-refund-deposit="${offer.id}" type="button">Пополнить</button>`
+    : isReferral
+      ? `<button class="loss-refund-action" data-loss-refund-share="${offer.id}" type="button">Позвать друга</button>`
+      : `<button class="loss-refund-action" data-loss-refund-stars="${offer.id}" data-loss-refund-cost="${cost}" type="button">Пополнить ${formatFire(cost)}</button>`;
 
   container.innerHTML = `
     <div class="loss-refund-card">
@@ -10462,6 +10470,22 @@ document.addEventListener("click", (event) => {
   // Hide the offer after sharing and hold it back for the day.
   dismissLossRefundForToday();
   renderLossRefundOffers();
+});
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-loss-refund-deposit]");
+  if (!button) {
+    return;
+  }
+  event.preventDefault();
+  triggerHaptic("selection");
+  // Возврат начислится сам при зачислении депозита — на стороне сервера.
+  openTopupSheet(
+    getUsdtDepositMinimum(),
+    "После зачисления пополнения возврат придёт автоматически.",
+    "topup",
+    "USDT",
+  );
 });
 
 document.addEventListener("click", (event) => {
