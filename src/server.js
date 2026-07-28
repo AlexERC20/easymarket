@@ -24,6 +24,7 @@ import {
   ingestShakeFeed,
   claimShareTask,
   completeVerifiedTask,
+  hasStartedTelegramBot,
   getEngagementState,
   ingestTaskEvent,
   createClan,
@@ -1149,6 +1150,29 @@ app.post("/api/tasks/daily", async (req, res) => {
       task_key: req.body?.task_key ?? req.body?.taskKey,
     });
     res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+// Задание «Запусти бота»: награда только после проверки у Telegram, что бот
+// действительно получил /start от этого пользователя.
+app.post("/api/tasks/verify-bot-start", async (req, res) => {
+  try {
+    const telegramId = req.body?.telegram_id;
+    const started = await hasStartedTelegramBot(telegramId);
+    if (!started) {
+      res.status(200).json({ ok: true, verified: false });
+      return;
+    }
+    const result = await completeVerifiedTask({
+      telegram_id: telegramId,
+      username: req.body?.username,
+      first_name: req.body?.first_name,
+      task_key: "bot_start",
+      source: "mini_app_task",
+    });
+    res.status(200).json({ ok: true, verified: true, ...result });
   } catch (error) {
     sendApiError(res, error);
   }

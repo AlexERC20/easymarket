@@ -2138,6 +2138,7 @@ function getClanTaskPoints(taskKey) {
     share_friend: 2,
     av_channel: 5,
     av_chat: 5,
+    bot_start: 5,
     private_chat: 10,
     daily_presence: 2,
     daily_bet: 3,
@@ -4979,9 +4980,32 @@ export async function claimShareTask(input) {
   });
 }
 
+// Проверка, что пользователь действительно запустил бота: у бота появляется
+// личный чат с ним только после /start, поэтому getChat отвечает успехом
+// лишь для тех, кто реально нажал кнопку. Подделать это с клиента нельзя.
+export async function hasStartedTelegramBot(telegramId) {
+  if (!config.telegramBotToken) {
+    return false;
+  }
+  const chatId = String(telegramId || "").trim();
+  if (!/^\d{4,20}$/.test(chatId)) {
+    return false;
+  }
+  try {
+    const response = await fetch(
+      `https://api.telegram.org/bot${config.telegramBotToken}/getChat?chat_id=${chatId}`,
+      { signal: AbortSignal.timeout(8_000) },
+    );
+    const body = await response.json().catch(() => null);
+    return response.ok && body?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function completeVerifiedTask(input) {
   const taskKey = String(input.task_key || input.taskKey || "").trim();
-  const allowedTasks = new Set(["av_channel", "av_chat", "private_chat"]);
+  const allowedTasks = new Set(["av_channel", "av_chat", "private_chat", "bot_start"]);
   if (!allowedTasks.has(taskKey)) {
     throw new Error("invalid_task");
   }
@@ -6079,6 +6103,10 @@ export async function getEngagementState(input) {
     av_chat: {
       ready: claimed.has("av_chat:once"),
       claimed: claimed.has("av_chat:once"),
+    },
+    bot_start: {
+      ready: claimed.has("bot_start:once"),
+      claimed: claimed.has("bot_start:once"),
     },
     join_clan: {
       amount: TASK_AMOUNTS.join_clan(),

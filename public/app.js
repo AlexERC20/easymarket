@@ -3151,6 +3151,7 @@ function renderTaskRewards() {
   const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 3));
   if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
   if ($("channelTaskReward")) $("channelTaskReward").textContent = formatFire(sub);
+  if ($("botStartTaskReward")) $("botStartTaskReward").textContent = formatFire(sub);
   if ($("chatTaskReward")) $("chatTaskReward").textContent = formatFire(sub);
   if ($("privateChatTaskReward")) $("privateChatTaskReward").textContent = formatFire(privateChat);
   if ($("refTaskUsdtReward")) $("refTaskUsdtReward").textContent = formatFire(refUsdt);
@@ -9899,6 +9900,12 @@ function renderEngagement() {
       CORE_DAILY_TASK_KEYS.map((taskKey) => renderDailyTaskRow(taskKey)).join(""),
     );
   }
+  const botStartButton = $("taskBotStartBtn");
+  if (botStartButton && state.engagement?.once?.bot_start?.claimed) {
+    botStartButton.textContent = "Готово";
+    botStartButton.disabled = true;
+    state.botStartVerified = true;
+  }
   const clanButton = $("joinClanTaskBtn");
   const clanTask = state.engagement?.once?.join_clan;
   if (clanButton && clanTask) {
@@ -10165,6 +10172,55 @@ $("tasksSheet").addEventListener("click", (event) => {
     setTasksSheetOpen(false);
   }
 });
+
+$("taskBotStartBtn")?.addEventListener("click", (event) => {
+  triggerHaptic("selection");
+  // Без start-параметра: у не запускавших бота откроется экран с кнопкой Start,
+  // а не сразу покупка звёзд.
+  openTelegramUrl(String(state.publicConfig.av_bot_url || "").split("?")[0] || "https://t.me/voit_help_bot");
+  const sourceElement = event.currentTarget;
+  // Проверяем не сразу: пользователю нужно успеть нажать Start в боте.
+  // Ещё одна попытка при возврате в приложение — на случай медленного старта.
+  window.setTimeout(() => void verifyBotStartTask(sourceElement), 3_500);
+  const onBack = () => {
+    if (document.visibilityState !== "visible") return;
+    document.removeEventListener("visibilitychange", onBack);
+    window.setTimeout(() => void verifyBotStartTask(sourceElement), 800);
+  };
+  document.addEventListener("visibilitychange", onBack);
+});
+
+async function verifyBotStartTask(sourceElement = null) {
+  if (!state.user?.telegram_id || state.botStartVerified) {
+    return;
+  }
+  try {
+    const result = await api("/api/tasks/verify-bot-start", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        username: state.user.username,
+        first_name: state.user.first_name,
+      }),
+    });
+    if (!result?.verified) {
+      return;
+    }
+    state.botStartVerified = true;
+    state.balance = result.balance ?? state.balance;
+    renderMe();
+    void loadEngagementState();
+    if (result.already_claimed) {
+      return;
+    }
+    if (Number(result.awarded || 0) > 0) {
+      playTaskRewardAnimation(sourceElement);
+      showToast(`+${formatFire(result.awarded)} за запуск бота.`);
+    }
+  } catch {
+    // Молча: пользователь мог не дойти до бота — проверим при следующем заходе.
+  }
+}
 
 $("taskChannelBtn").addEventListener("click", (event) => {
   triggerHaptic("selection");
