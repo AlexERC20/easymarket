@@ -80,7 +80,9 @@ import {
   cancelUserDepositIntent,
   checkUserDepositIntent,
   createUsdtDepositIntent,
+  creditDepositEventToIntent,
   creditPendingDepositIntentManually,
+  getDepositReviewQueue,
   getPublicUsdtDepositNetworks,
   getUserDepositIntent,
   getUserDepositIntents,
@@ -151,6 +153,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "deposit_amount_collision",
     "deposit_intent_not_found",
     "deposit_intent_not_pending",
+    "deposit_event_not_found",
     "invalid_withdrawal_amount",
     "withdrawal_amount_below_fee",
     "withdrawal_amount_below_minimum",
@@ -1358,6 +1361,36 @@ app.post("/api/bridge/deposits/credit-pending", requireBridgeSecret, async (req,
     const result = await creditPendingDepositIntentManually({
       telegram_id: req.body?.telegram_id,
       amount: req.body?.amount,
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/deposits/review", requireBridgeSecret, async (req, res) => {
+  try {
+    const events = await getDepositReviewQueue({
+      limit: req.query.limit,
+      max_age_hours: req.query.max_age_hours,
+    });
+    res.status(200).json({
+      ok: true,
+      events,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/deposits/review/credit", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await creditDepositEventToIntent({
+      event_id: req.body?.event_id ?? req.body?.eventId,
+      intent_id: req.body?.intent_id ?? req.body?.intentId,
     });
     res.status(200).json({
       ok: true,

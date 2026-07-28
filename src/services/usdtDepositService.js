@@ -341,6 +341,200 @@ export async function cancelUserDepositIntent(input) {
   return mapDepositIntent(result.rows[0]);
 }
 
+// Очередь на разбор: реальные приходы из блокчейна, которые не сошлись ни с
+// одной заявкой по точной сумме. Показываем только свежие — человек, который
+// собирался платить, делает это в течение пары часов после создания заявки,
+// а заявки недельной давности это просто "нажал и забыл".
+const DEPOSIT_REVIEW_EVENT_MAX_AGE_HOURS = 72;
+const DEPOSIT_REVIEW_INTENT_MAX_AGE_HOURS = 48;
+const DEPOSIT_REVIEW_INTENT_AFTER_EVENT_MINUTES = 60;
+
+export async function getDepositReviewQueue(input = {}) {
+  const limit = Math.max(1, Math.min(30, Number(input.limit) || 15));
+  const eventMaxAgeHours = Math.max(
+    1,
+    Math.min(168, Number(input.max_age_hours ?? input.maxAgeHours) || DEPOSIT_REVIEW_EVENT_MAX_AGE_HOURS),
+  );
+
+  const eventsResult = await query(
+    `
+      SELECT *
+      FROM usdt_deposit_events
+      WHERE status = 'unmatched'
+        AND created_at >= now() - interval '1 hour' * $1::int
+      ORDER BY created_at DESC
+      LIMIT $2
+    `,
+    [eventMaxAgeHours, limit],
+  );
+
+  const events = [];
+  for (const event of eventsResult.rows) {
+    const arrivedAt = event.chain_timestamp || event.created_at;
+    const candidatesResult = await query(
+      `
+        SELECT
+          intents.id,
+          intents.deposit_amount,
+          intents.requested_amount,
+          intents.created_at,
+          users.telegram_id,
+          users.username,
+          users.first_name
+        FROM usdt_deposit_intents intents
+        JOIN users ON users.id = intents.user_id
+        WHERE intents.status = 'pending'
+          AND intents.created_at >= now() - interval '1 hour' * $2::int
+          AND intents.created_at <= $1::timestamptz + interval '1 minute' * $3::int
+        ORDER BY ABS(intents.deposit_amount - $4::numeric) ASC, intents.created_at DESC
+        LIMIT 3
+      `,
+      [
+        arrivedAt,
+        DEPOSIT_REVIEW_INTENT_MAX_AGE_HOURS,
+        DEPOSIT_REVIEW_INTENT_AFTER_EVENT_MINUTES,
+        event.amount,
+      ],
+    );
+
+    events.push({
+      event_id: Number(event.id),
+      network: event.network,
+      amount: toNumber(event.amount),
+      from_address: event.from_address,
+      tx_hash: event.tx_hash,
+      arrived_at: arrivedAt,
+      candidates: candidatesResult.rows.map((row) => ({
+        intent_id: Number(row.id),
+        telegram_id: row.telegram_id,
+        username: row.username,
+        first_name: row.first_name,
+        expected_amount: toNumber(row.deposit_amount),
+        requested_amount: toNumber(row.requested_amount),
+        delta: roundMoney(toNumber(event.amount) - toNumber(row.deposit_amount), 2),
+        created_at: row.created_at,
+      })),
+    });
+  }
+
+  return events;
+}
+
+// Зачисление из очереди: админ выбрал, какой заявке принадлежит конкретный
+// приход. Событие переводится в credited вместе с балансом, поэтому один и
+// тот же перевод нельзя зачислить дважды.
+export async function creditDepositEventToIntent(input = {}) {
+  const eventId = Number(input.event_id ?? input.eventId);
+  const intentId = Number(input.intent_id ?? input.intentId);
+  if (!Number.isSafeInteger(eventId) || eventId <= 0) {
+    throw new Error("deposit_event_not_found");
+  }
+  if (!Number.isSafeInteger(intentId) || intentId <= 0) {
+    throw new Error("deposit_intent_not_found");
+  }
+
+  return withTransaction(async (client) => {
+    const eventResult = await client.query(
+      `
+        SELECT *
+        FROM usdt_deposit_events
+        WHERE id = $1
+          AND status <> 'credited'
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [eventId],
+    );
+    const event = eventResult.rows[0];
+    if (!event) {
+      throw new Error("deposit_event_not_found");
+    }
+
+    const intentResult = await client.query(
+      `
+        SELECT intents.*, users.telegram_id, users.username, users.first_name
+        FROM usdt_deposit_intents intents
+        JOIN users ON users.id = intents.user_id
+        WHERE intents.id = $1
+          AND intents.status = 'pending'
+        LIMIT 1
+        FOR UPDATE OF intents
+      `,
+      [intentId],
+    );
+    const intent = intentResult.rows[0];
+    if (!intent) {
+      throw new Error("deposit_intent_not_pending");
+    }
+
+    const amount = roundMoney(event.amount, 2);
+    if (amount <= 0) {
+      throw new Error("invalid_deposit_amount");
+    }
+
+    await client.query(
+      `
+        UPDATE usdt_balances
+        SET balance = balance + $2::numeric,
+            updated_at = now()
+        WHERE user_id = $1
+      `,
+      [intent.user_id, amount],
+    );
+    await client.query(
+      `
+        INSERT INTO usdt_ledger (user_id, amount, reason, source)
+        VALUES ($1, $2::numeric, 'usdt_onchain_deposit', $3)
+      `,
+      [intent.user_id, amount, `${event.network}:${event.tx_hash}:${event.log_index}`],
+    );
+    await client.query(
+      `
+        UPDATE usdt_deposit_intents
+        SET status = 'credited',
+            credited_amount = $2::numeric,
+            from_address = $3,
+            tx_hash = $4,
+            log_index = $5,
+            block_number = $6,
+            credited_at = now(),
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [intent.id, amount, event.from_address, event.tx_hash, event.log_index, event.block_number],
+    );
+    await client.query(
+      `
+        UPDATE usdt_deposit_events
+        SET status = 'credited',
+            matched_intent_id = $2
+        WHERE id = $1
+      `,
+      [event.id, intent.id],
+    );
+    const balanceResult = await client.query(
+      "SELECT balance FROM usdt_balances WHERE user_id = $1",
+      [intent.user_id],
+    );
+
+    console.log("[EasyMarket] USDT deposit credited from review queue", {
+      event_id: event.id,
+      intent_id: intent.id,
+      user_id: intent.user_id,
+      amount,
+    });
+
+    return {
+      amount,
+      telegram_id: intent.telegram_id,
+      username: intent.username,
+      first_name: intent.first_name,
+      expected_amount: toNumber(intent.deposit_amount),
+      usdt_cash_balance: toNumber(balanceResult.rows[0]?.balance),
+    };
+  });
+}
+
 // Ручной апрув зависшей заявки: пользователь отправил не ту точную сумму, и
 // сканер её не сматчил. Проводим как настоящий депозит (ledger-reason
 // usdt_onchain_deposit + intent credited), чтобы включились депозитные
