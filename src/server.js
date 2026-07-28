@@ -170,6 +170,8 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "task_not_ready",
     "task_not_in_rotation",
     "invalid_task_event",
+    "share_message_unavailable",
+    "invalid_share_url",
     "comment_required",
     "insufficient_shares",
     "invalid_market_price",
@@ -786,6 +788,79 @@ app.get("/api/share/story", async (req, res) => {
         sendApiError(res, error);
       }
     });
+  }
+});
+
+// Шэр карточки в чат настоящим сообщением с картинкой: готовим инлайн-photo
+// через Bot API, клиент затем открывает пикер чатов и отправляет её.
+app.post("/api/share/prepare-message", async (req, res) => {
+  try {
+    if (!config.telegramBotToken) {
+      throw new Error("share_message_unavailable");
+    }
+    const telegramId = String(req.body?.telegram_id ?? "").trim();
+    if (!/^\d{4,20}$/.test(telegramId)) {
+      throw new Error("telegram_id_required");
+    }
+    const value = Number(req.body?.value);
+    const currency = String(req.body?.currency ?? "USDT").toUpperCase() === "STAR" ? "STAR" : "USDT";
+    const theme = /^[a-z_]{1,24}$/.test(String(req.body?.theme ?? "")) ? String(req.body.theme) : "btc";
+    const taglineIndex = Number(req.body?.tagline_index ?? req.body?.taglineIndex);
+    const caption = String(req.body?.text ?? "").slice(0, 900);
+    const linkUrl = String(req.body?.url ?? config.publicMiniAppUrl).slice(0, 400);
+    if (!/^https:\/\/t\.me\//.test(linkUrl)) {
+      throw new Error("invalid_share_url");
+    }
+
+    const params = new URLSearchParams({ currency, theme, v: "3" });
+    if (Number.isFinite(value) && value > 0) {
+      params.set("value", String(value));
+    }
+    if (Number.isInteger(taglineIndex)) {
+      params.set("t", String(taglineIndex));
+    }
+    const photoUrl = `${config.publicWebUrl}/api/share/story?${params.toString()}`;
+
+    const response = await fetch(
+      `https://api.telegram.org/bot${config.telegramBotToken}/savePreparedInlineMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: Number(telegramId),
+          allow_user_chats: true,
+          allow_group_chats: true,
+          allow_channel_chats: true,
+          result: {
+            type: "photo",
+            id: `win_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            photo_url: photoUrl,
+            thumbnail_url: photoUrl,
+            photo_width: 1080,
+            photo_height: 1920,
+            caption,
+            reply_markup: {
+              inline_keyboard: [[{ text: "🚀 Играть в EasyMarket", url: linkUrl }]],
+            },
+          },
+        }),
+      },
+    );
+    const body = await response.json().catch(() => null);
+    if (!response.ok || body?.ok !== true || !body?.result?.id) {
+      console.warn("[EasyMarket] savePreparedInlineMessage failed", {
+        status: response.status,
+        description: body?.description,
+      });
+      throw new Error("share_message_unavailable");
+    }
+
+    res.status(200).json({
+      ok: true,
+      prepared_message_id: body.result.id,
+    });
+  } catch (error) {
+    sendApiError(res, error);
   }
 });
 

@@ -6369,8 +6369,7 @@ function openShareWinSheet() {
   triggerHaptic("win");
 }
 
-function shareWinToChat() {
-  triggerHaptic("selection");
+function shareWinLinkToChat() {
   const url = getShareWinUrl();
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(getShareWinText())}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
@@ -6378,6 +6377,47 @@ function shareWinToChat() {
     return;
   }
   window.open(shareUrl, "_blank", "noopener,noreferrer");
+}
+
+// В чат уходит настоящее фото карточки с подписью и кнопкой, а не голая
+// ссылка. Требует Telegram 8.0+; на старых клиентах остаётся ссылка с текстом.
+async function shareWinToChat() {
+  triggerHaptic("selection");
+  const tg = window.Telegram?.WebApp;
+  const canShareMessage = tg && typeof tg.shareMessage === "function"
+    && (typeof tg.isVersionAtLeast !== "function" || tg.isVersionAtLeast("8.0"))
+    && state.user?.telegram_id;
+  if (!canShareMessage) {
+    shareWinLinkToChat();
+    return;
+  }
+
+  try {
+    const themeKey = SHARE_THEMES[state.lastWin?.theme] ? state.lastWin.theme : "btc";
+    const taglineIndex = Number(state.lastWin?.taglineIndex);
+    const prepared = await api("/api/share/prepare-message", {
+      method: "POST",
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        value: Number(state.lastWin?.primaryValue || 0),
+        currency: state.lastWin?.primaryCurrency || "USDT",
+        theme: themeKey,
+        tagline_index: Number.isInteger(taglineIndex) ? taglineIndex : undefined,
+        text: getShareWinText(),
+        url: getShareWinUrl(),
+      }),
+    });
+    if (!prepared?.prepared_message_id) {
+      throw new Error("no_prepared_message");
+    }
+    tg.shareMessage(prepared.prepared_message_id, (sent) => {
+      if (sent === false) {
+        // Пользователь закрыл пикер — молча, без падения в ссылку.
+      }
+    });
+  } catch {
+    shareWinLinkToChat();
+  }
 }
 
 function shareWinToStory() {
