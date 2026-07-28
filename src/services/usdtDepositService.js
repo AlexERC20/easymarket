@@ -423,6 +423,99 @@ export async function creditPendingDepositIntentManually(input) {
   });
 }
 
+// Откат ошибочного ручного апрува: снимает начисленное с основного баланса и
+// снимает заявке статус credited, чтобы депозитные пороги пересчитались.
+export async function revertManualDepositCredit(input) {
+  const telegramId = String(input.telegram_id || "").trim();
+  if (!telegramId) {
+    throw new Error("telegram_id_missing");
+  }
+  const intentId = Number(input.intent_id ?? input.intentId);
+  if (!Number.isSafeInteger(intentId) || intentId <= 0) {
+    throw new Error("deposit_intent_not_found");
+  }
+  const user = await getUserByTelegramId(telegramId);
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+
+  return withTransaction(async (client) => {
+    const intentResult = await client.query(
+      `
+        SELECT *
+        FROM usdt_deposit_intents
+        WHERE id = $1
+          AND user_id = $2
+          AND status = 'credited'
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [intentId, user.id],
+    );
+    const intent = intentResult.rows[0];
+    if (!intent) {
+      throw new Error("deposit_intent_not_found");
+    }
+    const amount = roundMoney(intent.credited_amount, 2);
+    if (amount <= 0) {
+      throw new Error("deposit_intent_not_pending");
+    }
+
+    const balanceResult = await client.query(
+      "SELECT balance FROM usdt_balances WHERE user_id = $1 FOR UPDATE",
+      [user.id],
+    );
+    if (toNumber(balanceResult.rows[0]?.balance) < amount) {
+      throw new Error("insufficient_usdt");
+    }
+
+    await client.query(
+      `
+        UPDATE usdt_balances
+        SET balance = balance - $2::numeric,
+            updated_at = now()
+        WHERE user_id = $1
+      `,
+      [user.id, amount],
+    );
+    await client.query(
+      `
+        INSERT INTO usdt_ledger (user_id, amount, reason, source)
+        VALUES ($1, -$2::numeric, 'usdt_deposit_revert', $3)
+      `,
+      [user.id, amount, `manual_revert:intent:${intent.id}`],
+    );
+    const revertedResult = await client.query(
+      `
+        UPDATE usdt_deposit_intents
+        SET status = 'cancelled',
+            credited_amount = 0,
+            credited_at = NULL,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [intent.id],
+    );
+    const finalBalance = await client.query(
+      "SELECT balance FROM usdt_balances WHERE user_id = $1",
+      [user.id],
+    );
+
+    console.log("[EasyMarket] USDT manual deposit credit reverted", {
+      intent_id: intent.id,
+      user_id: user.id,
+      amount,
+    });
+
+    return {
+      intent: mapDepositIntent(revertedResult.rows[0]),
+      reverted_amount: amount,
+      usdt_cash_balance: toNumber(finalBalance.rows[0]?.balance),
+    };
+  });
+}
+
 export async function checkUserDepositIntent(input) {
   const telegramId = String(input.telegram_id || "").trim();
   if (!telegramId) {

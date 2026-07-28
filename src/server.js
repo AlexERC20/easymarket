@@ -84,6 +84,7 @@ import {
   getPublicUsdtDepositNetworks,
   getUserDepositIntent,
   getUserDepositIntents,
+  revertManualDepositCredit,
   scanUsdtDeposits,
 } from "./services/usdtDepositService.js";
 import {
@@ -1357,6 +1358,21 @@ app.post("/api/bridge/deposits/credit-pending", requireBridgeSecret, async (req,
     const result = await creditPendingDepositIntentManually({
       telegram_id: req.body?.telegram_id,
       amount: req.body?.amount,
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/deposits/revert-credit", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await revertManualDepositCredit({
+      telegram_id: req.body?.telegram_id,
+      intent_id: req.body?.intent_id ?? req.body?.intentId,
     });
     res.status(200).json({
       ok: true,
