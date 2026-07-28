@@ -5003,6 +5003,46 @@ export async function hasStartedTelegramBot(telegramId) {
   }
 }
 
+// Проверка подписки на канал/чат. Возвращаем и результат, и факт того, что
+// проверка вообще состоялась: если бот не админ в канале или id не настроен,
+// нельзя блокировать задание всем подряд — иначе оно просто умрёт.
+export async function checkTelegramSubscription(chatId, telegramId) {
+  const chat = String(chatId || "").trim();
+  const user = String(telegramId || "").trim();
+  if (!config.telegramBotToken || !chat || !/^\d{4,20}$/.test(user)) {
+    return { checked: false, subscribed: false };
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.telegram.org/bot${config.telegramBotToken}/getChatMember`
+        + `?chat_id=${encodeURIComponent(chat)}&user_id=${user}`,
+      { signal: AbortSignal.timeout(8_000) },
+    );
+    const body = await response.json().catch(() => null);
+    if (body?.ok === true) {
+      const status = String(body.result?.status || "");
+      const subscribed = ["creator", "administrator", "member"].includes(status)
+        || (status === "restricted" && body.result?.is_member === true);
+      return { checked: true, subscribed };
+    }
+
+    const description = String(body?.description || "");
+    // «Пользователь не участник» — это полноценный ответ, а не сбой проверки.
+    if (/user not found|not a member|PARTICIPANT_ID_INVALID/i.test(description)) {
+      return { checked: true, subscribed: false };
+    }
+    console.warn("[EasyMarket] subscription check unavailable", {
+      chat,
+      status: response.status,
+      description: description.slice(0, 120),
+    });
+    return { checked: false, subscribed: false };
+  } catch {
+    return { checked: false, subscribed: false };
+  }
+}
+
 export async function completeVerifiedTask(input) {
   const taskKey = String(input.task_key || input.taskKey || "").trim();
   const allowedTasks = new Set(["av_channel", "av_chat", "private_chat", "bot_start"]);

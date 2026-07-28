@@ -9294,6 +9294,12 @@ async function claimSimpleTask(taskKey, sourceElement = null) {
         task_key: taskKey,
       }),
     });
+    if (result.verified === false) {
+      showToast(taskKey === "av_chat"
+        ? "Не видим тебя в чате. Вступи и нажми ещё раз."
+        : "Подписка не найдена. Подпишись и нажми ещё раз.");
+      return;
+    }
     state.balance = result.balance ?? state.balance;
     renderMe();
     if (result.already_claimed) {
@@ -9305,7 +9311,9 @@ async function claimSimpleTask(taskKey, sourceElement = null) {
       showToast(`+${formatFire(result.awarded)} за задание.`);
       return;
     }
-    showToast("Дневной лимит бонусов уже достигнут.");
+    showToast(result.retry_tomorrow
+      ? "Дневной лимит звёзд исчерпан — задание останется, забери завтра."
+      : "Дневной лимит бонусов уже достигнут.");
   } catch {
     showToast("Открой ссылку и попробуй забрать бонус позже.");
   }
@@ -10222,22 +10230,35 @@ async function verifyBotStartTask(sourceElement = null) {
   }
 }
 
+// Подписка теперь проверяется у Telegram, поэтому забираем не сразу после
+// открытия ссылки, а когда пользователь вернулся в приложение — к этому
+// моменту он уже успел нажать «Подписаться».
+function claimSubscriptionTaskOnReturn(taskKey, sourceElement) {
+  let done = false;
+  const attempt = () => {
+    if (done) return;
+    done = true;
+    document.removeEventListener("visibilitychange", onBack);
+    void claimSimpleTask(taskKey, sourceElement);
+  };
+  const onBack = () => {
+    if (document.visibilityState === "visible") window.setTimeout(attempt, 700);
+  };
+  document.addEventListener("visibilitychange", onBack);
+  // Пользователь мог не уходить из приложения — не оставляем задание висеть.
+  window.setTimeout(attempt, 12_000);
+}
+
 $("taskChannelBtn").addEventListener("click", (event) => {
   triggerHaptic("selection");
   openTelegramUrl(state.publicConfig.av_channel_url || "https://t.me/erc20coin");
-  const sourceElement = event.currentTarget;
-  window.setTimeout(() => {
-    void claimSimpleTask("av_channel", sourceElement);
-  }, 900);
+  claimSubscriptionTaskOnReturn("av_channel", event.currentTarget);
 });
 
 $("taskChatBtn").addEventListener("click", (event) => {
   triggerHaptic("selection");
   openTelegramUrl(state.publicConfig.av_chat_url || "https://t.me/thedaomaker");
-  const sourceElement = event.currentTarget;
-  window.setTimeout(() => {
-    void claimSimpleTask("av_chat", sourceElement);
-  }, 900);
+  claimSubscriptionTaskOnReturn("av_chat", event.currentTarget);
 });
 
 $("taskPrivateChatBtn").addEventListener("click", () => {

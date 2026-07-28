@@ -23,6 +23,7 @@ import {
   claimShakeFeedBonus,
   ingestShakeFeed,
   claimShareTask,
+  checkTelegramSubscription,
   completeVerifiedTask,
   hasStartedTelegramBot,
   getEngagementState,
@@ -1180,9 +1181,19 @@ app.post("/api/tasks/verify-bot-start", async (req, res) => {
 
 app.post("/api/tasks/claim", async (req, res) => {
   try {
-    const taskKey = req.body?.task_key ?? req.body?.taskKey;
-    if (!["av_channel", "av_chat"].includes(String(taskKey || ""))) {
+    const taskKey = String(req.body?.task_key ?? req.body?.taskKey ?? "");
+    if (!["av_channel", "av_chat"].includes(taskKey)) {
       throw new Error("invalid_task");
+    }
+    // Награда только за реальную подписку. Если проверить не удалось (бот не
+    // админ в канале, Telegram недоступен) — не наказываем пользователя.
+    const subscription = await checkTelegramSubscription(
+      taskKey === "av_channel" ? config.avChannelChatId : config.avChatChatId,
+      req.body?.telegram_id,
+    );
+    if (subscription.checked && !subscription.subscribed) {
+      res.status(200).json({ ok: true, verified: false, subscribed: false });
+      return;
     }
     const result = await completeVerifiedTask({
       telegram_id: req.body?.telegram_id,

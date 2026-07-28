@@ -15,6 +15,13 @@ function parseNumber(value, fallback, min = Number.NEGATIVE_INFINITY) {
   return Math.max(min, parsed);
 }
 
+// https://t.me/erc20coin -> @erc20coin. Приглашения вида t.me/+hash и t.me/joinchat
+// публичного имени не дают — для них нужен числовой id в переменной окружения.
+function telegramChatIdFromUrl(url) {
+  const match = String(url || "").trim().match(/^https?:\/\/t\.me\/([A-Za-z][\w]{3,31})(?:[/?].*)?$/);
+  return match ? `@${match[1]}` : "";
+}
+
 export const config = {
   port: Number(process.env.PORT || 3000),
   nodeEnv: process.env.NODE_ENV || "development",
@@ -107,6 +114,17 @@ export const config = {
   publicAvChatUrl: (
     process.env.PUBLIC_AV_CHAT_URL
       || "https://t.me/thedaomaker"
+  ).trim(),
+  // Идентификаторы для проверки подписки через getChatMember. По умолчанию
+  // берём @username из публичных ссылок; приватные чаты задаются числовым id
+  // в переменных окружения.
+  avChannelChatId: (
+    process.env.AV_CHANNEL_CHAT_ID
+      || telegramChatIdFromUrl(process.env.PUBLIC_AV_CHANNEL_URL || "https://t.me/erc20coin")
+  ).trim(),
+  avChatChatId: (
+    process.env.AV_CHAT_CHAT_ID
+      || telegramChatIdFromUrl(process.env.PUBLIC_AV_CHAT_URL || "https://t.me/thedaomaker")
   ).trim(),
   publicPrivateChatUrl: (
     process.env.PUBLIC_PRIVATE_CHAT_URL
