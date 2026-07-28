@@ -535,6 +535,43 @@ export async function creditDepositEventToIntent(input = {}) {
   });
 }
 
+// Пометить приход разобранным, не двигая деньги: перевод уже зачислен другим
+// путём или начислять его не нужно. Из очереди уходит навсегда.
+export async function dismissDepositEvent(input = {}) {
+  const eventId = Number(input.event_id ?? input.eventId);
+  if (!Number.isSafeInteger(eventId) || eventId <= 0) {
+    throw new Error("deposit_event_not_found");
+  }
+  const intentId = Number(input.intent_id ?? input.intentId);
+
+  const result = await query(
+    `
+      UPDATE usdt_deposit_events
+      SET status = 'dismissed',
+          matched_intent_id = COALESCE($2, matched_intent_id)
+      WHERE id = $1
+        AND status <> 'credited'
+      RETURNING *
+    `,
+    [eventId, Number.isSafeInteger(intentId) && intentId > 0 ? intentId : null],
+  );
+  const event = result.rows[0];
+  if (!event) {
+    throw new Error("deposit_event_not_found");
+  }
+
+  console.log("[EasyMarket] USDT deposit event dismissed", {
+    event_id: event.id,
+    amount: toNumber(event.amount),
+  });
+
+  return {
+    event_id: Number(event.id),
+    amount: toNumber(event.amount),
+    status: event.status,
+  };
+}
+
 // Ручной апрув зависшей заявки: пользователь отправил не ту точную сумму, и
 // сканер её не сматчил. Проводим как настоящий депозит (ledger-reason
 // usdt_onchain_deposit + intent credited), чтобы включились депозитные
@@ -599,6 +636,32 @@ export async function creditPendingDepositIntentManually(input) {
       `,
       [intent.id, amount],
     );
+    // Если этому начислению соответствует ровно один неразобранный приход на
+    // ту же сумму — закрываем и его, иначе он останется висеть в очереди и
+    // его предложат зачислить кому-то ещё.
+    const matchingEvents = await client.query(
+      `
+        SELECT id
+        FROM usdt_deposit_events
+        WHERE status = 'unmatched'
+          AND amount = $1::numeric
+          AND created_at >= now() - interval '7 days'
+        LIMIT 2
+      `,
+      [amount],
+    );
+    if (matchingEvents.rows.length === 1) {
+      await client.query(
+        `
+          UPDATE usdt_deposit_events
+          SET status = 'credited',
+              matched_intent_id = $2
+          WHERE id = $1
+        `,
+        [matchingEvents.rows[0].id, intent.id],
+      );
+    }
+
     const balanceResult = await client.query(
       "SELECT balance FROM usdt_balances WHERE user_id = $1",
       [user.id],
@@ -795,7 +858,9 @@ async function getTransferLogs(provider, network, fromBlock, toBlock) {
 }
 
 async function matchDepositEvent(client, network, event) {
-  if (!event || event.status === "credited") {
+  // dismissed — разобранный вручную перевод: сканер не должен возвращать его
+  // в очередь при следующем проходе.
+  if (!event || event.status === "credited" || event.status === "dismissed") {
     return false;
   }
 
@@ -830,7 +895,7 @@ async function matchDepositEvent(client, network, event) {
         WHERE network = $1
           AND tx_hash = $2
           AND log_index = $3
-          AND status <> 'credited'
+          AND status NOT IN ('credited', 'dismissed')
       `,
       [network.key, event.tx_hash, event.log_index],
     );

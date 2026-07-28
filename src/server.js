@@ -82,6 +82,7 @@ import {
   createUsdtDepositIntent,
   creditDepositEventToIntent,
   creditPendingDepositIntentManually,
+  dismissDepositEvent,
   getDepositReviewQueue,
   getPublicUsdtDepositNetworks,
   getUserDepositIntent,
@@ -1389,6 +1390,21 @@ app.get("/api/bridge/deposits/review", requireBridgeSecret, async (req, res) => 
 app.post("/api/bridge/deposits/review/credit", requireBridgeSecret, async (req, res) => {
   try {
     const result = await creditDepositEventToIntent({
+      event_id: req.body?.event_id ?? req.body?.eventId,
+      intent_id: req.body?.intent_id ?? req.body?.intentId,
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/deposits/review/dismiss", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await dismissDepositEvent({
       event_id: req.body?.event_id ?? req.body?.eventId,
       intent_id: req.body?.intent_id ?? req.body?.intentId,
     });
