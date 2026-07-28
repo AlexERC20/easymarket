@@ -336,6 +336,34 @@ export async function getDepositorAudit(input = {}) {
   const isExcluded = (row) => excluded.includes(String(row.telegram_id || "").toLowerCase())
     || excluded.includes(String(row.username || "").toLowerCase());
 
+  // Балансы всех держателей, а не только тех, кто заносил деньги: без этого
+  // не видно, у кого копятся бонусы и звёзды без единого депозита.
+  const balancesResult = await query(
+    `
+      SELECT
+        users.telegram_id,
+        users.username,
+        users.first_name,
+        COALESCE(cash.balance, 0) AS cash_balance,
+        COALESCE(bonus.balance, 0) AS bonus_balance,
+        COALESCE(fire.balance, 0) AS star_balance,
+        COALESCE((
+          SELECT SUM(amount) FROM usdt_ledger
+          WHERE user_id = users.id AND reason = 'usdt_onchain_deposit' AND amount > 0
+        ), 0) AS deposited
+      FROM users
+      LEFT JOIN usdt_balances cash ON cash.user_id = users.id
+      LEFT JOIN usdt_bonus_balances bonus ON bonus.user_id = users.id
+      LEFT JOIN fire_balances fire ON fire.user_id = users.id
+      WHERE COALESCE(cash.balance, 0) > 0
+         OR COALESCE(bonus.balance, 0) > 0
+         OR COALESCE(fire.balance, 0) > 0
+      ORDER BY (COALESCE(cash.balance, 0) + COALESCE(bonus.balance, 0)) DESC
+      LIMIT $1
+    `,
+    [limit],
+  );
+
   const totalsResult = await query(
     `
       SELECT
@@ -445,6 +473,17 @@ export async function getDepositorAudit(input = {}) {
       usernames: depositors.filter((row) => row.is_admin).map((row) => row.username || row.telegram_id),
     },
     depositors,
+    balances: balancesResult.rows
+      .filter((row) => !isExcluded(row))
+      .map((row) => ({
+        telegram_id: row.telegram_id,
+        username: row.username,
+        first_name: row.first_name,
+        deposited: roundAmount(row.deposited),
+        cash_balance: roundAmount(row.cash_balance),
+        bonus_balance: roundAmount(row.bonus_balance),
+        star_balance: Math.floor(toNumber(row.star_balance)),
+      })),
   };
 }
 
