@@ -302,7 +302,11 @@ export async function getDepositorAudit(input = {}) {
         SELECT
           user_id,
           SUM(amount) AS withdrawn,
-          SUM(COALESCE(payout_amount, amount)) FILTER (WHERE status = 'completed') AS paid_out,
+          -- Реально ушедшие деньги: комиссия остаётся в кассе, поэтому
+          -- вычитаем её из списанной суммы.
+          SUM(COALESCE(NULLIF(payout_amount, 0), amount - COALESCE(fee_amount, 0)))
+            FILTER (WHERE status = 'completed') AS paid_out,
+          SUM(COALESCE(fee_amount, 0)) AS fees_kept,
           COUNT(*)::int AS withdrawal_count
         FROM usdt_withdrawal_requests
         WHERE status IN ('pending', 'completed')
@@ -315,6 +319,7 @@ export async function getDepositorAudit(input = {}) {
         deposits.deposited,
         COALESCE(withdrawals.withdrawn, 0) AS withdrawn,
         COALESCE(withdrawals.paid_out, 0) AS paid_out,
+        COALESCE(withdrawals.fees_kept, 0) AS fees_kept,
         COALESCE(withdrawals.withdrawal_count, 0) AS withdrawal_count,
         COALESCE(cash.balance, 0) AS cash_balance,
         COALESCE(bonus.balance, 0) AS bonus_balance
@@ -343,9 +348,14 @@ export async function getDepositorAudit(input = {}) {
           WHERE status IN ('pending', 'completed')
         ), 0) AS withdrawn_total,
         COALESCE((
-          SELECT SUM(COALESCE(payout_amount, amount)) FROM usdt_withdrawal_requests
+          SELECT SUM(COALESCE(NULLIF(payout_amount, 0), amount - COALESCE(fee_amount, 0)))
+          FROM usdt_withdrawal_requests
           WHERE status = 'completed'
         ), 0) AS paid_out_total,
+        COALESCE((
+          SELECT SUM(COALESCE(fee_amount, 0)) FROM usdt_withdrawal_requests
+          WHERE status IN ('pending', 'completed')
+        ), 0) AS withdrawal_fees_total,
         COALESCE((SELECT SUM(balance) FROM usdt_balances), 0) AS cash_total,
         COALESCE((SELECT SUM(balance) FROM usdt_bonus_balances), 0) AS bonus_total,
         COALESCE((
@@ -378,7 +388,10 @@ export async function getDepositorAudit(input = {}) {
     deposited: roundAmount(row.deposited),
     withdrawn: roundAmount(row.withdrawn),
     paid_out: roundAmount(row.paid_out),
-    net_deposited: roundMoneySigned(roundAmount(row.deposited) - roundAmount(row.withdrawn)),
+    fees_kept: roundAmount(row.fees_kept),
+    // Сколько реально осталось у проекта от этого человека: занёс минус то,
+    // что физически ушло ему на кошелёк.
+    net_deposited: roundMoneySigned(roundAmount(row.deposited) - roundAmount(row.paid_out)),
     withdrawal_count: Number(row.withdrawal_count || 0),
     cash_balance: roundAmount(row.cash_balance),
     bonus_balance: roundAmount(row.bonus_balance),
@@ -392,15 +405,19 @@ export async function getDepositorAudit(input = {}) {
   const adminWithdrawn = depositors
     .filter((row) => row.is_admin)
     .reduce((sum, row) => sum + row.withdrawn, 0);
+  const adminPaidOut = depositors
+    .filter((row) => row.is_admin)
+    .reduce((sum, row) => sum + row.paid_out, 0);
 
   return {
     totals: {
       deposited_total: depositedTotal,
       withdrawn_total: withdrawnTotal,
       paid_out_total: paidOutTotal,
+      withdrawal_fees_total: roundAmount(totals.withdrawal_fees_total),
       // Может уйти в минус: выплачено больше, чем занесли — это и есть реальный
       // расход проекта, прятать его за Math.max нельзя.
-      net_real_money: roundMoneySigned(depositedTotal - withdrawnTotal),
+      net_real_money: roundMoneySigned(depositedTotal - paidOutTotal),
       cash_total: cashTotal,
       cash_withdrawable: cashWithdrawable,
       cash_locked: roundAmount(Math.max(0, cashTotal - cashWithdrawable)),
@@ -411,8 +428,10 @@ export async function getDepositorAudit(input = {}) {
     external: {
       deposited_total: roundAmount(Math.max(0, depositedTotal - adminDeposited)),
       withdrawn_total: roundAmount(Math.max(0, withdrawnTotal - adminWithdrawn)),
+      paid_out_total: roundAmount(Math.max(0, paidOutTotal - adminPaidOut)),
+      // Считаем по фактически ушедшим деньгам: комиссия за вывод осталась у нас.
       net_real_money: roundMoneySigned(
-        (depositedTotal - adminDeposited) - (withdrawnTotal - adminWithdrawn),
+        (depositedTotal - adminDeposited) - (paidOutTotal - adminPaidOut),
       ),
       cash_withdrawable: roundAmount(Math.max(0, cashWithdrawable - adminCash)),
       excluded_accounts: depositors.filter((row) => row.is_admin).length,
