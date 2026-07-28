@@ -372,9 +372,46 @@ export async function creditPendingDepositIntentManually(input) {
       `,
       [user.id],
     );
-    const intent = intentResult.rows[0];
-    if (!intent) {
-      throw new Error("no_pending_deposit_intent");
+    let creditedIntent;
+    const pendingIntent = intentResult.rows[0];
+    if (pendingIntent) {
+      const updatedResult = await client.query(
+        `
+          UPDATE usdt_deposit_intents
+          SET status = 'credited',
+              credited_amount = $2::numeric,
+              credited_at = now(),
+              updated_at = now()
+          WHERE id = $1
+          RETURNING *
+        `,
+        [pendingIntent.id, amount],
+      );
+      creditedIntent = updatedResult.rows[0];
+    } else {
+      // Заявки нет (сумма не совпала ни с одной) — создаём её сразу
+      // закредитованной, чтобы депозит попал в сумму credited-заявок,
+      // по которой считаются пороги конвертации и бонусов.
+      const network = getConfiguredUsdtDepositNetworks()[0];
+      const insertedResult = await client.query(
+        `
+          INSERT INTO usdt_deposit_intents (
+            user_id,
+            network,
+            requested_amount,
+            deposit_amount,
+            to_address,
+            expires_at,
+            status,
+            credited_amount,
+            credited_at
+          )
+          VALUES ($1, $2, $3::numeric, $3::numeric, $4, now(), 'credited', $3::numeric, now())
+          RETURNING *
+        `,
+        [user.id, network?.key || "ANY", amount, network?.treasuryAddress || ""],
+      );
+      creditedIntent = insertedResult.rows[0];
     }
 
     await client.query(
@@ -391,19 +428,7 @@ export async function creditPendingDepositIntentManually(input) {
         INSERT INTO usdt_ledger (user_id, amount, reason, source)
         VALUES ($1, $2::numeric, 'usdt_onchain_deposit', $3)
       `,
-      [user.id, amount, `manual_approve:intent:${intent.id}`],
-    );
-    const updatedResult = await client.query(
-      `
-        UPDATE usdt_deposit_intents
-        SET status = 'credited',
-            credited_amount = $2::numeric,
-            credited_at = now(),
-            updated_at = now()
-        WHERE id = $1
-        RETURNING *
-      `,
-      [intent.id, amount],
+      [user.id, amount, `manual_approve:intent:${creditedIntent.id}`],
     );
     const balanceResult = await client.query(
       "SELECT balance FROM usdt_balances WHERE user_id = $1",
@@ -411,13 +436,13 @@ export async function creditPendingDepositIntentManually(input) {
     );
 
     console.log("[EasyMarket] USDT deposit credited manually", {
-      intent_id: intent.id,
+      intent_id: creditedIntent.id,
       user_id: user.id,
       amount,
     });
 
     return {
-      intent: mapDepositIntent(updatedResult.rows[0]),
+      intent: mapDepositIntent(creditedIntent),
       usdt_cash_balance: toNumber(balanceResult.rows[0]?.balance),
     };
   });
