@@ -5793,7 +5793,7 @@ async function getConsecutiveWinCount(client, userId, limit = 25) {
       FROM (
         SELECT
           p.market_id,
-          CASE WHEN SUM(p.pnl) > 0 THEN 1 ELSE 0 END AS won,
+          CASE WHEN COUNT(DISTINCT p.side) = 1 AND SUM(p.pnl) > 0 THEN 1 ELSE 0 END AS won,
           MAX(m.resolved_at) AS resolved_at
         FROM positions p
         JOIN markets m ON m.id = p.market_id
@@ -5949,8 +5949,8 @@ async function getDailyTaskValue(client, userId, taskKey) {
   }
 
   if (taskKey === "daily_win_1") {
-    // Победа считается по рынку целиком: ставка на обе стороны, закрытая в
-    // минус, побед не приносит — выигравшая нога не перекрывает проигравшую.
+    // Победа считается по рынку целиком и по всем валютам сразу: ставка на обе
+    // стороны — хедж, а не победа, даже если стороны взяты разными валютами.
     const result = await client.query(
       `
         SELECT COUNT(*)::int AS count
@@ -5961,7 +5961,8 @@ async function getDailyTaskValue(client, userId, taskKey) {
             AND status = 'resolved'
             AND updated_at >= date_trunc('day', now())
           GROUP BY market_id
-          HAVING SUM(pnl) > 0
+          HAVING COUNT(DISTINCT side) = 1
+            AND SUM(pnl) > 0
         ) won_markets
       `,
       [userId],
@@ -6001,7 +6002,8 @@ async function getDailyTaskValue(client, userId, taskKey) {
             AND status = 'resolved'
             AND updated_at >= date_trunc('day', now())
           GROUP BY market_id
-          HAVING SUM(pnl) > 0
+          HAVING COUNT(DISTINCT side) = 1
+            AND SUM(pnl) > 0
             AND SUM(CASE WHEN side = 'NO' THEN pnl ELSE 0 END) > 0
         ) won_markets
       `,
@@ -9660,19 +9662,23 @@ async function settleOpenMarketPositions(client, market, winner) {
   const economySettings = await getEconomySettingsWithClient(client);
   const realResultsByUser = new Map();
   const usdtResultsByUser = new Map();
-  const sidesByUserCurrency = new Map();
+  // Стороны считаем по пользователю целиком, без разбивки по валютам: хедж
+  // остаётся хеджем, даже если ноги взяты звёздами и долларами.
+  const sidesByUserAllCurrencies = new Map();
   for (const position of positions.rows) {
-    const key = `${position.user_id}:${normalizeCurrency(position.currency)}`;
-    const sides = sidesByUserCurrency.get(key) || new Set();
+    const key = String(position.user_id);
+    const sides = sidesByUserAllCurrencies.get(key) || new Set();
     sides.add(String(position.side).toUpperCase());
-    sidesByUserCurrency.set(key, sides);
+    sidesByUserAllCurrencies.set(key, sides);
   }
 
   for (const position of positions.rows) {
     const currency = normalizeCurrency(position.currency);
     const reasonSuffix = balanceReasonSuffix(currency);
-    const hasOppositePosition = sidesByUserCurrency
-      .get(`${position.user_id}:${currency}`)
+    // Хедж считаем по всем валютам: иначе YES звёздами и NO долларами
+    // сохраняли x2 на обеих ногах и гарантировали прибыль.
+    const hasOppositePosition = sidesByUserAllCurrencies
+      .get(String(position.user_id))
       ?.size > 1;
     const settlement = calculateResolvedPositionSettlement(
       hasOppositePosition ? { ...position, lucky_spent: 0 } : position,
@@ -9787,7 +9793,8 @@ async function settleOpenMarketPositions(client, market, winner) {
       continue;
     }
     // Ставка в обе стороны — не проигрыш, а хедж: возврат по ней не предлагаем.
-    if (sidesByUserCurrency.get(`${userId}:USDT`)?.size > 1) {
+    // Считаем по всем валютам: NO долларами и YES звёздами — тот же хедж.
+    if (sidesByUserAllCurrencies.get(String(userId))?.size > 1) {
       continue;
     }
     const refundableLoss = getRefundableMarketLoss(netPnl, result.totalSpent);

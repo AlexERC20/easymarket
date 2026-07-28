@@ -139,7 +139,7 @@ export async function getBonusUnlockStatusForUser(userId) {
   const result = await query(
     `
       SELECT
-        COALESCE(NULLIF((
+        GREATEST(0, COALESCE(NULLIF((
           SELECT SUM(credited_amount)
           FROM usdt_deposit_intents
           WHERE user_id = $1
@@ -151,7 +151,12 @@ export async function getBonusUnlockStatusForUser(userId) {
           WHERE user_id = $1
             AND reason = 'usdt_onchain_deposit'
             AND amount > 0
-        ), 0) AS deposit_total,
+        ), 0) - COALESCE((
+          SELECT SUM(amount)
+          FROM usdt_withdrawal_requests
+          WHERE user_id = $1
+            AND status IN ('pending', 'completed')
+        ), 0)) AS deposit_total,
         COALESCE((
           SELECT SUM(amount)
           FROM bonus_unlock_events
@@ -204,7 +209,7 @@ export async function getStarConversionStatusForUser(userId) {
   const result = await query(
     `
       SELECT
-        COALESCE(NULLIF((
+        GREATEST(0, COALESCE(NULLIF((
           SELECT SUM(credited_amount)
           FROM usdt_deposit_intents
           WHERE user_id = $1
@@ -216,7 +221,12 @@ export async function getStarConversionStatusForUser(userId) {
           WHERE user_id = $1
             AND reason = 'usdt_onchain_deposit'
             AND amount > 0
-        ), 0) AS deposit_total,
+        ), 0) - COALESCE((
+          SELECT SUM(amount)
+          FROM usdt_withdrawal_requests
+          WHERE user_id = $1
+            AND status IN ('pending', 'completed')
+        ), 0)) AS deposit_total,
         COALESCE((
           SELECT SUM(amount)
           FROM star_usdt_conversion_events
@@ -499,7 +509,7 @@ export async function getStarConversionReminderTargets(input = {}) {
         users.username,
         users.first_name,
         fire.balance AS star_balance,
-        COALESCE(NULLIF((
+        GREATEST(0, COALESCE(NULLIF((
           SELECT SUM(credited_amount)
           FROM usdt_deposit_intents
           WHERE user_id = users.id
@@ -511,7 +521,12 @@ export async function getStarConversionReminderTargets(input = {}) {
           WHERE user_id = users.id
             AND reason = 'usdt_onchain_deposit'
             AND amount > 0
-        ), 0) AS deposit_total,
+        ), 0) - COALESCE((
+          SELECT SUM(amount)
+          FROM usdt_withdrawal_requests
+          WHERE user_id = users.id
+            AND status IN ('pending', 'completed')
+        ), 0)) AS deposit_total,
         (
           EXISTS (
             SELECT 1
@@ -847,7 +862,7 @@ export async function convertStarsAfterResolvedMarket(client, input) {
   const eligibilityResult = await client.query(
     `
       SELECT
-        COALESCE(NULLIF((
+        GREATEST(0, COALESCE(NULLIF((
           SELECT SUM(credited_amount)
           FROM usdt_deposit_intents
           WHERE user_id = $1
@@ -859,7 +874,12 @@ export async function convertStarsAfterResolvedMarket(client, input) {
           WHERE user_id = $1
             AND reason = 'usdt_onchain_deposit'
             AND amount > 0
-        ), 0) AS deposit_total,
+        ), 0) - COALESCE((
+          SELECT SUM(amount)
+          FROM usdt_withdrawal_requests
+          WHERE user_id = $1
+            AND status IN ('pending', 'completed')
+        ), 0)) AS deposit_total,
         COALESCE((
           SELECT current_streak
           FROM user_streaks
