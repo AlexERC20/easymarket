@@ -28,6 +28,11 @@ function roundAmount(value) {
   return Math.max(0, Math.round(Number(value || 0) * 100_000_000) / 100_000_000);
 }
 
+// Для сальдо, которое законно бывает отрицательным (занёс минус вывел).
+function roundMoneySigned(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
 export function getBonusUnlockTier(depositTotal) {
   const total = roundAmount(depositTotal);
   const tier = BONUS_UNLOCK_TIERS.find((candidate) => total >= candidate.minDeposit);
@@ -294,9 +299,13 @@ export async function getDepositorAudit(input = {}) {
         GROUP BY user_id
       ),
       withdrawals AS (
-        SELECT user_id, SUM(amount) AS withdrawn, COUNT(*)::int AS withdrawal_count
+        SELECT
+          user_id,
+          SUM(amount) AS withdrawn,
+          SUM(COALESCE(payout_amount, amount)) FILTER (WHERE status = 'completed') AS paid_out,
+          COUNT(*)::int AS withdrawal_count
         FROM usdt_withdrawal_requests
-        WHERE status IN ('pending', 'confirmed', 'sent')
+        WHERE status IN ('pending', 'completed')
         GROUP BY user_id
       )
       SELECT
@@ -305,6 +314,7 @@ export async function getDepositorAudit(input = {}) {
         users.first_name,
         deposits.deposited,
         COALESCE(withdrawals.withdrawn, 0) AS withdrawn,
+        COALESCE(withdrawals.paid_out, 0) AS paid_out,
         COALESCE(withdrawals.withdrawal_count, 0) AS withdrawal_count,
         COALESCE(cash.balance, 0) AS cash_balance,
         COALESCE(bonus.balance, 0) AS bonus_balance
@@ -330,8 +340,12 @@ export async function getDepositorAudit(input = {}) {
         ), 0) AS deposited_total,
         COALESCE((
           SELECT SUM(amount) FROM usdt_withdrawal_requests
-          WHERE status IN ('pending', 'confirmed', 'sent')
+          WHERE status IN ('pending', 'completed')
         ), 0) AS withdrawn_total,
+        COALESCE((
+          SELECT SUM(COALESCE(payout_amount, amount)) FROM usdt_withdrawal_requests
+          WHERE status = 'completed'
+        ), 0) AS paid_out_total,
         COALESCE((SELECT SUM(balance) FROM usdt_balances), 0) AS cash_total,
         COALESCE((SELECT SUM(balance) FROM usdt_bonus_balances), 0) AS bonus_total,
         COALESCE((
@@ -352,6 +366,7 @@ export async function getDepositorAudit(input = {}) {
   const totals = totalsResult.rows[0] || {};
   const depositedTotal = roundAmount(totals.deposited_total);
   const withdrawnTotal = roundAmount(totals.withdrawn_total);
+  const paidOutTotal = roundAmount(totals.paid_out_total);
   const cashTotal = roundAmount(totals.cash_total);
   const cashWithdrawable = roundAmount(totals.cash_withdrawable);
 
@@ -362,6 +377,8 @@ export async function getDepositorAudit(input = {}) {
     is_admin: isExcluded(row),
     deposited: roundAmount(row.deposited),
     withdrawn: roundAmount(row.withdrawn),
+    paid_out: roundAmount(row.paid_out),
+    net_deposited: roundMoneySigned(roundAmount(row.deposited) - roundAmount(row.withdrawn)),
     withdrawal_count: Number(row.withdrawal_count || 0),
     cash_balance: roundAmount(row.cash_balance),
     bonus_balance: roundAmount(row.bonus_balance),
@@ -372,12 +389,18 @@ export async function getDepositorAudit(input = {}) {
   const adminDeposited = depositors
     .filter((row) => row.is_admin)
     .reduce((sum, row) => sum + row.deposited, 0);
+  const adminWithdrawn = depositors
+    .filter((row) => row.is_admin)
+    .reduce((sum, row) => sum + row.withdrawn, 0);
 
   return {
     totals: {
       deposited_total: depositedTotal,
       withdrawn_total: withdrawnTotal,
-      net_real_money: roundAmount(Math.max(0, depositedTotal - withdrawnTotal)),
+      paid_out_total: paidOutTotal,
+      // Может уйти в минус: выплачено больше, чем занесли — это и есть реальный
+      // расход проекта, прятать его за Math.max нельзя.
+      net_real_money: roundMoneySigned(depositedTotal - withdrawnTotal),
       cash_total: cashTotal,
       cash_withdrawable: cashWithdrawable,
       cash_locked: roundAmount(Math.max(0, cashTotal - cashWithdrawable)),
@@ -387,6 +410,10 @@ export async function getDepositorAudit(input = {}) {
     // То же самое без служебных аккаунтов — реальная картина по игрокам.
     external: {
       deposited_total: roundAmount(Math.max(0, depositedTotal - adminDeposited)),
+      withdrawn_total: roundAmount(Math.max(0, withdrawnTotal - adminWithdrawn)),
+      net_real_money: roundMoneySigned(
+        (depositedTotal - adminDeposited) - (withdrawnTotal - adminWithdrawn),
+      ),
       cash_withdrawable: roundAmount(Math.max(0, cashWithdrawable - adminCash)),
       excluded_accounts: depositors.filter((row) => row.is_admin).length,
     },
@@ -394,6 +421,7 @@ export async function getDepositorAudit(input = {}) {
     admins: {
       accounts: depositors.filter((row) => row.is_admin).length,
       deposited_total: roundAmount(adminDeposited),
+      withdrawn_total: roundAmount(adminWithdrawn),
       cash_balance: roundAmount(adminCash),
       usernames: depositors.filter((row) => row.is_admin).map((row) => row.username || row.telegram_id),
     },
