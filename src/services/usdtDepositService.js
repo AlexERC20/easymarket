@@ -341,6 +341,88 @@ export async function cancelUserDepositIntent(input) {
   return mapDepositIntent(result.rows[0]);
 }
 
+// Ручной апрув зависшей заявки: пользователь отправил не ту точную сумму, и
+// сканер её не сматчил. Проводим как настоящий депозит (ledger-reason
+// usdt_onchain_deposit + intent credited), чтобы включились депозитные
+// механики — бонусная разблокировка и конвертация звёзд.
+export async function creditPendingDepositIntentManually(input) {
+  const telegramId = String(input.telegram_id || "").trim();
+  if (!telegramId) {
+    throw new Error("telegram_id_missing");
+  }
+  const amount = roundMoney(input.amount, 2);
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 100_000) {
+    throw new Error("invalid_deposit_amount");
+  }
+  const user = await getUserByTelegramId(telegramId);
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+
+  return withTransaction(async (client) => {
+    const intentResult = await client.query(
+      `
+        SELECT *
+        FROM usdt_deposit_intents
+        WHERE user_id = $1
+          AND status = 'pending'
+        ORDER BY created_at DESC
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [user.id],
+    );
+    const intent = intentResult.rows[0];
+    if (!intent) {
+      throw new Error("no_pending_deposit_intent");
+    }
+
+    await client.query(
+      `
+        UPDATE usdt_balances
+        SET balance = balance + $2::numeric,
+            updated_at = now()
+        WHERE user_id = $1
+      `,
+      [user.id, amount],
+    );
+    await client.query(
+      `
+        INSERT INTO usdt_ledger (user_id, amount, reason, source)
+        VALUES ($1, $2::numeric, 'usdt_onchain_deposit', $3)
+      `,
+      [user.id, amount, `manual_approve:intent:${intent.id}`],
+    );
+    const updatedResult = await client.query(
+      `
+        UPDATE usdt_deposit_intents
+        SET status = 'credited',
+            credited_amount = $2::numeric,
+            credited_at = now(),
+            updated_at = now()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [intent.id, amount],
+    );
+    const balanceResult = await client.query(
+      "SELECT balance FROM usdt_balances WHERE user_id = $1",
+      [user.id],
+    );
+
+    console.log("[EasyMarket] USDT deposit credited manually", {
+      intent_id: intent.id,
+      user_id: user.id,
+      amount,
+    });
+
+    return {
+      intent: mapDepositIntent(updatedResult.rows[0]),
+      usdt_cash_balance: toNumber(balanceResult.rows[0]?.balance),
+    };
+  });
+}
+
 export async function checkUserDepositIntent(input) {
   const telegramId = String(input.telegram_id || "").trim();
   if (!telegramId) {

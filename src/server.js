@@ -80,6 +80,7 @@ import {
   cancelUserDepositIntent,
   checkUserDepositIntent,
   createUsdtDepositIntent,
+  creditPendingDepositIntentManually,
   getPublicUsdtDepositNetworks,
   getUserDepositIntent,
   getUserDepositIntents,
@@ -1341,6 +1342,21 @@ app.post("/api/bridge/usdt/add", requireBridgeSecret, async (req, res) => {
       amount: req.body?.amount,
       reason: req.body?.reason || "admin_usdt_bonus_adjustment",
       source: "bridge",
+    });
+    res.status(200).json({
+      ok: true,
+      ...result,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/deposits/credit-pending", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await creditPendingDepositIntentManually({
+      telegram_id: req.body?.telegram_id,
+      amount: req.body?.amount,
     });
     res.status(200).json({
       ok: true,
