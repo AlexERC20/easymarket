@@ -3049,6 +3049,19 @@ function getTelegramUser() {
         document.documentElement.style.setProperty("--tg-app-height", `${height}px`);
       }
     };
+    // В полноэкранном режиме кнопки «закрыть» и «свернуть» висят поверх
+    // страницы, и на части устройств (Pixel) захардкоженного отступа не
+    // хватает — они перекрывают баланс и наши иконки. Берём реальные отступы,
+    // которые сообщает сам Telegram.
+    const applyTelegramSafeArea = () => {
+      if (!mobileShell) {
+        return;
+      }
+      const deviceTop = Math.max(0, Number(tg.safeAreaInset?.top || 0));
+      const contentTop = Math.max(0, Number(tg.contentSafeAreaInset?.top || 0));
+      document.documentElement.style.setProperty("--tg-safe-top", `${deviceTop}px`);
+      document.documentElement.style.setProperty("--tg-content-top", `${contentTop}px`);
+    };
     try {
       document.body.classList.add("telegram-shell");
       document.body.classList.toggle("telegram-ios-shell", platform === "ios" || /iPhone|iPad|iPod/i.test(navigator.userAgent || ""));
@@ -3065,7 +3078,11 @@ function getTelegramUser() {
         tg.exitFullscreen?.();
       }
       applyTelegramViewport();
+      applyTelegramSafeArea();
       tg.onEvent?.("viewportChanged", applyTelegramViewport);
+      tg.onEvent?.("safeAreaChanged", applyTelegramSafeArea);
+      tg.onEvent?.("contentSafeAreaChanged", applyTelegramSafeArea);
+      tg.onEvent?.("fullscreenChanged", applyTelegramSafeArea);
     } catch {
       // Older Telegram clients may not support every Mini App display method.
     }
@@ -6375,13 +6392,37 @@ function shareWinToStory() {
         text: getShareWinText(),
         widget_link: { url, name: "Играть" },
       });
-      postTaskEvent("share_story"); // дейлик «Сторис с выигрышем»
+      // Telegram не сообщает, опубликовал ли пользователь историю. Поэтому
+      // засчитываем дейлик только если он провёл в редакторе достаточно
+      // времени, чтобы её выложить, — мгновенная отмена не считается.
+      awaitStoryPublished();
       return;
     } catch {
       // Fall through to chat share.
     }
   }
   shareWinToChat();
+}
+
+const STORY_PUBLISH_MIN_MS = 6_000;
+
+function awaitStoryPublished() {
+  const openedAt = Date.now();
+  let settled = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    document.removeEventListener("visibilitychange", onVisible);
+    if (Date.now() - openedAt >= STORY_PUBLISH_MIN_MS) {
+      postTaskEvent("share_story"); // дейлик «Сторис с выигрышем»
+    }
+  };
+  const onVisible = () => {
+    if (document.visibilityState === "visible") finish();
+  };
+  document.addEventListener("visibilitychange", onVisible);
+  // Пользователь мог не уходить со страницы вовсе — подстрахуемся таймером.
+  setTimeout(finish, 90_000);
 }
 
 async function shareWinCopy() {

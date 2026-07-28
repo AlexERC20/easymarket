@@ -5466,7 +5466,7 @@ async function getConsecutiveWinCount(client, userId, limit = 25) {
       FROM (
         SELECT
           p.market_id,
-          MAX(CASE WHEN p.pnl > 0 THEN 1 ELSE 0 END) AS won,
+          CASE WHEN SUM(p.pnl) > 0 THEN 1 ELSE 0 END AS won,
           MAX(m.resolved_at) AS resolved_at
         FROM positions p
         JOIN markets m ON m.id = p.market_id
@@ -5622,14 +5622,20 @@ async function getDailyTaskValue(client, userId, taskKey) {
   }
 
   if (taskKey === "daily_win_1") {
+    // Победа считается по рынку целиком: ставка на обе стороны, закрытая в
+    // минус, побед не приносит — выигравшая нога не перекрывает проигравшую.
     const result = await client.query(
       `
         SELECT COUNT(*)::int AS count
-        FROM positions
-        WHERE user_id = $1
-          AND status = 'resolved'
-          AND pnl > 0
-          AND updated_at >= date_trunc('day', now())
+        FROM (
+          SELECT market_id
+          FROM positions
+          WHERE user_id = $1
+            AND status = 'resolved'
+            AND updated_at >= date_trunc('day', now())
+          GROUP BY market_id
+          HAVING SUM(pnl) > 0
+        ) won_markets
       `,
       [userId],
     );
@@ -5661,12 +5667,16 @@ async function getDailyTaskValue(client, userId, taskKey) {
     const result = await client.query(
       `
         SELECT COUNT(*)::int AS count
-        FROM positions
-        WHERE user_id = $1
-          AND side = 'NO'
-          AND status = 'resolved'
-          AND pnl > 0
-          AND updated_at >= date_trunc('day', now())
+        FROM (
+          SELECT market_id
+          FROM positions
+          WHERE user_id = $1
+            AND status = 'resolved'
+            AND updated_at >= date_trunc('day', now())
+          GROUP BY market_id
+          HAVING SUM(pnl) > 0
+            AND SUM(CASE WHEN side = 'NO' THEN pnl ELSE 0 END) > 0
+        ) won_markets
       `,
       [userId],
     );
@@ -5984,6 +5994,29 @@ export async function ingestTaskEvent(input) {
     username: input.username,
     first_name: input.first_name,
   });
+
+  // Задание называется «Сторис с выигрышем»: без выигранного сегодня рынка
+  // шэрить нечего, поэтому событие не засчитываем. Telegram не сообщает, была
+  // ли история опубликована, так что это единственная проверяемая часть.
+  if (eventKey === "share_story") {
+    const winResult = await query(
+      `
+        SELECT 1
+        FROM positions
+        WHERE user_id = $1
+          AND status = 'resolved'
+          AND updated_at >= date_trunc('day', now())
+        GROUP BY market_id
+        HAVING SUM(pnl) > 0
+        LIMIT 1
+      `,
+      [user.id],
+    );
+    if (!winResult.rows[0]) {
+      return { ok: true, skipped: "no_win_to_share" };
+    }
+  }
+
   await query(
     `
       INSERT INTO user_task_events (user_id, day_key, event_key, count)

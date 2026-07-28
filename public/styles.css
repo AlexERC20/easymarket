@@ -111,7 +111,12 @@ p {
 .telegram-shell .app-shell {
   min-height: var(--tg-app-height, 100dvh);
   height: var(--tg-app-height, 100dvh);
-  padding-top: calc(max(22px, env(safe-area-inset-top)) + 28px);
+  /* Отступ никогда не меньше прежнего, но растёт на устройствах, где Telegram
+     сообщает, что его кнопки занимают больше места (Pixel в полный экран). */
+  padding-top: max(
+    calc(max(22px, env(safe-area-inset-top)) + 28px),
+    calc(var(--tg-safe-top, 0px) + var(--tg-content-top, 0px) + 10px)
+  );
   padding-bottom: calc(max(20px, env(safe-area-inset-bottom)) + 8px);
 }
 
