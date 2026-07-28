@@ -2,6 +2,14 @@ import { config } from "../config.js";
 import { query, toNumber } from "../db.js";
 
 const BONUS_UNLOCK_LIFETIME_CAP_BPS = 2_500;
+
+// Порог депозита с учётом допуска сопоставления: биржа может занизить сумму на
+// копейки, и из-за них человек не должен терять включённую конвертацию.
+function getDepositQualifyMinimum() {
+  const minimum = Math.max(0, Number(config.usdtDepositMinimum || 18));
+  const tolerance = Math.max(0, Number(config.usdtDepositMatchTolerance || 0));
+  return Math.round((minimum - tolerance) * 100) / 100;
+}
 const BONUS_UNLOCK_TIERS = [
   { minDeposit: 500, rateBps: 100 },
   { minDeposit: 200, rateBps: 75 },
@@ -98,11 +106,11 @@ export function buildStarConversionStatus({
   const starsPerUsdt = Math.max(1, Number(config.starUsdtConversionStarsPerUsdt || 1_000));
 
   return {
-    eligible: safeDepositTotal >= 18
+    eligible: safeDepositTotal >= getDepositQualifyMinimum()
       && Boolean(cashPlayQualified)
       && safeStarBalance >= 1
       && effectiveRateBps > 0,
-    deposit_qualified: safeDepositTotal >= 18,
+    deposit_qualified: safeDepositTotal >= getDepositQualifyMinimum(),
     cash_play_qualified: Boolean(cashPlayQualified),
     deposit_total: safeDepositTotal,
     base_rate_bps: baseRateBps,
@@ -328,7 +336,7 @@ export async function getStarConversionReminderTargets(input = {}) {
         star_balance: starBalance,
         frozen_usdt: roundAmount(starBalance / starsPerUsdt),
         deposit_total: depositTotal,
-        deposit_qualified: depositTotal >= 18,
+        deposit_qualified: depositTotal >= getDepositQualifyMinimum(),
         cash_play_qualified: row.cash_play_qualified === true,
       };
     })
@@ -665,7 +673,7 @@ export async function convertStarsAfterResolvedMarket(client, input) {
   );
   const eligibility = eligibilityResult.rows[0] || {};
   const depositTotal = roundAmount(eligibility.deposit_total);
-  if (depositTotal < 18 || eligibility.cash_play_qualified !== true) {
+  if (depositTotal < getDepositQualifyMinimum() || eligibility.cash_play_qualified !== true) {
     return null;
   }
 

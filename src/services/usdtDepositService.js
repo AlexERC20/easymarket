@@ -222,7 +222,32 @@ export async function createUsdtDepositIntent(input) {
       return existingResult.rows[0];
     }
 
-    for (const depositAmount of buildDepositAmountCandidates(requestedAmount)) {
+    // Разносим суммы как можно дальше друг от друга: чем больше зазор между
+    // ожидаемыми суммами, тем реже допуск при сопоставлении даёт двух
+    // кандидатов и тем чаще перевод зачисляется автоматически.
+    const neighborsResult = await client.query(
+      `
+        SELECT deposit_amount
+        FROM usdt_deposit_intents
+        WHERE status = 'pending'
+          AND deposit_amount BETWEEN ($1::numeric - 1) AND ($1::numeric + 2)
+      `,
+      [requestedAmount],
+    );
+    const takenAmounts = neighborsResult.rows.map((row) => toNumber(row.deposit_amount));
+    const orderedCandidates = buildDepositAmountCandidates(requestedAmount)
+      .map((candidate) => ({
+        candidate,
+        distance: takenAmounts.length
+          ? Math.min(...takenAmounts.map((taken) => Math.abs(taken - candidate)))
+          : Number.POSITIVE_INFINITY,
+      }))
+      // Сортировка стабильная, поэтому среди равноудалённых сохраняется
+      // случайный порядок из buildDepositAmountCandidates.
+      .sort((a, b) => b.distance - a.distance)
+      .map((item) => item.candidate);
+
+    for (const depositAmount of orderedCandidates) {
       const result = await client.query(
         `
           INSERT INTO usdt_deposit_intents (
@@ -859,14 +884,19 @@ async function getTransferLogs(provider, network, fromBlock, toBlock) {
   }
 }
 
-async function matchDepositEvent(client, network, event) {
-  // dismissed — разобранный вручную перевод: сканер не должен возвращать его
-  // в очередь при следующем проходе.
-  if (!event || event.status === "credited" || event.status === "dismissed") {
-    return false;
-  }
-
-  const intentResult = await client.query(
+// Подбор заявки под пришедший перевод. Сначала точное совпадение суммы, как
+// раньше. Если его нет — допуск в несколько копеек (биржи занижают и завышают
+// сумму на копейки), но только когда в окно попала ровно одна заявка: два
+// кандидата означают, что угадывать нельзя, и перевод уходит в очередь.
+async function findIntentForDepositEvent(client, network, event) {
+  const baseParams = [
+    [network.key, "ANY"],
+    event.amount,
+    event.chain_timestamp || new Date(),
+    network.key,
+    Math.round(config.usdtDepositMatchGraceMinutes),
+  ];
+  const exactResult = await client.query(
     `
       SELECT *
       FROM usdt_deposit_intents
@@ -880,15 +910,48 @@ async function matchDepositEvent(client, network, event) {
       LIMIT 1
       FOR UPDATE
     `,
-    [
-      [network.key, "ANY"],
-      event.amount,
-      event.chain_timestamp || new Date(),
-      network.key,
-      Math.round(config.usdtDepositMatchGraceMinutes),
-    ],
+    baseParams,
   );
-  const intent = intentResult.rows[0];
+  if (exactResult.rows[0]) {
+    return exactResult.rows[0];
+  }
+
+  const tolerance = Math.max(0, Number(config.usdtDepositMatchTolerance || 0));
+  if (tolerance <= 0) {
+    return null;
+  }
+  const nearResult = await client.query(
+    `
+      SELECT *
+      FROM usdt_deposit_intents
+      WHERE network = ANY($1::text[])
+        AND status = 'pending'
+        AND deposit_amount BETWEEN ($2::numeric - $6::numeric) AND ($2::numeric + $6::numeric)
+        AND created_at <= ($3::timestamptz + ($5::int * interval '1 minute'))
+      LIMIT 2
+      FOR UPDATE
+    `,
+    [...baseParams, tolerance],
+  );
+  if (nearResult.rows.length !== 1) {
+    return null;
+  }
+  console.log("[EasyMarket] deposit matched within tolerance", {
+    intent_id: nearResult.rows[0].id,
+    expected: toNumber(nearResult.rows[0].deposit_amount),
+    arrived: toNumber(event.amount),
+  });
+  return nearResult.rows[0];
+}
+
+async function matchDepositEvent(client, network, event) {
+  // dismissed — разобранный вручную перевод: сканер не должен возвращать его
+  // в очередь при следующем проходе.
+  if (!event || event.status === "credited" || event.status === "dismissed") {
+    return false;
+  }
+
+  const intent = await findIntentForDepositEvent(client, network, event);
   if (!intent) {
     await client.query(
       `
