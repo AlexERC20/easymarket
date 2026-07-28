@@ -6,6 +6,7 @@ import {
   calculateResolvedPositionSettlement,
   getBuyExecutionQuote,
   getLuckySpentForBuy,
+  getPricingWeight,
   getRefundableMarketLoss,
   splitUsdtSpend,
 } from "../src/services/marketService.js";
@@ -115,6 +116,30 @@ test("losing side pays zero in both STAR and USDT settlements", () => {
     assert.equal(winner.payout, expected.payout);
     assert.equal(winner.pnl, expected.pnl);
   }
+});
+
+test("star bets move the price by their dollar value, not their number", () => {
+  // Ровный рынок: иначе цену задаёт нижняя граница книги, а не размер ставки.
+  const market = buildMarket({ yes_price: 0.5, no_price: 0.5, yes_volume: 100, no_volume: 100 });
+  const usdtQuote = getBuyExecutionQuote(market, "YES", 500, { pricingWeight: 1 });
+  const starQuote = getBuyExecutionQuote(market, "YES", 500, {
+    pricingWeight: getPricingWeight("STAR"),
+  });
+
+  // 500⭐ стоят $0.50 и не должны двигать рынок как ставка в $500.
+  assert.ok(
+    starQuote.nextYesPrice < usdtQuote.nextYesPrice,
+    "a star bet must move the price less than the same number of dollars",
+  );
+  assert.ok(
+    starQuote.nextYesPrice - market.yes_price < 0.005,
+    "500 stars must barely move the price",
+  );
+  assert.ok(
+    usdtQuote.nextYesPrice - market.yes_price > 0.05,
+    "the dollar bet must still move the price",
+  );
+  assert.equal(getPricingWeight("USDT"), 1);
 });
 
 test("lucky x2 is revoked when the user holds the opposite side", () => {

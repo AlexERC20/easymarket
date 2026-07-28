@@ -1031,11 +1031,11 @@ function getSpecialMarketDepth(market) {
   return Math.max(100, toNumber(market?.liquidity, KYIVSTONER_MARKET_LIQUIDITY));
 }
 
-function getSpecialBuyExecutionQuote(market, side, amount) {
+function getSpecialBuyExecutionQuote(market, side, amount, pricingWeight = 1) {
   const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
   const depth = getSpecialMarketDepth(market);
-  const shift = Math.min(SPECIAL_MARKET_MAX_SHIFT, amount / depth);
+  const shift = Math.min(SPECIAL_MARKET_MAX_SHIFT, (amount * pricingWeight) / depth);
   const nextOutcomePrice = roundOutcomePrice(oldOutcomePrice + shift, minPrice);
   const nextOppositePrice = roundOutcomePrice(1 - nextOutcomePrice, minPrice);
   const spread = SPECIAL_MARKET_SPREAD_BPS / 10_000;
@@ -1052,12 +1052,12 @@ function getSpecialBuyExecutionQuote(market, side, amount) {
   };
 }
 
-function getSpecialSellExecutionQuote(market, side, sharesToSell) {
+function getSpecialSellExecutionQuote(market, side, sharesToSell, pricingWeight = 1) {
   const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
   const estimatedGross = Math.max(0, sharesToSell * oldOutcomePrice);
   const depth = getSpecialMarketDepth(market);
-  const shift = Math.min(SPECIAL_MARKET_MAX_SHIFT, estimatedGross / depth);
+  const shift = Math.min(SPECIAL_MARKET_MAX_SHIFT, (estimatedGross * pricingWeight) / depth);
   const nextOutcomePrice = roundOutcomePrice(oldOutcomePrice - shift, minPrice);
   const nextOppositePrice = roundOutcomePrice(1 - nextOutcomePrice, minPrice);
   const spread = SPECIAL_MARKET_SPREAD_BPS / 10_000;
@@ -1082,9 +1082,20 @@ function getSpecialSellExecutionQuote(market, side, sharesToSell) {
   };
 }
 
-export function getBuyExecutionQuote(market, side, amount) {
+// Вес ставки для влияния на цену. Звёзды — мягкая валюта (1000⭐ ≈ $1), и без
+// пересчёта ставка в 500⭐ двигала рынок так же, как $500: бесплатной валютой
+// можно было продавливать цену, по которой исполняются реальные деньги.
+export function getPricingWeight(currency) {
+  if (normalizeCurrency(currency) !== "STAR") {
+    return 1;
+  }
+  return 1 / Math.max(1, Number(config.starUsdtConversionStarsPerUsdt || 1_000));
+}
+
+export function getBuyExecutionQuote(market, side, amount, options = {}) {
+  const pricingWeight = Number.isFinite(options.pricingWeight) ? options.pricingWeight : 1;
   if (isSpecialMarket(market)) {
-    return getSpecialBuyExecutionQuote(market, side, amount);
+    return getSpecialBuyExecutionQuote(market, side, amount, pricingWeight);
   }
   const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
@@ -1093,12 +1104,13 @@ export function getBuyExecutionQuote(market, side, amount) {
   const fairOutcomePrice = getFairOutcomePrice(market, side);
   const bookPrice = Math.max(oldOutcomePrice, fairOutcomePrice);
   const liquidity = getEffectiveMarketMakerLiquidity(market, bookPrice);
-  const rawTradeShift = (amount / liquidity) * BUY_IMPACT_MULTIPLIER;
+  const pricingAmount = amount * pricingWeight;
+  const rawTradeShift = (pricingAmount / liquidity) * BUY_IMPACT_MULTIPLIER;
   const tradeShift = Math.min(MAX_SINGLE_TRADE_SHIFT, rawTradeShift);
   const repricedMarket = {
     ...market,
-    yes_volume: toNumber(market.yes_volume) + (side === "YES" ? amount : 0),
-    no_volume: toNumber(market.no_volume) + (side === "NO" ? amount : 0),
+    yes_volume: toNumber(market.yes_volume) + (side === "YES" ? pricingAmount : 0),
+    no_volume: toNumber(market.no_volume) + (side === "NO" ? pricingAmount : 0),
   };
   const nextOutcomePrice = roundOutcomePrice(
     Math.max(
@@ -1124,24 +1136,27 @@ export function getBuyExecutionQuote(market, side, amount) {
   };
 }
 
-function getSellExecutionQuote(market, side, sharesToSell) {
+function getSellExecutionQuote(market, side, sharesToSell, options = {}) {
+  const pricingWeight = Number.isFinite(options.pricingWeight) ? options.pricingWeight : 1;
   if (isSpecialMarket(market)) {
-    return getSpecialSellExecutionQuote(market, side, sharesToSell);
+    return getSpecialSellExecutionQuote(market, side, sharesToSell, pricingWeight);
   }
   const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
   const estimatedGross = Math.max(0, sharesToSell * oldOutcomePrice);
+  // Влияние на цену — в долларовом эквиваленте; сама выручка остаётся в валюте позиции.
+  const pricingGross = estimatedGross * pricingWeight;
   const fairOutcomePrice = getFairOutcomePrice(market, side);
   const liquidity = getEffectiveMarketMakerLiquidity(market, oldOutcomePrice);
-  const rawTradeShift = (estimatedGross / liquidity) * SELL_IMPACT_MULTIPLIER;
+  const rawTradeShift = (pricingGross / liquidity) * SELL_IMPACT_MULTIPLIER;
   const tradeShift = Math.min(MAX_SINGLE_TRADE_SHIFT, rawTradeShift);
   const repricedMarket = {
     ...market,
     yes_volume: side === "YES"
-      ? Math.max(0, toNumber(market.yes_volume) - estimatedGross)
+      ? Math.max(0, toNumber(market.yes_volume) - pricingGross)
       : toNumber(market.yes_volume),
     no_volume: side === "NO"
-      ? Math.max(0, toNumber(market.no_volume) - estimatedGross)
+      ? Math.max(0, toNumber(market.no_volume) - pricingGross)
       : toNumber(market.no_volume),
   };
   const driftedOutcomePrice = oldOutcomePrice * 0.86 + fairOutcomePrice * 0.14;
@@ -9161,7 +9176,8 @@ export async function buyOutcome(input) {
     }
 
     const marketMinPrice = getMarketMinOutcomePrice(market);
-    const quote = getBuyExecutionQuote(market, side, amount);
+    const pricingWeight = getPricingWeight(currency);
+    const quote = getBuyExecutionQuote(market, side, amount, { pricingWeight });
     if (quote.executionPrice < marketMinPrice || quote.executionPrice > 1 - marketMinPrice) {
       throw new Error("invalid_market_price");
     }
@@ -9223,8 +9239,8 @@ export async function buyOutcome(input) {
         marketId,
         nextYesPrice,
         nextNoPrice,
-        side === "YES" ? netAmount : 0,
-        side === "NO" ? netAmount : 0,
+        side === "YES" ? netAmount * pricingWeight : 0,
+        side === "NO" ? netAmount * pricingWeight : 0,
       ],
     );
     await persistSpecialMarketTicks(client, market, nextYesPrice, nextNoPrice);
@@ -9434,7 +9450,9 @@ export async function sellOutcome(input) {
 
     const sharesToSell = Math.min(positionShares, requestedShares);
     const marketMinPrice = getMarketMinOutcomePrice(market);
-    const quote = getSellExecutionQuote(market, side, sharesToSell);
+    const quote = getSellExecutionQuote(market, side, sharesToSell, {
+      pricingWeight: getPricingWeight(currency),
+    });
     if (quote.executionPrice < marketMinPrice || quote.executionPrice > 1 - marketMinPrice) {
       throw new Error("invalid_market_price");
     }
