@@ -1690,7 +1690,11 @@ app.post("/api/bridge/economy/correct-star-settlement", requireBridgeSecret, asy
     const result = await correctStarMarketSettlement(req.body || {});
     res.status(200).json(result);
   } catch (error) {
-    sendApiError(res, error);
+    res.status(500).json({
+      ok: false,
+      message: "Settlement correction failed.",
+      detail: getSafePublicErrorDetail(error instanceof Error ? error.message : error),
+    });
   }
 });
 
