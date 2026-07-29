@@ -2,6 +2,8 @@ const BINANCE_BTC_URL = "https://api.binance.com/api/v3/ticker/price?symbol=BTCU
 const COINBASE_BTC_URL = "https://api.coinbase.com/v2/prices/BTC-USD/spot";
 const COINGECKO_BTC_URL = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd";
 
+let latestBtcPrice = null;
+
 export class PriceUnavailableError extends Error {
   constructor(message = "BTC price is unavailable.") {
     super(message);
@@ -31,7 +33,9 @@ export async function getBtcPrice() {
   let lastError = null;
   for (const source of sources) {
     try {
-      return await getBtcPriceFromSource(source);
+      const quote = await getBtcPriceFromSource(source);
+      latestBtcPrice = quote;
+      return quote;
     } catch (error) {
       lastError = error;
     }
@@ -42,6 +46,16 @@ export async function getBtcPrice() {
   }
 
   throw new PriceUnavailableError("BTC price request failed.");
+}
+
+export function getCachedBtcPrice() {
+  if (!latestBtcPrice) {
+    return null;
+  }
+  return {
+    ...latestBtcPrice,
+    at: new Date(latestBtcPrice.at),
+  };
 }
 
 async function getBtcPriceFromSource(source) {

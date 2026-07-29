@@ -10,6 +10,7 @@ import {
   getMarketMakerPayoutMultiplier,
   getPricingWeight,
   getRefundableMarketLoss,
+  getTimeAdjustedPayoutMultiplier,
   splitUsdtSpend,
 } from "../src/services/marketService.js";
 import { buildUnlockStatus } from "../src/services/bonusEconomyService.js";
@@ -194,6 +195,89 @@ test("a capped STAR tail buy reprices the book before the next buy", () => {
 
   assert.ok(first.nextYesPrice >= 1 / 15);
   assert.ok(second.executionPrice > first.executionPrice);
+});
+
+test("split STAR tail buys cannot mint beyond the market risk budget", () => {
+  const riskBudget = 500;
+  const amount = 50;
+  let pool = 0;
+  let liability = 0;
+  let market = buildMarket({
+    symbol: "BTCUSDT",
+    yes_price: 0.002,
+    no_price: 0.998,
+    current_price: 99,
+    open_price: 100,
+    yes_volume: 0,
+    no_volume: 100,
+  });
+
+  for (let index = 0; index < 20; index += 1) {
+    const executionFloor = getCollateralizedExecutionFloor({
+      amount,
+      pool,
+      liability,
+      riskBudget,
+      minPrice: 0.001,
+    });
+    const quote = getBuyExecutionQuote(market, "YES", amount, {
+      pricingWeight: getPricingWeight("STAR"),
+      maxPayoutMultiplier: getMarketMakerPayoutMultiplier("STAR"),
+      executionFloor,
+    });
+    const shares = amount / quote.executionPrice;
+    pool += amount;
+    liability += shares;
+    market = {
+      ...market,
+      yes_price: quote.nextYesPrice,
+      no_price: quote.nextNoPrice,
+      yes_volume: market.yes_volume + amount * getPricingWeight("STAR"),
+    };
+  }
+
+  assert.ok(
+    liability - pool <= riskBudget + 1,
+    "repeating a small click must not reset the AMM risk allowance",
+  );
+  assert.ok(market.yes_price > 0.95, "an exhausted tail must reprice instead of rejecting the bet");
+});
+
+test("BTC payout multiplier decays sharply near settlement", () => {
+  const now = Date.now();
+  const market = buildMarket({
+    symbol: "BTCUSDT",
+    start_time: new Date(now - 240_000).toISOString(),
+    end_time: new Date(now + 60_000).toISOString(),
+  });
+  const base = 15;
+  const atWindowStart = getTimeAdjustedPayoutMultiplier(market, base, now);
+  const atThirtySeconds = getTimeAdjustedPayoutMultiplier(
+    { ...market, end_time: new Date(now + 30_000).toISOString() },
+    base,
+    now,
+  );
+  const atTenSeconds = getTimeAdjustedPayoutMultiplier(
+    { ...market, end_time: new Date(now + 10_000).toISOString() },
+    base,
+    now,
+  );
+  const atFreeze = getTimeAdjustedPayoutMultiplier(
+    { ...market, end_time: new Date(now + 5_000).toISOString() },
+    base,
+    now,
+  );
+  const nonBtc = getTimeAdjustedPayoutMultiplier(
+    { ...market, symbol: "SPORT:test-market" },
+    base,
+    now,
+  );
+
+  assert.equal(atWindowStart, base);
+  assert.ok(atThirtySeconds < 5);
+  assert.ok(atTenSeconds < 1.2);
+  assert.equal(atFreeze, 1);
+  assert.equal(nonBtc, base);
 });
 
 test("a stale collateral floor cannot lock a new market buy", () => {

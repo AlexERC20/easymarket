@@ -8,7 +8,7 @@ import {
   getStarConversionStatusForUser,
   unlockBonusAfterResolvedMarket,
 } from "./bonusEconomyService.js";
-import { getBtcPrice, PriceUnavailableError } from "./priceService.js";
+import { getBtcPrice, getCachedBtcPrice, PriceUnavailableError } from "./priceService.js";
 
 const MARKET_SYMBOL = "BTCUSDT";
 const WORLD_CUP_EVENT_SLUG = "world-cup-winner";
@@ -105,7 +105,6 @@ const DAILY_TASK_KEYS = [
   "daily_win_1",
   "daily_win_streak_5",
   "daily_win_2_row",
-  "daily_sniper",
   "daily_no_win",
   "daily_feed_fish",
   "daily_comment",
@@ -1108,6 +1107,29 @@ export function getMarketMakerPayoutMultiplier(currency) {
     : Math.max(1, Number(config.marketUsdtMaxPayoutMultiplier || 25));
 }
 
+export function getTimeAdjustedPayoutMultiplier(market, baseMultiplier, nowMs = Date.now()) {
+  const safeBase = Math.max(1, Number(baseMultiplier || 1));
+  if (!isBtcMarketSymbol(market?.symbol)) {
+    return safeBase;
+  }
+
+  const endMs = new Date(market.end_time).getTime();
+  const protectionMs = Math.max(0, Number(config.marketTailProtectionSeconds || 0)) * 1_000;
+  const freezeMs = Math.max(0, Number(config.marketBuyFreezeSeconds || 0)) * 1_000;
+  const msLeft = endMs - Number(nowMs);
+  if (!Number.isFinite(endMs) || protectionMs <= freezeMs || msLeft >= protectionMs) {
+    return safeBase;
+  }
+  if (msLeft <= freezeMs) {
+    return 1;
+  }
+
+  // A convex decay keeps normal pricing through most of the round, then
+  // quickly removes the unbacked tail multiplier near settlement.
+  const remaining = clamp((msLeft - freezeMs) / (protectionMs - freezeMs), 0, 1);
+  return 1 + (safeBase - 1) * remaining * remaining;
+}
+
 export function getCollateralizedExecutionFloor(input = {}) {
   const amount = Math.max(0, Number(input.amount || 0));
   const pool = Number(input.pool || 0);
@@ -1135,7 +1157,74 @@ export function getCollateralizedExecutionFloor(input = {}) {
   );
 }
 
-async function getMarketMakerBackingSnapshot(client, marketId) {
+async function getMarketMakerBackingSnapshot(client, marketId, currency = "USDT") {
+  if (normalizeCurrency(currency) === "STAR") {
+    const result = await client.query(
+      `
+        WITH exposure_rows AS (
+          SELECT
+            side,
+            (
+              shares
+              + GREATEST(shares - spent, 0)
+                * CASE WHEN spent > 0 THEN LEAST(1, lucky_spent / spent) ELSE 0 END
+            ) AS effective_shares
+          FROM positions
+          WHERE market_id = $1::bigint
+            AND currency = 'STAR'
+            AND status IN ('open', 'reserved')
+            AND shares > 0
+
+          UNION ALL
+
+          SELECT side, remaining_shares AS effective_shares
+          FROM limit_orders
+          WHERE market_id = $1::bigint
+            AND currency = 'STAR'
+            AND order_side = 'SELL'
+            AND status = 'open'
+            AND remaining_shares > 0
+        ),
+        exposure AS (
+          SELECT
+            COALESCE(SUM(CASE WHEN side = 'YES' THEN effective_shares ELSE 0 END), 0)
+              AS yes_liability,
+            COALESCE(SUM(CASE WHEN side = 'NO' THEN effective_shares ELSE 0 END), 0)
+              AS no_liability
+          FROM exposure_rows
+        ),
+        market_flow AS (
+          SELECT COALESCE(SUM(
+            CASE
+              WHEN reason IN ('buy_yes', 'buy_no') THEN -amount
+              WHEN reason IN ('sell_yes', 'sell_no') THEN -amount
+              ELSE 0
+            END
+          ), 0) AS pool
+          FROM fire_ledger
+          WHERE source = 'market:' || $1::text
+        )
+        SELECT exposure.*, market_flow.pool
+        FROM exposure
+        CROSS JOIN market_flow
+      `,
+      [marketId],
+    );
+    const row = result.rows[0] || {};
+    return {
+      cash: {
+        pool: toNumber(row.pool),
+        yesLiability: toNumber(row.yes_liability),
+        noLiability: toNumber(row.no_liability),
+      },
+      bonus: {
+        pool: 0,
+        yesLiability: 0,
+        noLiability: 0,
+      },
+    };
+  }
+
   const result = await client.query(
     `
       WITH exposure_rows AS (
@@ -1244,13 +1333,26 @@ function getBackingLiability(backing, side) {
   return side === "YES" ? backing.yesLiability : backing.noLiability;
 }
 
-function getUsdtExecutionFloor(market, side, amount, debitSplit, backing, luckyShare = 0) {
-  const sourceBacking = debitSplit?.cash > 0 ? backing.cash : backing.bonus;
+function getCurrencyExecutionFloor(
+  market,
+  side,
+  amount,
+  currency,
+  debitSplit,
+  backing,
+  luckyShare = 0,
+) {
+  const normalized = normalizeCurrency(currency);
+  const sourceBacking = normalized === "USDT" && debitSplit?.cash <= 0
+    ? backing.bonus
+    : backing.cash;
   return getCollateralizedExecutionFloor({
     amount,
     pool: sourceBacking.pool,
     liability: getBackingLiability(sourceBacking, side),
-    riskBudget: config.marketUsdtRiskBudget,
+    riskBudget: normalized === "STAR"
+      ? config.marketStarRiskBudget
+      : config.marketUsdtRiskBudget,
     luckyShare,
     minPrice: getMarketMinOutcomePrice(market),
   });
@@ -1322,7 +1424,10 @@ export function getBuyExecutionQuote(market, side, amount, options = {}) {
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
   const oppositeOutcomePrice = getMarketOutcomePrice(market, getOppositeSide(side));
   const crossBookFloor = roundOutcomePrice(1 - oppositeOutcomePrice, minPrice);
-  const fairOutcomePrice = getFairOutcomePrice(market, side);
+  const currentPrice = Number.isFinite(Number(options.currentPrice))
+    ? Number(options.currentPrice)
+    : getCurrentPriceForMarket(market);
+  const fairOutcomePrice = getFairOutcomePrice(market, side, currentPrice);
   const bookPrice = Math.max(oldOutcomePrice, fairOutcomePrice);
   const liquidity = getEffectiveMarketMakerLiquidity(market, bookPrice);
   const pricingAmount = amount * pricingWeight;
@@ -1344,7 +1449,7 @@ export function getBuyExecutionQuote(market, side, amount, options = {}) {
     repricedMarket,
     side,
     nextOutcomePrice,
-    { oppositeDriftStrength: 0.05 },
+    { oppositeDriftStrength: 0.05, currentPrice },
   );
   const spread = getMarketMakerSpreadBps() / 10_000;
   const executionPrice = Math.max(
@@ -5634,7 +5739,6 @@ const TASK_AMOUNTS = {
   daily_win_1: () => scaleTaskReward(50, "daily_win_1"),
   daily_win_streak_5: () => scaleTaskReward(300, "daily_win_streak_5"),
   daily_win_2_row: () => scaleTaskReward(100, "daily_win_2_row"),
-  daily_sniper: () => scaleTaskReward(75, "daily_sniper"),
   daily_no_win: () => scaleTaskReward(75, "daily_no_win"),
   daily_feed_fish: () => scaleTaskReward(25, "daily_feed_fish"),
   daily_comment: () => scaleTaskReward(25, "daily_comment"),
@@ -5660,7 +5764,6 @@ const CORE_DAILY_TASK_KEYS = new Set([
 // Пул ротации: 3 бонусных задания в день, детерминированно от даты — у всех одинаковые.
 const DAILY_ROTATION_POOL = [
   "daily_win_2_row",
-  "daily_sniper",
   "daily_no_win",
   "daily_feed_fish",
   "daily_comment",
@@ -5874,16 +5977,6 @@ const DAILY_PROGRESS_TASKS = {
   daily_win_2_row: {
     unit: "серия",
     levels: [{ target: 2, amount: 100 }],
-  },
-  daily_sniper: {
-    unit: "снайпер",
-    levels: [
-      { target: 1, amount: 75 },
-      { target: 3, amount: 150 },
-      { target: 5, amount: 300 },
-      { target: 10, amount: 650 },
-      { target: 20, amount: 1400 },
-    ],
   },
   daily_no_win: {
     unit: "NO",
@@ -6205,23 +6298,6 @@ async function getDailyTaskValue(client, userId, taskKey) {
 
   if (taskKey === "daily_win_streak_5" || taskKey === "daily_win_2_row") {
     return getConsecutiveWinCount(client, userId);
-  }
-
-  if (taskKey === "daily_sniper") {
-    const result = await client.query(
-      `
-        SELECT COUNT(*)::int AS count
-        FROM trades
-        JOIN markets ON markets.id = trades.market_id
-        WHERE trades.user_id = $1
-          AND trades.action = 'BUY'
-          AND trades.created_at >= markets.end_time - interval '15 seconds'
-          AND trades.created_at <= markets.end_time
-          AND trades.created_at >= date_trunc('day', now())
-      `,
-      [userId],
-    );
-    return Number(result.rows[0]?.count || 0);
   }
 
   if (taskKey === "daily_no_win") {
@@ -9351,8 +9427,16 @@ export async function createLimitOrder(input) {
     if (!market || market.status !== "open") {
       throw new Error("market_not_open");
     }
-    if (new Date(market.end_time).getTime() <= Date.now()) {
+    const nowMs = Date.now();
+    const endMs = new Date(market.end_time).getTime();
+    if (endMs <= nowMs) {
       throw new Error("market_closed");
+    }
+    if (
+      isBtcMarketSymbol(market.symbol)
+      && endMs - nowMs <= Math.max(0, Number(config.marketBuyFreezeSeconds || 0)) * 1_000
+    ) {
+      throw new Error("market_buy_frozen");
     }
 
     const limitPrice = ensureLimitPrice(input.limit_price ?? input.price, market);
@@ -9605,8 +9689,16 @@ export async function buyOutcome(input) {
       throw new Error("market_not_open");
     }
 
-    if (new Date(market.end_time).getTime() <= Date.now()) {
+    const nowMs = Date.now();
+    const endMs = new Date(market.end_time).getTime();
+    if (endMs <= nowMs) {
       throw new Error("market_closed");
+    }
+    if (
+      isBtcMarketSymbol(market.symbol)
+      && endMs - nowMs <= Math.max(0, Number(config.marketBuyFreezeSeconds || 0)) * 1_000
+    ) {
+      throw new Error("market_buy_frozen");
     }
 
     const oppositePositionResult = await client.query(
@@ -9629,19 +9721,44 @@ export async function buyOutcome(input) {
     // x2 удваивает только прибыль счастливой части позиции. Для неё заранее
     // уменьшаем максимально допустимое число shares, чтобы итоговая выплата
     // тоже не могла перескочить установленный потолок.
-    const quotePayoutMultiplier = luckySpentPart > 0
+    const luckyAdjustedPayoutMultiplier = luckySpentPart > 0
       ? (basePayoutMultiplier + 1) / 2
       : basePayoutMultiplier;
+    const quotePayoutMultiplier = getTimeAdjustedPayoutMultiplier(
+      market,
+      luckyAdjustedPayoutMultiplier,
+      nowMs,
+    );
     const pricingWeight = getPricingWeight(currency);
+    let debitSplit = { cash: amount, bonus: 0 };
     if (currency === "USDT") {
       const lockedBalance = await getLockedCurrencyBalance(client, user.id, currency);
-      if (!splitUsdtSpend(amount, lockedBalance)) {
+      debitSplit = splitUsdtSpend(amount, lockedBalance);
+      if (!debitSplit) {
         throw new Error(insufficientBalanceError(currency));
       }
     }
+    const backing = await getMarketMakerBackingSnapshot(client, marketId, currency);
+    const collateralExecutionFloor = getCurrencyExecutionFloor(
+      market,
+      side,
+      amount,
+      currency,
+      debitSplit,
+      backing,
+      luckySpentPart > 0 ? luckySpentPart / amount : 0,
+    );
+    const cachedBtc = isBtcMarketSymbol(market.symbol) ? getCachedBtcPrice() : null;
+    const cachedBtcAt = cachedBtc ? new Date(cachedBtc.at).getTime() : 0;
+    const liveBtcPrice = cachedBtc
+      && nowMs - cachedBtcAt <= Math.max(250, Number(config.marketBtcQuoteMaxAgeMs || 3_000))
+      ? cachedBtc.price
+      : undefined;
     const quote = getBuyExecutionQuote(market, side, amount, {
       pricingWeight,
       maxPayoutMultiplier: quotePayoutMultiplier,
+      executionFloor: collateralExecutionFloor,
+      currentPrice: liveBtcPrice,
     });
     const marketMinPrice = getMarketMinOutcomePrice(market);
     if (quote.executionPrice < marketMinPrice || quote.executionPrice > 1 - marketMinPrice) {

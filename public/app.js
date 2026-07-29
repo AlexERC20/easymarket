@@ -272,6 +272,8 @@ const state = {
     task_daily_cap_fire: 750,
     market_profit_fee_bps: 700,
     market_star_profit_fee_bps: 1500,
+    market_buy_freeze_seconds: 5,
+    market_tail_protection_seconds: 60,
     star_usdt_conversion_stars_per_usdt: 1000,
     star_usdt_conversion_rate_bps: 5,
     star_usdt_conversion_lifetime_cap_bps: 500,
@@ -1507,7 +1509,13 @@ function isMarketOpenForBuy(market, bufferMs = MARKET_BUY_CLOSE_BUFFER_MS) {
   if (!market || market.status !== "open" || !market.end_time) {
     return false;
   }
-  return new Date(market.end_time).getTime() > Date.now() + bufferMs;
+  const closeBufferMs = isBtcMarket(market)
+    ? Math.max(
+      bufferMs,
+      Number(state.publicConfig.market_buy_freeze_seconds || 5) * 1_000,
+    )
+    : bufferMs;
+  return new Date(market.end_time).getTime() > Date.now() + closeBufferMs;
 }
 
 function isMarketClosedForCarousel(market) {
@@ -4891,7 +4899,7 @@ function estimateBuyQuote({ market, side, amount }) {
   const pricingWeight = normalizeCurrency(state.currency) === "STAR"
     ? 1 / Math.max(1, Number(state.publicConfig.star_market_pricing_stars_per_usdt || 250))
     : 1;
-  const maxPayoutMultiplier = normalizeCurrency(state.currency) === "STAR"
+  const basePayoutMultiplier = normalizeCurrency(state.currency) === "STAR"
     ? Math.max(
       1,
       Number(
@@ -4906,6 +4914,22 @@ function estimateBuyQuote({ market, side, amount }) {
           || DEFAULT_USDT_MARKET_MAKER_PAYOUT_MULTIPLIER,
       ),
     );
+  let maxPayoutMultiplier = basePayoutMultiplier;
+  if (isBtcMarket(market) && market?.end_time) {
+    const protectionMs = Math.max(
+      0,
+      Number(state.publicConfig.market_tail_protection_seconds || 60) * 1_000,
+    );
+    const freezeMs = Math.max(
+      0,
+      Number(state.publicConfig.market_buy_freeze_seconds || 5) * 1_000,
+    );
+    const msLeft = new Date(market.end_time).getTime() - Date.now();
+    if (protectionMs > freezeMs && msLeft < protectionMs) {
+      const remaining = Math.max(0, Math.min(1, (msLeft - freezeMs) / (protectionMs - freezeMs)));
+      maxPayoutMultiplier = 1 + (basePayoutMultiplier - 1) * remaining * remaining;
+    }
+  }
   const minMarketMakerExecutionPrice = 1 / maxPayoutMultiplier;
   const pricingAmount = Number(amount || 0) * pricingWeight;
   if (isSpecialMarket(market)) {
@@ -8404,9 +8428,17 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
       const latestBalance = getAvailableBetBalance(currency);
       const missing = Math.max(1, Math.ceil(buyAmount - Number(latestBalance || 0)));
       openTopupSheet(missing, `Для ставки ${formatCurrencyAmount(buyAmount, currency)} не хватает ${formatCurrencyAmount(missing, currency)}.`);
-    } else if (error.message === "market_closed" || error.message === "market_not_open") {
+    } else if (
+      error.message === "market_closed"
+      || error.message === "market_not_open"
+      || error.message === "market_buy_frozen"
+    ) {
       state.buyQueue = [];
-      showToast("Этот рынок уже завершился. Обновляю...");
+      showToast(
+        error.message === "market_buy_frozen"
+          ? "Приём ставок закрыт, идёт финальная фиксация цены."
+          : "Этот рынок уже завершился. Обновляю...",
+      );
       scheduleCoreRefresh({ delay: 80 });
     } else {
       showToast("Покупка не прошла.");
@@ -9594,7 +9626,6 @@ const DAILY_TASK_META = {
   daily_win_1: { title: "Выиграй прогноз", desc: "Первая победа дня", icon: "trophy" },
   daily_win_streak_5: { title: "5 побед подряд", desc: "Серия из пяти побед", icon: "streak" },
   daily_win_2_row: { title: "2 победы подряд", desc: "Выиграй два раунда подряд", icon: "bolt" },
-  daily_sniper: { title: "Снайпер", desc: "Ставка в последние 15 секунд раунда", icon: "target" },
   daily_no_win: { title: "Против толпы", desc: "Выиграй ставкой на NO", icon: "bear" },
   daily_feed_fish: { title: "Покорми рыбок", desc: "Встряхни телефон на BTC 5m", icon: "fish" },
   daily_comment: { title: "Голос рынка", desc: "Оставь комментарий под рынком", icon: "chat" },
@@ -9632,7 +9663,6 @@ function getDailyTaskAmount(taskKey, fallback = 0) {
     daily_win_1: 25,
     daily_win_streak_5: 50,
     daily_win_2_row: 50,
-    daily_sniper: 38,
     daily_no_win: 38,
     daily_feed_fish: 6,
     daily_comment: 6,
@@ -9731,7 +9761,6 @@ function getDailyTaskDisplayMeta(taskKey) {
     daily_win_1: `${targetText} побед за день`,
     daily_win_streak_5: `${targetText} побед подряд`,
     daily_win_2_row: `${targetText} победы подряд`,
-    daily_sniper: `${targetText} снайперских ставок`,
     daily_no_win: `${targetText} NO-побед`,
     daily_feed_fish: `${targetText} кормление рыбок`,
     daily_comment: `${targetText} сообщений в чат`,
