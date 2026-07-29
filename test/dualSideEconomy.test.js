@@ -14,6 +14,7 @@ import {
 import { buildUnlockStatus } from "../src/services/bonusEconomyService.js";
 import { normalizeUsdtDepositAmount } from "../src/services/usdtDepositService.js";
 import { calculateUsdtWithdrawalAmounts } from "../src/services/usdtWithdrawalService.js";
+import { isAccountSnapshotCurrent } from "../public/account-state.js";
 
 const economySettings = {
   profit_fee_bps: 700,
@@ -192,6 +193,11 @@ test("a capped STAR tail buy reprices the book before the next buy", () => {
 
   assert.ok(first.nextYesPrice >= 1 / 15);
   assert.ok(second.executionPrice > first.executionPrice);
+});
+
+test("an account snapshot started before a balance mutation is rejected", () => {
+  assert.equal(isAccountSnapshotCurrent(4, 4), true);
+  assert.equal(isAccountSnapshotCurrent(4, 5), false);
 });
 
 test("lucky x2 is revoked when the user holds the opposite side", () => {

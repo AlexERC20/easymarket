@@ -27,6 +27,7 @@ import { getActiveSceneKey, setActiveScene, setShakeSceneListener } from "./shak
 import "./basketball-scene.js?v=20260712-03"; // регистрирует сцену «Легенда 24»
 import { playKyivstonerMotion, preloadKyivstonerMotion } from "./kyivstoner-motion.js?v=20260714-01";
 import { playFootballWow } from "./football-wow.js?v=20260716-01";
+import { isAccountSnapshotCurrent } from "./account-state.js?v=20260729-01";
 
 const DEFAULT_USDT_PROFIT_FEE_RATE = 0.07;
 const DEFAULT_STAR_PROFIT_FEE_RATE = 0.15;
@@ -241,6 +242,7 @@ const state = {
   pendingBuy: false,
   pendingBuyKey: null,
   buyQueue: [],
+  accountMutationRevision: 0,
   inFlight: new Set(),
   refreshTimer: null,
   promoClaimTimer: null,
@@ -464,6 +466,11 @@ function applyCurrencyBalancePayload(currency, payload = {}) {
   }
 
   state.balance = Number(total || 0);
+}
+
+function applyCurrencyMutationPayload(currency, payload = {}) {
+  state.accountMutationRevision += 1;
+  applyCurrencyBalancePayload(currency, payload);
 }
 const formatPrice = (value) => Number(value || 0).toLocaleString("ru-RU", {
   maximumFractionDigits: 2,
@@ -4042,7 +4049,14 @@ async function loadMe() {
     return;
   }
 
+  const requestMutationRevision = state.accountMutationRevision;
   const data = await api(`/api/me?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
+  if (!isAccountSnapshotCurrent(requestMutationRevision, state.accountMutationRevision)) {
+    window.setTimeout(() => {
+      void runSingleFlight("me", loadMe).catch(() => undefined);
+    }, 0);
+    return;
+  }
   state.balance = data.balance || 0;
   state.usdtBalance = data.usdt_balance || 0;
   state.usdtCashBalance = data.usdt_cash_balance || 0;
@@ -8253,7 +8267,7 @@ async function submitLimitOrder() {
         currency: state.currency,
       }),
     });
-    applyCurrencyBalancePayload(result.currency || state.currency, result);
+    applyCurrencyMutationPayload(result.currency || state.currency, result);
     upsertLocalPosition(result.position);
     showToast("Лимитка выставлена.");
     triggerHaptic("success");
@@ -8290,7 +8304,7 @@ async function cancelLimitOrder(orderId) {
         telegram_id: state.user.telegram_id,
       }),
     });
-    applyCurrencyBalancePayload(result.currency || state.currency, result);
+    applyCurrencyMutationPayload(result.currency || state.currency, result);
     upsertLocalPosition(result.position);
     showToast("Лимитка отменена.");
     triggerHaptic("success");
@@ -8362,7 +8376,7 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
         currency,
       }),
     });
-    applyCurrencyBalancePayload(result.currency || currency, result);
+    applyCurrencyMutationPayload(result.currency || currency, result);
     upsertLocalMarket(result.market);
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
@@ -8432,15 +8446,19 @@ async function sellPosition({ side, positionId, marketId, shares }) {
         currency: state.currency,
       }),
     });
-    applyCurrencyBalancePayload(result.currency || state.currency, result);
+    applyCurrencyMutationPayload(result.currency || state.currency, result);
     upsertLocalMarket(result.market);
     upsertLocalPosition(result.position);
     addLocalActivity(result.trade);
     triggerHaptic("success");
     triggerLightningFlash("success", getTierForAmount(result.trade?.amount || result.sale?.exit_value || 0, result.currency || state.currency));
+    const saleCurrency = result.currency || state.currency;
+    const proceeds = Number(result.sale?.proceeds ?? result.trade?.amount ?? 0);
     const pnl = Number(result.sale?.pnl || 0);
     const sellMarket = result.market || findMarketById(marketId) || getDisplayMarket();
-    showToast(`Продано ${marketSideLabel(sellMarket, side)}: ${formatSignedCurrencyAmount(pnl, result.currency || state.currency)}`);
+    showToast(
+      `На баланс ${formatCurrencyAmount(proceeds, saleCurrency)} · PnL ${formatSignedCurrencyAmount(pnl, saleCurrency)}`,
+    );
     renderMarket();
     renderMe();
     renderActivity();
