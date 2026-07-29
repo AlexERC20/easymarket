@@ -9690,9 +9690,9 @@ export async function correctStarMarketSettlement(input) {
     const eventKey = `star_market_cap:${marketId}:position:${position.id}:x${maxPayoutMultiplier}`;
     const existingCorrection = await client.query(
       `
-        SELECT *
-        FROM market_settlement_corrections
-        WHERE event_key = $1
+        SELECT key AS event_key, applied_at AS created_at
+        FROM app_migrations
+        WHERE key = $1
         LIMIT 1
       `,
       [eventKey],
@@ -9905,67 +9905,47 @@ export async function correctStarMarketSettlement(input) {
       );
     }
 
-    const correctionResult = await client.query(
+    await client.query(
       `
-        INSERT INTO market_settlement_corrections (
-          event_key,
-          market_id,
-          position_id,
-          user_id,
-          referrer_user_id,
-          max_payout_multiplier,
-          original_shares,
-          corrected_shares,
-          original_payout,
-          corrected_payout,
-          user_debit,
-          original_referral_fee,
-          corrected_referral_fee,
-          referral_debit,
-          clan_debit,
-          details
-        )
-        VALUES (
-          $1, $2, $3, $4, $5, $6::numeric,
-          $7::numeric, $8::numeric, $9::numeric, $10::numeric,
-          $11::numeric, $12::numeric, $13::numeric, $14::numeric,
-          $15::numeric, $16::jsonb
-        )
-        RETURNING *
+        INSERT INTO app_migrations (key)
+        VALUES ($1)
       `,
-      [
-        eventKey,
-        marketId,
-        position.id,
-        position.user_id,
-        distribution?.referrer_user_id || null,
-        maxPayoutMultiplier,
-        originalShares,
-        correctedShares,
-        originalPayout,
-        correctedPayout,
-        userDebit,
-        originalReferralFee,
-        correctedReferralFee,
-        referralDebit,
-        clanDebit,
-        JSON.stringify({
-          capped_trades: cappedTrades,
-          total_buy_trades: tradesResult.rowCount,
-          excess_shares: excessShares,
-          original_pnl: roundMoney(position.pnl),
-          corrected_pnl: roundMoney(correctedSettlement.pnl),
-          original_total_fee: roundMoney(distribution?.total_fee),
-          corrected_total_fee: correctedTotalFee,
-          trades: tradeCorrections,
-        }),
-      ],
+      [eventKey],
     );
 
+    const details = {
+      capped_trades: cappedTrades,
+      total_buy_trades: tradesResult.rowCount,
+      excess_shares: excessShares,
+      original_pnl: roundMoney(position.pnl),
+      corrected_pnl: roundMoney(correctedSettlement.pnl),
+      original_total_fee: roundMoney(distribution?.total_fee),
+      corrected_total_fee: correctedTotalFee,
+      trades: tradeCorrections,
+    };
     return {
       ok: true,
       already_corrected: false,
-      correction: correctionResult.rows[0],
+      correction: {
+        event_key: eventKey,
+        market_id: marketId,
+        position_id: Number(position.id),
+        user_id: Number(position.user_id),
+        referrer_user_id: distribution?.referrer_user_id
+          ? Number(distribution.referrer_user_id)
+          : null,
+        max_payout_multiplier: maxPayoutMultiplier,
+        original_shares: originalShares,
+        corrected_shares: correctedShares,
+        original_payout: originalPayout,
+        corrected_payout: correctedPayout,
+        user_debit: userDebit,
+        original_referral_fee: originalReferralFee,
+        corrected_referral_fee: correctedReferralFee,
+        referral_debit: referralDebit,
+        clan_debit: clanDebit,
+        details,
+      },
     };
   });
 }
