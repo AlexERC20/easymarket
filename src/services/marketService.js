@@ -7407,11 +7407,25 @@ export async function getOpenMarket(symbol = MARKET_SYMBOL) {
   return mapMarket(result.rows[0]);
 }
 
+async function getOpenBtcMarketMap() {
+  const result = await query(
+    `
+      SELECT *
+      FROM markets
+      WHERE status = 'open'
+        AND symbol = ANY($1)
+    `,
+    [BTC_MARKET_SYMBOLS],
+  );
+  return new Map(result.rows.map((row) => [row.symbol, mapMarket(row)]));
+}
+
 export async function ensureActiveBtcMarkets() {
   let btc = null;
   const markets = [];
+  const openMarkets = await getOpenBtcMarketMap();
   for (const definition of BTC_MARKET_DEFS) {
-    const existing = await getOpenMarket(definition.symbol);
+    const existing = openMarkets.get(definition.symbol);
     if (existing) {
       markets.push(existing);
       continue;
@@ -10638,8 +10652,8 @@ export async function resolveExpiredMarkets() {
     [BTC_MARKET_SYMBOLS],
   );
 
-  for (const market of expiredResult.rows) {
-    let closePrice = null;
+  let closePrice = null;
+  if (expiredResult.rows.length) {
     try {
       closePrice = (await getBtcPrice()).price;
     } catch (error) {
@@ -10647,7 +10661,9 @@ export async function resolveExpiredMarkets() {
         throw error;
       }
     }
+  }
 
+  for (const market of expiredResult.rows) {
     await withTransaction(async (client) => {
       const currentResult = await client.query(
         `
@@ -10697,19 +10713,11 @@ export async function resolveExpiredMarkets() {
     });
   }
 
-  let btcForCreation = null;
-  for (const definition of BTC_MARKET_DEFS) {
-    const currentOpen = await getOpenMarket(definition.symbol);
-    if (currentOpen) {
-      continue;
-    }
-    try {
-      btcForCreation = btcForCreation || await getBtcPrice();
-      await createBtcMarket(definition, btcForCreation);
-    } catch (error) {
-      if (!(error instanceof PriceUnavailableError) && error?.code !== "23505") {
-        throw error;
-      }
+  try {
+    await ensureActiveBtcMarkets();
+  } catch (error) {
+    if (!(error instanceof PriceUnavailableError) && error?.code !== "23505") {
+      throw error;
     }
   }
 }

@@ -36,7 +36,6 @@ import {
   createLimitOrder,
   deleteClan,
   distributeDueClanRewardFunds,
-  ensureActiveMarket,
   getActiveMarket,
   getAppActivityStats,
   getBtcMarkets,
@@ -235,10 +234,11 @@ function sendApiError(res, error, fallbackStatus = 500) {
 // а не плодят повторные запросы к БД.
 const readThroughCache = new Map();
 function cachedJsonRoute(cacheKey, ttlMs, loader) {
-  return async (_req, res) => {
+  return async (req, res) => {
     try {
       const now = Date.now();
-      const entry = readThroughCache.get(cacheKey);
+      const resolvedCacheKey = typeof cacheKey === "function" ? cacheKey(req) : cacheKey;
+      const entry = readThroughCache.get(resolvedCacheKey);
       if (entry && entry.expiresAt > now) {
         res.status(200).json(entry.payload);
         return;
@@ -247,13 +247,14 @@ function cachedJsonRoute(cacheKey, ttlMs, loader) {
         res.status(200).json(await entry.pending);
         return;
       }
-      const pending = loader();
-      readThroughCache.set(cacheKey, { expiresAt: entry?.expiresAt ?? 0, payload: entry?.payload, pending });
+      const pending = loader(req);
+      readThroughCache.set(resolvedCacheKey, { expiresAt: entry?.expiresAt ?? 0, payload: entry?.payload, pending });
       const payload = await pending;
-      readThroughCache.set(cacheKey, { expiresAt: Date.now() + ttlMs, payload, pending: null });
+      readThroughCache.set(resolvedCacheKey, { expiresAt: Date.now() + ttlMs, payload, pending: null });
       res.status(200).json(payload);
     } catch (error) {
-      const entry = readThroughCache.get(cacheKey);
+      const resolvedCacheKey = typeof cacheKey === "function" ? cacheKey(req) : cacheKey;
+      const entry = readThroughCache.get(resolvedCacheKey);
       if (entry) entry.pending = null;
       sendApiError(res, error);
     }
@@ -732,17 +733,14 @@ app.get("/api/market/:marketId/activity", async (req, res) => {
   }
 });
 
-app.get("/api/activity/recent", async (req, res) => {
-  try {
-    const activity = await getRecentActivity(req.query.limit);
-    res.status(200).json({
-      ok: true,
-      activity,
-    });
-  } catch (error) {
-    sendApiError(res, error);
-  }
-});
+app.get("/api/activity/recent", cachedJsonRoute(
+  (req) => `activity/recent:${Math.max(1, Math.min(80, Number(req.query.limit) || 30))}`,
+  3_000,
+  async (req) => ({
+    ok: true,
+    activity: await getRecentActivity(req.query.limit),
+  }),
+));
 
 app.get("/api/world-cup/markets", cachedJsonRoute("world-cup/markets", 3_000, async () => {
   const result = await getWorldCupMarkets();
@@ -1889,7 +1887,6 @@ async function marketTick() {
   marketEngineBusy = true;
   try {
     await resolveExpiredMarkets();
-    await ensureActiveMarket();
     await syncSportsMarkets();
     await syncTopMarkets();
   } catch (error) {
@@ -1991,7 +1988,6 @@ async function startMarketEngine() {
     const worldCupResult = await finalizeWorldCupMarkets();
     console.log("[easymarket] World Cup markets finalized", worldCupResult);
     await resolveExpiredMarkets();
-    await ensureActiveMarket();
     await getKyivstonerMarket();
     void clanRewardDistributionTick("startup");
   } catch (error) {

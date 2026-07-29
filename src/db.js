@@ -111,6 +111,9 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_fire_ledger_user_created
       ON fire_ledger(user_id, created_at DESC);
 
+    CREATE INDEX IF NOT EXISTS idx_fire_ledger_user_reason
+      ON fire_ledger(user_id, reason);
+
     CREATE TABLE IF NOT EXISTS usdt_balances (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       balance NUMERIC(20, 8) NOT NULL DEFAULT 0,
@@ -558,6 +561,9 @@ export async function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_trades_user_market_created
       ON trades(user_id, market_id, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_trades_created
+      ON trades(created_at DESC);
 
     CREATE TABLE IF NOT EXISTS profit_fee_distributions (
       id BIGSERIAL PRIMARY KEY,
