@@ -1990,6 +1990,7 @@ async function startMarketEngine() {
     await runMigrations();
     const worldCupResult = await finalizeWorldCupMarkets();
     console.log("[easymarket] World Cup markets finalized", worldCupResult);
+    await resolveExpiredMarkets();
     await ensureActiveMarket();
     await getKyivstonerMarket();
     void clanRewardDistributionTick("startup");
@@ -2014,9 +2015,11 @@ async function startMarketEngine() {
   }
 
   if (config.databaseCleanupEnabled) {
-    setTimeout(() => {
-      void databaseCleanupTick(config.databaseCleanupRunOnStart ? "startup" : "startup-safety");
-    }, 15_000);
+    if (config.databaseCleanupRunOnStart) {
+      setTimeout(() => {
+        void databaseCleanupTick("startup");
+      }, 15_000);
+    }
     setInterval(() => {
       void databaseCleanupTick("daily");
     }, config.databaseCleanupIntervalMs);

@@ -149,6 +149,9 @@ let sportsCatalogLastFetchAt = 0;
 let sportsCatalogCache = [];
 let externalMarketSchemaReady = false;
 let kyivstonerResetPromise = null;
+let appActivityStatsCache = null;
+let appActivityStatsPromise = null;
+let appActivityStatsCacheAt = 0;
 
 function getBtcMarketDef(symbol) {
   return BTC_MARKET_DEFS.find((definition) => definition.symbol === symbol) || null;
@@ -4420,11 +4423,12 @@ export async function getUserSnapshot(telegramId) {
       UPDATE users
       SET updated_at = now()
       WHERE id = $1
+        AND updated_at < now() - interval '30 seconds'
     `,
     [user.id],
   );
 
-  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, dailyTasks, premiumFishResult, lossRefundOffersResult, depositTotalResult, depositBonusClaimsResult, shakeFeedTotal, bonusUnlockStatus, starConversionStatus] = await Promise.all([
+  const [balance, usdtCashBalance, usdtBonusBalance, positionsResult, tradesResult, marketStats, referralStats, premiumFishResult, lossRefundOffersResult, depositTotalResult, depositBonusClaimsResult, shakeFeedTotal, bonusUnlockStatus, starConversionStatus] = await Promise.all([
     getBalanceByUserId(user.id),
     getUsdtBalanceByUserId(user.id),
     getUsdtBonusBalanceByUserId(user.id),
@@ -4483,7 +4487,6 @@ export async function getUserSnapshot(telegramId) {
     ),
     getUserMarketStats(user.id),
     getUserReferralStats(user.id, user.telegram_id),
-    getUserDailyTaskStatus(user.id),
     query(
       `
         SELECT EXISTS (
@@ -4547,7 +4550,10 @@ export async function getUserSnapshot(telegramId) {
     recent_trades: tradesResult.rows.map(mapTrade),
     market_stats: marketStats,
     referral_stats: referralStats,
-    daily_tasks: dailyTasks,
+    // Task progress is loaded by /api/tasks/state while the sheet is open.
+    // Calculating every task on each background account poll used dozens of
+    // database queries without changing the visible market screen.
+    daily_tasks: {},
     aquarium_premium_fish_unlocked: Boolean(premiumFishResult.rows[0]?.unlocked),
     // Премиум-анимация («Легенда 24»): задание с прогрессом видят все,
     // открывается за суммарный депозит $1000. Админ — без депозита (тест).
@@ -6606,10 +6612,17 @@ export async function getEngagementState(input) {
     [user.id, today],
   );
   const claimed = new Set(claimsResult.rows.map((row) => `${row.task_key}:${row.day_key}`));
+  const progressPromises = new Map();
+  const loadProgress = (key) => {
+    if (!progressPromises.has(key)) {
+      progressPromises.set(key, getDailyTaskProgress(shim, user.id, key));
+    }
+    return progressPromises.get(key);
+  };
 
   const rotation = [];
   for (const key of rotationKeys) {
-    const progress = await getDailyTaskProgress(shim, user.id, key);
+    const progress = await loadProgress(key);
     rotation.push({
       key,
       amount: progress?.amount ?? TASK_AMOUNTS[key]?.() ?? 0,
@@ -6654,7 +6667,7 @@ export async function getEngagementState(input) {
     ...rotationKeys,
   ]);
   for (const key of progressKeys) {
-    const taskProgress = await getDailyTaskProgress(shim, user.id, key);
+    const taskProgress = await loadProgress(key);
     if (taskProgress) {
       progress[key] = taskProgress;
     }
@@ -7395,7 +7408,6 @@ export async function getOpenMarket(symbol = MARKET_SYMBOL) {
 }
 
 export async function ensureActiveBtcMarkets() {
-  await resolveExpiredMarkets();
   let btc = null;
   const markets = [];
   for (const definition of BTC_MARKET_DEFS) {
@@ -7505,8 +7517,12 @@ export async function updateLiveBtcPrice() {
 }
 
 export async function getActiveMarket() {
-  const market = await ensureActiveMarket();
-  return market;
+  const market = await getOpenMarket(MARKET_SYMBOL);
+  if (market) {
+    return market;
+  }
+  const markets = await ensureActiveBtcMarkets();
+  return markets.find((candidate) => candidate.symbol === MARKET_SYMBOL) || markets[0] || null;
 }
 
 // Полоска истории раундов над кнопками Up/Down на BTC 5m: последние N
@@ -7530,7 +7546,6 @@ export async function getRecentMarketOutcomes(symbol, limit = 12) {
 }
 
 export async function getBtcMarkets() {
-  await ensureActiveBtcMarkets();
   const result = await query(
     `
       SELECT *
@@ -7875,26 +7890,38 @@ export async function getMarketOnlineCount(marketId) {
 }
 
 export async function getAppActivityStats() {
-  const result = await query(
-    `
-      SELECT
-        (
-          SELECT COUNT(*)::int
-          FROM users
-          WHERE updated_at > now() - interval '5 minutes'
-        ) AS online_count,
-        (
-          SELECT COUNT(*)::int
-          FROM trades
-          WHERE action = 'BUY'
-        ) AS total_bets
-    `,
-  );
-
-  return {
-    online_count: Number(result.rows[0]?.online_count || 0),
-    total_bets: Number(result.rows[0]?.total_bets || 0),
-  };
+  if (appActivityStatsCache && Date.now() - appActivityStatsCacheAt < 5_000) {
+    return appActivityStatsCache;
+  }
+  if (!appActivityStatsPromise) {
+    appActivityStatsPromise = query(
+      `
+        SELECT
+          (
+            SELECT COUNT(*)::int
+            FROM users
+            WHERE updated_at > now() - interval '5 minutes'
+          ) AS online_count,
+          (
+            SELECT COUNT(*)::int
+            FROM trades
+            WHERE action = 'BUY'
+          ) AS total_bets
+      `,
+    )
+      .then((result) => {
+        appActivityStatsCache = {
+          online_count: Number(result.rows[0]?.online_count || 0),
+          total_bets: Number(result.rows[0]?.total_bets || 0),
+        };
+        appActivityStatsCacheAt = Date.now();
+        return appActivityStatsCache;
+      })
+      .finally(() => {
+        appActivityStatsPromise = null;
+      });
+  }
+  return appActivityStatsPromise;
 }
 
 export async function addMarketComment(input) {

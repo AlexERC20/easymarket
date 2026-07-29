@@ -69,6 +69,8 @@ const ACTIVE_MARKET_POLL_MS = 1_500;
 const MARKET_LIST_POLL_MS = 10_000;
 const SPECIAL_MARKET_POLL_MS = 3_000;
 const COMMENTS_POLL_MS = 10_000;
+const ACCOUNT_POLL_MS = 8_000;
+const ACTIVITY_POLL_MS = 6_000;
 const LEADERBOARD_CACHE_MS = 90_000;
 const LEADERBOARD_MODES = ["BEST_24H", "WINS_24H", "BALANCE", "REFERRALS", "CLANS"];
 const LEADERBOARD_CURRENCIES = ["USDT", "STAR"];
@@ -11049,11 +11051,11 @@ setInterval(() => {
 setInterval(() => {
   if (isAppInBackground() || isBlockingSheetOpen()) return;
   void runSingleFlight("activity", loadActivity).catch(() => undefined);
-}, 4_000);
+}, ACTIVITY_POLL_MS);
 setInterval(() => {
   if (isAppInBackground() || isBlockingSheetOpen()) return;
   void runSingleFlight("me", loadMe).catch(() => undefined);
-}, 3_500);
+}, ACCOUNT_POLL_MS);
 setInterval(() => {
   if (isAppInBackground() || isBlockingSheetOpen()) return;
   void runSingleFlight("recentMarkets", loadRecentMarkets).catch(() => undefined);
@@ -11081,7 +11083,6 @@ loadPublicConfig()
     }
     restoreUsdtIntent(); // живая депозитная заявка переживает перезаход
     void checkinStreakDaily(); // стрик «Заряд молнии»: отметка входа + лутбокс
-    void loadEngagementState();
     return refreshAll()
       .then(() => handleAppLaunchLink().catch(() => showToast("Не получилось открыть нужный раздел.")))
       .then(() => {

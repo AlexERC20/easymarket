@@ -90,6 +90,9 @@ export async function runMigrations() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE INDEX IF NOT EXISTS idx_users_updated_at
+      ON users(updated_at DESC);
+
     CREATE TABLE IF NOT EXISTS fire_balances (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       balance NUMERIC(20, 8) NOT NULL DEFAULT 0,
