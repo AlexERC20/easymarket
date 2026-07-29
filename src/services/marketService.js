@@ -7176,6 +7176,24 @@ export async function getMarketMakerEconomyAudit(input = {}) {
         FROM markets
         WHERE status = 'resolved'
           AND resolved_at >= now() - ($1::int * interval '1 hour')
+          AND (
+            EXISTS (
+              SELECT 1
+              FROM trades
+              WHERE trades.market_id = markets.id
+                AND trades.currency = 'USDT'
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM usdt_ledger
+              WHERE usdt_ledger.source = 'market:' || markets.id::text
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM usdt_bonus_ledger
+              WHERE usdt_bonus_ledger.source = 'market:' || markets.id::text
+            )
+          )
         ORDER BY resolved_at DESC
         LIMIT $2
       )
