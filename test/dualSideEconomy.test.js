@@ -142,6 +142,27 @@ test("star bets move the price by their dollar value, not their number", () => {
   assert.equal(getPricingWeight("USDT"), 1);
 });
 
+test("internal market-maker buys cannot exceed a 25x gross payout", () => {
+  const tailMarket = buildMarket({
+    symbol: "BTCUSDT",
+    yes_price: 0.002,
+    no_price: 0.998,
+    current_price: 99,
+    open_price: 100,
+    yes_volume: 0,
+    no_volume: 100,
+  });
+  const amount = 50;
+  const quote = getBuyExecutionQuote(tailMarket, "YES", amount, {
+    pricingWeight: getPricingWeight("STAR"),
+    maxPayoutMultiplier: 25,
+  });
+  const shares = amount / quote.executionPrice;
+
+  assert.ok(quote.executionPrice >= 0.04);
+  assert.ok(shares <= amount * 25);
+});
+
 test("lucky x2 is revoked when the user holds the opposite side", () => {
   const luckyMarket = buildMarket({
     lucky_until: new Date(Date.now() + 30_000).toISOString(),

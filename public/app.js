@@ -37,6 +37,8 @@ const MARKET_MAKER_DENSITY_MULTIPLIER = 1.4;
 const SPORTS_MARKET_MAKER_DENSITY_MULTIPLIER = 1.8;
 const SPECIAL_MARKET_SPREAD_RATE = 0.01;
 const SPECIAL_MARKET_MAX_SHIFT = 0.2;
+const MAX_MARKET_MAKER_PAYOUT_MULTIPLIER = 25;
+const MIN_MARKET_MAKER_EXECUTION_PRICE = 1 / MAX_MARKET_MAKER_PAYOUT_MULTIPLIER;
 const MAX_SINGLE_TRADE_SHIFT = 0.46;
 const MIN_TAIL_DEPTH_FACTOR = 0.004;
 const SPORTS_MIN_TAIL_DEPTH_FACTOR = 0.2;
@@ -4870,26 +4872,33 @@ function estimateBuyQuote({ market, side, amount }) {
     minPrice,
     Math.min(1 - minPrice, rawOppositePrice || 0.5),
   );
+  const pricingWeight = normalizeCurrency(state.currency) === "STAR"
+    ? 1 / Math.max(1, Number(state.publicConfig.star_usdt_conversion_stars_per_usdt || 1_000))
+    : 1;
+  const pricingAmount = Number(amount || 0) * pricingWeight;
   if (isSpecialMarket(market)) {
     const depth = Math.max(100, Number(market?.liquidity || 7_000));
-    const impact = Math.min(SPECIAL_MARKET_MAX_SHIFT, Number(amount || 0) / depth);
+    const impact = Math.min(SPECIAL_MARKET_MAX_SHIFT, pricingAmount / depth);
     const nextPrice = Math.max(minPrice, Math.min(1 - minPrice, price + impact));
     return {
       executionPrice: Math.max(
-        minPrice,
+        MIN_MARKET_MAKER_EXECUTION_PRICE,
         Math.min(1 - minPrice, ((price + nextPrice) / 2) * (1 + SPECIAL_MARKET_SPREAD_RATE)),
       ),
       nextPrice,
     };
   }
   const liquidity = estimateMarketMakerLiquidity(market, price);
-  const impact = Math.min(MAX_SINGLE_TRADE_SHIFT, (Number(amount || 0) / liquidity) * BUY_IMPACT_MULTIPLIER);
+  const impact = Math.min(MAX_SINGLE_TRADE_SHIFT, (pricingAmount / liquidity) * BUY_IMPACT_MULTIPLIER);
   const crossBookFloor = 1 - oppositePrice;
   const nextPrice = Math.max(
     minPrice,
     Math.min(1 - minPrice, Math.max(crossBookFloor, price + impact)),
   );
-  const executionPrice = Math.max(minPrice, Math.min(1 - minPrice, Math.max(price, nextPrice) * (1 + MARKET_MAKER_SPREAD_RATE)));
+  const executionPrice = Math.max(
+    MIN_MARKET_MAKER_EXECUTION_PRICE,
+    Math.min(1 - minPrice, Math.max(price, nextPrice) * (1 + MARKET_MAKER_SPREAD_RATE)),
+  );
   return {
     executionPrice,
     nextPrice,

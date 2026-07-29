@@ -27,6 +27,7 @@ const KYIVSTONER_NO_LABEL = "Меньше 8";
 const KYIVSTONER_TEST_RESET_MIGRATION = "kyivstoner_test_market_reset_v2";
 const SPECIAL_MARKET_SPREAD_BPS = 100;
 const SPECIAL_MARKET_MAX_SHIFT = 0.2;
+const MAX_MARKET_MAKER_PAYOUT_MULTIPLIER = 25;
 const MIN_PRICE = 0.001;
 const MAX_PRICE = 0.999;
 const BTC_MIN_PRICE = 0.001;
@@ -1094,8 +1095,16 @@ export function getPricingWeight(currency) {
 
 export function getBuyExecutionQuote(market, side, amount, options = {}) {
   const pricingWeight = Number.isFinite(options.pricingWeight) ? options.pricingWeight : 1;
+  const maxPayoutMultiplier = Number(options.maxPayoutMultiplier);
+  const executionFloor = Number.isFinite(maxPayoutMultiplier) && maxPayoutMultiplier > 0
+    ? 1 / maxPayoutMultiplier
+    : 0;
   if (isSpecialMarket(market)) {
-    return getSpecialBuyExecutionQuote(market, side, amount, pricingWeight);
+    const quote = getSpecialBuyExecutionQuote(market, side, amount, pricingWeight);
+    return {
+      ...quote,
+      executionPrice: Math.max(executionFloor, quote.executionPrice),
+    };
   }
   const minPrice = getMarketMinOutcomePrice(market);
   const oldOutcomePrice = getMarketOutcomePrice(market, side);
@@ -1126,7 +1135,10 @@ export function getBuyExecutionQuote(market, side, amount, options = {}) {
     { oppositeDriftStrength: 0.05 },
   );
   const spread = getMarketMakerSpreadBps() / 10_000;
-  const executionPrice = roundOutcomePrice(Math.max(oldOutcomePrice, nextOutcomePrice) * (1 + spread), minPrice);
+  const executionPrice = Math.max(
+    executionFloor,
+    roundOutcomePrice(Math.max(oldOutcomePrice, nextOutcomePrice) * (1 + spread), minPrice),
+  );
 
   return {
     oldOutcomePrice,
@@ -9179,7 +9191,10 @@ export async function buyOutcome(input) {
 
     const marketMinPrice = getMarketMinOutcomePrice(market);
     const pricingWeight = getPricingWeight(currency);
-    const quote = getBuyExecutionQuote(market, side, amount, { pricingWeight });
+    const quote = getBuyExecutionQuote(market, side, amount, {
+      pricingWeight,
+      maxPayoutMultiplier: MAX_MARKET_MAKER_PAYOUT_MULTIPLIER,
+    });
     if (quote.executionPrice < marketMinPrice || quote.executionPrice > 1 - marketMinPrice) {
       throw new Error("invalid_market_price");
     }
