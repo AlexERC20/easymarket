@@ -1203,6 +1203,7 @@ async function getMarketMakerBackingSnapshot(client, marketId, currency = "USDT"
           ), 0) AS pool
           FROM fire_ledger
           WHERE source = 'market:' || $1::text
+            AND source LIKE 'market:%'
         )
         SELECT exposure.*, market_flow.pool
         FROM exposure
@@ -1295,6 +1296,7 @@ async function getMarketMakerBackingSnapshot(client, marketId, currency = "USDT"
         ), 0) AS pool
         FROM usdt_ledger
         WHERE source = 'market:' || $1::text
+          AND source LIKE 'market:%'
       ),
       bonus_flow AS (
         SELECT COALESCE(SUM(
@@ -1306,6 +1308,7 @@ async function getMarketMakerBackingSnapshot(client, marketId, currency = "USDT"
         ), 0) AS pool
         FROM usdt_bonus_ledger
         WHERE source = 'market:' || $1::text
+          AND source LIKE 'market:%'
       )
       SELECT exposure.*, cash_flow.pool AS cash_pool, bonus_flow.pool AS bonus_pool
       FROM exposure
