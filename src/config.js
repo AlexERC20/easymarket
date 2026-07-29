@@ -75,7 +75,7 @@ export const config = {
   ),
   marketUsdtRiskBudget: parseNumber(
     process.env.MARKET_USDT_RISK_BUDGET,
-    100,
+    25,
     0,
   ),
   marketStarRiskBudget: parseNumber(

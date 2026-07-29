@@ -351,16 +351,16 @@ test("opposite USDT stakes restore collateral capacity", () => {
   assert.ok(backedYes < 0.05);
 });
 
-test("a large first USDT tail bet consumes the configured risk budget in its quote", () => {
+test("a large first USDT tail bet cannot expose more than the starter risk budget", () => {
   const floor = getCollateralizedExecutionFloor({
     amount: 100,
     pool: 0,
     liability: 0,
-    riskBudget: 100,
+    riskBudget: 25,
     minPrice: 0.001,
   });
 
-  assert.equal(floor, 0.5);
+  assert.equal(floor, 0.8);
 });
 
 test("an account snapshot started before a balance mutation is rejected", () => {
