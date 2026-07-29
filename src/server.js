@@ -182,7 +182,6 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "comment_required",
     "insufficient_shares",
     "invalid_market_price",
-    "market_maker_capacity_exhausted",
     "invoice_failed",
     "invoice_not_configured",
     "sell_failed",

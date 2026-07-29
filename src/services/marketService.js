@@ -959,15 +959,7 @@ function getRawMarketOutcomePrice(market, side) {
 }
 
 function getMarketOutcomePrice(market, side) {
-  const minPrice = getMarketMinOutcomePrice(market);
-  const rawPrice = getRawMarketOutcomePrice(market, side);
-  if (market?.status && market.status !== "open") {
-    return rawPrice;
-  }
-  const askFloor = side === "YES"
-    ? toNumber(market.yes_ask_floor, minPrice)
-    : toNumber(market.no_ask_floor, minPrice);
-  return roundOutcomePrice(Math.max(rawPrice, askFloor), minPrice);
+  return getRawMarketOutcomePrice(market, side);
 }
 
 function getOppositeSide(side) {
@@ -9599,35 +9591,18 @@ export async function buyOutcome(input) {
     const quotePayoutMultiplier = luckySpentPart > 0
       ? (basePayoutMultiplier + 1) / 2
       : basePayoutMultiplier;
-    const marketMinPrice = getMarketMinOutcomePrice(market);
     const pricingWeight = getPricingWeight(currency);
-    let usdtDebitSplit = null;
-    let usdtBacking = null;
-    let collateralExecutionFloor = 0;
     if (currency === "USDT") {
       const lockedBalance = await getLockedCurrencyBalance(client, user.id, currency);
-      usdtDebitSplit = splitUsdtSpend(amount, lockedBalance);
-      if (!usdtDebitSplit) {
+      if (!splitUsdtSpend(amount, lockedBalance)) {
         throw new Error(insufficientBalanceError(currency));
-      }
-      usdtBacking = await getMarketMakerBackingSnapshot(client, marketId);
-      collateralExecutionFloor = getUsdtExecutionFloor(
-        market,
-        side,
-        amount,
-        usdtDebitSplit,
-        usdtBacking,
-        luckySpentPart > 0 ? luckySpentPart / amount : 0,
-      );
-      if (collateralExecutionFloor >= 1 - marketMinPrice) {
-        throw new Error("market_maker_capacity_exhausted");
       }
     }
     const quote = getBuyExecutionQuote(market, side, amount, {
       pricingWeight,
       maxPayoutMultiplier: quotePayoutMultiplier,
-      executionFloor: collateralExecutionFloor,
     });
+    const marketMinPrice = getMarketMinOutcomePrice(market);
     if (quote.executionPrice < marketMinPrice || quote.executionPrice > 1 - marketMinPrice) {
       throw new Error("invalid_market_price");
     }
@@ -9720,14 +9695,6 @@ export async function buyOutcome(input) {
     );
 
     const referralBonus = await awardReferralBetBonus(client, user, marketId);
-    const askFloors = currency === "USDT"
-      ? await refreshMarketMakerAskFloors(client, {
-        ...market,
-        yes_price: nextYesPrice,
-        no_price: nextNoPrice,
-      })
-      : null;
-
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
     return {
@@ -9744,8 +9711,6 @@ export async function buyOutcome(input) {
         ...market,
         yes_price: nextYesPrice,
         no_price: nextNoPrice,
-        yes_ask_floor: askFloors?.yesFloor ?? market.yes_ask_floor,
-        no_ask_floor: askFloors?.noFloor ?? market.no_ask_floor,
         yes_volume: toNumber(market.yes_volume) + (side === "YES" ? netAmount : 0),
         no_volume: toNumber(market.no_volume) + (side === "NO" ? netAmount : 0),
       }),
@@ -10008,14 +9973,6 @@ export async function sellOutcome(input) {
       ],
     );
     await persistSpecialMarketTicks(client, market, nextYesPrice, nextNoPrice);
-    const askFloors = currency === "USDT"
-      ? await refreshMarketMakerAskFloors(client, {
-        ...market,
-        yes_price: nextYesPrice,
-        no_price: nextNoPrice,
-      })
-      : null;
-
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
     return {
@@ -10031,8 +9988,6 @@ export async function sellOutcome(input) {
         ...market,
         yes_price: nextYesPrice,
         no_price: nextNoPrice,
-        yes_ask_floor: askFloors?.yesFloor ?? market.yes_ask_floor,
-        no_ask_floor: askFloors?.noFloor ?? market.no_ask_floor,
         yes_volume: quote.nextYesVolume,
         no_volume: quote.nextNoVolume,
       }),

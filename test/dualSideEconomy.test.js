@@ -196,6 +196,24 @@ test("a capped STAR tail buy reprices the book before the next buy", () => {
   assert.ok(second.executionPrice > first.executionPrice);
 });
 
+test("a stale collateral floor cannot lock a new market buy", () => {
+  const market = buildMarket({
+    symbol: "BTCUSDT",
+    yes_price: 0.5,
+    no_price: 0.5,
+    yes_ask_floor: 0.999,
+    no_ask_floor: 0.999,
+    yes_volume: 0,
+    no_volume: 0,
+  });
+  const quote = getBuyExecutionQuote(market, "YES", 5, {
+    maxPayoutMultiplier: getMarketMakerPayoutMultiplier("USDT"),
+  });
+
+  assert.ok(quote.executionPrice > 0.5);
+  assert.ok(quote.executionPrice < 0.6);
+});
+
 test("USDT MM risk stays bounded during repeated one-sided buys", () => {
   const riskBudget = 100;
   const amount = 5;

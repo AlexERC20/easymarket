@@ -8406,10 +8406,6 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
       state.buyQueue = [];
       showToast("Этот рынок уже завершился. Обновляю...");
       scheduleCoreRefresh({ delay: 80 });
-    } else if (error.message === "market_maker_capacity_exhausted") {
-      state.buyQueue = [];
-      showToast("На этой стороне закончилась ликвидность. Попробуй меньшую сумму или другую сторону.");
-      scheduleCoreRefresh({ delay: 80, includeLists: false });
     } else {
       showToast("Покупка не прошла.");
     }
