@@ -129,6 +129,10 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_usdt_ledger_user_reason
       ON usdt_ledger(user_id, reason);
 
+    CREATE INDEX IF NOT EXISTS idx_usdt_ledger_market_source_reason
+      ON usdt_ledger(source, reason)
+      WHERE source LIKE 'market:%';
+
     CREATE TABLE IF NOT EXISTS usdt_bonus_balances (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       balance NUMERIC(20, 8) NOT NULL DEFAULT 0,
@@ -143,6 +147,10 @@ export async function runMigrations() {
       source TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_bonus_ledger_market_source_reason
+      ON usdt_bonus_ledger(source, reason)
+      WHERE source LIKE 'market:%';
 
     CREATE TABLE IF NOT EXISTS usdt_bonus_claims (
       id BIGSERIAL PRIMARY KEY,
@@ -782,6 +790,10 @@ export async function runMigrations() {
       ADD COLUMN IF NOT EXISTS lucky_until TIMESTAMPTZ;
     ALTER TABLE markets
       ADD COLUMN IF NOT EXISTS lucky_rolled BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE markets
+      ADD COLUMN IF NOT EXISTS yes_ask_floor NUMERIC(10, 8) NOT NULL DEFAULT 0.001;
+    ALTER TABLE markets
+      ADD COLUMN IF NOT EXISTS no_ask_floor NUMERIC(10, 8) NOT NULL DEFAULT 0.001;
     ALTER TABLE positions
       ADD COLUMN IF NOT EXISTS lucky_spent NUMERIC(20, 8) NOT NULL DEFAULT 0;
 

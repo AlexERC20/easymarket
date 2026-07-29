@@ -47,6 +47,7 @@ import {
   getKyivstonerMarket,
   getMarketActivity,
   getMarketComments,
+  getMarketMakerEconomyAudit,
   getMarketOrderBook,
   getMarketChart,
   getProjectEconomySettings,
@@ -181,6 +182,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "comment_required",
     "insufficient_shares",
     "invalid_market_price",
+    "market_maker_capacity_exhausted",
     "invoice_failed",
     "invoice_not_configured",
     "sell_failed",
@@ -367,6 +369,7 @@ app.get("/api/public/config", async (_req, res) => {
     ),
     market_star_max_payout_multiplier: config.marketStarMaxPayoutMultiplier,
     market_usdt_max_payout_multiplier: config.marketUsdtMaxPayoutMultiplier,
+    market_usdt_risk_budget: config.marketUsdtRiskBudget,
     star_usdt_conversion_stars_per_usdt: config.starUsdtConversionStarsPerUsdt,
     star_market_pricing_stars_per_usdt: config.starMarketPricingStarsPerUsdt,
     star_usdt_conversion_rate_bps: config.starUsdtConversionRateBps,
@@ -1755,6 +1758,21 @@ app.get("/api/bridge/economy/bonus-audit", requireBridgeSecret, async (_req, res
 app.get("/api/bridge/economy/integrity-audit", requireBridgeSecret, async (_req, res) => {
   try {
     const audit = await getEconomyIntegrityAudit();
+    res.status(200).json({
+      ok: true,
+      audit,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/market-maker-audit", requireBridgeSecret, async (req, res) => {
+  try {
+    const audit = await getMarketMakerEconomyAudit({
+      hours: req.query.hours,
+      limit: req.query.limit,
+    });
     res.status(200).json({
       ok: true,
       audit,

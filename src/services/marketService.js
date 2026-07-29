@@ -201,8 +201,8 @@ function mapMarket(row) {
   const isSports = String(row.symbol || "").startsWith(SPORTS_MARKET_SYMBOL_PREFIX);
   const isKyivstoner = isKyivstonerMarketSymbol(row.symbol);
   const minPrice = btcDefinition ? BTC_MIN_PRICE : MIN_PRICE;
-  const yesPrice = roundOutcomePrice(toNumber(row.yes_price), minPrice);
-  const noPrice = roundOutcomePrice(toNumber(row.no_price, 1 - yesPrice), minPrice);
+  const yesPrice = getMarketOutcomePrice(row, "YES");
+  const noPrice = getMarketOutcomePrice(row, "NO");
 
   return {
     id: Number(row.id),
@@ -413,7 +413,8 @@ function mapMarketComment(row) {
 }
 
 function mapWorldCupMarket(row) {
-  const yesPrice = toNumber(row.yes_price);
+  const yesPrice = getMarketOutcomePrice(row, "YES");
+  const noPrice = getMarketOutcomePrice(row, "NO");
   const localVolume = toNumber(row.yes_volume) + toNumber(row.no_volume);
   const externalVolume = toNumber(row.meta_volume ?? row.volume);
   return {
@@ -430,7 +431,7 @@ function mapWorldCupMarket(row) {
     open_price: toNumber(row.open_price),
     current_price: yesPrice,
     yes_price: yesPrice,
-    no_price: toNumber(row.no_price, 1 - yesPrice),
+    no_price: noPrice,
     chance_pct: Math.round(yesPrice * 1000) / 10,
     volume: localVolume,
     external_volume: externalVolume,
@@ -445,7 +446,8 @@ function mapWorldCupMarket(row) {
 }
 
 function mapTopMarket(row) {
-  const yesPrice = toNumber(row.yes_price);
+  const yesPrice = getMarketOutcomePrice(row, "YES");
+  const noPrice = getMarketOutcomePrice(row, "NO");
   const localVolume = toNumber(row.yes_volume) + toNumber(row.no_volume);
   const externalVolume = toNumber(row.meta_volume ?? row.volume);
   return {
@@ -464,7 +466,7 @@ function mapTopMarket(row) {
     open_price: toNumber(row.open_price),
     current_price: yesPrice,
     yes_price: yesPrice,
-    no_price: toNumber(row.no_price, 1 - yesPrice),
+    no_price: noPrice,
     chance_pct: Math.round(yesPrice * 1000) / 10,
     volume: localVolume,
     external_volume: externalVolume,
@@ -480,7 +482,8 @@ function mapTopMarket(row) {
 }
 
 function mapSportsMarket(row) {
-  const yesPrice = toNumber(row.yes_price);
+  const yesPrice = getMarketOutcomePrice(row, "YES");
+  const noPrice = getMarketOutcomePrice(row, "NO");
   const localVolume = toNumber(row.yes_volume) + toNumber(row.no_volume);
   return {
     id: Number(row.id),
@@ -502,7 +505,7 @@ function mapSportsMarket(row) {
     open_price: toNumber(row.open_price),
     current_price: yesPrice,
     yes_price: yesPrice,
-    no_price: toNumber(row.no_price, 1 - yesPrice),
+    no_price: noPrice,
     chance_pct: Math.round(yesPrice * 1000) / 10,
     volume: localVolume,
     external_volume: toNumber(row.meta_volume ?? row.volume),
@@ -948,11 +951,23 @@ function roundOutcomePrice(value, minPrice = MIN_PRICE) {
   return Math.round(clamp(Number(value || 0), minPrice, 1 - minPrice) * 100_000_000) / 100_000_000;
 }
 
-function getMarketOutcomePrice(market, side) {
+function getRawMarketOutcomePrice(market, side) {
   const minPrice = getMarketMinOutcomePrice(market);
   return side === "YES"
     ? roundOutcomePrice(toNumber(market.yes_price), minPrice)
     : roundOutcomePrice(toNumber(market.no_price), minPrice);
+}
+
+function getMarketOutcomePrice(market, side) {
+  const minPrice = getMarketMinOutcomePrice(market);
+  const rawPrice = getRawMarketOutcomePrice(market, side);
+  if (market?.status && market.status !== "open") {
+    return rawPrice;
+  }
+  const askFloor = side === "YES"
+    ? toNumber(market.yes_ask_floor, minPrice)
+    : toNumber(market.no_ask_floor, minPrice);
+  return roundOutcomePrice(Math.max(rawPrice, askFloor), minPrice);
 }
 
 function getOppositeSide(side) {
@@ -1054,7 +1069,7 @@ function getSpecialBuyExecutionQuote(market, side, amount, pricingWeight = 1) {
 
 function getSpecialSellExecutionQuote(market, side, sharesToSell, pricingWeight = 1) {
   const minPrice = getMarketMinOutcomePrice(market);
-  const oldOutcomePrice = getMarketOutcomePrice(market, side);
+  const oldOutcomePrice = getRawMarketOutcomePrice(market, side);
   const estimatedGross = Math.max(0, sharesToSell * oldOutcomePrice);
   const depth = getSpecialMarketDepth(market);
   const shift = Math.min(SPECIAL_MARKET_MAX_SHIFT, (estimatedGross * pricingWeight) / depth);
@@ -1098,12 +1113,203 @@ export function getMarketMakerPayoutMultiplier(currency) {
     : Math.max(1, Number(config.marketUsdtMaxPayoutMultiplier || 25));
 }
 
+export function getCollateralizedExecutionFloor(input = {}) {
+  const amount = Math.max(0, Number(input.amount || 0));
+  const pool = Number(input.pool || 0);
+  const liability = Math.max(0, Number(input.liability || 0));
+  const riskBudget = Math.max(0, Number(input.riskBudget || 0));
+  const luckyShare = clamp(Number(input.luckyShare || 0), 0, 1);
+  const minPrice = Math.max(0.00000001, Number(input.minPrice || MIN_PRICE));
+  const maxPrice = 1 - minPrice;
+  if (amount <= 0) {
+    return minPrice;
+  }
+
+  // A winning share settles at 1. The quote may therefore create at most the
+  // stake pool plus the explicitly configured MM risk budget. Lucky x2 adds
+  // one more copy of the profit, so it consumes collateral faster.
+  const availableLiability = pool + amount + riskBudget - liability;
+  const denominator = availableLiability + amount * luckyShare;
+  if (denominator <= 0) {
+    return maxPrice;
+  }
+
+  return roundOutcomePrice(
+    (amount * (1 + luckyShare)) / denominator,
+    minPrice,
+  );
+}
+
+async function getMarketMakerBackingSnapshot(client, marketId) {
+  const result = await client.query(
+    `
+      WITH exposure_rows AS (
+        SELECT
+          side,
+          (
+            shares
+            + GREATEST(shares - spent, 0)
+              * CASE WHEN spent > 0 THEN LEAST(1, lucky_spent / spent) ELSE 0 END
+          ) AS effective_shares,
+          spent,
+          bonus_spent
+        FROM positions
+        WHERE market_id = $1::bigint
+          AND currency = 'USDT'
+          AND status IN ('open', 'reserved')
+          AND shares > 0
+
+        UNION ALL
+
+        SELECT
+          side,
+          remaining_shares AS effective_shares,
+          remaining_spent AS spent,
+          remaining_bonus_spent AS bonus_spent
+        FROM limit_orders
+        WHERE market_id = $1::bigint
+          AND currency = 'USDT'
+          AND order_side = 'SELL'
+          AND status = 'open'
+          AND remaining_shares > 0
+      ),
+      exposure AS (
+        SELECT
+          COALESCE(SUM(
+            CASE WHEN side = 'YES' THEN
+              effective_shares
+                * CASE WHEN spent > 0 THEN GREATEST(spent - bonus_spent, 0) / spent ELSE 1 END
+            ELSE 0 END
+          ), 0) AS cash_yes_liability,
+          COALESCE(SUM(
+            CASE WHEN side = 'NO' THEN
+              effective_shares
+                * CASE WHEN spent > 0 THEN GREATEST(spent - bonus_spent, 0) / spent ELSE 1 END
+            ELSE 0 END
+          ), 0) AS cash_no_liability,
+          COALESCE(SUM(
+            CASE WHEN side = 'YES' THEN
+              effective_shares
+                * CASE WHEN spent > 0 THEN LEAST(1, bonus_spent / spent) ELSE 0 END
+            ELSE 0 END
+          ), 0) AS bonus_yes_liability,
+          COALESCE(SUM(
+            CASE WHEN side = 'NO' THEN
+              effective_shares
+                * CASE WHEN spent > 0 THEN LEAST(1, bonus_spent / spent) ELSE 0 END
+            ELSE 0 END
+          ), 0) AS bonus_no_liability
+        FROM exposure_rows
+      ),
+      cash_flow AS (
+        SELECT COALESCE(SUM(
+          CASE
+            WHEN reason IN ('buy_yes_usdt', 'buy_no_usdt') THEN -amount
+            WHEN reason IN ('sell_yes_usdt', 'sell_no_usdt') THEN -amount
+            ELSE 0
+          END
+        ), 0) AS pool
+        FROM usdt_ledger
+        WHERE source = 'market:' || $1::text
+      ),
+      bonus_flow AS (
+        SELECT COALESCE(SUM(
+          CASE
+            WHEN reason IN ('buy_yes_usdt_bonus', 'buy_no_usdt_bonus') THEN -amount
+            WHEN reason IN ('sell_yes_usdt_bonus', 'sell_no_usdt_bonus') THEN -amount
+            ELSE 0
+          END
+        ), 0) AS pool
+        FROM usdt_bonus_ledger
+        WHERE source = 'market:' || $1::text
+      )
+      SELECT exposure.*, cash_flow.pool AS cash_pool, bonus_flow.pool AS bonus_pool
+      FROM exposure
+      CROSS JOIN cash_flow
+      CROSS JOIN bonus_flow
+    `,
+    [marketId],
+  );
+  const row = result.rows[0] || {};
+  return {
+    cash: {
+      pool: toNumber(row.cash_pool),
+      yesLiability: toNumber(row.cash_yes_liability),
+      noLiability: toNumber(row.cash_no_liability),
+    },
+    bonus: {
+      pool: toNumber(row.bonus_pool),
+      yesLiability: toNumber(row.bonus_yes_liability),
+      noLiability: toNumber(row.bonus_no_liability),
+    },
+  };
+}
+
+function getBackingLiability(backing, side) {
+  return side === "YES" ? backing.yesLiability : backing.noLiability;
+}
+
+function getUsdtExecutionFloor(market, side, amount, debitSplit, backing, luckyShare = 0) {
+  const sourceBacking = debitSplit?.cash > 0 ? backing.cash : backing.bonus;
+  return getCollateralizedExecutionFloor({
+    amount,
+    pool: sourceBacking.pool,
+    liability: getBackingLiability(sourceBacking, side),
+    riskBudget: config.marketUsdtRiskBudget,
+    luckyShare,
+    minPrice: getMarketMinOutcomePrice(market),
+  });
+}
+
+async function refreshMarketMakerAskFloors(client, market) {
+  const backing = await getMarketMakerBackingSnapshot(client, market.id);
+  const minPrice = getMarketMinOutcomePrice(market);
+  const quoteAmount = 5;
+  const payoutFloor = 1 / getMarketMakerPayoutMultiplier("USDT");
+  const luckyShare = isLuckyWindowActive(market) ? 1 : 0;
+  const floorFor = (side, source) => Math.max(
+    payoutFloor,
+    getCollateralizedExecutionFloor({
+      amount: quoteAmount,
+      pool: backing[source].pool,
+      liability: getBackingLiability(backing[source], side),
+      riskBudget: config.marketUsdtRiskBudget,
+      luckyShare,
+      minPrice,
+    }),
+  );
+  const yesFloor = roundOutcomePrice(
+    Math.max(floorFor("YES", "cash"), floorFor("YES", "bonus")),
+    minPrice,
+  );
+  const noFloor = roundOutcomePrice(
+    Math.max(floorFor("NO", "cash"), floorFor("NO", "bonus")),
+    minPrice,
+  );
+
+  await client.query(
+    `
+      UPDATE markets
+      SET yes_ask_floor = $2::numeric,
+          no_ask_floor = $3::numeric
+      WHERE id = $1::bigint
+    `,
+    [market.id, yesFloor, noFloor],
+  );
+  return { yesFloor, noFloor, backing };
+}
+
 export function getBuyExecutionQuote(market, side, amount, options = {}) {
   const pricingWeight = Number.isFinite(options.pricingWeight) ? options.pricingWeight : 1;
   const maxPayoutMultiplier = Number(options.maxPayoutMultiplier);
-  const executionFloor = Number.isFinite(maxPayoutMultiplier) && maxPayoutMultiplier > 0
+  const payoutExecutionFloor = Number.isFinite(maxPayoutMultiplier) && maxPayoutMultiplier > 0
     ? 1 / maxPayoutMultiplier
     : 0;
+  const requestedExecutionFloor = Number(options.executionFloor);
+  const executionFloor = Math.max(
+    payoutExecutionFloor,
+    Number.isFinite(requestedExecutionFloor) ? requestedExecutionFloor : 0,
+  );
   if (isSpecialMarket(market)) {
     const quote = getSpecialBuyExecutionQuote(market, side, amount, pricingWeight);
     const executionPrice = Math.max(executionFloor, quote.executionPrice);
@@ -1169,7 +1375,9 @@ function getSellExecutionQuote(market, side, sharesToSell, options = {}) {
     return getSpecialSellExecutionQuote(market, side, sharesToSell, pricingWeight);
   }
   const minPrice = getMarketMinOutcomePrice(market);
-  const oldOutcomePrice = getMarketOutcomePrice(market, side);
+  // The collateral floor is an ask-side protection. Paying that same floor on
+  // SELL would let a trader cash it out against the internal market maker.
+  const oldOutcomePrice = getRawMarketOutcomePrice(market, side);
   const estimatedGross = Math.max(0, sharesToSell * oldOutcomePrice);
   // Влияние на цену — в долларовом эквиваленте; сама выручка остаётся в валюте позиции.
   const pricingGross = estimatedGross * pricingWeight;
@@ -6958,6 +7166,152 @@ export async function getUsdtLedgerEvents(input = {}) {
   return result.rows.map(mapUsdtLedgerEvent);
 }
 
+export async function getMarketMakerEconomyAudit(input = {}) {
+  const hours = Math.max(1, Math.min(24 * 30, Math.floor(Number(input.hours || 72))));
+  const limit = Math.max(1, Math.min(250, Math.floor(Number(input.limit || 100))));
+  const result = await query(
+    `
+      WITH audited_markets AS (
+        SELECT *
+        FROM markets
+        WHERE status = 'resolved'
+          AND resolved_at >= now() - ($1::int * interval '1 hour')
+        ORDER BY resolved_at DESC
+        LIMIT $2
+      )
+      SELECT
+        markets.id,
+        markets.symbol,
+        markets.question,
+        markets.winner,
+        markets.start_time,
+        markets.end_time,
+        markets.resolved_at,
+        COALESCE(cash.buy_amount, 0) AS cash_buy_amount,
+        COALESCE(cash.sell_amount, 0) AS cash_sell_amount,
+        COALESCE(cash.payout_amount, 0) AS cash_payout_amount,
+        COALESCE(bonus.buy_amount, 0) AS bonus_buy_amount,
+        COALESCE(bonus.sell_amount, 0) AS bonus_sell_amount,
+        COALESCE(bonus.payout_amount, 0) AS bonus_payout_amount,
+        COALESCE(trades.buy_count, 0) AS buy_count,
+        COALESCE(trades.sell_count, 0) AS sell_count,
+        COALESCE(trades.usdt_users, 0) AS usdt_users
+      FROM audited_markets markets
+      LEFT JOIN LATERAL (
+        SELECT
+          COALESCE(SUM(-amount) FILTER (
+            WHERE reason IN ('buy_yes_usdt', 'buy_no_usdt')
+          ), 0) AS buy_amount,
+          COALESCE(SUM(amount) FILTER (
+            WHERE reason IN ('sell_yes_usdt', 'sell_no_usdt')
+          ), 0) AS sell_amount,
+          COALESCE(SUM(amount) FILTER (
+            WHERE reason = 'market_payout_usdt'
+          ), 0) AS payout_amount
+        FROM usdt_ledger
+        WHERE source = 'market:' || markets.id::text
+      ) cash ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          COALESCE(SUM(-amount) FILTER (
+            WHERE reason IN ('buy_yes_usdt_bonus', 'buy_no_usdt_bonus')
+          ), 0) AS buy_amount,
+          COALESCE(SUM(amount) FILTER (
+            WHERE reason IN ('sell_yes_usdt_bonus', 'sell_no_usdt_bonus')
+          ), 0) AS sell_amount,
+          COALESCE(SUM(amount) FILTER (
+            WHERE reason = 'market_payout_usdt_bonus'
+          ), 0) AS payout_amount
+        FROM usdt_bonus_ledger
+        WHERE source = 'market:' || markets.id::text
+      ) bonus ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*) FILTER (WHERE action = 'BUY')::int AS buy_count,
+          COUNT(*) FILTER (WHERE action = 'SELL')::int AS sell_count,
+          COUNT(DISTINCT user_id)::int AS usdt_users
+        FROM trades
+        WHERE market_id = markets.id
+          AND currency = 'USDT'
+      ) trades ON true
+      ORDER BY markets.resolved_at DESC
+    `,
+    [hours, limit],
+  );
+
+  const markets = result.rows.map((row) => {
+    const cashIn = toNumber(row.cash_buy_amount);
+    const cashSell = toNumber(row.cash_sell_amount);
+    const cashPayout = toNumber(row.cash_payout_amount);
+    const bonusIn = toNumber(row.bonus_buy_amount);
+    const bonusSell = toNumber(row.bonus_sell_amount);
+    const bonusPayout = toNumber(row.bonus_payout_amount);
+    const cashNet = roundMoney(cashIn - cashSell - cashPayout);
+    const bonusNet = roundMoney(bonusIn - bonusSell - bonusPayout);
+    return {
+      market_id: Number(row.id),
+      symbol: row.symbol,
+      question: row.question,
+      winner: row.winner,
+      cash_in: cashIn,
+      cash_sell: cashSell,
+      cash_payout: cashPayout,
+      cash_net: cashNet,
+      bonus_in: bonusIn,
+      bonus_sell: bonusSell,
+      bonus_payout: bonusPayout,
+      bonus_net: bonusNet,
+      combined_net: roundMoney(cashNet + bonusNet),
+      buy_count: Number(row.buy_count || 0),
+      sell_count: Number(row.sell_count || 0),
+      users: Number(row.usdt_users || 0),
+      start_time: row.start_time,
+      end_time: row.end_time,
+      resolved_at: row.resolved_at,
+    };
+  });
+  const activeMarkets = markets.filter((market) => (
+    market.cash_in > 0
+    || market.bonus_in > 0
+    || market.cash_sell > 0
+    || market.bonus_sell > 0
+  ));
+  const totals = activeMarkets.reduce((summary, market) => {
+    summary.cash_in += market.cash_in;
+    summary.cash_sell += market.cash_sell;
+    summary.cash_payout += market.cash_payout;
+    summary.cash_net += market.cash_net;
+    summary.bonus_in += market.bonus_in;
+    summary.bonus_sell += market.bonus_sell;
+    summary.bonus_payout += market.bonus_payout;
+    summary.bonus_net += market.bonus_net;
+    return summary;
+  }, {
+    cash_in: 0,
+    cash_sell: 0,
+    cash_payout: 0,
+    cash_net: 0,
+    bonus_in: 0,
+    bonus_sell: 0,
+    bonus_payout: 0,
+    bonus_net: 0,
+  });
+  for (const key of Object.keys(totals)) {
+    totals[key] = roundMoney(totals[key]);
+  }
+
+  return {
+    hours,
+    risk_budget_per_market: config.marketUsdtRiskBudget,
+    market_count: activeMarkets.length,
+    totals,
+    worst_markets: activeMarkets
+      .slice()
+      .sort((left, right) => left.cash_net - right.cash_net)
+      .slice(0, 20),
+  };
+}
+
 export async function createBtcMarket(definition = BTC_MARKET_DEFS[0], btcInput = null) {
   const existing = await getOpenMarket(definition.symbol);
   if (existing) {
@@ -9229,9 +9583,32 @@ export async function buyOutcome(input) {
       : basePayoutMultiplier;
     const marketMinPrice = getMarketMinOutcomePrice(market);
     const pricingWeight = getPricingWeight(currency);
+    let usdtDebitSplit = null;
+    let usdtBacking = null;
+    let collateralExecutionFloor = 0;
+    if (currency === "USDT") {
+      const lockedBalance = await getLockedCurrencyBalance(client, user.id, currency);
+      usdtDebitSplit = splitUsdtSpend(amount, lockedBalance);
+      if (!usdtDebitSplit) {
+        throw new Error(insufficientBalanceError(currency));
+      }
+      usdtBacking = await getMarketMakerBackingSnapshot(client, marketId);
+      collateralExecutionFloor = getUsdtExecutionFloor(
+        market,
+        side,
+        amount,
+        usdtDebitSplit,
+        usdtBacking,
+        luckySpentPart > 0 ? luckySpentPart / amount : 0,
+      );
+      if (collateralExecutionFloor >= 1 - marketMinPrice) {
+        throw new Error("market_maker_capacity_exhausted");
+      }
+    }
     const quote = getBuyExecutionQuote(market, side, amount, {
       pricingWeight,
       maxPayoutMultiplier: quotePayoutMultiplier,
+      executionFloor: collateralExecutionFloor,
     });
     if (quote.executionPrice < marketMinPrice || quote.executionPrice > 1 - marketMinPrice) {
       throw new Error("invalid_market_price");
@@ -9325,6 +9702,13 @@ export async function buyOutcome(input) {
     );
 
     const referralBonus = await awardReferralBetBonus(client, user, marketId);
+    const askFloors = currency === "USDT"
+      ? await refreshMarketMakerAskFloors(client, {
+        ...market,
+        yes_price: nextYesPrice,
+        no_price: nextNoPrice,
+      })
+      : null;
 
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
@@ -9342,6 +9726,8 @@ export async function buyOutcome(input) {
         ...market,
         yes_price: nextYesPrice,
         no_price: nextNoPrice,
+        yes_ask_floor: askFloors?.yesFloor ?? market.yes_ask_floor,
+        no_ask_floor: askFloors?.noFloor ?? market.no_ask_floor,
         yes_volume: toNumber(market.yes_volume) + (side === "YES" ? netAmount : 0),
         no_volume: toNumber(market.no_volume) + (side === "NO" ? netAmount : 0),
       }),
@@ -9604,6 +9990,13 @@ export async function sellOutcome(input) {
       ],
     );
     await persistSpecialMarketTicks(client, market, nextYesPrice, nextNoPrice);
+    const askFloors = currency === "USDT"
+      ? await refreshMarketMakerAskFloors(client, {
+        ...market,
+        yes_price: nextYesPrice,
+        no_price: nextNoPrice,
+      })
+      : null;
 
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
@@ -9620,6 +10013,8 @@ export async function sellOutcome(input) {
         ...market,
         yes_price: nextYesPrice,
         no_price: nextNoPrice,
+        yes_ask_floor: askFloors?.yesFloor ?? market.yes_ask_floor,
+        no_ask_floor: askFloors?.noFloor ?? market.no_ask_floor,
         yes_volume: quote.nextYesVolume,
         no_volume: quote.nextNoVolume,
       }),

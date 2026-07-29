@@ -5,6 +5,7 @@ import {
   buildPromoUsdtPlayProgress,
   calculateResolvedPositionSettlement,
   getBuyExecutionQuote,
+  getCollateralizedExecutionFloor,
   getLuckySpentForBuy,
   getMarketMakerPayoutMultiplier,
   getPricingWeight,
@@ -193,6 +194,71 @@ test("a capped STAR tail buy reprices the book before the next buy", () => {
 
   assert.ok(first.nextYesPrice >= 1 / 15);
   assert.ok(second.executionPrice > first.executionPrice);
+});
+
+test("USDT MM risk stays bounded during repeated one-sided buys", () => {
+  const riskBudget = 100;
+  const amount = 5;
+  let pool = 0;
+  let liability = 0;
+  let accepted = 0;
+
+  for (let index = 0; index < 50; index += 1) {
+    const floor = getCollateralizedExecutionFloor({
+      amount,
+      pool,
+      liability,
+      riskBudget,
+      minPrice: 0.001,
+    });
+    if (floor >= 0.999) {
+      break;
+    }
+    const executionPrice = Math.max(0.1, floor);
+    pool += amount;
+    liability += amount / executionPrice;
+    accepted += 1;
+    assert.ok(
+      liability - pool <= riskBudget + 0.0001,
+      "one-sided winning liability must stay inside the explicit MM budget",
+    );
+  }
+
+  assert.ok(accepted > 1);
+  assert.ok(accepted < 50, "the MM must stop minting an unbacked tail indefinitely");
+});
+
+test("opposite USDT stakes restore collateral capacity", () => {
+  const riskBudget = 100;
+  const exhaustedYes = getCollateralizedExecutionFloor({
+    amount: 5,
+    pool: 10,
+    liability: 110,
+    riskBudget,
+    minPrice: 0.001,
+  });
+  const backedYes = getCollateralizedExecutionFloor({
+    amount: 5,
+    pool: 110,
+    liability: 110,
+    riskBudget,
+    minPrice: 0.001,
+  });
+
+  assert.equal(exhaustedYes, 0.999);
+  assert.ok(backedYes < 0.05);
+});
+
+test("a large first USDT tail bet consumes the configured risk budget in its quote", () => {
+  const floor = getCollateralizedExecutionFloor({
+    amount: 100,
+    pool: 0,
+    liability: 0,
+    riskBudget: 100,
+    minPrice: 0.001,
+  });
+
+  assert.equal(floor, 0.5);
 });
 
 test("an account snapshot started before a balance mutation is rejected", () => {

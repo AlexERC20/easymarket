@@ -73,6 +73,11 @@ export const config = {
     25,
     1,
   ),
+  marketUsdtRiskBudget: parseNumber(
+    process.env.MARKET_USDT_RISK_BUDGET,
+    100,
+    0,
+  ),
   marketMakerSpreadBps: parseNumber(process.env.MARKET_MAKER_SPREAD_BPS, 300, 0),
   pricePollMs: parseNumber(process.env.PRICE_POLL_MS, 1_000, 250),
   priceTicksEnabled: !parseBoolean(process.env.PRICE_TICKS_DISABLED, false),
