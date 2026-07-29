@@ -6,6 +6,7 @@ import {
   calculateResolvedPositionSettlement,
   getBuyExecutionQuote,
   getLuckySpentForBuy,
+  getMarketMakerPayoutMultiplier,
   getPricingWeight,
   getRefundableMarketLoss,
   splitUsdtSpend,
@@ -118,7 +119,7 @@ test("losing side pays zero in both STAR and USDT settlements", () => {
   }
 });
 
-test("star bets move the price by their dollar value, not their number", () => {
+test("star bets use a thinner dedicated pricing book", () => {
   // Ровный рынок: иначе цену задаёт нижняя граница книги, а не размер ставки.
   const market = buildMarket({ yes_price: 0.5, no_price: 0.5, yes_volume: 100, no_volume: 100 });
   const usdtQuote = getBuyExecutionQuote(market, "YES", 500, { pricingWeight: 1 });
@@ -126,7 +127,8 @@ test("star bets move the price by their dollar value, not their number", () => {
     pricingWeight: getPricingWeight("STAR"),
   });
 
-  // 500⭐ стоят $0.50 и не должны двигать рынок как ставка в $500.
+  // 500 STAR не должны двигать рынок как $500, но отдельная глубина книги
+  // делает их влияние сильнее старого курса конвертации 1000:1.
   assert.ok(
     starQuote.nextYesPrice < usdtQuote.nextYesPrice,
     "a star bet must move the price less than the same number of dollars",
@@ -140,9 +142,10 @@ test("star bets move the price by their dollar value, not their number", () => {
     "the dollar bet must still move the price",
   );
   assert.equal(getPricingWeight("USDT"), 1);
+  assert.equal(getPricingWeight("STAR"), 1 / 250);
 });
 
-test("internal market-maker buys cannot exceed a 25x gross payout", () => {
+test("STAR market-maker buys cannot exceed a 15x gross payout", () => {
   const tailMarket = buildMarket({
     symbol: "BTCUSDT",
     yes_price: 0.002,
@@ -155,12 +158,40 @@ test("internal market-maker buys cannot exceed a 25x gross payout", () => {
   const amount = 50;
   const quote = getBuyExecutionQuote(tailMarket, "YES", amount, {
     pricingWeight: getPricingWeight("STAR"),
-    maxPayoutMultiplier: 25,
+    maxPayoutMultiplier: getMarketMakerPayoutMultiplier("STAR"),
   });
   const shares = amount / quote.executionPrice;
 
-  assert.ok(quote.executionPrice >= 0.04);
-  assert.ok(shares <= amount * 25);
+  assert.ok(quote.executionPrice >= 1 / 15);
+  assert.ok(shares <= amount * 15);
+  assert.equal(getMarketMakerPayoutMultiplier("STAR"), 15);
+  assert.equal(getMarketMakerPayoutMultiplier("USDT"), 25);
+});
+
+test("a capped STAR tail buy reprices the book before the next buy", () => {
+  const market = buildMarket({
+    symbol: "BTCUSDT",
+    yes_price: 0.002,
+    no_price: 0.998,
+    current_price: 99,
+    open_price: 100,
+    yes_volume: 0,
+    no_volume: 100,
+  });
+  const options = {
+    pricingWeight: getPricingWeight("STAR"),
+    maxPayoutMultiplier: getMarketMakerPayoutMultiplier("STAR"),
+  };
+  const first = getBuyExecutionQuote(market, "YES", 50, options);
+  const second = getBuyExecutionQuote({
+    ...market,
+    yes_price: first.nextYesPrice,
+    no_price: first.nextNoPrice,
+    yes_volume: market.yes_volume + 50 * getPricingWeight("STAR"),
+  }, "YES", 50, options);
+
+  assert.ok(first.nextYesPrice >= 1 / 15);
+  assert.ok(second.executionPrice > first.executionPrice);
 });
 
 test("lucky x2 is revoked when the user holds the opposite side", () => {

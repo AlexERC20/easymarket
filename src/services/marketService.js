@@ -27,7 +27,6 @@ const KYIVSTONER_NO_LABEL = "Меньше 8";
 const KYIVSTONER_TEST_RESET_MIGRATION = "kyivstoner_test_market_reset_v2";
 const SPECIAL_MARKET_SPREAD_BPS = 100;
 const SPECIAL_MARKET_MAX_SHIFT = 0.2;
-const MAX_MARKET_MAKER_PAYOUT_MULTIPLIER = 25;
 const MIN_PRICE = 0.001;
 const MAX_PRICE = 0.999;
 const BTC_MIN_PRICE = 0.001;
@@ -1083,14 +1082,20 @@ function getSpecialSellExecutionQuote(market, side, sharesToSell, pricingWeight 
   };
 }
 
-// Вес ставки для влияния на цену. Звёзды — мягкая валюта (1000⭐ ≈ $1), и без
-// пересчёта ставка в 500⭐ двигала рынок так же, как $500: бесплатной валютой
-// можно было продавливать цену, по которой исполняются реальные деньги.
+// Курс конвертации и глубина STAR-книги намеренно разделены. Конвертация может
+// оставаться медленной, а цена при этом обязана заметно реагировать на серию
+// STAR-покупок, особенно в хвосте.
 export function getPricingWeight(currency) {
   if (normalizeCurrency(currency) !== "STAR") {
     return 1;
   }
-  return 1 / Math.max(1, Number(config.starUsdtConversionStarsPerUsdt || 1_000));
+  return 1 / Math.max(1, Number(config.starMarketPricingStarsPerUsdt || 250));
+}
+
+export function getMarketMakerPayoutMultiplier(currency) {
+  return normalizeCurrency(currency) === "STAR"
+    ? Math.max(1, Number(config.marketStarMaxPayoutMultiplier || 15))
+    : Math.max(1, Number(config.marketUsdtMaxPayoutMultiplier || 25));
 }
 
 export function getBuyExecutionQuote(market, side, amount, options = {}) {
@@ -1101,9 +1106,15 @@ export function getBuyExecutionQuote(market, side, amount, options = {}) {
     : 0;
   if (isSpecialMarket(market)) {
     const quote = getSpecialBuyExecutionQuote(market, side, amount, pricingWeight);
+    const executionPrice = Math.max(executionFloor, quote.executionPrice);
+    const nextOutcomePrice = Math.max(executionFloor, side === "YES"
+      ? quote.nextYesPrice
+      : quote.nextNoPrice);
     return {
       ...quote,
-      executionPrice: Math.max(executionFloor, quote.executionPrice),
+      executionPrice,
+      nextYesPrice: side === "YES" ? nextOutcomePrice : quote.nextYesPrice,
+      nextNoPrice: side === "NO" ? nextOutcomePrice : quote.nextNoPrice,
     };
   }
   const minPrice = getMarketMinOutcomePrice(market);
@@ -1139,12 +1150,16 @@ export function getBuyExecutionQuote(market, side, amount, options = {}) {
     executionFloor,
     roundOutcomePrice(Math.max(oldOutcomePrice, nextOutcomePrice) * (1 + spread), minPrice),
   );
+  const flooredNextOutcomePrice = Math.max(
+    executionFloor,
+    side === "YES" ? nextYesPrice : nextNoPrice,
+  );
 
   return {
     oldOutcomePrice,
     executionPrice,
-    nextYesPrice,
-    nextNoPrice,
+    nextYesPrice: side === "YES" ? flooredNextOutcomePrice : nextYesPrice,
+    nextNoPrice: side === "NO" ? flooredNextOutcomePrice : nextNoPrice,
   };
 }
 
@@ -9189,21 +9204,6 @@ export async function buyOutcome(input) {
       throw new Error("market_closed");
     }
 
-    const marketMinPrice = getMarketMinOutcomePrice(market);
-    const pricingWeight = getPricingWeight(currency);
-    const quote = getBuyExecutionQuote(market, side, amount, {
-      pricingWeight,
-      maxPayoutMultiplier: MAX_MARKET_MAKER_PAYOUT_MULTIPLIER,
-    });
-    if (quote.executionPrice < marketMinPrice || quote.executionPrice > 1 - marketMinPrice) {
-      throw new Error("invalid_market_price");
-    }
-
-    const fee = 0;
-    const netAmount = Math.max(0, amount - fee);
-    const shares = netAmount / quote.executionPrice;
-    const nextYesPrice = quote.nextYesPrice;
-    const nextNoPrice = quote.nextNoPrice;
     const oppositePositionResult = await client.query(
       `
         SELECT id
@@ -9219,6 +9219,29 @@ export async function buyOutcome(input) {
       [user.id, marketId, getOppositeSide(side), currency],
     );
     const hasOppositePosition = oppositePositionResult.rowCount > 0;
+    const luckySpentPart = getLuckySpentForBuy(market, hasOppositePosition, amount);
+    const basePayoutMultiplier = getMarketMakerPayoutMultiplier(currency);
+    // x2 удваивает только прибыль счастливой части позиции. Для неё заранее
+    // уменьшаем максимально допустимое число shares, чтобы итоговая выплата
+    // тоже не могла перескочить установленный потолок.
+    const quotePayoutMultiplier = luckySpentPart > 0
+      ? (basePayoutMultiplier + 1) / 2
+      : basePayoutMultiplier;
+    const marketMinPrice = getMarketMinOutcomePrice(market);
+    const pricingWeight = getPricingWeight(currency);
+    const quote = getBuyExecutionQuote(market, side, amount, {
+      pricingWeight,
+      maxPayoutMultiplier: quotePayoutMultiplier,
+    });
+    if (quote.executionPrice < marketMinPrice || quote.executionPrice > 1 - marketMinPrice) {
+      throw new Error("invalid_market_price");
+    }
+
+    const fee = 0;
+    const netAmount = Math.max(0, amount - fee);
+    const shares = netAmount / quote.executionPrice;
+    const nextYesPrice = quote.nextYesPrice;
+    const nextNoPrice = quote.nextNoPrice;
     if (hasOppositePosition) {
       await client.query(
         `
@@ -9263,7 +9286,6 @@ export async function buyOutcome(input) {
     await persistSpecialMarketTicks(client, market, nextYesPrice, nextNoPrice);
 
     // x2 нельзя хеджировать второй стороной: иначе бонус гарантирует прибыль.
-    const luckySpentPart = getLuckySpentForBuy(market, hasOppositePosition, amount);
     const positionResult = await client.query(
       `
         INSERT INTO positions (
@@ -9610,6 +9632,340 @@ export async function sellOutcome(input) {
         proceeds,
         pnl: realizedPnl,
       },
+    };
+  });
+}
+
+export async function correctStarMarketSettlement(input) {
+  const telegramId = String(input.telegram_id || input.telegramId || "").trim();
+  const marketId = Number(input.market_id ?? input.marketId);
+  const maxPayoutMultiplier = Math.max(
+    1,
+    Number(
+      input.max_payout_multiplier
+        ?? input.maxPayoutMultiplier
+        ?? getMarketMakerPayoutMultiplier("STAR"),
+    ),
+  );
+  if (!telegramId) {
+    throw new Error("telegram_id_missing");
+  }
+  if (!Number.isSafeInteger(marketId) || marketId <= 0) {
+    throw new Error("invalid_market_id");
+  }
+  if (!Number.isFinite(maxPayoutMultiplier)) {
+    throw new Error("invalid_payout_multiplier");
+  }
+
+  return withTransaction(async (client) => {
+    const positionResult = await client.query(
+      `
+        SELECT
+          position.*,
+          market.winner,
+          market.is_lucky,
+          market.status AS market_status,
+          market.symbol,
+          market.question,
+          app_user.telegram_id,
+          app_user.username
+        FROM positions position
+        JOIN markets market ON market.id = position.market_id
+        JOIN users app_user ON app_user.id = position.user_id
+        WHERE app_user.telegram_id = $1
+          AND position.market_id = $2
+          AND position.currency = 'STAR'
+          AND position.status = 'resolved'
+          AND UPPER(position.side) = UPPER(market.winner)
+        LIMIT 1
+        FOR UPDATE OF position
+      `,
+      [telegramId, marketId],
+    );
+    const position = positionResult.rows[0];
+    if (!position) {
+      throw new Error("resolved_winning_star_position_not_found");
+    }
+
+    const eventKey = `star_market_cap:${marketId}:position:${position.id}:x${maxPayoutMultiplier}`;
+    const existingCorrection = await client.query(
+      `
+        SELECT *
+        FROM market_settlement_corrections
+        WHERE event_key = $1
+        LIMIT 1
+      `,
+      [eventKey],
+    );
+    if (existingCorrection.rows[0]) {
+      return {
+        ok: true,
+        already_corrected: true,
+        correction: existingCorrection.rows[0],
+      };
+    }
+
+    const tradesResult = await client.query(
+      `
+        SELECT id, amount, price, shares, created_at
+        FROM trades
+        WHERE user_id = $1
+          AND market_id = $2
+          AND currency = 'STAR'
+          AND action = 'BUY'
+          AND side = $3
+        ORDER BY id ASC
+      `,
+      [position.user_id, marketId, position.side],
+    );
+    let excessShares = 0;
+    let cappedTrades = 0;
+    const tradeCorrections = [];
+    for (const trade of tradesResult.rows) {
+      const originalTradeShares = roundShares(trade.shares);
+      const correctedTradeShares = Math.min(
+        originalTradeShares,
+        roundShares(toNumber(trade.amount) * maxPayoutMultiplier),
+      );
+      const tradeExcess = roundShares(originalTradeShares - correctedTradeShares);
+      if (tradeExcess <= 0) {
+        continue;
+      }
+      cappedTrades += 1;
+      excessShares = roundShares(excessShares + tradeExcess);
+      tradeCorrections.push({
+        trade_id: Number(trade.id),
+        amount: toNumber(trade.amount),
+        original_price: toNumber(trade.price),
+        original_shares: originalTradeShares,
+        corrected_shares: correctedTradeShares,
+      });
+    }
+
+    const originalShares = roundShares(position.shares);
+    const correctedShares = roundShares(originalShares - excessShares);
+    if (cappedTrades === 0 || correctedShares <= 0 || correctedShares >= originalShares) {
+      throw new Error("settlement_correction_not_needed");
+    }
+
+    const economySettings = await getEconomySettingsWithClient(client);
+    const correctedPosition = {
+      ...position,
+      shares: correctedShares,
+    };
+    const correctedSettlement = calculateResolvedPositionSettlement(
+      correctedPosition,
+      position,
+      position.winner,
+      economySettings,
+    );
+    const originalPayout = roundMoney(position.payout);
+    const correctedPayout = roundMoney(correctedSettlement.payout);
+    const userDebit = roundMoney(originalPayout - correctedPayout);
+    if (userDebit <= 0) {
+      throw new Error("settlement_correction_not_needed");
+    }
+
+    const distributionResult = await client.query(
+      `
+        SELECT *
+        FROM profit_fee_distributions
+        WHERE position_id = $1
+          AND currency = 'STAR'
+        ORDER BY id DESC
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [position.id],
+    );
+    const distribution = distributionResult.rows[0] || null;
+    const correctedGrossProfit = Math.max(0, roundMoney(correctedSettlement.grossProfit));
+    const correctedTotalFee = Math.max(0, roundMoney(correctedSettlement.fee));
+    const correctedReferralFee = distribution?.referrer_user_id
+      ? Math.min(
+        correctedTotalFee,
+        roundMoney(correctedGrossProfit * (economySettings.referral_profit_share_bps / 10_000)),
+      )
+      : 0;
+    const correctedClanFee = distribution?.clan_id
+      ? Math.min(
+        Math.max(0, correctedTotalFee - correctedReferralFee),
+        roundMoney(correctedGrossProfit * (economySettings.clan_profit_share_bps / 10_000)),
+      )
+      : 0;
+    const correctedProjectFee = roundMoney(
+      correctedTotalFee - correctedReferralFee - correctedClanFee,
+    );
+    const originalReferralFee = roundMoney(distribution?.referral_fee);
+    const originalClanFee = roundMoney(distribution?.clan_fee);
+    const referralDebit = Math.max(0, roundMoney(originalReferralFee - correctedReferralFee));
+    const clanDebit = Math.max(0, roundMoney(originalClanFee - correctedClanFee));
+    const source = `market:${marketId}:settlement-correction`;
+
+    await debitCurrencyBalance(
+      client,
+      position.user_id,
+      "STAR",
+      userDebit,
+      "market_payout_correction",
+      source,
+    );
+    if (referralDebit > 0 && distribution?.referrer_user_id) {
+      await debitCurrencyBalance(
+        client,
+        distribution.referrer_user_id,
+        "STAR",
+        referralDebit,
+        "profit_fee_referral_correction",
+        source,
+      );
+    }
+
+    const correctedAvgPrice = correctedShares > 0
+      ? roundShares(toNumber(position.spent) / correctedShares)
+      : 0;
+    await client.query(
+      `
+        UPDATE positions
+        SET shares = $2::numeric,
+            avg_price = $3::numeric,
+            payout = $4::numeric,
+            pnl = $5::numeric,
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [
+        position.id,
+        correctedShares,
+        correctedAvgPrice,
+        correctedPayout,
+        correctedSettlement.pnl,
+      ],
+    );
+
+    if (distribution) {
+      await client.query(
+        `
+          UPDATE profit_fee_distributions
+          SET gross_profit = $2::numeric,
+              total_fee = $3::numeric,
+              distributable_fee = $3::numeric,
+              bonus_fee = 0,
+              project_fee = $4::numeric,
+              referral_fee = $5::numeric,
+              clan_fee = $6::numeric,
+              bonus_unlock_fee = 0
+          WHERE id = $1
+        `,
+        [
+          distribution.id,
+          correctedGrossProfit,
+          correctedTotalFee,
+          correctedProjectFee,
+          correctedReferralFee,
+          correctedClanFee,
+        ],
+      );
+    }
+
+    if (clanDebit > 0 && distribution?.clan_id) {
+      const fundEntryResult = await client.query(
+        `
+          SELECT month_key
+          FROM clan_reward_fund_ledger
+          WHERE position_id = $1
+            AND currency = 'STAR'
+            AND amount > 0
+          ORDER BY id DESC
+          LIMIT 1
+        `,
+        [position.id],
+      );
+      await client.query(
+        `
+          INSERT INTO clan_reward_fund_ledger (
+            clan_id,
+            market_id,
+            position_id,
+            currency,
+            amount,
+            month_key,
+            source
+          )
+          VALUES ($1, $2, $3, 'STAR', $4::numeric, $5, $6)
+        `,
+        [
+          distribution.clan_id,
+          marketId,
+          position.id,
+          -clanDebit,
+          fundEntryResult.rows[0]?.month_key || getMonthKey(),
+          source,
+        ],
+      );
+    }
+
+    const correctionResult = await client.query(
+      `
+        INSERT INTO market_settlement_corrections (
+          event_key,
+          market_id,
+          position_id,
+          user_id,
+          referrer_user_id,
+          max_payout_multiplier,
+          original_shares,
+          corrected_shares,
+          original_payout,
+          corrected_payout,
+          user_debit,
+          original_referral_fee,
+          corrected_referral_fee,
+          referral_debit,
+          clan_debit,
+          details
+        )
+        VALUES (
+          $1, $2, $3, $4, $5, $6::numeric,
+          $7::numeric, $8::numeric, $9::numeric, $10::numeric,
+          $11::numeric, $12::numeric, $13::numeric, $14::numeric,
+          $15::numeric, $16::jsonb
+        )
+        RETURNING *
+      `,
+      [
+        eventKey,
+        marketId,
+        position.id,
+        position.user_id,
+        distribution?.referrer_user_id || null,
+        maxPayoutMultiplier,
+        originalShares,
+        correctedShares,
+        originalPayout,
+        correctedPayout,
+        userDebit,
+        originalReferralFee,
+        correctedReferralFee,
+        referralDebit,
+        clanDebit,
+        JSON.stringify({
+          capped_trades: cappedTrades,
+          total_buy_trades: tradesResult.rowCount,
+          excess_shares: excessShares,
+          original_pnl: roundMoney(position.pnl),
+          corrected_pnl: roundMoney(correctedSettlement.pnl),
+          original_total_fee: roundMoney(distribution?.total_fee),
+          corrected_total_fee: correctedTotalFee,
+          trades: tradeCorrections,
+        }),
+      ],
+    );
+
+    return {
+      ok: true,
+      already_corrected: false,
+      correction: correctionResult.rows[0],
     };
   });
 }

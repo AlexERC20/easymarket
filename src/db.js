@@ -664,6 +664,26 @@ export async function runMigrations() {
       ON profit_fee_distributions(currency, referrer_user_id)
       WHERE referral_fee > 0 AND referrer_user_id IS NOT NULL;
 
+    CREATE TABLE IF NOT EXISTS market_settlement_corrections (
+      event_key TEXT PRIMARY KEY,
+      market_id BIGINT NOT NULL,
+      position_id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      referrer_user_id BIGINT,
+      max_payout_multiplier NUMERIC(20, 8) NOT NULL,
+      original_shares NUMERIC(20, 8) NOT NULL,
+      corrected_shares NUMERIC(20, 8) NOT NULL,
+      original_payout NUMERIC(20, 8) NOT NULL,
+      corrected_payout NUMERIC(20, 8) NOT NULL,
+      user_debit NUMERIC(20, 8) NOT NULL,
+      original_referral_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      corrected_referral_fee NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      referral_debit NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      clan_debit NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS clan_reward_fund_ledger (
       id BIGSERIAL PRIMARY KEY,
       clan_id BIGINT REFERENCES clans(id) ON DELETE SET NULL,

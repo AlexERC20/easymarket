@@ -26,6 +26,7 @@ import {
   auditSubscriptionTasks,
   checkTelegramSubscription,
   completeVerifiedTask,
+  correctStarMarketSettlement,
   revokeSubscriptionTask,
   hasStartedTelegramBot,
   getEngagementState,
@@ -364,7 +365,10 @@ app.get("/api/public/config", async (_req, res) => {
     market_star_profit_fee_bps: Number(
       economySettings.star_profit_fee_bps || config.marketStarProfitFeeBps,
     ),
+    market_star_max_payout_multiplier: config.marketStarMaxPayoutMultiplier,
+    market_usdt_max_payout_multiplier: config.marketUsdtMaxPayoutMultiplier,
     star_usdt_conversion_stars_per_usdt: config.starUsdtConversionStarsPerUsdt,
+    star_market_pricing_stars_per_usdt: config.starMarketPricingStarsPerUsdt,
     star_usdt_conversion_rate_bps: config.starUsdtConversionRateBps,
     star_usdt_conversion_lifetime_cap_bps: config.starUsdtConversionLifetimeCapBps,
     usdt_deposit_minimum: config.usdtDepositMinimum,
@@ -1676,6 +1680,15 @@ app.post("/api/bridge/economy/settings", requireBridgeSecret, async (req, res) =
       ok: true,
       settings,
     });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/economy/correct-star-settlement", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await correctStarMarketSettlement(req.body || {});
+    res.status(200).json(result);
   } catch (error) {
     sendApiError(res, error);
   }

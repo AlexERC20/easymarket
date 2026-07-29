@@ -63,6 +63,16 @@ export const config = {
   marketFeeBps: parseNumber(process.env.MARKET_FEE_BPS, 200, 0),
   marketProfitFeeBps: parseNumber(process.env.MARKET_PROFIT_FEE_BPS, 700, 0),
   marketStarProfitFeeBps: parseNumber(process.env.MARKET_STAR_PROFIT_FEE_BPS, 1_500, 0),
+  marketStarMaxPayoutMultiplier: parseNumber(
+    process.env.MARKET_STAR_MAX_PAYOUT_MULTIPLIER,
+    15,
+    1,
+  ),
+  marketUsdtMaxPayoutMultiplier: parseNumber(
+    process.env.MARKET_USDT_MAX_PAYOUT_MULTIPLIER,
+    25,
+    1,
+  ),
   marketMakerSpreadBps: parseNumber(process.env.MARKET_MAKER_SPREAD_BPS, 300, 0),
   pricePollMs: parseNumber(process.env.PRICE_POLL_MS, 1_000, 250),
   priceTicksEnabled: !parseBoolean(process.env.PRICE_TICKS_DISABLED, false),
@@ -99,6 +109,11 @@ export const config = {
   starUsdtConversionStarsPerUsdt: parseNumber(
     process.env.STAR_USDT_CONVERSION_STARS_PER_USDT,
     1_000,
+    1,
+  ),
+  starMarketPricingStarsPerUsdt: parseNumber(
+    process.env.STAR_MARKET_PRICING_STARS_PER_USDT,
+    250,
     1,
   ),
   starUsdtConversionRateBps: parseNumber(process.env.STAR_USDT_CONVERSION_RATE_BPS, 5, 0),
