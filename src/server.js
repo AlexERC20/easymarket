@@ -66,6 +66,7 @@ import {
   resetUserMarketStateByUsername,
   restartMarketMaker,
   applyMarketMakerCollateral,
+  unwindMarket,
   resolveExpiredMarkets,
   sellOutcome,
   syncTopMarkets,
@@ -1771,6 +1772,18 @@ app.post("/api/bridge/amm/collateral", requireBridgeSecret, async (req, res) => 
     const result = await applyMarketMakerCollateral({
       book_types: req.body?.book_types ?? req.body?.bookTypes,
       admin_telegram_id: req.body?.admin_telegram_id ?? req.body?.adminTelegramId,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/admin/unwind-market", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await unwindMarket({
+      market_id: req.body?.market_id ?? req.body?.marketId,
+      dry_run: req.body?.dry_run ?? req.body?.dryRun,
     });
     res.status(200).json(result);
   } catch (error) {

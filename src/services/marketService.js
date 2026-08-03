@@ -13383,6 +13383,192 @@ async function settleOpenMarketPositions(client, market, winner) {
   }
 }
 
+const UNWIND_LEDGERS = [
+  { ledger: "fire_ledger", balances: "fire_balances", label: "STAR", reason: "market_unwind" },
+  { ledger: "usdt_ledger", balances: "usdt_balances", label: "USDT_CASH", reason: "market_unwind_usdt" },
+  { ledger: "usdt_bonus_ledger", balances: "usdt_bonus_balances", label: "USDT_BONUS", reason: "market_unwind_usdt" },
+];
+
+// Unwinds a market that priced incorrectly: every participant is returned to
+// exactly the cash flow they started with. Stakes come back, realised profits
+// go back, positions close and the market can no longer settle. The rule is the
+// same for everyone, so it does not depend on judging who exploited the pricing
+// and who merely traded against it.
+export async function unwindMarket(input = {}) {
+  const marketId = Number(input.market_id ?? input.marketId);
+  if (!Number.isSafeInteger(marketId) || marketId <= 0) {
+    throw new Error("invalid_market_id");
+  }
+  const dryRun = input.dry_run !== false && input.dryRun !== false;
+
+  return withTransaction(async (client) => {
+    const marketResult = await client.query(
+      "SELECT * FROM markets WHERE id = $1::bigint FOR UPDATE",
+      [marketId],
+    );
+    const market = marketResult.rows[0];
+    if (!market) {
+      throw new Error("market_not_found");
+    }
+    if (market.status === "unwound") {
+      throw new Error("market_already_unwound");
+    }
+
+    const sourceExact = `market:${marketId}`;
+    const sourcePrefix = `market:${marketId}:%`;
+    const adjustments = [];
+    const totals = {};
+
+    for (const book of UNWIND_LEDGERS) {
+      const flowResult = await client.query(
+        `
+          SELECT
+            ledger.user_id,
+            users.telegram_id,
+            users.username,
+            SUM(ledger.amount) AS net,
+            COUNT(*)::int AS entries,
+            COALESCE(balances.balance, 0) AS balance
+          FROM ${book.ledger} ledger
+          JOIN users ON users.id = ledger.user_id
+          LEFT JOIN ${book.balances} balances ON balances.user_id = ledger.user_id
+          WHERE ledger.source = $1::text OR ledger.source LIKE $2::text
+          GROUP BY ledger.user_id, users.telegram_id, users.username, balances.balance
+          ORDER BY SUM(ledger.amount) DESC
+        `,
+        [sourceExact, sourcePrefix],
+      );
+
+      let clawedBack = 0;
+      let refunded = 0;
+      let shortfall = 0;
+      for (const row of flowResult.rows) {
+        const net = roundMoney(row.net);
+        if (Math.abs(net) < 0.01) {
+          continue;
+        }
+        const balance = roundMoney(row.balance);
+        // A clawback can never push a balance below zero: if the profit is
+        // already spent we take what is there and report the rest.
+        const correction = net > 0
+          ? -Math.min(net, balance)
+          : -net;
+        const missed = net > 0 ? roundMoney(net - Math.min(net, balance)) : 0;
+        if (net > 0) {
+          clawedBack += -correction;
+          shortfall += missed;
+        } else {
+          refunded += correction;
+        }
+        adjustments.push({
+          book: book.label,
+          user_id: Number(row.user_id),
+          telegram_id: row.telegram_id,
+          username: row.username,
+          entries: row.entries,
+          net_before: net,
+          balance_before: balance,
+          correction: roundMoney(correction),
+          shortfall: missed,
+        });
+        if (!dryRun && Math.abs(correction) >= 0.01) {
+          await client.query(
+            `
+              UPDATE ${book.balances}
+              SET balance = balance + $2::numeric, updated_at = now()
+              WHERE user_id = $1::bigint
+            `,
+            [row.user_id, roundMoney(correction)],
+          );
+          await client.query(
+            `
+              INSERT INTO ${book.ledger} (user_id, amount, reason, source)
+              VALUES ($1::bigint, $2::numeric, $3::text, $4::text)
+            `,
+            [row.user_id, roundMoney(correction), book.reason, `market:${marketId}:unwind`],
+          );
+        }
+      }
+      totals[book.label] = {
+        users: flowResult.rows.length,
+        clawed_back: roundMoney(clawedBack),
+        refunded: roundMoney(refunded),
+        unrecoverable: roundMoney(shortfall),
+      };
+    }
+
+    const positionsResult = await client.query(
+      `
+        SELECT
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE status = 'open')::int AS open,
+          COALESCE(SUM(shares) FILTER (WHERE status = 'open'), 0) AS open_shares,
+          COALESCE(MAX(shares), 0) AS largest_position
+        FROM positions
+        WHERE market_id = $1::bigint
+      `,
+      [marketId],
+    );
+    const ordersResult = await client.query(
+      "SELECT COUNT(*)::int AS open FROM limit_orders WHERE market_id = $1::bigint AND status = 'open'",
+      [marketId],
+    );
+
+    if (!dryRun) {
+      await client.query(
+        `
+          UPDATE positions
+          SET shares = 0,
+              payout = 0,
+              pnl = 0,
+              status = 'refunded',
+              updated_at = now()
+          WHERE market_id = $1::bigint
+        `,
+        [marketId],
+      );
+      await client.query(
+        `
+          UPDATE limit_orders
+          SET remaining_shares = 0,
+              remaining_reserved = 0,
+              status = 'cancelled',
+              updated_at = now()
+          WHERE market_id = $1::bigint
+            AND status = 'open'
+        `,
+        [marketId],
+      );
+      await client.query(
+        `
+          UPDATE markets
+          SET status = 'unwound',
+              yes_volume = 0,
+              no_volume = 0,
+              resolved_at = now()
+          WHERE id = $1::bigint
+        `,
+        [marketId],
+      );
+    }
+
+    return {
+      ok: true,
+      dry_run: dryRun,
+      market: {
+        id: Number(market.id),
+        symbol: market.symbol,
+        status: market.status,
+        end_time: market.end_time,
+      },
+      positions: positionsResult.rows[0],
+      open_orders: ordersResult.rows[0]?.open ?? 0,
+      totals,
+      adjustments: adjustments.sort((left, right) => left.correction - right.correction),
+    };
+  });
+}
+
 async function refundMarket(client, market, message) {
   await cancelOpenLimitOrdersForMarket(client, market.id, "market_refund");
 
