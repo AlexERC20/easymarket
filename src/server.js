@@ -141,6 +141,7 @@ let marketEngineStarted = false;
 let marketEngineBusy = false;
 let priceEngineBusy = false;
 let usdtDepositScannerBusy = false;
+let usdtDepositScannerStartedAt = 0;
 let databaseCleanupBusy = false;
 let clanRewardDistributionBusy = false;
 
@@ -2057,11 +2058,26 @@ async function priceTick() {
 }
 
 async function usdtDepositTick() {
-  if (usdtDepositScannerBusy || !config.usdtDepositScanEnabled) {
+  if (!config.usdtDepositScanEnabled) {
     return;
   }
 
+  // The busy latch is only cleared in finally, so anything that hangs rather
+  // than throwing would silence the scanner for good - which is exactly how it
+  // once went quiet for days without a log line. Past the deadline we assume the
+  // previous run is never coming back and start a fresh one.
+  if (usdtDepositScannerBusy) {
+    const runningMs = Date.now() - (usdtDepositScannerStartedAt || 0);
+    if (runningMs < config.usdtDepositScanStuckMs) {
+      return;
+    }
+    console.warn(
+      `[easymarket] USDT deposit scan wedged for ${Math.round(runningMs / 1000)}s, restarting it`,
+    );
+  }
+
   usdtDepositScannerBusy = true;
+  usdtDepositScannerStartedAt = Date.now();
   try {
     await scanUsdtDeposits();
   } catch (error) {

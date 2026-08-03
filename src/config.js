@@ -94,6 +94,8 @@ export const config = {
   marketTailProtectionSeconds: parseNumber(process.env.MARKET_TAIL_PROTECTION_SECONDS, 60, 0),
   marketBtcQuoteMaxAgeMs: parseNumber(process.env.MARKET_BTC_QUOTE_MAX_AGE_MS, 3_000, 250),
   clobQuoteMaxAgeMs: parseNumber(process.env.CLOB_QUOTE_MAX_AGE_MS, 1_000, 250),
+  usdtDepositScanTimeoutMs: parseNumber(process.env.USDT_DEPOSIT_SCAN_TIMEOUT_MS, 20_000, 1_000),
+  usdtDepositScanStuckMs: parseNumber(process.env.USDT_DEPOSIT_SCAN_STUCK_MS, 300_000, 60_000),
   marketMakerSpreadBps: parseNumber(process.env.MARKET_MAKER_SPREAD_BPS, 300, 0),
   pricePollMs: parseNumber(process.env.PRICE_POLL_MS, 1_000, 250),
   priceTicksEnabled: !parseBoolean(process.env.PRICE_TICKS_DISABLED, false),

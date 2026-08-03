@@ -74,6 +74,21 @@ function buildEvmNetwork(input) {
   };
 }
 
+// A hung request is worse than a failed one: scanUsdtDeposits already handles
+// errors per network, but nothing ever resolves a promise that hangs, so the
+// caller's busy latch would stay set forever and the scanner would go quiet
+// without a single log line. Every outbound call gets a deadline.
+function withTimeout(promise, label) {
+  const ms = Math.max(1_000, Number(config.usdtDepositScanTimeoutMs || 20_000));
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`timeout_${label}`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 export function getConfiguredUsdtDepositNetworks() {
   return [
     buildEvmNetwork({
@@ -998,7 +1013,7 @@ async function getTransferLogs(provider, network, fromBlock, toBlock) {
   }
 
   try {
-    return await provider.getLogs({
+    return await withTimeout(provider.getLogs({
       address: network.tokenAddress,
       fromBlock,
       toBlock,
@@ -1007,7 +1022,7 @@ async function getTransferLogs(provider, network, fromBlock, toBlock) {
         null,
         zeroPadValue(network.treasuryAddress, 32),
       ],
-    });
+    }), "get_logs");
   } catch (error) {
     if (fromBlock >= toBlock) {
       throw error;
@@ -1218,7 +1233,7 @@ async function processDepositLog(network, log, provider, blockCache) {
 
   let block = blockCache.get(log.blockNumber);
   if (!block) {
-    block = await provider.getBlock(log.blockNumber);
+    block = await withTimeout(provider.getBlock(log.blockNumber), "get_block");
     blockCache.set(log.blockNumber, block);
   }
   const chainTimestamp = block?.timestamp
@@ -1356,11 +1371,15 @@ async function scanExplorerNetwork(network) {
     apikey: network.explorerApiKey,
   });
 
-  const response = await fetch(`${network.explorerApiUrl}?${params.toString()}`, {
-    headers: {
-      accept: "application/json",
-    },
-  });
+  const response = await withTimeout(
+    fetch(`${network.explorerApiUrl}?${params.toString()}`, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(
+        Math.max(1_000, Number(config.usdtDepositScanTimeoutMs || 20_000)),
+      ),
+    }),
+    "explorer",
+  );
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     throw new Error(`explorer_http_${response.status}`);
@@ -1426,7 +1445,7 @@ async function scanNetwork(network) {
   const provider = getProvider(network);
   let latestBlock;
   try {
-    latestBlock = await provider.getBlockNumber();
+    latestBlock = await withTimeout(provider.getBlockNumber(), "block_number");
   } catch (error) {
     return {
       network: network.key,
