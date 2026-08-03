@@ -63,8 +63,21 @@ notional used to buy a $400 payout, and the whole ask ladder cost $68 while
 exposing 95% of the book. The cap binds hard at the tails and barely touches
 size at the money, where a share can only lose the price paid for it.
 
+`momentum_guard_seconds` sets the window over which the recent BTC move is
+measured. While the price trends, one side of a two-sided quote is simply the
+wrong side to be on: on the way up the book is selling YES too cheap and buying
+NO that is heading to zero. The guard converts the recent move into probability
+terms and steps those two sides outward, leaving the two winning sides where
+they were. Both steps go outward, so the book never crosses itself and the
+complementary guards still hold.
+
 Raising `spread_bps` also raises the cheapest price the AMM will sell a tail at,
 since every ask sits at least a half-spread above fair value.
+
+The market maker is not identified anywhere a trader can see it. Its quotes are
+folded into the same price levels as everybody else's resting orders before the
+book is returned, and a fill reports its counterparty as the book rather than as
+the market maker. It is one participant among the rest.
 
 ## Risk controls
 

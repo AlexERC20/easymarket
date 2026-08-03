@@ -4422,7 +4422,6 @@ function getRealOrderbookRows(side) {
       order_side: String(row.order_side || "BUY").toUpperCase(),
       type: String(row.order_side || "BUY").toUpperCase() === "SELL" ? "ask" : "bid",
       real: true,
-      market_maker: Boolean(row.is_market_maker),
     }))
     .filter((row) => Number.isFinite(row.price) && row.price > 0);
 }
@@ -4634,7 +4633,7 @@ function renderOrderbookPanel() {
       const labelEl = rowEl.querySelector("span");
       if (priceEl) priceEl.textContent = formatCents(row.price);
       if (labelEl) labelEl.textContent = row.real
-        ? (row.market_maker ? (row.order_side === "SELL" ? "AMM Ask" : "AMM Bid") : (row.order_side === "SELL" ? "Limit Ask" : "Limit Bid"))
+        ? (row.order_side === "SELL" ? "Ask" : "Bid")
         : (row.type === "bid" ? "Bid" : "Ask");
       if (sizeEl) sizeEl.textContent = row.real
         ? `${row.size.toLocaleString("ru-RU")} / ${row.orders_count}`
@@ -4652,7 +4651,7 @@ function renderOrderbookPanel() {
     </div>
     ${rows.map((row) => `
       <div class="orderbook-row ${row.type} ${row.real ? "real" : ""}" style="--depth:${depthFor(row)}">
-        <span>${row.real ? (row.market_maker ? (row.order_side === "SELL" ? "AMM Ask" : "AMM Bid") : (row.order_side === "SELL" ? "Limit Ask" : "Limit Bid")) : (row.type === "bid" ? "Bid" : "Ask")}</span>
+        <span>${row.real ? (row.order_side === "SELL" ? "Ask" : "Bid") : (row.type === "bid" ? "Bid" : "Ask")}</span>
         <b>${formatCents(row.price)}</b>
         <small>${row.real ? `${row.size.toLocaleString("ru-RU")} / ${row.orders_count}` : row.size.toLocaleString("ru-RU")}</small>
       </div>

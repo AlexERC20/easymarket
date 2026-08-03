@@ -93,6 +93,7 @@ export const config = {
   marketBuyFreezeSeconds: parseNumber(process.env.MARKET_BUY_FREEZE_SECONDS, 5, 0),
   marketTailProtectionSeconds: parseNumber(process.env.MARKET_TAIL_PROTECTION_SECONDS, 60, 0),
   marketBtcQuoteMaxAgeMs: parseNumber(process.env.MARKET_BTC_QUOTE_MAX_AGE_MS, 3_000, 250),
+  clobQuoteMaxAgeMs: parseNumber(process.env.CLOB_QUOTE_MAX_AGE_MS, 1_000, 250),
   marketMakerSpreadBps: parseNumber(process.env.MARKET_MAKER_SPREAD_BPS, 300, 0),
   pricePollMs: parseNumber(process.env.PRICE_POLL_MS, 1_000, 250),
   priceTicksEnabled: !parseBoolean(process.env.PRICE_TICKS_DISABLED, false),

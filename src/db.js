@@ -792,6 +792,7 @@ export async function runMigrations() {
       auto_risk_enabled BOOLEAN NOT NULL DEFAULT true,
       gamma_guard_seconds INTEGER NOT NULL DEFAULT 10,
       max_level_loss_bps INTEGER NOT NULL DEFAULT 500,
+      momentum_guard_seconds INTEGER NOT NULL DEFAULT 20,
       updated_by_telegram_id TEXT,
       updated_by_username TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -803,6 +804,8 @@ export async function runMigrations() {
       ADD COLUMN IF NOT EXISTS gamma_guard_seconds INTEGER NOT NULL DEFAULT 10;
     ALTER TABLE market_maker_settings
       ADD COLUMN IF NOT EXISTS max_level_loss_bps INTEGER NOT NULL DEFAULT 500;
+    ALTER TABLE market_maker_settings
+      ADD COLUMN IF NOT EXISTS momentum_guard_seconds INTEGER NOT NULL DEFAULT 20;
 
     INSERT INTO market_maker_settings (id)
     VALUES (1)

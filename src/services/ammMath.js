@@ -216,6 +216,41 @@ export function calculateGammaHalfSpread(input) {
   return clamp(Math.abs(shocked - fair), 0, 0.45);
 }
 
+// While BTC is trending, one side of a two-sided quote is simply the wrong side
+// to be on: on the way up the market maker is selling YES too cheap and buying
+// NO that is on its way to zero. This converts the recent move into probability
+// terms and returns how far each side has to step out of the way. Both steps go
+// outward, so the book never crosses and the complementary guards still hold.
+export function calculateMomentumBias(input) {
+  const guardSeconds = Math.max(0, Number(input?.momentumGuardSeconds || 0));
+  const driftRatio = Number(input?.driftRatio || 0);
+  const secondsLeft = Number(input?.secondsLeft || 0);
+  const currentPrice = Number(input?.currentPrice || 0);
+  const openPrice = Number(input?.openPrice || 0);
+  const sigmaPerSqrtSecond = Number(input?.sigmaPerSqrtSecond || 0);
+  if (
+    guardSeconds <= 0
+    || !Number.isFinite(driftRatio)
+    || driftRatio === 0
+    || !(secondsLeft > 0)
+    || !(currentPrice > 0)
+    || !(openPrice > 0)
+    || !(sigmaPerSqrtSecond > 0)
+  ) {
+    return 0;
+  }
+
+  const fair = calculateBinaryFairProbability({
+    openPrice, currentPrice, secondsLeft, sigmaPerSqrtSecond,
+  });
+  // Assume the move that just happened keeps going for the reaction window.
+  const projected = currentPrice * (1 + driftRatio);
+  const shocked = calculateBinaryFairProbability({
+    openPrice, currentPrice: projected, secondsLeft, sigmaPerSqrtSecond,
+  });
+  return clamp(shocked - fair, -0.45, 0.45);
+}
+
 function buildSideLevels({
   center,
   halfSpread,
@@ -225,6 +260,8 @@ function buildSideLevels({
   riskMultiplier,
   inventoryAvailable,
   maxLevelLoss,
+  askBias = 0,
+  bidBias = 0,
 }) {
   const tailDistance = Math.min(center, 1 - center);
   const tailDepth = clamp(tailDistance * 4, 0.035, 1);
@@ -235,8 +272,8 @@ function buildSideLevels({
 
   for (let index = 0; index < levels; index += 1) {
     const distance = halfSpread * (1 + index * 0.8) + PRICE_TICK * index;
-    const askPrice = roundPrice(center + distance);
-    const bidPrice = roundPrice(center - distance);
+    const askPrice = roundPrice(center + distance + Math.max(0, askBias));
+    const bidPrice = roundPrice(center - distance - Math.max(0, bidBias));
     const levelWeight = 1 / (1 + index * 0.55);
     const levelNotional = quoteCapital * 0.12 * tailDepth * riskMultiplier * levelWeight;
     // Notional alone does not bound risk: a cheap tail turns a few units of
@@ -293,6 +330,9 @@ export function buildAmmQuoteLadder(input) {
   const gammaHalfSpread = calculateGammaHalfSpread(input);
   const halfSpread = Math.max(PRICE_TICK, spreadBps / 20_000, gammaHalfSpread);
 
+  // A rising BTC makes the YES ask and the NO bid the losing sides, so those
+  // two step outward; a falling BTC moves the bias to the other pair.
+  const momentumBias = calculateMomentumBias(input);
   const yes = buildSideLevels({
     center: yesCenter,
     halfSpread,
@@ -302,6 +342,8 @@ export function buildAmmQuoteLadder(input) {
     bidCapital: totalBidCapital * 0.5,
     riskMultiplier,
     inventoryAvailable: yesInventory,
+    askBias: Math.max(0, momentumBias),
+    bidBias: Math.max(0, -momentumBias),
   });
   const no = buildSideLevels({
     center: noCenter,
@@ -312,6 +354,8 @@ export function buildAmmQuoteLadder(input) {
     bidCapital: totalBidCapital * 0.5,
     riskMultiplier,
     inventoryAvailable: noInventory,
+    askBias: Math.max(0, -momentumBias),
+    bidBias: Math.max(0, momentumBias),
   });
 
   // Complementary tokens must never expose a crossed synthetic pair. A trader
@@ -339,6 +383,7 @@ export function buildAmmQuoteLadder(input) {
     inventorySkew: roundTo(inventorySkew, 6),
     halfSpread: roundTo(halfSpread, 6),
     gammaHalfSpread: roundTo(gammaHalfSpread, 6),
+    momentumBias: roundTo(momentumBias, 6),
     yes,
     no,
   };

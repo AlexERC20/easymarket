@@ -11,6 +11,7 @@ import {
 import {
   getBtcPrice,
   getBtcStreamStatus,
+  getBtcDrift,
   getBtcVolatility,
   getCachedBtcPrice,
   PriceUnavailableError,
@@ -71,7 +72,10 @@ const BOOK_TYPE_STAR = "STAR";
 const BOOK_TYPE_USDT_CASH = "USDT_CASH";
 const BOOK_TYPE_USDT_BONUS = "USDT_BONUS";
 const CLOB_BOOK_TYPES = [BOOK_TYPE_USDT_CASH, BOOK_TYPE_USDT_BONUS, BOOK_TYPE_STAR];
-const CLOB_QUOTE_MAX_AGE_MS = 2_000;
+// How stale the Binance quote is allowed to be before the book stops trading.
+// This is the window in which a taker can hit a price the market maker has not
+// caught up with yet, so it is kept close to the feed's own tick rate.
+const CLOB_QUOTE_MAX_AGE_MS = Math.max(250, Number(config.clobQuoteMaxAgeMs || 1_000));
 const CLOB_MIN_FILL_SHARES = 0.00000001;
 const WORLD_CUP_SYNC_INTERVAL_MS = 90_000;
 const TOP_MARKET_SYNC_INTERVAL_MS = 60_000;
@@ -374,7 +378,6 @@ function mapLimitOrder(row) {
     order_side: row.order_side || "BUY",
     currency: normalizeCurrency(row.currency),
     book_type: row.book_type || "LEGACY",
-    is_market_maker: Boolean(row.is_market_maker),
     filled_shares: toNumber(row.filled_shares),
     fee_paid: toNumber(row.fee_paid),
     limit_price: toNumber(row.limit_price),
@@ -9424,6 +9427,7 @@ function mapMarketMakerSettings(row) {
     auto_risk_enabled: row.auto_risk_enabled !== false,
     gamma_guard_seconds: Number(row.gamma_guard_seconds ?? 0),
     max_level_loss_bps: Number(row.max_level_loss_bps ?? 0),
+    momentum_guard_seconds: Number(row.momentum_guard_seconds ?? 0),
     updated_by_telegram_id: row.updated_by_telegram_id || null,
     updated_by_username: row.updated_by_username || null,
     updated_at: row.updated_at,
@@ -9705,6 +9709,8 @@ async function refreshMarketMakerAccount(client, market, bookType, lock = true, 
       noInventory: account.no_inventory,
       maxLevelLoss: risk.riskCapital * (settings.max_level_loss_bps / 10_000),
       gammaGuardSeconds: settings.gamma_guard_seconds,
+      momentumGuardSeconds: settings.momentum_guard_seconds,
+      driftRatio: getBtcDrift(settings.momentum_guard_seconds || 20).ratio,
       secondsLeft: fair.secondsLeft,
       sigmaPerSqrtSecond: fair.sigmaPerSqrtSecond,
       openPrice: fair.openPrice,
@@ -10007,6 +10013,7 @@ export async function updateMarketMakerSettings(input = {}) {
   const quoteLevels = numeric(input.quote_levels, 1, 12, "invalid_amm_quote_levels");
   const gammaGuardSeconds = numeric(input.gamma_guard_seconds, 0, 600, "invalid_amm_gamma_guard");
   const maxLevelLossBps = numeric(input.max_level_loss_bps, 0, 10_000, "invalid_amm_level_loss");
+  const momentumGuardSeconds = numeric(input.momentum_guard_seconds, 0, 600, "invalid_amm_momentum_guard");
   const boolean = (value) => (value === undefined || value === null
     ? null
     : [true, 1, "1", "true", "yes", "on"].includes(
@@ -10038,6 +10045,7 @@ export async function updateMarketMakerSettings(input = {}) {
           auto_risk_enabled = COALESCE($13::boolean, auto_risk_enabled),
           gamma_guard_seconds = COALESCE($14::integer, gamma_guard_seconds),
           max_level_loss_bps = COALESCE($15::integer, max_level_loss_bps),
+          momentum_guard_seconds = COALESCE($16::integer, momentum_guard_seconds),
           updated_by_telegram_id = $11::text,
           updated_by_username = $12::text,
           updated_at = now()
@@ -10060,6 +10068,7 @@ export async function updateMarketMakerSettings(input = {}) {
       autoRiskEnabled,
       gammaGuardSeconds === null ? null : Math.round(gammaGuardSeconds),
       maxLevelLossBps === null ? null : Math.round(maxLevelLossBps),
+      momentumGuardSeconds === null ? null : Math.round(momentumGuardSeconds),
     ],
   );
   return { ok: true, settings: mapMarketMakerSettings(result.rows[0]) };
@@ -11003,7 +11012,7 @@ async function matchIncomingClobLimitOrder(client, input) {
       price,
       shares: incomingFill.shares,
       gross: incomingFill.gross,
-      source: useMakerOrder ? "USER" : "AMM",
+      source: "BOOK",
       maker_order_id: useMakerOrder ? Number(makerOrder.id) : null,
     });
   }
@@ -11302,7 +11311,7 @@ async function executeClobMarketBuy(client, input) {
       price,
       shares: fillShares,
       gross: buyerFill.gross,
-      source: useUserOrder ? "USER" : "AMM",
+      source: "BOOK",
       maker_order_id: useUserOrder ? Number(userOrder.id) : null,
     });
   }
@@ -11497,7 +11506,7 @@ async function executeClobMarketSell(client, input) {
       price,
       shares: sellerFill.shares,
       gross: sellerFill.gross,
-      source: useUserOrder ? "USER" : "AMM",
+      source: "BOOK",
       maker_order_id: useUserOrder ? Number(userOrder.id) : null,
     });
   }
@@ -11731,7 +11740,6 @@ export async function getMarketOrderBook(input) {
         amount: toNumber(row.amount),
         orders_count: Number(row.orders_count || 0),
         order_side: String(row.order_side || "BUY").toUpperCase(),
-        is_market_maker: false,
       }));
       for (const side of ["YES", "NO"]) {
         const quoteSide = side === "YES" ? context.quotes.yes : context.quotes.no;
@@ -11745,7 +11753,6 @@ export async function getMarketOrderBook(input) {
             amount: toNumber(level.amount),
             orders_count: 1,
             order_side: "BUY",
-            is_market_maker: true,
           });
         }
         for (const level of quoteSide?.asks || []) {
@@ -11758,7 +11765,6 @@ export async function getMarketOrderBook(input) {
             amount: toNumber(level.amount),
             orders_count: 1,
             order_side: "SELL",
-            is_market_maker: true,
           });
         }
       }
@@ -11787,7 +11793,30 @@ export async function getMarketOrderBook(input) {
         }
       }
 
-      const best = (side, orderSide) => levels
+      // The market maker is one participant among the rest, so its quotes are
+      // folded into the same price levels as everybody else's orders. Nothing
+      // downstream can tell which resting size came from where.
+      const merged = new Map();
+      for (const level of levels) {
+        const key = `${level.side}:${level.order_side}:${level.price}`;
+        const existing = merged.get(key);
+        if (existing) {
+          existing.shares = roundShares(existing.shares + level.shares);
+          existing.amount = roundMoney(existing.amount + level.amount);
+          existing.orders_count += level.orders_count;
+        } else {
+          merged.set(key, { ...level });
+        }
+      }
+      const mergedLevels = [...merged.values()].sort((left, right) => (
+        left.side === right.side
+          ? (left.order_side === right.order_side
+            ? right.price - left.price
+            : left.order_side.localeCompare(right.order_side))
+          : left.side.localeCompare(right.side)
+      ));
+
+      const best = (side, orderSide) => mergedLevels
         .filter((level) => level.side === side && level.order_side === orderSide)
         .sort((left, right) => orderSide === "SELL" ? left.price - right.price : right.price - left.price)[0]
         ?.price ?? null;
@@ -11802,7 +11831,7 @@ export async function getMarketOrderBook(input) {
           yes_price: context.fair.fairYes,
           no_price: 1 - context.fair.fairYes,
         }),
-        levels,
+        levels: mergedLevels,
         best_quotes: {
           YES: { bid: best("YES", "BUY"), ask: best("YES", "SELL") },
           NO: { bid: best("NO", "BUY"), ask: best("NO", "SELL") },

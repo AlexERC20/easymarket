@@ -192,6 +192,32 @@ export function getCachedBtcPrice() {
   };
 }
 
+// Signed price move over a short window. Volatility says how far BTC travels;
+// this says which way it has been going, which is what tells the market maker
+// whose side of its own quote is about to be the wrong one.
+export function getBtcDrift(windowSeconds = 20) {
+  const window = Math.max(1, Number(windowSeconds || 20));
+  const cutoff = Date.now() - window * 1_000;
+  const samples = priceSamples.filter((sample) => sample.at >= cutoff);
+  if (samples.length < 2) {
+    return { ratio: 0, from: null, to: null, samples: samples.length, seconds: window };
+  }
+
+  const from = samples[0];
+  const to = samples[samples.length - 1];
+  if (!(from.price > 0) || !(to.price > 0)) {
+    return { ratio: 0, from: null, to: null, samples: samples.length, seconds: window };
+  }
+
+  return {
+    ratio: (to.price - from.price) / from.price,
+    from: from.price,
+    to: to.price,
+    samples: samples.length,
+    seconds: Math.max(0.25, (to.at - from.at) / 1_000),
+  };
+}
+
 export function getBtcVolatility(windowSeconds = 300) {
   const cutoff = Date.now() - Math.max(30, Number(windowSeconds || 300)) * 1_000;
   const samples = priceSamples.filter((sample) => sample.at >= cutoff);

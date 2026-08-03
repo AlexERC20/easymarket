@@ -9,6 +9,7 @@ import {
   calculateBinaryFairProbability,
   calculateExecutionFee,
   calculateGammaHalfSpread,
+  calculateMomentumBias,
   calculateNextAmmAllocation,
 } from "../src/services/ammMath.js";
 
@@ -449,4 +450,84 @@ test("the gamma guard never crosses the complementary pair", () => {
       }
     }
   }
+});
+
+test("a trending price pushes the losing side of the quote out of the way", () => {
+  const base = {
+    fairYes: 0.5,
+    spreadBps: 200,
+    levels: 5,
+    riskCapital: 1_000,
+    riskMultiplier: 1,
+    yesInventory: 1_000,
+    noInventory: 1_000,
+    maxLevelLoss: 50,
+    secondsLeft: 300,
+    openPrice: 62_600,
+    currentPrice: 62_600,
+    sigmaPerSqrtSecond: 0.0000365,
+    momentumGuardSeconds: 20,
+  };
+  const flat = buildAmmQuoteLadder({ ...base, driftRatio: 0 });
+  const rising = buildAmmQuoteLadder({ ...base, driftRatio: 0.0004 });
+  const falling = buildAmmQuoteLadder({ ...base, driftRatio: -0.0004 });
+
+  assert.equal(flat.momentumBias, 0);
+  assert.ok(rising.momentumBias > 0);
+  assert.ok(falling.momentumBias < 0);
+
+  // Rising BTC: do not sell YES cheap, do not buy NO that is heading to zero.
+  assert.ok(rising.yes.asks[0].price > flat.yes.asks[0].price);
+  assert.ok(rising.no.bids[0].price < flat.no.bids[0].price);
+  // The other two sides are the winning ones and stay where they were.
+  assert.equal(rising.yes.bids[0].price, flat.yes.bids[0].price);
+  assert.equal(rising.no.asks[0].price, flat.no.asks[0].price);
+
+  // Falling BTC mirrors it.
+  assert.ok(falling.no.asks[0].price > flat.no.asks[0].price);
+  assert.ok(falling.yes.bids[0].price < flat.yes.bids[0].price);
+});
+
+test("the momentum guard never crosses the book or the complementary pair", () => {
+  for (const driftRatio of [-0.002, -0.0005, 0, 0.0005, 0.002]) {
+    for (const fairYes of [0.15, 0.5, 0.85]) {
+      const book = buildAmmQuoteLadder({
+        fairYes,
+        spreadBps: 200,
+        levels: 5,
+        riskCapital: 1_000,
+        riskMultiplier: 1,
+        yesInventory: 1_000,
+        noInventory: 1_000,
+        maxLevelLoss: 50,
+        secondsLeft: 300,
+        openPrice: 62_600,
+        currentPrice: 62_600,
+        sigmaPerSqrtSecond: 0.0000365,
+        momentumGuardSeconds: 20,
+        driftRatio,
+      });
+      const ctx = `drift=${driftRatio} fair=${fairYes}`;
+      for (const side of ["yes", "no"]) {
+        const bestBid = Math.max(...book[side].bids.map((l) => l.price), -Infinity);
+        const bestAsk = Math.min(...book[side].asks.map((l) => l.price), Infinity);
+        if (Number.isFinite(bestBid) && Number.isFinite(bestAsk)) {
+          assert.ok(bestBid < bestAsk, `${ctx} ${side} crossed`);
+        }
+      }
+      const pairAsk = Math.min(...book.yes.asks.map((l) => l.price), Infinity)
+        + Math.min(...book.no.asks.map((l) => l.price), Infinity);
+      const pairBid = Math.max(...book.yes.bids.map((l) => l.price), -Infinity)
+        + Math.max(...book.no.bids.map((l) => l.price), -Infinity);
+      if (Number.isFinite(pairAsk)) assert.ok(pairAsk > 1, `${ctx} pair ask ${pairAsk}`);
+      if (Number.isFinite(pairBid)) assert.ok(pairBid < 1, `${ctx} pair bid ${pairBid}`);
+    }
+  }
+});
+
+test("the momentum guard is off when it is not configured", () => {
+  assert.equal(calculateMomentumBias({
+    driftRatio: 0.001, secondsLeft: 300, currentPrice: 62_600,
+    openPrice: 62_600, sigmaPerSqrtSecond: 0.0000365, momentumGuardSeconds: 0,
+  }), 0);
 });
