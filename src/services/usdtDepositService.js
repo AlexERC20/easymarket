@@ -380,6 +380,28 @@ export async function auditUserDeposits(input = {}) {
     [user.id],
   );
 
+  // Whether the watcher is even current matters as much as the intent itself:
+  // a stalled scanner and a payment that never arrived look identical from the
+  // intent's side.
+  const scannerResult = await query(
+    `
+      SELECT network, last_scanned_block, updated_at
+      FROM usdt_deposit_scanner_state
+      ORDER BY network
+    `,
+  );
+  const lastEventResult = await query(
+    `
+      SELECT network, MAX(created_at) AS seen_at
+      FROM usdt_deposit_events
+      GROUP BY network
+    `,
+  );
+
+  const lastEventByNetwork = new Map(
+    lastEventResult.rows.map((row) => [row.network, row.seen_at]),
+  );
+
   return {
     ok: true,
     user: {
@@ -387,6 +409,16 @@ export async function auditUserDeposits(input = {}) {
       telegram_id: user.telegram_id,
       username: user.username,
       first_name: user.first_name,
+    },
+    scanner: {
+      enabled: Boolean(config.usdtDepositScanEnabled),
+      networks: scannerResult.rows.map((row) => ({
+        network: row.network,
+        last_scanned_block: Number(row.last_scanned_block),
+        updated_at: row.updated_at,
+        stale_seconds: Math.round((Date.now() - new Date(row.updated_at).getTime()) / 1000),
+        last_event_at: lastEventByNetwork.get(row.network) || null,
+      })),
     },
     credited_total: Number(creditedResult.rows[0]?.total || 0),
     credited_entries: Number(creditedResult.rows[0]?.entries || 0),
