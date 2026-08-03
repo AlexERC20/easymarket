@@ -1530,6 +1530,14 @@ app.post("/api/bridge/deposits/credit-pending", requireBridgeSecret, async (req,
   }
 });
 
+app.post("/api/bridge/deposits/scan", requireBridgeSecret, async (_req, res) => {
+  try {
+    res.status(200).json(await scanUsdtDeposits());
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
 app.get("/api/bridge/deposits/audit", requireBridgeSecret, async (req, res) => {
   try {
     res.status(200).json(await auditUserDeposits({

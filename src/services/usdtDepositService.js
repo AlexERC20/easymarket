@@ -1516,6 +1516,10 @@ export async function scanUsdtDeposits() {
       results.push({
         network: network.key,
         error: "scan_failed",
+        // The message used to go to console.warn only, which is unreachable on
+        // a hosted log-less deploy - so a scanner that failed every run looked
+        // exactly like one that was idle.
+        detail: error instanceof Error ? error.message : String(error),
       });
     }
   }
