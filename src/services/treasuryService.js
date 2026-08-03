@@ -73,9 +73,12 @@ export async function getTreasurySnapshot() {
         COALESCE(SUM(clan_fee) FILTER (WHERE currency = 'USDT'), 0) AS clan_usdt
       FROM profit_fee_distributions
     ), trade_fees AS (
+      -- Split by book, not by currency: an execution fee charged on a bonus
+      -- trade is paid in bonus dollars and never becomes real income.
       SELECT
-        COALESCE(SUM(amount) FILTER (WHERE currency = 'USDT'), 0) AS usdt,
-        COALESCE(SUM(amount) FILTER (WHERE currency <> 'USDT'), 0) AS star
+        COALESCE(SUM(amount) FILTER (WHERE book_type = 'USDT_CASH'), 0) AS cash,
+        COALESCE(SUM(amount) FILTER (WHERE book_type = 'USDT_BONUS'), 0) AS bonus,
+        COALESCE(SUM(amount) FILTER (WHERE book_type = 'STAR'), 0) AS star
       FROM market_trade_fees
     ), reserve AS (
       SELECT
@@ -131,7 +134,8 @@ export async function getTreasurySnapshot() {
       (SELECT total_usdt FROM fees) AS fee_total_usdt,
       (SELECT referral_usdt FROM fees) AS fee_referral_usdt,
       (SELECT clan_usdt FROM fees) AS fee_clan_usdt,
-      (SELECT usdt FROM trade_fees) AS trade_fee_usdt,
+      (SELECT cash FROM trade_fees) AS trade_fee_cash,
+      (SELECT bonus FROM trade_fees) AS trade_fee_bonus,
       (SELECT star FROM trade_fees) AS trade_fee_star,
       (SELECT balance FROM reserve) AS reserve_balance,
       (SELECT funded FROM reserve) AS reserve_funded,
@@ -184,7 +188,8 @@ export async function getTreasurySnapshot() {
       total_usdt: round(row.fee_total_usdt),
       referral_usdt: round(row.fee_referral_usdt),
       clan_usdt: round(row.fee_clan_usdt),
-      execution_usdt: round(row.trade_fee_usdt),
+      execution_cash: round(row.trade_fee_cash),
+      execution_bonus: round(row.trade_fee_bonus),
       execution_star: round(row.trade_fee_star),
     },
     liabilities: {
@@ -208,6 +213,20 @@ export async function getTreasurySnapshot() {
       // Markets are a sink only while they pay out less than they take in.
       market_net: round(toNumber(row.star_payouts) - toNumber(row.star_stakes), 0),
     },
+    // The only line that is money. Fees are already cash-only by construction -
+    // distributeProfitFee scales them by the cash share of the stake - and the
+    // maker earns real money in the cash book alone: a win in the bonus or star
+    // book absorbs a liability that was never real to begin with.
+    real_result: (() => {
+      const cashBook = makerResult.rows.find((book) => book.book_type === "USDT_CASH");
+      const fees = toNumber(row.fee_project_usdt) + toNumber(row.trade_fee_cash);
+      const makerPnl = toNumber(cashBook?.realized);
+      return {
+        fees: round(fees),
+        maker_pnl: round(makerPnl),
+        total: round(fees + makerPnl),
+      };
+    })(),
     market_maker: makerResult.rows.map((book) => ({
       book_type: book.book_type,
       realized_pnl: round(book.realized),
