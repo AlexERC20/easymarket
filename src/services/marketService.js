@@ -13244,12 +13244,47 @@ async function settleOpenMarketPositions(client, market, winner) {
   // Стороны считаем по пользователю целиком, без разбивки по валютам: хедж
   // остаётся хеджем, даже если ноги взяты звёздами и долларами.
   const sidesByUserAllCurrencies = new Map();
+  // Ставки по сторонам, отдельно кэшем и бонусами. Нужны, чтобы право на
+  // разблокировку начислялось только за деньги, которыми человек рисковал:
+  // кэшевая нога, прикрытая встречной бонусной, риска не несёт.
+  const stakesByUser = new Map();
   for (const position of positions.rows) {
     const key = String(position.user_id);
     const sides = sidesByUserAllCurrencies.get(key) || new Set();
-    sides.add(String(position.side).toUpperCase());
+    const side = String(position.side).toUpperCase();
+    sides.add(side);
     sidesByUserAllCurrencies.set(key, sides);
+
+    if (normalizeCurrency(position.currency) === "USDT") {
+      const stakes = stakesByUser.get(key) || {
+        cash: { YES: 0, NO: 0 },
+        bonus: { YES: 0, NO: 0 },
+      };
+      const bonusSpent = Math.max(0, toNumber(position.bonus_spent));
+      const cashPart = Math.max(0, roundMoney(toNumber(position.spent) - bonusSpent));
+      if (side === "YES" || side === "NO") {
+        stakes.cash[side] += cashPart;
+        stakes.bonus[side] += bonusSpent;
+      }
+      stakesByUser.set(key, stakes);
+    }
   }
+
+  // Доля кэша, закрытая встречной бонусной ставкой на этом же рынке. Полный
+  // хедж даёт ноль в зачёт, частичный — пропорционально непокрытому остатку.
+  const getHedgedCashRatio = (userId) => {
+    const stakes = stakesByUser.get(String(userId));
+    if (!stakes) {
+      return 0;
+    }
+    const totalCash = stakes.cash.YES + stakes.cash.NO;
+    if (totalCash <= 0) {
+      return 0;
+    }
+    const covered = Math.min(stakes.cash.YES, stakes.bonus.NO)
+      + Math.min(stakes.cash.NO, stakes.bonus.YES);
+    return clamp(covered / totalCash, 0, 1);
+  };
 
   for (const position of positions.rows) {
     const currency = normalizeCurrency(position.currency);
@@ -13388,7 +13423,12 @@ async function settleOpenMarketPositions(client, market, winner) {
   }
 
   for (const result of realResultsByUser.values()) {
-    const realNetPnl = roundMoney(result.realNetPnl);
+    const settledNetPnl = roundMoney(result.realNetPnl);
+    // Разблокировка и конвертация звёзд идут только с той прибыли, которая
+    // заработана непокрытым кэшем. Клановые очки и статистика считаются по
+    // фактическому результату, поэтому берут исходное значение.
+    const hedgedRatio = settledNetPnl > 0 ? getHedgedCashRatio(result.userId) : 0;
+    const realNetPnl = roundMoney(settledNetPnl * (1 - hedgedRatio));
     await unlockBonusAfterResolvedMarket(client, {
       userId: result.userId,
       marketId: market.id,
@@ -13399,12 +13439,12 @@ async function settleOpenMarketPositions(client, market, winner) {
       marketId: market.id,
       realNetPnl,
     });
-    if (result.cashSpent > 0 && realNetPnl !== 0) {
+    if (result.cashSpent > 0 && settledNetPnl !== 0) {
       await awardClanPoints(
         client,
         result.userId,
         market.id,
-        realNetPnl > 0 ? 3 : -1,
+        settledNetPnl > 0 ? 3 : -1,
         "market_result",
         "USDT",
       );
