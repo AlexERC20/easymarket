@@ -87,6 +87,7 @@ import {
   getStarConversionReminderTargets,
   markStarConversionRemindersSent,
 } from "./services/bonusEconomyService.js";
+import { getTreasurySnapshot } from "./services/treasuryService.js";
 import { PriceUnavailableError, startBtcPriceStream } from "./services/priceService.js";
 import { runDatabaseCleanup, runStartupDatabaseRescue } from "./services/databaseCleanupService.js";
 import {
@@ -1855,6 +1856,14 @@ app.get("/api/bridge/economy/depositor-audit", requireBridgeSecret, async (req, 
       ok: true,
       ...audit,
     });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/treasury", requireBridgeSecret, async (_req, res) => {
+  try {
+    res.status(200).json({ ok: true, treasury: await getTreasurySnapshot() });
   } catch (error) {
     sendApiError(res, error);
   }
