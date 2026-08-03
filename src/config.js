@@ -7,6 +7,13 @@ function parseBoolean(value, fallback = false) {
 }
 
 function parseNumber(value, fallback, min = Number.NEGATIVE_INFINITY) {
+  // Number("") is 0, so a variable left blank on the host would silently mean
+  // zero rather than "not set" - and for a reward scale that quietly turns off
+  // every payout. Treat blank as absent.
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return fallback;
+  }
+
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
     return fallback;
@@ -119,8 +126,11 @@ export const config = {
   taskDailyPresenceFire: parseNumber(process.env.TASK_DAILY_PRESENCE_FIRE, 50, 0),
   taskDailyBetFire: parseNumber(process.env.TASK_DAILY_BET_FIRE, 50, 0),
   taskDailyCapFire: parseNumber(process.env.TASK_DAILY_CAP_FIRE, 5_000, 0),
-  taskRewardScale: parseNumber(process.env.TASK_REWARD_SCALE, 0.15, 0),
-  taskEasyRewardScale: parseNumber(process.env.TASK_EASY_REWARD_SCALE, 0.05, 0),
+  // Один множитель управляет и размером награды, и дневным потолком, потому что
+  // потолок тоже проходит через scaleTaskReward. Гриндеры упираются именно в
+  // потолок, так что резать награды по отдельности бессмысленно.
+  taskRewardScale: parseNumber(process.env.TASK_REWARD_SCALE, 0.07, 0),
+  taskEasyRewardScale: parseNumber(process.env.TASK_EASY_REWARD_SCALE, 0.025, 0),
   starUsdtConversionStarsPerUsdt: parseNumber(
     process.env.STAR_USDT_CONVERSION_STARS_PER_USDT,
     1_000,
