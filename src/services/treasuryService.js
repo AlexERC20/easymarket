@@ -1,4 +1,17 @@
 import { query } from "../db.js";
+import { config } from "../config.js";
+
+// Service accounts are the house's own float, not money someone will turn up to
+// withdraw. Counting them as a liability makes an ordinary book look insolvent.
+function getHouseAccounts() {
+  return [
+    ...(config.telegramAdminUserIds || []),
+    ...String(config.economyAuditExcludedAccounts || "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ].map((item) => String(item).replace(/^@/, "").toLowerCase());
+}
 
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
@@ -14,6 +27,7 @@ function round(value, precision = 2) {
 // two soft currencies are kept apart on purpose: a star and a bonus dollar are
 // liabilities of very different weight, and adding them up would hide that.
 export async function getTreasurySnapshot() {
+  const house = getHouseAccounts();
   const result = await query(`
     WITH deposits AS (
       SELECT COALESCE(SUM(amount), 0) AS total
@@ -26,17 +40,30 @@ export async function getTreasurySnapshot() {
         COUNT(*) FILTER (WHERE status = 'pending')::int AS pending_count,
         COALESCE(SUM(COALESCE(fee_amount, 0)) FILTER (WHERE status = 'confirmed'), 0) AS fees
       FROM usdt_withdrawal_requests
-    ), balances AS (
+    ), tagged AS (
       SELECT
-        COALESCE(SUM(cash.balance), 0) AS cash,
-        COALESCE(SUM(bonus.balance), 0) AS bonus,
-        COALESCE(SUM(fire.balance), 0) AS stars,
-        COUNT(*) FILTER (WHERE COALESCE(cash.balance, 0) > 0)::int AS cash_holders,
-        COUNT(*) FILTER (WHERE COALESCE(fire.balance, 0) > 0)::int AS star_holders
+        users.id,
+        COALESCE(cash.balance, 0) AS cash,
+        COALESCE(bonus.balance, 0) AS bonus,
+        COALESCE(fire.balance, 0) AS stars,
+        (
+          lower(COALESCE(users.telegram_id, '')) = ANY($1::text[])
+          OR lower(COALESCE(users.username, '')) = ANY($1::text[])
+        ) AS is_house
       FROM users
       LEFT JOIN usdt_balances cash ON cash.user_id = users.id
       LEFT JOIN usdt_bonus_balances bonus ON bonus.user_id = users.id
       LEFT JOIN fire_balances fire ON fire.user_id = users.id
+    ), balances AS (
+      SELECT
+        COALESCE(SUM(cash) FILTER (WHERE NOT is_house), 0) AS cash,
+        COALESCE(SUM(cash) FILTER (WHERE is_house), 0) AS house_cash,
+        COALESCE(SUM(bonus) FILTER (WHERE NOT is_house), 0) AS bonus,
+        COALESCE(SUM(stars) FILTER (WHERE NOT is_house), 0) AS stars,
+        COALESCE(SUM(stars) FILTER (WHERE is_house), 0) AS house_stars,
+        COUNT(*) FILTER (WHERE NOT is_house AND cash > 0)::int AS cash_holders,
+        COUNT(*) FILTER (WHERE NOT is_house AND stars > 0)::int AS star_holders
+      FROM tagged
     ), fees AS (
       SELECT
         COALESCE(SUM(project_fee) FILTER (WHERE currency = 'USDT'), 0) AS project_usdt,
@@ -76,7 +103,14 @@ export async function getTreasurySnapshot() {
         COALESCE(SUM(amount) FILTER (WHERE reason LIKE 'task_%' AND amount > 0), 0) AS tasks,
         COALESCE(SUM(amount) FILTER (WHERE reason LIKE 'referral%' AND amount > 0), 0) AS referrals,
         COALESCE(SUM(amount) FILTER (WHERE reason IN ('market_payout', 'sell_yes', 'sell_no') AND amount > 0), 0) AS payouts,
-        COALESCE(-SUM(amount) FILTER (WHERE reason IN ('buy_yes', 'buy_no') AND amount < 0), 0) AS stakes
+        COALESCE(-SUM(amount) FILTER (WHERE reason IN ('buy_yes', 'buy_no') AND amount < 0), 0) AS stakes,
+        COALESCE(-SUM(amount) FILTER (
+          WHERE reason IN (
+            'admin_adjustment', 'bug_bounty_reset', 'market_payout_correction',
+            'farm_account_reset', 'market_unwind'
+          ) AND amount < 0
+        ), 0) AS clawed_back,
+        COALESCE(-SUM(amount) FILTER (WHERE reason = 'fire_expiry' AND amount < 0), 0) AS expired
       FROM fire_ledger
     )
     SELECT
@@ -86,6 +120,8 @@ export async function getTreasurySnapshot() {
       (SELECT pending_count FROM withdrawals) AS withdrawal_pending_count,
       (SELECT fees FROM withdrawals) AS withdrawal_fees,
       (SELECT cash FROM balances) AS user_cash,
+      (SELECT house_cash FROM balances) AS house_cash,
+      (SELECT house_stars FROM balances) AS house_stars,
       (SELECT bonus FROM balances) AS user_bonus,
       (SELECT stars FROM balances) AS user_stars,
       (SELECT cash_holders FROM balances) AS cash_holders,
@@ -105,8 +141,10 @@ export async function getTreasurySnapshot() {
       (SELECT tasks FROM star_flow) AS star_tasks,
       (SELECT referrals FROM star_flow) AS star_referrals,
       (SELECT payouts FROM star_flow) AS star_payouts,
-      (SELECT stakes FROM star_flow) AS star_stakes
-  `);
+      (SELECT stakes FROM star_flow) AS star_stakes,
+      (SELECT clawed_back FROM star_flow) AS star_clawed_back,
+      (SELECT expired FROM star_flow) AS star_expired
+  `, [house.length ? house : [""]]);
   const row = result.rows[0] || {};
 
   const makerResult = await query(`
@@ -134,8 +172,10 @@ export async function getTreasurySnapshot() {
       pending_withdrawals: round(row.withdrawal_pending),
       pending_withdrawal_count: Number(row.withdrawal_pending_count || 0),
       user_balances: round(userCash),
+      house_balance: round(row.house_cash),
       holders: Number(row.cash_holders || 0),
       // Positive means players hold more than ever came in through deposits.
+      // The house float is excluded: nobody is coming to withdraw it.
       uncovered: round(userCash - (deposits - withdrawn)),
     },
     fees: {
@@ -162,6 +202,9 @@ export async function getTreasurySnapshot() {
       printed_referrals: round(row.star_referrals, 0),
       staked: round(row.star_stakes, 0),
       paid_out: round(row.star_payouts, 0),
+      clawed_back: round(row.star_clawed_back, 0),
+      expired: round(row.star_expired, 0),
+      house_stars: round(row.house_stars, 0),
       // Markets are a sink only while they pay out less than they take in.
       market_net: round(toNumber(row.star_payouts) - toNumber(row.star_stakes), 0),
     },
