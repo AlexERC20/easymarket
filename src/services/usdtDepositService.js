@@ -315,6 +315,110 @@ export async function getUserDepositIntents(telegramId, limit = 10) {
   return result.rows.map(mapDepositIntent);
 }
 
+// Read-only view for working out what happened to a payment that never landed.
+// Shows every intent regardless of status, plus any chain event that touched the
+// same address, so a cancelled intent with money already sent is visible.
+export async function auditUserDeposits(input = {}) {
+  const telegramId = String(input.telegram_id || input.telegramId || "").trim();
+  const username = String(input.username || "").replace(/^@/, "").trim();
+  if (!telegramId && !username) {
+    throw new Error("telegram_id_or_username_required");
+  }
+
+  const userResult = await query(
+    `
+      SELECT id, telegram_id, username, first_name, created_at
+      FROM users
+      WHERE ($1::text <> '' AND telegram_id = $1::text)
+         OR ($2::text <> '' AND lower(username) = lower($2::text))
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `,
+    [telegramId, username],
+  );
+  const user = userResult.rows[0];
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+
+  const intentsResult = await query(
+    `
+      SELECT *
+      FROM usdt_deposit_intents
+      WHERE user_id = $1::bigint
+      ORDER BY created_at DESC
+      LIMIT 30
+    `,
+    [user.id],
+  );
+
+  // Any chain event that landed on an address this user was ever given, however
+  // the event itself was classified.
+  const eventsResult = await query(
+    `
+      SELECT events.*
+      FROM usdt_deposit_events events
+      WHERE lower(events.to_address) IN (
+        SELECT DISTINCT lower(to_address)
+        FROM usdt_deposit_intents
+        WHERE user_id = $1::bigint
+      )
+      ORDER BY events.created_at DESC
+      LIMIT 50
+    `,
+    [user.id],
+  );
+
+  const creditedResult = await query(
+    `
+      SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*)::int AS entries
+      FROM usdt_ledger
+      WHERE user_id = $1::bigint
+        AND reason = 'usdt_onchain_deposit'
+        AND amount > 0
+    `,
+    [user.id],
+  );
+
+  return {
+    ok: true,
+    user: {
+      id: Number(user.id),
+      telegram_id: user.telegram_id,
+      username: user.username,
+      first_name: user.first_name,
+    },
+    credited_total: Number(creditedResult.rows[0]?.total || 0),
+    credited_entries: Number(creditedResult.rows[0]?.entries || 0),
+    intents: intentsResult.rows.map((row) => ({
+      id: Number(row.id),
+      status: row.status,
+      network: row.network,
+      requested_amount: Number(row.requested_amount),
+      deposit_amount: Number(row.deposit_amount),
+      credited_amount: row.credited_amount === null ? null : Number(row.credited_amount),
+      to_address: row.to_address,
+      from_address: row.from_address,
+      tx_hash: row.tx_hash,
+      created_at: row.created_at,
+      expires_at: row.expires_at,
+      credited_at: row.credited_at,
+    })),
+    chain_events: eventsResult.rows.map((row) => ({
+      id: Number(row.id),
+      status: row.status,
+      network: row.network,
+      tx_hash: row.tx_hash,
+      amount: Number(row.amount),
+      from_address: row.from_address,
+      to_address: row.to_address,
+      matched_intent_id: row.matched_intent_id === null ? null : Number(row.matched_intent_id),
+      chain_timestamp: row.chain_timestamp,
+      created_at: row.created_at,
+    })),
+  };
+}
+
 export async function getUserDepositIntent(input) {
   await expirePendingDepositIntents();
   const telegramId = String(input.telegram_id || "").trim();
