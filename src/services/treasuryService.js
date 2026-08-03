@@ -213,18 +213,25 @@ export async function getTreasurySnapshot() {
       // Markets are a sink only while they pay out less than they take in.
       market_net: round(toNumber(row.star_payouts) - toNumber(row.star_stakes), 0),
     },
-    // The only line that is money. Fees are already cash-only by construction -
-    // distributeProfitFee scales them by the cash share of the stake - and the
-    // maker earns real money in the cash book alone: a win in the bonus or star
-    // book absorbs a liability that was never real to begin with.
+    // Hard money only, measured by cash flow rather than by accrual. Fee
+    // records are not cash: the fee is withheld from a payout, so if the payout
+    // itself was funded by balance the pricing bugs printed, the fee booked
+    // against it was never real either. What the house actually earned is what
+    // came in and has not been paid out or promised to a player.
     real_result: (() => {
-      const cashBook = makerResult.rows.find((book) => book.book_type === "USDT_CASH");
-      const fees = toNumber(row.fee_project_usdt) + toNumber(row.trade_fee_cash);
-      const makerPnl = toNumber(cashBook?.realized);
+      const owed = toNumber(row.user_cash);
+      const paidOut = withdrawn + toNumber(row.withdrawal_pending);
       return {
-        fees: round(fees),
-        maker_pnl: round(makerPnl),
-        total: round(fees + makerPnl),
+        deposits: round(deposits),
+        withdrawn: round(paidOut),
+        owed_to_players: round(owed),
+        earned: round(deposits - paidOut - owed),
+        // Kept beside it so the gap between the two is visible instead of
+        // silently replacing one with the other.
+        accrued_fees: round(toNumber(row.fee_project_usdt) + toNumber(row.trade_fee_cash)),
+        maker_cash_pnl: round(
+          toNumber(makerResult.rows.find((book) => book.book_type === "USDT_CASH")?.realized),
+        ),
       };
     })(),
     market_maker: makerResult.rows.map((book) => ({
