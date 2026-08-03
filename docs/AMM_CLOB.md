@@ -68,6 +68,53 @@ No market maker can be guaranteed to make money. These controls make ordinary
 round-trip farming negative and cap loss to posted collateral, but they do not
 remove market or gap risk.
 
+## Attack audit
+
+Adversarial simulation of the quoting and fill layer, run at the current live
+settings (1,000 collateral per book, 200 bps spread, 100 bps execution fee):
+
+- 4,000 random fill sequences of 60 steps each. The AMM never reached negative
+  cash or negative inventory, and its loss never exceeded the collateral it had
+  locked, under either settlement outcome.
+- 270 fair prices × 5 spreads × 5 inventory skews. The cheapest YES ask plus the
+  cheapest NO ask always exceeds 1, and the richest YES bid plus the richest NO
+  bid always falls below 1, across every level pair rather than only equal
+  indexes. Both ladders stay monotonic, the AMM never crosses its own book, and
+  an immediate round trip is always negative.
+- With the fair price held constant, no sequence extracts a risk-free profit.
+  Every profitable sequence found required the fair price to move first.
+
+The execution paths hold up as well: a limit order crosses AMM liquidity only at
+the AMM's own quoted price, never at the taker's limit price; every AMM fill
+re-checks quote freshness against the 2-second window; the matcher refuses to
+fill an order against its own owner; and the three books settle into separate
+balance tables, so a star or bonus trade cannot reach real USDT.
+
+### The exposure that remains
+
+The complementary guard is an instantaneous one. It cannot stop a trader who
+buys the cheap side now and the opposite side after the price swings, ending
+with a complete set bought for less than the 1 unit it redeems for. The
+break-even swing is roughly the spread plus the fee, about 3 probability points
+at current settings, and BTC crosses that routinely:
+
+| time to expiry | +$5 on BTC | +$10 | +$20 |
+|---|---|---|---|
+| 15 min | 2.9 pp | 5.8 pp | 11.5 pp |
+| 5 min | 5.0 pp | 10.0 pp | 19.3 pp |
+| 1 min | 11.1 pp | 21.4 pp | 37.1 pp |
+
+The same dollar move is four times more probability-sensitive one minute before
+expiry than fifteen minutes before, while trading is frozen only for the last
+five seconds. This is ordinary market-maker adverse selection rather than a
+defect, but it is what the settled star and bonus books actually lost money to,
+and with `auto_risk_enabled` off the loss per market is capped only by the
+posted collateral.
+
+Worth considering: a spread of 600-1,000 bps, a spread or quote size that scales
+with time to expiry, a longer pre-settlement freeze, and turning the automatic
+risk reduction back on once the bot controls have been exercised.
+
 ## Polymarket reference model
 
 The implementation follows the public Polymarket model where it matters for
