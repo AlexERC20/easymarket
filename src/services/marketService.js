@@ -9385,6 +9385,7 @@ function mapMarketMakerSettings(row) {
     rapid_loss_bps: Number(row.rapid_loss_bps || 0),
     minimum_quote_capital: toNumber(row.minimum_quote_capital),
     quote_levels: Number(row.quote_levels || 0),
+    auto_risk_enabled: row.auto_risk_enabled !== false,
     updated_by_telegram_id: row.updated_by_telegram_id || null,
     updated_by_username: row.updated_by_username || null,
     updated_at: row.updated_at,
@@ -9495,11 +9496,14 @@ async function initializeMarketMakerAccounts(client, market, settingsInput = nul
       configuredCollateral,
       Math.max(0, toNumber(settings.minimum_quote_capital)),
     );
+    const allocationMultiplier = settings.auto_risk_enabled
+      ? clamp(toNumber(globalRisk?.allocation_multiplier, 1), 0, 1)
+      : 1;
     const collateral = roundMoney(Math.min(
       configuredCollateral,
       Math.max(
         minimumAllocation,
-        configuredCollateral * clamp(toNumber(globalRisk?.allocation_multiplier, 1), 0, 1),
+        configuredCollateral * allocationMultiplier,
       ),
     ));
     if (collateral <= 0) {
@@ -9548,7 +9552,7 @@ async function initializeMarketMakerAccounts(client, market, settingsInput = nul
           JSON.stringify({
             collateral_locked: collateral,
             configured_collateral: configuredCollateral,
-            global_risk_multiplier: globalRisk?.allocation_multiplier ?? 1,
+            global_risk_multiplier: allocationMultiplier,
           }),
         ],
       );
@@ -9624,8 +9628,11 @@ async function refreshMarketMakerAccount(client, market, bookType, lock = true, 
     maxDrawdownBps: settings.max_drawdown_bps,
     rapidLossBps: settings.rapid_loss_bps,
     minimumQuoteCapital: settings.minimum_quote_capital,
+    autoRiskEnabled: settings.auto_risk_enabled,
   });
-  const globalMultiplier = clamp(toNumber(globalRisk?.allocation_multiplier, 1), 0, 1);
+  const globalMultiplier = settings.auto_risk_enabled
+    ? clamp(toNumber(globalRisk?.allocation_multiplier, 1), 0, 1)
+    : 1;
   const configuredCollateral = collateralForBook(settings, bookType);
   const riskMultiplier = Math.min(localRisk.riskMultiplier, globalMultiplier);
   const riskCapital = Math.min(
@@ -9950,11 +9957,13 @@ export async function updateMarketMakerSettings(input = {}) {
   const rapidLossBps = numeric(input.rapid_loss_bps, 10, 8_000, "invalid_amm_rapid_loss");
   const minimumQuoteCapital = numeric(input.minimum_quote_capital, 1, 100_000, "invalid_amm_minimum_capital");
   const quoteLevels = numeric(input.quote_levels, 1, 12, "invalid_amm_quote_levels");
-  const enabled = input.enabled === undefined
+  const boolean = (value) => (value === undefined || value === null
     ? null
     : [true, 1, "1", "true", "yes", "on"].includes(
-      typeof input.enabled === "string" ? input.enabled.toLowerCase() : input.enabled,
-    );
+      typeof value === "string" ? value.toLowerCase() : value,
+    ));
+  const enabled = boolean(input.enabled);
+  const autoRiskEnabled = boolean(input.auto_risk_enabled);
   const currentSettingsResult = await query("SELECT * FROM market_maker_settings WHERE id = 1");
   const currentSettings = mapMarketMakerSettings(currentSettingsResult.rows[0]);
   const effectiveMaxDrawdown = maxDrawdownBps ?? currentSettings.max_drawdown_bps;
@@ -9976,6 +9985,7 @@ export async function updateMarketMakerSettings(input = {}) {
           rapid_loss_bps = COALESCE($8::integer, rapid_loss_bps),
           minimum_quote_capital = COALESCE($9::numeric, minimum_quote_capital),
           quote_levels = COALESCE($10::integer, quote_levels),
+          auto_risk_enabled = COALESCE($13::boolean, auto_risk_enabled),
           updated_by_telegram_id = $11::text,
           updated_by_username = $12::text,
           updated_at = now()
@@ -9995,6 +10005,7 @@ export async function updateMarketMakerSettings(input = {}) {
       quoteLevels === null ? null : Math.round(quoteLevels),
       input.admin_telegram_id ? String(input.admin_telegram_id) : null,
       input.admin_username ? String(input.admin_username).replace(/^@/, "") : null,
+      autoRiskEnabled,
     ],
   );
   return { ok: true, settings: mapMarketMakerSettings(result.rows[0]) };
@@ -10088,6 +10099,85 @@ export async function restartMarketMaker(input = {}) {
   });
 }
 
+// Tops every open AMM account up to the collateral configured for its book.
+// The added collateral is split into complete sets exactly like the initial
+// split, so one added unit always creates one YES and one NO share and the
+// solvency invariant holds. Collateral is never removed from a live account.
+export async function applyMarketMakerCollateral(input = {}) {
+  let requestedBooks = CLOB_BOOK_TYPES;
+  if (Array.isArray(input.book_types) && input.book_types.length > 0) {
+    requestedBooks = input.book_types.map((book) => String(book || "").trim().toUpperCase());
+    if (requestedBooks.some((book) => !CLOB_BOOK_TYPES.includes(book))) {
+      throw new Error("invalid_book_type");
+    }
+  }
+  return withTransaction(async (client) => {
+    const settings = await getMarketMakerSettingsWithClient(client, true);
+    const result = await client.query(
+      `
+        SELECT accounts.*
+        FROM market_maker_accounts accounts
+        JOIN markets ON markets.id = accounts.market_id
+        WHERE markets.status = 'open'
+          AND markets.trading_mode = $1::text
+          AND accounts.status <> 'SETTLED'
+          AND accounts.book_type = ANY($2::text[])
+        ORDER BY accounts.id ASC
+        FOR UPDATE OF accounts
+      `,
+      [CLOB_TRADING_MODE, requestedBooks],
+    );
+    const updated = [];
+    for (const account of result.rows) {
+      const target = roundMoney(collateralForBook(settings, account.book_type));
+      const current = roundMoney(toNumber(account.initial_collateral));
+      const delta = roundMoney(target - current);
+      if (delta <= 0) {
+        continue;
+      }
+      const updatedResult = await client.query(
+        `
+          UPDATE market_maker_accounts
+          SET initial_collateral = initial_collateral + $2::numeric,
+              yes_inventory = yes_inventory + $2::numeric,
+              no_inventory = no_inventory + $2::numeric,
+              current_nav = current_nav + $2::numeric,
+              peak_nav = peak_nav + $2::numeric,
+              risk_capital = LEAST(initial_collateral + $2::numeric, risk_capital + $2::numeric),
+              status = CASE WHEN status = 'HALTED' THEN 'ACTIVE' ELSE status END,
+              stop_reason = CASE WHEN status = 'HALTED' THEN NULL ELSE stop_reason END,
+              quotes = '{}'::jsonb,
+              updated_at = now()
+          WHERE id = $1::bigint
+          RETURNING *
+        `,
+        [account.id, delta],
+      );
+      await client.query(
+        `
+          INSERT INTO market_maker_ledger (
+            account_id, market_id, book_type, event_type, yes_delta, no_delta, metadata
+          )
+          VALUES ($1::bigint, $2::bigint, $3::text, 'ADMIN_COLLATERAL_TOPUP', $4::numeric, $4::numeric, $5::jsonb)
+        `,
+        [
+          account.id,
+          account.market_id,
+          account.book_type,
+          delta,
+          JSON.stringify({
+            admin_telegram_id: input.admin_telegram_id || null,
+            previous_collateral: current,
+            target_collateral: target,
+          }),
+        ],
+      );
+      updated.push(mapMarketMakerAccount(updatedResult.rows[0]));
+    }
+    return { ok: true, updated, settings };
+  });
+}
+
 async function recordMarketMakerSettlementRisk(client, settings, account, realizedPnl) {
   const riskState = await getMarketMakerRiskStateWithClient(client, account.book_type, true);
   const configuredCollateral = Math.max(0, collateralForBook(settings, account.book_type));
@@ -10100,6 +10190,7 @@ async function recordMarketMakerSettlementRisk(client, settings, account, realiz
     realizedPnl,
     lossStreak: riskState?.loss_streak || 0,
     minimumMultiplier,
+    autoRiskEnabled: settings.auto_risk_enabled,
   });
   const result = await client.query(
     `

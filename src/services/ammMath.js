@@ -63,10 +63,26 @@ export function calculateAmmRiskState(input) {
   const maxDrawdownBps = clamp(Number(input?.maxDrawdownBps || 1500), 100, 9900);
   const rapidLossBps = clamp(Number(input?.rapidLossBps || 500), 10, maxDrawdownBps);
   const minimumQuoteCapital = Math.max(0, Number(input?.minimumQuoteCapital || 20));
+  const autoRiskEnabled = input?.autoRiskEnabled !== false;
   const drawdownBps = peakNav > 0 ? ((peakNav - currentNav) / peakNav) * 10_000 : 0;
   const lossFromStartBps = initialCollateral > 0
     ? ((initialCollateral - currentNav) / initialCollateral) * 10_000
     : 0;
+
+  if (!autoRiskEnabled) {
+    // Automatic throttling is off, so the book quotes its full collateral. The
+    // solvency stop stays: an account with no net asset value has nothing left
+    // to back a quote.
+    return {
+      status: currentNav > 0 ? "ACTIVE" : "HALTED",
+      riskMultiplier: currentNav > 0 ? 1 : 0,
+      riskCapital: roundTo(currentNav),
+      drawdownBps: roundTo(drawdownBps, 2),
+      lossFromStartBps: roundTo(lossFromStartBps, 2),
+      peakNav: roundTo(peakNav),
+      stopReason: currentNav > 0 ? null : "insolvent",
+    };
+  }
 
   if (currentNav < minimumQuoteCapital || drawdownBps >= maxDrawdownBps) {
     return {
@@ -111,6 +127,18 @@ export function calculateNextAmmAllocation(input) {
   const realizedPnl = Number(input?.realizedPnl || 0);
   const previousLossStreak = Math.max(0, Math.floor(Number(input?.lossStreak || 0)));
   const minimumMultiplier = clamp(Number(input?.minimumMultiplier || 0.02), 0, 1);
+  const autoRiskEnabled = input?.autoRiskEnabled !== false;
+
+  if (!autoRiskEnabled) {
+    return {
+      allocationMultiplier: 1,
+      lossStreak: 0,
+      lossRatio: initialCollateral > 0 && realizedPnl < 0
+        ? roundTo(Math.abs(realizedPnl) / initialCollateral, 6)
+        : 0,
+      status: "ACTIVE",
+    };
+  }
 
   if (realizedPnl >= 0 || initialCollateral <= 0) {
     return {

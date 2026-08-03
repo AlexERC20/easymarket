@@ -265,3 +265,73 @@ test("AMM NAV is conserved by a fair complete set", () => {
   assert.equal(calculateAmmNav(account, 0.5), 1_000);
   assert.equal(calculateAmmNav(account, 0.99), 1_000);
 });
+
+test("disabled auto risk keeps full size but still stops an insolvent book", () => {
+  const drawdownThatWouldHalt = calculateAmmRiskState({
+    initialCollateral: 1_000,
+    currentNav: 840,
+    peakNav: 1_000,
+    rapidLossBps: 500,
+    maxDrawdownBps: 1_500,
+    minimumQuoteCapital: 20,
+    autoRiskEnabled: false,
+  });
+  assert.equal(drawdownThatWouldHalt.status, "ACTIVE");
+  assert.equal(drawdownThatWouldHalt.riskMultiplier, 1);
+  assert.equal(drawdownThatWouldHalt.riskCapital, 840);
+
+  const belowFloor = calculateAmmRiskState({
+    initialCollateral: 1_000,
+    currentNav: 5,
+    peakNav: 1_000,
+    rapidLossBps: 500,
+    maxDrawdownBps: 1_500,
+    minimumQuoteCapital: 20,
+    autoRiskEnabled: false,
+  });
+  assert.equal(belowFloor.status, "ACTIVE");
+  assert.equal(belowFloor.riskCapital, 5);
+
+  const insolvent = calculateAmmRiskState({
+    initialCollateral: 1_000,
+    currentNav: 0,
+    peakNav: 1_000,
+    rapidLossBps: 500,
+    maxDrawdownBps: 1_500,
+    minimumQuoteCapital: 20,
+    autoRiskEnabled: false,
+  });
+  assert.equal(insolvent.status, "HALTED");
+  assert.equal(insolvent.riskMultiplier, 0);
+  assert.equal(insolvent.stopReason, "insolvent");
+});
+
+test("disabled auto risk never carries a loss into the next market allocation", () => {
+  const afterLoss = calculateNextAmmAllocation({
+    currentMultiplier: 0.25,
+    initialCollateral: 1_000,
+    realizedPnl: -300,
+    lossStreak: 4,
+    minimumMultiplier: 0.02,
+    autoRiskEnabled: false,
+  });
+  assert.equal(afterLoss.allocationMultiplier, 1);
+  assert.equal(afterLoss.lossStreak, 0);
+  assert.equal(afterLoss.status, "ACTIVE");
+});
+
+test("a collateral top-up mints one YES and one NO per added unit", () => {
+  const before = { cash_balance: 120, yes_inventory: 400, no_inventory: 700 };
+  const delta = 250;
+  const after = {
+    cash_balance: before.cash_balance,
+    yes_inventory: before.yes_inventory + delta,
+    no_inventory: before.no_inventory + delta,
+  };
+  for (const price of [0.02, 0.37, 0.5, 0.91]) {
+    assert.equal(
+      Math.round((calculateAmmNav(after, price) - calculateAmmNav(before, price)) * 1e6) / 1e6,
+      delta,
+    );
+  }
+});

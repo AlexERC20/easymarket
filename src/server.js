@@ -65,6 +65,7 @@ import {
   matchOpenClobLimitOrders,
   resetUserMarketStateByUsername,
   restartMarketMaker,
+  applyMarketMakerCollateral,
   resolveExpiredMarkets,
   sellOutcome,
   syncTopMarkets,
@@ -1741,6 +1742,7 @@ app.post("/api/bridge/amm/settings", requireBridgeSecret, async (req, res) => {
       rapid_loss_bps: req.body?.rapid_loss_bps ?? req.body?.rapidLossBps,
       minimum_quote_capital: req.body?.minimum_quote_capital ?? req.body?.minimumQuoteCapital,
       quote_levels: req.body?.quote_levels ?? req.body?.quoteLevels,
+      auto_risk_enabled: req.body?.auto_risk_enabled ?? req.body?.autoRiskEnabled,
       admin_telegram_id: req.body?.admin_telegram_id ?? req.body?.adminTelegramId,
       admin_username: req.body?.admin_username ?? req.body?.adminUsername,
     });
@@ -1754,6 +1756,18 @@ app.post("/api/bridge/amm/restart", requireBridgeSecret, async (req, res) => {
   try {
     const result = await restartMarketMaker({
       market_id: req.body?.market_id ?? req.body?.marketId,
+      admin_telegram_id: req.body?.admin_telegram_id ?? req.body?.adminTelegramId,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/amm/collateral", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await applyMarketMakerCollateral({
+      book_types: req.body?.book_types ?? req.body?.bookTypes,
       admin_telegram_id: req.body?.admin_telegram_id ?? req.body?.adminTelegramId,
     });
     res.status(200).json(result);

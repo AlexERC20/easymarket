@@ -789,10 +789,14 @@ export async function runMigrations() {
       rapid_loss_bps INTEGER NOT NULL DEFAULT 500,
       minimum_quote_capital NUMERIC(20, 8) NOT NULL DEFAULT 20,
       quote_levels INTEGER NOT NULL DEFAULT 5,
+      auto_risk_enabled BOOLEAN NOT NULL DEFAULT true,
       updated_by_telegram_id TEXT,
       updated_by_username TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    ALTER TABLE market_maker_settings
+      ADD COLUMN IF NOT EXISTS auto_risk_enabled BOOLEAN NOT NULL DEFAULT true;
 
     INSERT INTO market_maker_settings (id)
     VALUES (1)

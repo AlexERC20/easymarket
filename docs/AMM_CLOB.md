@@ -57,6 +57,13 @@ that fair value.
 - explicit admin restart;
 - settlement PnL and an immutable AMM ledger.
 
+The quadratic size reduction, the persistent per-book multiplier and the
+drawdown halt are all governed by one switch, `auto_risk_enabled`. With the
+switch off the AMM always quotes its full configured collateral and a settled
+loss never shrinks the following market. The only stop that remains is
+solvency: a book with zero net asset value has nothing left to quote against.
+Turn the switch off only while an operator is watching the books.
+
 No market maker can be guaranteed to make money. These controls make ordinary
 round-trip farming negative and cap loss to posted collateral, but they do not
 remove market or gap risk.
@@ -104,6 +111,7 @@ Content-Type: application/json
   "minimum_quote_capital": 20,
   "quote_levels": 5,
   "enabled": true,
+  "auto_risk_enabled": false,
   "admin_telegram_id": "..."
 }
 ```
@@ -111,6 +119,24 @@ Content-Type: application/json
 Collateral changes apply to newly created AMM accounts. Spread, execution fee
 and risk settings apply to subsequent quotes immediately. `GET /api/bridge/amm`
 also returns `performance` (won, lost and net by book) and `global_risk`.
+
+### Apply collateral to open markets
+
+```http
+POST /api/bridge/amm/collateral
+Content-Type: application/json
+
+{
+  "book_types": ["USDT_CASH", "USDT_BONUS", "STAR"],
+  "admin_telegram_id": "..."
+}
+```
+
+Tops every open account up to the collateral configured for its book, so a
+setting change reaches long-running markets without waiting for the next one.
+Each added unit is split into one YES and one NO share, exactly like the initial
+split. Collateral is never taken back out of a live account, and an account
+already at or above its target is skipped. Omit `book_types` for all three.
 
 ### Restart stopped accounts
 
