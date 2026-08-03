@@ -8,6 +8,7 @@ import {
   calculateAmmRiskState,
   calculateBinaryFairProbability,
   calculateExecutionFee,
+  calculateGammaHalfSpread,
   calculateNextAmmAllocation,
 } from "../src/services/ammMath.js";
 
@@ -333,5 +334,119 @@ test("a collateral top-up mints one YES and one NO per added unit", () => {
       Math.round((calculateAmmNav(after, price) - calculateAmmNav(before, price)) * 1e6) / 1e6,
       delta,
     );
+  }
+});
+
+test("the payout cap bounds what one tail level can cost the book", () => {
+  const uncapped = buildAmmQuoteLadder({
+    fairYes: 0.02,
+    spreadBps: 200,
+    levels: 5,
+    riskCapital: 1_000,
+    riskMultiplier: 1,
+    yesInventory: 1_000,
+    noInventory: 1_000,
+  });
+  const capped = buildAmmQuoteLadder({
+    fairYes: 0.02,
+    spreadBps: 200,
+    levels: 5,
+    riskCapital: 1_000,
+    riskMultiplier: 1,
+    yesInventory: 1_000,
+    noInventory: 1_000,
+    maxLevelLoss: 50,
+  });
+
+  const worstLoss = (book) => book.yes.asks.reduce(
+    (total, level) => total + level.shares * (1 - level.price),
+    0,
+  );
+
+  // Without the cap a few units of capital buy a payout worth most of the book.
+  assert.ok(worstLoss(uncapped) > 600);
+  assert.ok(worstLoss(capped) < 150);
+  assert.ok(capped.yes.asks[0].shares < uncapped.yes.asks[0].shares / 4);
+  // Prices are untouched; only size is bounded.
+  assert.equal(capped.yes.asks[0].price, uncapped.yes.asks[0].price);
+});
+
+test("the payout cap barely touches at-the-money size", () => {
+  const options = {
+    fairYes: 0.5,
+    spreadBps: 200,
+    levels: 5,
+    riskCapital: 1_000,
+    riskMultiplier: 1,
+    yesInventory: 1_000,
+    noInventory: 1_000,
+  };
+  const uncapped = buildAmmQuoteLadder(options);
+  const capped = buildAmmQuoteLadder({ ...options, maxLevelLoss: 50 });
+  const ratio = capped.yes.asks[0].shares / uncapped.yes.asks[0].shares;
+  assert.ok(ratio > 0.3, `at the money size collapsed to ${ratio}`);
+});
+
+test("the gamma guard widens the spread as settlement approaches", () => {
+  const base = {
+    openPrice: 62_600,
+    currentPrice: 62_600,
+    sigmaPerSqrtSecond: 0.0000365,
+    gammaGuardSeconds: 10,
+  };
+  const early = calculateGammaHalfSpread({ ...base, secondsLeft: 900 });
+  const late = calculateGammaHalfSpread({ ...base, secondsLeft: 60 });
+  const veryLate = calculateGammaHalfSpread({ ...base, secondsLeft: 10 });
+
+  assert.ok(early > 0);
+  assert.ok(late > early * 2, `late ${late} should dwarf early ${early}`);
+  assert.ok(veryLate > late);
+  assert.ok(veryLate <= 0.45);
+
+  // Switched off, it contributes nothing and the configured spread rules.
+  assert.equal(calculateGammaHalfSpread({ ...base, secondsLeft: 60, gammaGuardSeconds: 0 }), 0);
+
+  const guarded = buildAmmQuoteLadder({
+    fairYes: 0.5, spreadBps: 200, levels: 5, riskCapital: 1_000, riskMultiplier: 1,
+    yesInventory: 1_000, noInventory: 1_000, secondsLeft: 60, ...base,
+  });
+  const plain = buildAmmQuoteLadder({
+    fairYes: 0.5, spreadBps: 200, levels: 5, riskCapital: 1_000, riskMultiplier: 1,
+    yesInventory: 1_000, noInventory: 1_000,
+  });
+  assert.ok(guarded.yes.asks[0].price > plain.yes.asks[0].price);
+  assert.ok(guarded.yes.bids[0].price < plain.yes.bids[0].price);
+  assert.ok(guarded.halfSpread > plain.halfSpread);
+});
+
+test("the gamma guard never crosses the complementary pair", () => {
+  for (const secondsLeft of [900, 300, 60, 20, 5]) {
+    for (const fairYes of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+      const book = buildAmmQuoteLadder({
+        fairYes,
+        spreadBps: 200,
+        levels: 5,
+        riskCapital: 1_000,
+        riskMultiplier: 1,
+        yesInventory: 1_000,
+        noInventory: 1_000,
+        maxLevelLoss: 50,
+        gammaGuardSeconds: 10,
+        secondsLeft,
+        openPrice: 62_600,
+        currentPrice: 62_600 * (0.5 + fairYes) / 1.0,
+        sigmaPerSqrtSecond: 0.0000365,
+      });
+      const cheapestPair = Math.min(...book.yes.asks.map((l) => l.price), Infinity)
+        + Math.min(...book.no.asks.map((l) => l.price), Infinity);
+      const richestPair = Math.max(...book.yes.bids.map((l) => l.price), -Infinity)
+        + Math.max(...book.no.bids.map((l) => l.price), -Infinity);
+      if (Number.isFinite(cheapestPair)) {
+        assert.ok(cheapestPair > 1, `t=${secondsLeft} p=${fairYes} pair ${cheapestPair}`);
+      }
+      if (Number.isFinite(richestPair)) {
+        assert.ok(richestPair < 1, `t=${secondsLeft} p=${fairYes} bids ${richestPair}`);
+      }
+    }
   }
 });

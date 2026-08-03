@@ -1743,6 +1743,8 @@ app.post("/api/bridge/amm/settings", requireBridgeSecret, async (req, res) => {
       minimum_quote_capital: req.body?.minimum_quote_capital ?? req.body?.minimumQuoteCapital,
       quote_levels: req.body?.quote_levels ?? req.body?.quoteLevels,
       auto_risk_enabled: req.body?.auto_risk_enabled ?? req.body?.autoRiskEnabled,
+      gamma_guard_seconds: req.body?.gamma_guard_seconds ?? req.body?.gammaGuardSeconds,
+      max_level_loss_bps: req.body?.max_level_loss_bps ?? req.body?.maxLevelLossBps,
       admin_telegram_id: req.body?.admin_telegram_id ?? req.body?.adminTelegramId,
       admin_username: req.body?.admin_username ?? req.body?.adminUsername,
     });

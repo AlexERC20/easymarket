@@ -43,6 +43,29 @@ expiry and observed short-term volatility. Internal EasyMarket order flow does
 not change fair value. Inventory skew only changes the AMM's own bid/ask around
 that fair value.
 
+## Gamma guard and the payout cap
+
+Two settings answer the two ways the quoting model is weakest.
+
+`gamma_guard_seconds` sets the reaction window the spread must cover. A binary's
+probability grows more sensitive to the underlying as the clock runs out — the
+same dollar of BTC is worth roughly four times more probability one minute
+before settlement than fifteen minutes before — so a fixed spread is generous
+early and far too thin late. The guard raises the half-spread to whatever covers
+a one-sigma BTC move over that window, which makes the spread widen on its own
+as settlement approaches. Set it to 0 to quote on the configured spread alone.
+
+`max_level_loss_bps` caps what a single quote level can cost the book if the
+outcome lands, as a fraction of collateral. Sizing by notional alone does not
+bound risk, because a cheap tail turns a few units of capital into a large share
+count and every share redeems for one unit: at a fair price of 0.05, $24 of
+notional used to buy a $400 payout, and the whole ask ladder cost $68 while
+exposing 95% of the book. The cap binds hard at the tails and barely touches
+size at the money, where a share can only lose the price paid for it.
+
+Raising `spread_bps` also raises the cheapest price the AMM will sell a tail at,
+since every ask sits at least a half-spread above fair value.
+
 ## Risk controls
 
 - stale external quote rejection;
@@ -159,6 +182,8 @@ Content-Type: application/json
   "quote_levels": 5,
   "enabled": true,
   "auto_risk_enabled": false,
+  "gamma_guard_seconds": 10,
+  "max_level_loss_bps": 500,
   "admin_telegram_id": "..."
 }
 ```

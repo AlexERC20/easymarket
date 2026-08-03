@@ -177,6 +177,45 @@ export function calculateNextAmmAllocation(input) {
   };
 }
 
+// A binary's quoted probability gets more sensitive to the underlying as the
+// clock runs out: the same dollar of BTC is worth about four times more
+// probability one minute before settlement than fifteen minutes before. A fixed
+// spread is therefore wide early and far too narrow late, which is exactly when
+// it is picked off. This returns the half-spread needed to cover a one-sigma
+// move over the reaction window, so the spread widens on its own as the market
+// approaches settlement.
+export function calculateGammaHalfSpread(input) {
+  const guardSeconds = Math.max(0, Number(input?.gammaGuardSeconds || 0));
+  const secondsLeft = Number(input?.secondsLeft || 0);
+  const currentPrice = Number(input?.currentPrice || 0);
+  const openPrice = Number(input?.openPrice || 0);
+  const sigmaPerSqrtSecond = Number(input?.sigmaPerSqrtSecond || 0);
+  if (
+    guardSeconds <= 0
+    || !(secondsLeft > 0)
+    || !(currentPrice > 0)
+    || !(openPrice > 0)
+    || !(sigmaPerSqrtSecond > 0)
+  ) {
+    return 0;
+  }
+
+  const fair = calculateBinaryFairProbability({
+    openPrice, currentPrice, secondsLeft, sigmaPerSqrtSecond,
+  });
+  const move = currentPrice * sigmaPerSqrtSecond * Math.sqrt(guardSeconds);
+  const shocked = calculateBinaryFairProbability({
+    openPrice,
+    currentPrice: currentPrice + move,
+    secondsLeft,
+    sigmaPerSqrtSecond,
+  });
+  // Capped so the ladder stays inside the tradable price range instead of
+  // collapsing onto the clamps; at that width the AMM is effectively out of the
+  // market, which is the intended outcome close to settlement.
+  return clamp(Math.abs(shocked - fair), 0, 0.45);
+}
+
 function buildSideLevels({
   center,
   halfSpread,
@@ -185,6 +224,7 @@ function buildSideLevels({
   bidCapital,
   riskMultiplier,
   inventoryAvailable,
+  maxLevelLoss,
 }) {
   const tailDistance = Math.min(center, 1 - center);
   const tailDepth = clamp(tailDistance * 4, 0.035, 1);
@@ -199,13 +239,22 @@ function buildSideLevels({
     const bidPrice = roundPrice(center - distance);
     const levelWeight = 1 / (1 + index * 0.55);
     const levelNotional = quoteCapital * 0.12 * tailDepth * riskMultiplier * levelWeight;
+    // Notional alone does not bound risk: a cheap tail turns a few units of
+    // capital into a large share count, and every share pays out one unit if
+    // the outcome lands. Cap each level by what it loses when it does land -
+    // the ask loses (1 - price) per share sold, the bid loses its own price.
+    const levelLossBudget = maxLevelLoss > 0
+      ? maxLevelLoss * levelWeight * riskMultiplier
+      : Infinity;
     const askShares = roundTo(Math.min(
       askInventoryLeft,
       levelNotional / Math.max(askPrice, MIN_OUTCOME_PRICE),
+      levelLossBudget / Math.max(1 - askPrice, MIN_OUTCOME_PRICE),
     ));
     const bidShares = roundTo(Math.min(
       bidCapitalLeft / Math.max(bidPrice, MIN_OUTCOME_PRICE),
       levelNotional / Math.max(bidPrice, MIN_OUTCOME_PRICE),
+      levelLossBudget / Math.max(bidPrice, MIN_OUTCOME_PRICE),
     ));
 
     if (askShares > 0.00000001) {
@@ -240,12 +289,15 @@ export function buildAmmQuoteLadder(input) {
   const skewShift = inventorySkew * Math.min(0.06, spreadBps / 10_000);
   const yesCenter = clamp(fairYes - skewShift, 0.002, 0.998);
   const noCenter = clamp(fairNo + skewShift, 0.002, 0.998);
-  const halfSpread = Math.max(PRICE_TICK, spreadBps / 20_000);
+  const maxLevelLoss = Math.max(0, Number(input?.maxLevelLoss || 0));
+  const gammaHalfSpread = calculateGammaHalfSpread(input);
+  const halfSpread = Math.max(PRICE_TICK, spreadBps / 20_000, gammaHalfSpread);
 
   const yes = buildSideLevels({
     center: yesCenter,
     halfSpread,
     levels,
+    maxLevelLoss,
     quoteCapital: riskCapital,
     bidCapital: totalBidCapital * 0.5,
     riskMultiplier,
@@ -255,6 +307,7 @@ export function buildAmmQuoteLadder(input) {
     center: noCenter,
     halfSpread,
     levels,
+    maxLevelLoss,
     quoteCapital: riskCapital,
     bidCapital: totalBidCapital * 0.5,
     riskMultiplier,
@@ -284,6 +337,8 @@ export function buildAmmQuoteLadder(input) {
     fairYes: roundTo(fairYes, 6),
     fairNo: roundTo(fairNo, 6),
     inventorySkew: roundTo(inventorySkew, 6),
+    halfSpread: roundTo(halfSpread, 6),
+    gammaHalfSpread: roundTo(gammaHalfSpread, 6),
     yes,
     no,
   };

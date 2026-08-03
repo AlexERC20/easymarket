@@ -9386,6 +9386,8 @@ function mapMarketMakerSettings(row) {
     minimum_quote_capital: toNumber(row.minimum_quote_capital),
     quote_levels: Number(row.quote_levels || 0),
     auto_risk_enabled: row.auto_risk_enabled !== false,
+    gamma_guard_seconds: Number(row.gamma_guard_seconds ?? 0),
+    max_level_loss_bps: Number(row.max_level_loss_bps ?? 0),
     updated_by_telegram_id: row.updated_by_telegram_id || null,
     updated_by_username: row.updated_by_username || null,
     updated_at: row.updated_at,
@@ -9576,13 +9578,17 @@ function getFreshBtcFairPrice(market) {
     throw new Error("price_unavailable");
   }
   const secondsLeft = Math.max(0.05, (new Date(market.end_time).getTime() - Date.now()) / 1_000);
+  const sigmaPerSqrtSecond = getBtcVolatility(Math.min(900, Math.max(60, secondsLeft * 2)));
   return {
     btc: quote,
+    secondsLeft,
+    sigmaPerSqrtSecond,
+    openPrice: toNumber(market.open_price),
     fairYes: calculateBinaryFairProbability({
       openPrice: market.open_price,
       currentPrice: quote.price,
       secondsLeft,
-      sigmaPerSqrtSecond: getBtcVolatility(Math.min(900, Math.max(60, secondsLeft * 2))),
+      sigmaPerSqrtSecond,
     }),
   };
 }
@@ -9661,6 +9667,12 @@ async function refreshMarketMakerAccount(client, market, bookType, lock = true, 
       cashBalance: account.cash_balance,
       yesInventory: account.yes_inventory,
       noInventory: account.no_inventory,
+      maxLevelLoss: risk.riskCapital * (settings.max_level_loss_bps / 10_000),
+      gammaGuardSeconds: settings.gamma_guard_seconds,
+      secondsLeft: fair.secondsLeft,
+      sigmaPerSqrtSecond: fair.sigmaPerSqrtSecond,
+      openPrice: fair.openPrice,
+      currentPrice: fair.btc.price,
     })
     : { fairYes: fair.fairYes, fairNo: 1 - fair.fairYes, yes: { bids: [], asks: [] }, no: { bids: [], asks: [] } };
 
@@ -9957,6 +9969,8 @@ export async function updateMarketMakerSettings(input = {}) {
   const rapidLossBps = numeric(input.rapid_loss_bps, 10, 8_000, "invalid_amm_rapid_loss");
   const minimumQuoteCapital = numeric(input.minimum_quote_capital, 1, 100_000, "invalid_amm_minimum_capital");
   const quoteLevels = numeric(input.quote_levels, 1, 12, "invalid_amm_quote_levels");
+  const gammaGuardSeconds = numeric(input.gamma_guard_seconds, 0, 600, "invalid_amm_gamma_guard");
+  const maxLevelLossBps = numeric(input.max_level_loss_bps, 0, 10_000, "invalid_amm_level_loss");
   const boolean = (value) => (value === undefined || value === null
     ? null
     : [true, 1, "1", "true", "yes", "on"].includes(
@@ -9986,6 +10000,8 @@ export async function updateMarketMakerSettings(input = {}) {
           minimum_quote_capital = COALESCE($9::numeric, minimum_quote_capital),
           quote_levels = COALESCE($10::integer, quote_levels),
           auto_risk_enabled = COALESCE($13::boolean, auto_risk_enabled),
+          gamma_guard_seconds = COALESCE($14::integer, gamma_guard_seconds),
+          max_level_loss_bps = COALESCE($15::integer, max_level_loss_bps),
           updated_by_telegram_id = $11::text,
           updated_by_username = $12::text,
           updated_at = now()
@@ -10006,6 +10022,8 @@ export async function updateMarketMakerSettings(input = {}) {
       input.admin_telegram_id ? String(input.admin_telegram_id) : null,
       input.admin_username ? String(input.admin_username).replace(/^@/, "") : null,
       autoRiskEnabled,
+      gammaGuardSeconds === null ? null : Math.round(gammaGuardSeconds),
+      maxLevelLossBps === null ? null : Math.round(maxLevelLossBps),
     ],
   );
   return { ok: true, settings: mapMarketMakerSettings(result.rows[0]) };
