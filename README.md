@@ -231,6 +231,9 @@ GET  /api/bridge/fire/ledger?after_id=0&limit=100
 POST /api/bridge/usdt/add
 GET  /api/bridge/economy/bonus-audit
 GET  /api/bridge/economy/integrity-audit
+GET  /api/bridge/amm
+POST /api/bridge/amm/settings
+POST /api/bridge/amm/restart
 ```
 
 `POST /api/bridge/usdt/add` is an admin promotional grant and credits bonus USDT only. `/api/bridge/economy/bonus-audit` returns aggregate cash/bonus/reclassification/reserve totals without user identities. `/api/bridge/economy/integrity-audit` compares cash-funded fee allocations against referral, clan, and reserve ledgers from the backed-economy reset point.
@@ -251,3 +254,7 @@ curl -X POST https://easymarket-rcuj.onrender.com/api/bridge/fire/sync \
 ```
 
 Use `/api/bridge/fire/ledger` when the local bot needs to pull EasyMarket-side ⭐ balance changes such as prediction-market buys and payouts.
+
+BTC markets use isolated collateralized CLOB books for real USDT, bonus USDT,
+and STAR. The matching, collateral, risk-stop, and AV admin bridge contract are
+documented in [docs/AMM_CLOB.md](docs/AMM_CLOB.md).

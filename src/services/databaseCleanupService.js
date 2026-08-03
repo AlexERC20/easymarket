@@ -315,6 +315,46 @@ async function deleteEmptyOldMarkets() {
   );
 }
 
+async function deleteOldAmmLedger() {
+  return deleteInBatches(
+    `
+      WITH doomed AS (
+        SELECT ledger.id
+        FROM market_maker_ledger ledger
+        JOIN market_maker_accounts accounts ON accounts.id = ledger.account_id
+        WHERE accounts.status IN ('SETTLED', 'REFUNDED')
+          AND ledger.created_at < now() - ($1::int * interval '1 day')
+        ORDER BY ledger.id ASC
+        LIMIT $2
+      )
+      DELETE FROM market_maker_ledger ledger
+      USING doomed
+      WHERE ledger.id = doomed.id
+    `,
+    [Math.round(config.cleanupAmmLedgerDays)],
+  );
+}
+
+async function deleteOldMarketTradeFees() {
+  return deleteInBatches(
+    `
+      WITH doomed AS (
+        SELECT fees.id
+        FROM market_trade_fees fees
+        JOIN markets ON markets.id = fees.market_id
+        WHERE markets.status IN ('resolved', 'price_error', 'superseded')
+          AND fees.created_at < now() - ($1::int * interval '1 day')
+        ORDER BY fees.id ASC
+        LIMIT $2
+      )
+      DELETE FROM market_trade_fees fees
+      USING doomed
+      WHERE fees.id = doomed.id
+    `,
+    [Math.round(config.cleanupMarketTradeFeesDays)],
+  );
+}
+
 async function vacuumTouchedTables(summary) {
   if (!config.databaseCleanupVacuum) {
     return [];
@@ -327,6 +367,8 @@ async function vacuumTouchedTables(summary) {
     ["usdt_deposit_intents", summary.usdt_deposit_intents],
     ["fire_task_claims", summary.fire_task_claims],
     ["markets", summary.empty_markets],
+    ["market_maker_ledger", summary.amm_ledger],
+    ["market_trade_fees", summary.market_trade_fees],
   ]
     .filter(([, count]) => count > 0)
     .map(([table]) => table);
@@ -348,6 +390,8 @@ export async function runDatabaseCleanup() {
     usdt_deposit_events: await deleteOldDepositEvents(),
     usdt_deposit_intents: await deleteOldExpiredDepositIntents(),
     fire_task_claims: await deleteOldTaskClaims(),
+    amm_ledger: await deleteOldAmmLedger(),
+    market_trade_fees: await deleteOldMarketTradeFees(),
     empty_markets: await deleteEmptyOldMarkets(),
     vacuumed_tables: [],
     elapsed_ms: 0,

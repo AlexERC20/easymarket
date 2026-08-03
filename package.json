@@ -6,14 +6,17 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test:economy": "node --test test/dualSideEconomy.test.js"
+    "test": "node --test test/*.test.js",
+    "test:economy": "node --test test/dualSideEconomy.test.js",
+    "test:amm": "node --test test/clobAmm.test.js"
   },
   "dependencies": {
     "compression": "^1.8.1",
     "ethers": "^6.17.0",
     "express": "^4.19.2",
     "pg": "^8.12.0",
-    "sharp": "^0.33.5"
+    "sharp": "^0.35.3",
+    "ws": "^8.21.1"
   },
   "engines": {
     "node": ">=20"

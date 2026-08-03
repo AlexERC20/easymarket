@@ -8,7 +8,22 @@ import {
   getStarConversionStatusForUser,
   unlockBonusAfterResolvedMarket,
 } from "./bonusEconomyService.js";
-import { getBtcPrice, getCachedBtcPrice, PriceUnavailableError } from "./priceService.js";
+import {
+  getBtcPrice,
+  getBtcStreamStatus,
+  getBtcVolatility,
+  getCachedBtcPrice,
+  PriceUnavailableError,
+} from "./priceService.js";
+import {
+  applyAmmInventoryFill,
+  buildAmmQuoteLadder,
+  calculateAmmNav,
+  calculateAmmRiskState,
+  calculateBinaryFairProbability,
+  calculateExecutionFee,
+  calculateNextAmmAllocation,
+} from "./ammMath.js";
 
 const MARKET_SYMBOL = "BTCUSDT";
 const WORLD_CUP_EVENT_SLUG = "world-cup-winner";
@@ -48,6 +63,13 @@ const SPORTS_TAIL_DEPTH_EXPONENT = 1.45;
 const REFERRAL_SIGNUP_BONUS = 100;
 const PROMO_CAMPAIGN_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{2,63}$/;
 const CURRENCIES = new Set(["STAR", "USDT"]);
+const CLOB_TRADING_MODE = "CLOB";
+const BOOK_TYPE_STAR = "STAR";
+const BOOK_TYPE_USDT_CASH = "USDT_CASH";
+const BOOK_TYPE_USDT_BONUS = "USDT_BONUS";
+const CLOB_BOOK_TYPES = [BOOK_TYPE_USDT_CASH, BOOK_TYPE_USDT_BONUS, BOOK_TYPE_STAR];
+const CLOB_QUOTE_MAX_AGE_MS = 2_000;
+const CLOB_MIN_FILL_SHARES = 0.00000001;
 const WORLD_CUP_SYNC_INTERVAL_MS = 90_000;
 const TOP_MARKET_SYNC_INTERVAL_MS = 60_000;
 const TOP_MARKET_CATALOG_REFRESH_INTERVAL_MS = 10 * 60_000;
@@ -240,10 +262,12 @@ function mapMarket(row) {
     end_time: row.end_time,
     status: row.status,
     winner: row.winner,
-    is_lucky: Boolean(row.is_lucky),
-    lucky_until: row.lucky_until ?? null,
+    is_lucky: false,
+    lucky_until: null,
     created_at: row.created_at,
     resolved_at: row.resolved_at,
+    trading_mode: row.trading_mode || "LEGACY",
+    trading_enabled: row.status === "open" && row.trading_mode === CLOB_TRADING_MODE,
     resolution_mode: isKyivstoner ? "MANUAL" : undefined,
   };
 }
@@ -253,10 +277,7 @@ function isLuckyWindowActive(marketRow) {
 }
 
 export function getLuckySpentForBuy(marketRow, hasOppositePosition, amount) {
-  if (hasOppositePosition || !isLuckyWindowActive(marketRow)) {
-    return 0;
-  }
-  return Math.max(0, toNumber(amount));
+  return 0;
 }
 
 function mapUser(row) {
@@ -289,6 +310,7 @@ function mapPosition(row) {
     payout: toNumber(row.payout),
     pnl: toNumber(row.pnl),
     currency: normalizeCurrency(row.currency),
+    book_type: row.book_type || "LEGACY",
     status: row.status,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -297,6 +319,9 @@ function mapPosition(row) {
     market_status: row.market_status,
     market_end_time: row.market_end_time,
     market_symbol: row.market_symbol,
+    market_trading_mode: row.market_trading_mode || "LEGACY",
+    best_bid: row.best_bid === null || row.best_bid === undefined ? null : toNumber(row.best_bid),
+    best_ask: row.best_ask === null || row.best_ask === undefined ? null : toNumber(row.best_ask),
     team: isKyivstoner ? "Киевстонер" : row.team,
     icon: isKyivstoner ? KYIVSTONER_MARKET_ICON : row.icon,
     yes_label: isKyivstoner ? KYIVSTONER_YES_LABEL : (row.yes_label || undefined),
@@ -318,6 +343,16 @@ function mapTrade(row) {
     price: toNumber(row.price),
     shares: toNumber(row.shares),
     currency: normalizeCurrency(row.currency),
+    book_type: row.book_type || "LEGACY",
+    gross_amount: toNumber(row.gross_amount),
+    trade_fee: toNumber(row.trade_fee),
+    maker_order_id: row.maker_order_id === null || row.maker_order_id === undefined
+      ? null
+      : Number(row.maker_order_id),
+    counterparty_user_id: row.counterparty_user_id === null || row.counterparty_user_id === undefined
+      ? null
+      : Number(row.counterparty_user_id),
+    liquidity_role: row.liquidity_role || "TAKER",
     created_at: row.created_at,
   };
 }
@@ -335,6 +370,10 @@ function mapLimitOrder(row) {
     side: row.side,
     order_side: row.order_side || "BUY",
     currency: normalizeCurrency(row.currency),
+    book_type: row.book_type || "LEGACY",
+    is_market_maker: Boolean(row.is_market_maker),
+    filled_shares: toNumber(row.filled_shares),
+    fee_paid: toNumber(row.fee_paid),
     limit_price: toNumber(row.limit_price),
     shares: toNumber(row.shares),
     remaining_shares: toNumber(row.remaining_shares),
@@ -697,8 +736,18 @@ function ensurePositiveAmount(amount) {
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error("amount_must_be_positive");
   }
+  const rounded = Math.round(value * 100) / 100;
+  if (rounded <= 0) {
+    throw new Error("amount_must_be_positive");
+  }
+  return rounded;
+}
 
-  return Math.round(value * 100) / 100;
+function ensureMinimumBtcStake(amount, currency) {
+  const minimum = normalizeCurrency(currency) === "USDT" ? 5 : 50;
+  if (Number(amount) + 0.00000001 < minimum) {
+    throw new Error("amount_below_minimum");
+  }
 }
 
 function ensureNonNegativeAmount(amount) {
@@ -4556,16 +4605,28 @@ export async function getUserSnapshot(telegramId) {
           m.status AS market_status,
           m.end_time AS market_end_time,
           m.symbol AS market_symbol,
+          m.trading_mode AS market_trading_mode,
           COALESCE(meta.team, top_meta.title) AS team,
           COALESCE(meta.icon, top_meta.icon) AS icon,
           top_meta.yes_label,
           top_meta.no_label,
           m.yes_price,
-          m.no_price
+          m.no_price,
+          CASE p.side
+            WHEN 'YES' THEN amm.quotes -> 'yes' -> 'bids' -> 0 ->> 'price'
+            ELSE amm.quotes -> 'no' -> 'bids' -> 0 ->> 'price'
+          END AS best_bid,
+          CASE p.side
+            WHEN 'YES' THEN amm.quotes -> 'yes' -> 'asks' -> 0 ->> 'price'
+            ELSE amm.quotes -> 'no' -> 'asks' -> 0 ->> 'price'
+          END AS best_ask
         FROM positions p
         JOIN markets m ON m.id = p.market_id
         LEFT JOIN world_cup_market_meta meta ON meta.symbol = m.symbol
         LEFT JOIN top_market_meta top_meta ON top_meta.symbol = m.symbol
+        LEFT JOIN market_maker_accounts amm
+          ON amm.market_id = p.market_id
+          AND amm.book_type = p.book_type
         WHERE p.user_id = $1
           AND (
             p.status = 'open'
@@ -7430,40 +7491,44 @@ export async function createBtcMarket(definition = BTC_MARKET_DEFS[0], btcInput 
   // maybeTriggerLuckyWindow в updateLiveBtcPrice.
   const isLucky = false;
 
-  const result = await query(
-    `
-      INSERT INTO markets (
-        symbol,
-        question,
-        open_price,
-        current_price,
-        yes_price,
-        no_price,
-        yes_volume,
-        no_volume,
-        liquidity,
-        start_time,
-        end_time,
-        status,
-        is_lucky
-      )
-      VALUES ($1, $2, $3, $3, 0.5, 0.5, 0, 0, $4, $5, $6, 'open', $7)
-      RETURNING *
-    `,
-    [
-      definition.symbol,
-      questionForPrice(btc.price, definition),
-      btc.price,
-      config.marketLiquidity,
-      startTime,
-      endTime,
-      isLucky,
-    ],
-  );
-
-  await persistPriceTick({ query }, definition.symbol, btc.price, btc.source);
-
-  return mapMarket(result.rows[0]);
+  return withTransaction(async (client) => {
+    const result = await client.query(
+      `
+        INSERT INTO markets (
+          symbol,
+          question,
+          open_price,
+          current_price,
+          yes_price,
+          no_price,
+          yes_volume,
+          no_volume,
+          liquidity,
+          start_time,
+          end_time,
+          status,
+          is_lucky,
+          trading_mode
+        )
+        VALUES ($1, $2, $3, $3, 0.5, 0.5, 0, 0, $4, $5, $6, 'open', $7, $8)
+        RETURNING *
+      `,
+      [
+        definition.symbol,
+        questionForPrice(btc.price, definition),
+        btc.price,
+        config.marketLiquidity,
+        startTime,
+        endTime,
+        isLucky,
+        CLOB_TRADING_MODE,
+      ],
+    );
+    const market = result.rows[0];
+    await initializeMarketMakerAccounts(client, market);
+    await persistPriceTick(client, definition.symbol, btc.price, btc.source);
+    return mapMarket(market);
+  });
 }
 
 export async function createBtc5mMarket() {
@@ -7499,7 +7564,58 @@ async function getOpenBtcMarketMap() {
   return new Map(result.rows.map((row) => [row.symbol, mapMarket(row)]));
 }
 
+async function activateOpenBtcClobMarkets() {
+  return withTransaction(async (client) => {
+    const result = await client.query(
+      `
+        SELECT *
+        FROM markets
+        WHERE status = 'open'
+          AND symbol = ANY($1)
+        ORDER BY id ASC
+        FOR UPDATE
+      `,
+      [BTC_MARKET_SYMBOLS],
+    );
+    for (const market of result.rows) {
+      let activeMarket = market;
+      if (market.trading_mode !== CLOB_TRADING_MODE) {
+        const updateResult = await client.query(
+          `
+            UPDATE markets
+            SET trading_mode = $2::text,
+                is_lucky = false,
+                lucky_until = NULL
+            WHERE id = $1::bigint
+            RETURNING *
+          `,
+          [market.id, CLOB_TRADING_MODE],
+        );
+        activeMarket = updateResult.rows[0];
+      }
+      const legacyOrders = await client.query(
+        `
+          SELECT *
+          FROM limit_orders
+          WHERE market_id = $1::bigint
+            AND status = 'open'
+            AND book_type = 'LEGACY'
+          ORDER BY created_at ASC, id ASC
+          FOR UPDATE
+        `,
+        [market.id],
+      );
+      for (const order of legacyOrders.rows) {
+        await refundLimitOrder(client, order, "clob_migration_refund");
+      }
+      await initializeMarketMakerAccounts(client, activeMarket);
+    }
+    return result.rowCount;
+  });
+}
+
 export async function ensureActiveBtcMarkets() {
+  await activateOpenBtcClobMarkets();
   let btc = null;
   const markets = [];
   const openMarkets = await getOpenBtcMarketMap();
@@ -7580,6 +7696,29 @@ export async function updateLiveBtcPrice() {
     );
 
     for (const market of markets.rows) {
+      if (market.trading_mode === CLOB_TRADING_MODE) {
+        const secondsLeft = Math.max(0.05, (new Date(market.end_time).getTime() - Date.now()) / 1_000);
+        const fairYes = calculateBinaryFairProbability({
+          openPrice: market.open_price,
+          currentPrice: btc.price,
+          secondsLeft,
+          sigmaPerSqrtSecond: getBtcVolatility(Math.min(900, Math.max(60, secondsLeft * 2))),
+        });
+        await client.query(
+          `
+            UPDATE markets
+            SET current_price = $2::numeric,
+                yes_price = $3::numeric,
+                no_price = $4::numeric,
+                is_lucky = false,
+                lucky_until = NULL
+            WHERE id = $1::bigint
+          `,
+          [market.id, btc.price, fairYes, 1 - fairYes],
+        );
+        continue;
+      }
+
       const yesPrice = getMarketMakerYesPrice(market, btc.price);
       const noTargetPrice = roundOutcomePrice(1 - yesPrice, getMarketMinOutcomePrice(market));
       const noPrice = roundOutcomePrice(
@@ -7597,8 +7736,6 @@ export async function updateLiveBtcPrice() {
         `,
         [market.id, btc.price, yesPrice, noPrice],
       );
-
-      await maybeTriggerLuckyWindow(client, market, yesPrice);
 
       if (!isBtcMarketSymbol(market.symbol) && market.symbol !== btc.symbol) {
         await persistPriceTick(client, market.symbol, btc.price, btc.source);
@@ -9208,6 +9345,2085 @@ async function awardReferralBetBonus(client, buyerUser, marketId) {
   };
 }
 
+async function awardReferralBetBonusByUserId(client, userId, marketId) {
+  const userResult = await client.query(
+    "SELECT * FROM users WHERE id = $1::bigint LIMIT 1",
+    [userId],
+  );
+  const user = userResult.rows[0];
+  return user ? awardReferralBetBonus(client, user, marketId) : null;
+}
+
+function normalizeClobBookType(value, currency = "STAR") {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (CLOB_BOOK_TYPES.includes(normalized)) {
+    return normalized;
+  }
+  return normalizeCurrency(currency) === "USDT" ? BOOK_TYPE_USDT_CASH : BOOK_TYPE_STAR;
+}
+
+function currencyForBookType(bookType) {
+  return normalizeClobBookType(bookType) === BOOK_TYPE_STAR ? "STAR" : "USDT";
+}
+
+function isBonusBookType(bookType) {
+  return normalizeClobBookType(bookType) === BOOK_TYPE_USDT_BONUS;
+}
+
+function mapMarketMakerSettings(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    enabled: Boolean(row.enabled),
+    collateral_usdt: toNumber(row.collateral_usdt),
+    collateral_bonus: toNumber(row.collateral_bonus),
+    collateral_star: toNumber(row.collateral_star),
+    spread_bps: Number(row.spread_bps || 0),
+    user_trade_fee_bps: Number(row.user_trade_fee_bps || 0),
+    max_drawdown_bps: Number(row.max_drawdown_bps || 0),
+    rapid_loss_bps: Number(row.rapid_loss_bps || 0),
+    minimum_quote_capital: toNumber(row.minimum_quote_capital),
+    quote_levels: Number(row.quote_levels || 0),
+    updated_by_telegram_id: row.updated_by_telegram_id || null,
+    updated_by_username: row.updated_by_username || null,
+    updated_at: row.updated_at,
+  };
+}
+
+function mapMarketMakerAccount(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    id: Number(row.id),
+    market_id: Number(row.market_id),
+    book_type: row.book_type,
+    initial_collateral: toNumber(row.initial_collateral),
+    risk_capital: toNumber(row.risk_capital),
+    cash_balance: toNumber(row.cash_balance),
+    yes_inventory: toNumber(row.yes_inventory),
+    no_inventory: toNumber(row.no_inventory),
+    realized_pnl: toNumber(row.realized_pnl),
+    peak_nav: toNumber(row.peak_nav),
+    current_nav: toNumber(row.current_nav),
+    risk_multiplier: toNumber(row.risk_multiplier),
+    fair_yes_price: toNumber(row.fair_yes_price, 0.5),
+    quotes: row.quotes || {},
+    status: row.status,
+    stop_reason: row.stop_reason || null,
+    last_quote_at: row.last_quote_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    settled_at: row.settled_at,
+  };
+}
+
+function mapMarketMakerRiskState(row) {
+  if (!row) {
+    return null;
+  }
+  return {
+    book_type: row.book_type,
+    allocation_multiplier: toNumber(row.allocation_multiplier, 1),
+    loss_streak: Number(row.loss_streak || 0),
+    wins: Number(row.wins || 0),
+    losses: Number(row.losses || 0),
+    cumulative_realized_pnl: toNumber(row.cumulative_realized_pnl),
+    last_realized_pnl: toNumber(row.last_realized_pnl),
+    status: row.status || "ACTIVE",
+    last_settled_at: row.last_settled_at || null,
+    reset_at: row.reset_at || null,
+    updated_at: row.updated_at,
+  };
+}
+
+async function getMarketMakerSettingsWithClient(client, lock = false) {
+  const result = await client.query(
+    `
+      SELECT *
+      FROM market_maker_settings
+      WHERE id = 1
+      ${lock ? "FOR UPDATE" : ""}
+    `,
+  );
+  return mapMarketMakerSettings(result.rows[0]);
+}
+
+async function getMarketMakerRiskStateWithClient(client, bookType, lock = false) {
+  const normalizedBook = normalizeClobBookType(bookType, currencyForBookType(bookType));
+  await client.query(
+    `
+      INSERT INTO market_maker_risk_state (book_type)
+      VALUES ($1::text)
+      ON CONFLICT (book_type) DO NOTHING
+    `,
+    [normalizedBook],
+  );
+  const result = await client.query(
+    `
+      SELECT *
+      FROM market_maker_risk_state
+      WHERE book_type = $1::text
+      ${lock ? "FOR UPDATE" : ""}
+    `,
+    [normalizedBook],
+  );
+  return mapMarketMakerRiskState(result.rows[0]);
+}
+
+function collateralForBook(settings, bookType) {
+  if (bookType === BOOK_TYPE_USDT_CASH) {
+    return settings.collateral_usdt;
+  }
+  if (bookType === BOOK_TYPE_USDT_BONUS) {
+    return settings.collateral_bonus;
+  }
+  return settings.collateral_star;
+}
+
+async function initializeMarketMakerAccounts(client, market, settingsInput = null) {
+  if (!market || market.trading_mode !== CLOB_TRADING_MODE || !isBtcMarketSymbol(market.symbol)) {
+    return [];
+  }
+  const settings = settingsInput || await getMarketMakerSettingsWithClient(client);
+  const accounts = [];
+  for (const bookType of CLOB_BOOK_TYPES) {
+    const configuredCollateral = roundMoney(collateralForBook(settings, bookType));
+    const globalRisk = await getMarketMakerRiskStateWithClient(client, bookType);
+    const minimumAllocation = Math.min(
+      configuredCollateral,
+      Math.max(0, toNumber(settings.minimum_quote_capital)),
+    );
+    const collateral = roundMoney(Math.min(
+      configuredCollateral,
+      Math.max(
+        minimumAllocation,
+        configuredCollateral * clamp(toNumber(globalRisk?.allocation_multiplier, 1), 0, 1),
+      ),
+    ));
+    if (collateral <= 0) {
+      continue;
+    }
+    const accountResult = await client.query(
+      `
+        INSERT INTO market_maker_accounts (
+          market_id,
+          book_type,
+          initial_collateral,
+          risk_capital,
+          cash_balance,
+          yes_inventory,
+          no_inventory,
+          peak_nav,
+          current_nav,
+          status
+        )
+        VALUES ($1::bigint, $2::text, $3::numeric, $3::numeric, 0, $3::numeric, $3::numeric, $3::numeric, $3::numeric, $4::text)
+        ON CONFLICT (market_id, book_type) DO NOTHING
+        RETURNING *
+      `,
+      [market.id, bookType, collateral, settings.enabled ? "ACTIVE" : "PAUSED"],
+    );
+    let account = accountResult.rows[0];
+    if (account) {
+      await client.query(
+        `
+          INSERT INTO market_maker_ledger (
+            account_id,
+            market_id,
+            book_type,
+            event_type,
+            yes_delta,
+            no_delta,
+            metadata
+          )
+          VALUES ($1::bigint, $2::bigint, $3::text, 'INITIAL_SPLIT', $4::numeric, $4::numeric, $5::jsonb)
+        `,
+        [
+          account.id,
+          market.id,
+          bookType,
+          collateral,
+          JSON.stringify({
+            collateral_locked: collateral,
+            configured_collateral: configuredCollateral,
+            global_risk_multiplier: globalRisk?.allocation_multiplier ?? 1,
+          }),
+        ],
+      );
+    } else {
+      const existingResult = await client.query(
+        "SELECT * FROM market_maker_accounts WHERE market_id = $1::bigint AND book_type = $2::text",
+        [market.id, bookType],
+      );
+      account = existingResult.rows[0];
+    }
+    if (account) {
+      accounts.push(mapMarketMakerAccount(account));
+    }
+  }
+  return accounts;
+}
+
+function getFreshBtcFairPrice(market) {
+  const quote = getCachedBtcPrice();
+  if (!quote || Date.now() - new Date(quote.at).getTime() > CLOB_QUOTE_MAX_AGE_MS) {
+    throw new Error("price_unavailable");
+  }
+  const secondsLeft = Math.max(0.05, (new Date(market.end_time).getTime() - Date.now()) / 1_000);
+  return {
+    btc: quote,
+    fairYes: calculateBinaryFairProbability({
+      openPrice: market.open_price,
+      currentPrice: quote.price,
+      secondsLeft,
+      sigmaPerSqrtSecond: getBtcVolatility(Math.min(900, Math.max(60, secondsLeft * 2))),
+    }),
+  };
+}
+
+async function refreshMarketMakerAccount(client, market, bookType, lock = true, persist = lock) {
+  const settings = await getMarketMakerSettingsWithClient(client);
+  const globalRisk = await getMarketMakerRiskStateWithClient(client, bookType);
+  const result = await client.query(
+    `
+      SELECT *
+      FROM market_maker_accounts
+      WHERE market_id = $1::bigint
+        AND book_type = $2::text
+      ${lock ? "FOR UPDATE" : ""}
+    `,
+    [market.id, bookType],
+  );
+  let account = result.rows[0];
+  if (!account) {
+    await initializeMarketMakerAccounts(client, market, settings);
+    const retryResult = await client.query(
+      `
+        SELECT *
+        FROM market_maker_accounts
+        WHERE market_id = $1::bigint
+          AND book_type = $2::text
+        ${lock ? "FOR UPDATE" : ""}
+      `,
+      [market.id, bookType],
+    );
+    account = retryResult.rows[0];
+  }
+  if (!account) {
+    throw new Error("market_maker_unavailable");
+  }
+
+  const fair = getFreshBtcFairPrice(market);
+  const currentNav = calculateAmmNav(account, fair.fairYes);
+  const localRisk = calculateAmmRiskState({
+    initialCollateral: account.initial_collateral,
+    currentNav,
+    peakNav: account.peak_nav,
+    maxDrawdownBps: settings.max_drawdown_bps,
+    rapidLossBps: settings.rapid_loss_bps,
+    minimumQuoteCapital: settings.minimum_quote_capital,
+  });
+  const globalMultiplier = clamp(toNumber(globalRisk?.allocation_multiplier, 1), 0, 1);
+  const configuredCollateral = collateralForBook(settings, bookType);
+  const riskMultiplier = Math.min(localRisk.riskMultiplier, globalMultiplier);
+  const riskCapital = Math.min(
+    localRisk.riskCapital,
+    currentNav,
+    Math.max(
+      Math.min(configuredCollateral, settings.minimum_quote_capital),
+      configuredCollateral * globalMultiplier,
+    ),
+  );
+  const risk = {
+    ...localRisk,
+    riskMultiplier: Math.round(riskMultiplier * 1_000_000) / 1_000_000,
+    riskCapital: roundMoney(riskCapital),
+    globalMultiplier,
+    globalStatus: globalRisk?.status || "ACTIVE",
+  };
+  const status = settings.enabled ? localRisk.status : "PAUSED";
+  const quotes = status === "ACTIVE"
+    ? buildAmmQuoteLadder({
+      fairYes: fair.fairYes,
+      spreadBps: settings.spread_bps,
+      levels: settings.quote_levels,
+      riskCapital: risk.riskCapital,
+      riskMultiplier: risk.riskMultiplier,
+      cashBalance: account.cash_balance,
+      yesInventory: account.yes_inventory,
+      noInventory: account.no_inventory,
+    })
+    : { fairYes: fair.fairYes, fairNo: 1 - fair.fairYes, yes: { bids: [], asks: [] }, no: { bids: [], asks: [] } };
+
+  if (!persist) {
+    return {
+      settings,
+      account: {
+        ...mapMarketMakerAccount(account),
+        risk_capital: risk.riskCapital,
+        current_nav: currentNav,
+        peak_nav: risk.peakNav,
+        risk_multiplier: risk.riskMultiplier,
+        fair_yes_price: fair.fairYes,
+        quotes,
+        status,
+        stop_reason: status === "ACTIVE" ? null : (risk.stopReason || "admin_paused"),
+      },
+      fair,
+      quotes,
+      risk,
+      globalRisk,
+    };
+  }
+
+  const updateResult = await client.query(
+    `
+      UPDATE market_maker_accounts
+      SET risk_capital = $2::numeric,
+          current_nav = $3::numeric,
+          peak_nav = $4::numeric,
+          risk_multiplier = $5::numeric,
+          fair_yes_price = $6::numeric,
+          quotes = $7::jsonb,
+          status = $8::text,
+          stop_reason = $9::text,
+          last_quote_at = now(),
+          updated_at = now()
+      WHERE id = $1::bigint
+      RETURNING *
+    `,
+    [
+      account.id,
+      risk.riskCapital,
+      currentNav,
+      risk.peakNav,
+      risk.riskMultiplier,
+      fair.fairYes,
+      JSON.stringify(quotes),
+      status,
+      status === "ACTIVE" ? null : (risk.stopReason || "admin_paused"),
+    ],
+  );
+
+  return {
+    settings,
+    account: mapMarketMakerAccount(updateResult.rows[0]),
+    fair,
+    quotes,
+    risk,
+    globalRisk,
+  };
+}
+
+async function getLockedClobFunding(client, userId, currency, requestedAmount, requestedBookType = null) {
+  const amount = roundMoney(requestedAmount);
+  if (normalizeCurrency(currency) === "STAR") {
+    const result = await client.query(
+      "SELECT balance FROM fire_balances WHERE user_id = $1::bigint FOR UPDATE",
+      [userId],
+    );
+    const balance = toNumber(result.rows[0]?.balance);
+    if (balance + 0.00000001 < amount) {
+      throw new Error("insufficient_fire");
+    }
+    return { bookType: BOOK_TYPE_STAR, balance, currency: "STAR" };
+  }
+
+  const result = await client.query(
+    `
+      SELECT cash.balance AS cash_balance, bonus.balance AS bonus_balance
+      FROM usdt_balances cash
+      JOIN usdt_bonus_balances bonus ON bonus.user_id = cash.user_id
+      WHERE cash.user_id = $1::bigint
+      FOR UPDATE OF cash, bonus
+    `,
+    [userId],
+  );
+  const cash = toNumber(result.rows[0]?.cash_balance);
+  const bonus = toNumber(result.rows[0]?.bonus_balance);
+  const explicitBook = requestedBookType
+    ? normalizeClobBookType(requestedBookType, "USDT")
+    : null;
+  if (explicitBook === BOOK_TYPE_USDT_CASH && cash + 0.00000001 >= amount) {
+    return { bookType: explicitBook, balance: cash, currency: "USDT" };
+  }
+  if (explicitBook === BOOK_TYPE_USDT_BONUS && bonus + 0.00000001 >= amount) {
+    return { bookType: explicitBook, balance: bonus, currency: "USDT" };
+  }
+  if (cash + 0.00000001 >= amount) {
+    return { bookType: BOOK_TYPE_USDT_CASH, balance: cash, currency: "USDT" };
+  }
+  if (bonus + 0.00000001 >= amount) {
+    return { bookType: BOOK_TYPE_USDT_BONUS, balance: bonus, currency: "USDT" };
+  }
+  throw new Error("insufficient_usdt");
+}
+
+async function adjustClobBookBalance(client, userId, bookType, amount, reason, source) {
+  const normalizedBook = normalizeClobBookType(bookType, currencyForBookType(bookType));
+  const delta = roundMoney(amount);
+  if (Math.abs(delta) < 0.00000001) {
+    return;
+  }
+  if (normalizedBook === BOOK_TYPE_STAR) {
+    await client.query(
+      "UPDATE fire_balances SET balance = balance + $2::numeric, updated_at = now() WHERE user_id = $1::bigint",
+      [userId, delta],
+    );
+    await client.query(
+      "INSERT INTO fire_ledger (user_id, amount, reason, source) VALUES ($1::bigint, $2::numeric, $3::text, $4::text)",
+      [userId, delta, reason, source],
+    );
+    return;
+  }
+  if (normalizedBook === BOOK_TYPE_USDT_BONUS) {
+    await client.query(
+      "UPDATE usdt_bonus_balances SET balance = balance + $2::numeric, updated_at = now() WHERE user_id = $1::bigint",
+      [userId, delta],
+    );
+    await client.query(
+      "INSERT INTO usdt_bonus_ledger (user_id, amount, reason, source) VALUES ($1::bigint, $2::numeric, $3::text, $4::text)",
+      [userId, delta, reason, source],
+    );
+    return;
+  }
+  await client.query(
+    "UPDATE usdt_balances SET balance = balance + $2::numeric, updated_at = now() WHERE user_id = $1::bigint",
+    [userId, delta],
+  );
+  await client.query(
+    "INSERT INTO usdt_ledger (user_id, amount, reason, source) VALUES ($1::bigint, $2::numeric, $3::text, $4::text)",
+    [userId, delta, reason, source],
+  );
+}
+
+async function getClobBookBalanceSnapshot(client, userId, bookType) {
+  const normalizedBook = normalizeClobBookType(bookType, currencyForBookType(bookType));
+  if (normalizedBook === BOOK_TYPE_STAR) {
+    const result = await client.query("SELECT balance FROM fire_balances WHERE user_id = $1::bigint", [userId]);
+    return toNumber(result.rows[0]?.balance);
+  }
+  const table = normalizedBook === BOOK_TYPE_USDT_BONUS ? "usdt_bonus_balances" : "usdt_balances";
+  const result = await client.query(`SELECT balance FROM ${table} WHERE user_id = $1::bigint`, [userId]);
+  return toNumber(result.rows[0]?.balance);
+}
+
+export async function getMarketMakerAdminState() {
+  try {
+    await withTransaction(async (client) => {
+      const openResult = await client.query(
+        `
+          SELECT markets.*, accounts.book_type
+          FROM market_maker_accounts accounts
+          JOIN markets ON markets.id = accounts.market_id
+          WHERE markets.status = 'open'
+            AND markets.trading_mode = $1::text
+          ORDER BY accounts.id ASC
+        `,
+        [CLOB_TRADING_MODE],
+      );
+      for (const row of openResult.rows) {
+        await refreshMarketMakerAccount(client, row, row.book_type, false, true);
+      }
+    });
+  } catch (error) {
+    if (error?.message !== "price_unavailable") {
+      throw error;
+    }
+  }
+  const [settingsResult, accountsResult, feesResult, riskResult, performanceResult] = await Promise.all([
+    query("SELECT * FROM market_maker_settings WHERE id = 1"),
+    query(
+      `
+        SELECT
+          accounts.*,
+          markets.symbol,
+          markets.status AS market_status,
+          markets.end_time,
+          markets.winner
+        FROM market_maker_accounts accounts
+        JOIN markets ON markets.id = accounts.market_id
+        ORDER BY accounts.market_id DESC, accounts.book_type ASC
+        LIMIT 150
+      `,
+    ),
+    query(
+      `
+        SELECT book_type, currency, COALESCE(SUM(amount), 0) AS total
+        FROM market_trade_fees
+        GROUP BY book_type, currency
+        ORDER BY book_type ASC
+      `,
+    ),
+    query(
+      `
+        SELECT *
+        FROM market_maker_risk_state
+        ORDER BY book_type ASC
+      `,
+    ),
+    query(
+      `
+        SELECT
+          book_type,
+          COUNT(*) FILTER (WHERE status = 'SETTLED') AS settled_markets,
+          COUNT(*) FILTER (WHERE status = 'SETTLED' AND realized_pnl > 0) AS wins,
+          COUNT(*) FILTER (WHERE status = 'SETTLED' AND realized_pnl < 0) AS losses,
+          COALESCE(SUM(GREATEST(realized_pnl, 0)) FILTER (WHERE status = 'SETTLED'), 0) AS won,
+          COALESCE(ABS(SUM(LEAST(realized_pnl, 0)) FILTER (WHERE status = 'SETTLED')), 0) AS lost,
+          COALESCE(SUM(realized_pnl) FILTER (WHERE status = 'SETTLED'), 0) AS net
+        FROM market_maker_accounts
+        GROUP BY book_type
+        ORDER BY book_type ASC
+      `,
+    ),
+  ]);
+  const accounts = accountsResult.rows.map((row) => ({
+    ...mapMarketMakerAccount(row),
+    symbol: row.symbol,
+    market_status: row.market_status,
+    end_time: row.end_time,
+    winner: row.winner,
+  }));
+  const totals = accounts.reduce((summary, account) => {
+    summary.initial_collateral += account.initial_collateral;
+    summary.current_nav += account.current_nav;
+    summary.realized_pnl += account.realized_pnl;
+    summary.active += account.status === "ACTIVE" ? 1 : 0;
+    summary.halted += account.status === "HALTED" ? 1 : 0;
+    summary.settled += account.status === "SETTLED" ? 1 : 0;
+    return summary;
+  }, {
+    initial_collateral: 0,
+    current_nav: 0,
+    realized_pnl: 0,
+    active: 0,
+    halted: 0,
+    settled: 0,
+  });
+  for (const key of ["initial_collateral", "current_nav", "realized_pnl"]) {
+    totals[key] = roundMoney(totals[key]);
+  }
+  return {
+    ok: true,
+    settings: mapMarketMakerSettings(settingsResult.rows[0]),
+    totals,
+    fees: feesResult.rows.map((row) => ({
+      book_type: row.book_type,
+      currency: row.currency,
+      total: toNumber(row.total),
+    })),
+    global_risk: riskResult.rows.map(mapMarketMakerRiskState),
+    performance: performanceResult.rows.map((row) => ({
+      book_type: row.book_type,
+      settled_markets: Number(row.settled_markets || 0),
+      wins: Number(row.wins || 0),
+      losses: Number(row.losses || 0),
+      won: toNumber(row.won),
+      lost: toNumber(row.lost),
+      net: toNumber(row.net),
+    })),
+    price_stream: getBtcStreamStatus(),
+    accounts,
+  };
+}
+
+export async function updateMarketMakerSettings(input = {}) {
+  const numeric = (value, min, max, error) => {
+    if (value === undefined || value === null || value === "") {
+      return null;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+      throw new Error(error);
+    }
+    return parsed;
+  };
+  const collateralUsdt = numeric(input.collateral_usdt, 20, 1_000_000, "invalid_amm_collateral_usdt");
+  const collateralBonus = numeric(input.collateral_bonus, 20, 1_000_000, "invalid_amm_collateral_bonus");
+  const collateralStar = numeric(input.collateral_star, 20, 100_000_000, "invalid_amm_collateral_star");
+  const spreadBps = numeric(input.spread_bps, 10, 5_000, "invalid_amm_spread");
+  const tradeFeeBps = numeric(input.user_trade_fee_bps, 0, 500, "invalid_amm_trade_fee");
+  const maxDrawdownBps = numeric(input.max_drawdown_bps, 100, 9_000, "invalid_amm_drawdown");
+  const rapidLossBps = numeric(input.rapid_loss_bps, 10, 8_000, "invalid_amm_rapid_loss");
+  const minimumQuoteCapital = numeric(input.minimum_quote_capital, 1, 100_000, "invalid_amm_minimum_capital");
+  const quoteLevels = numeric(input.quote_levels, 1, 12, "invalid_amm_quote_levels");
+  const enabled = input.enabled === undefined
+    ? null
+    : [true, 1, "1", "true", "yes", "on"].includes(
+      typeof input.enabled === "string" ? input.enabled.toLowerCase() : input.enabled,
+    );
+  const currentSettingsResult = await query("SELECT * FROM market_maker_settings WHERE id = 1");
+  const currentSettings = mapMarketMakerSettings(currentSettingsResult.rows[0]);
+  const effectiveMaxDrawdown = maxDrawdownBps ?? currentSettings.max_drawdown_bps;
+  const effectiveRapidLoss = rapidLossBps ?? currentSettings.rapid_loss_bps;
+  if (effectiveRapidLoss >= effectiveMaxDrawdown) {
+    throw new Error("invalid_amm_risk_thresholds");
+  }
+
+  const result = await query(
+    `
+      UPDATE market_maker_settings
+      SET enabled = COALESCE($1::boolean, enabled),
+          collateral_usdt = COALESCE($2::numeric, collateral_usdt),
+          collateral_bonus = COALESCE($3::numeric, collateral_bonus),
+          collateral_star = COALESCE($4::numeric, collateral_star),
+          spread_bps = COALESCE($5::integer, spread_bps),
+          user_trade_fee_bps = COALESCE($6::integer, user_trade_fee_bps),
+          max_drawdown_bps = COALESCE($7::integer, max_drawdown_bps),
+          rapid_loss_bps = COALESCE($8::integer, rapid_loss_bps),
+          minimum_quote_capital = COALESCE($9::numeric, minimum_quote_capital),
+          quote_levels = COALESCE($10::integer, quote_levels),
+          updated_by_telegram_id = $11::text,
+          updated_by_username = $12::text,
+          updated_at = now()
+      WHERE id = 1
+      RETURNING *
+    `,
+    [
+      enabled,
+      collateralUsdt,
+      collateralBonus,
+      collateralStar,
+      spreadBps === null ? null : Math.round(spreadBps),
+      tradeFeeBps === null ? null : Math.round(tradeFeeBps),
+      maxDrawdownBps === null ? null : Math.round(maxDrawdownBps),
+      rapidLossBps === null ? null : Math.round(rapidLossBps),
+      minimumQuoteCapital,
+      quoteLevels === null ? null : Math.round(quoteLevels),
+      input.admin_telegram_id ? String(input.admin_telegram_id) : null,
+      input.admin_username ? String(input.admin_username).replace(/^@/, "") : null,
+    ],
+  );
+  return { ok: true, settings: mapMarketMakerSettings(result.rows[0]) };
+}
+
+export async function restartMarketMaker(input = {}) {
+  const marketId = input.market_id === undefined || input.market_id === null
+    ? null
+    : Number(input.market_id);
+  if (marketId !== null && (!Number.isSafeInteger(marketId) || marketId <= 0)) {
+    throw new Error("invalid_market_id");
+  }
+  return withTransaction(async (client) => {
+    const settings = await getMarketMakerSettingsWithClient(client, true);
+    if (!settings.enabled) {
+      throw new Error("market_maker_disabled");
+    }
+    const result = await client.query(
+      `
+        SELECT accounts.*
+        FROM market_maker_accounts accounts
+        JOIN markets ON markets.id = accounts.market_id
+        WHERE markets.status = 'open'
+          AND markets.trading_mode = $1::text
+          AND ($2::bigint IS NULL OR accounts.market_id = $2::bigint)
+        ORDER BY accounts.id ASC
+        FOR UPDATE OF accounts
+      `,
+      [CLOB_TRADING_MODE, marketId],
+    );
+    const restarted = [];
+    for (const account of result.rows) {
+      const currentNav = Math.max(0, toNumber(account.current_nav));
+      if (currentNav < settings.minimum_quote_capital) {
+        continue;
+      }
+      const riskCapital = Math.min(toNumber(account.initial_collateral), currentNav);
+      const updatedResult = await client.query(
+        `
+          UPDATE market_maker_accounts
+          SET risk_capital = $2::numeric,
+              peak_nav = $3::numeric,
+              risk_multiplier = 1,
+              status = 'ACTIVE',
+              stop_reason = NULL,
+              quotes = '{}'::jsonb,
+              updated_at = now()
+          WHERE id = $1::bigint
+          RETURNING *
+        `,
+        [account.id, riskCapital, currentNav],
+      );
+      await client.query(
+        `
+          INSERT INTO market_maker_ledger (
+            account_id, market_id, book_type, event_type, metadata
+          )
+          VALUES ($1::bigint, $2::bigint, $3::text, 'ADMIN_RESTART', $4::jsonb)
+        `,
+        [
+          account.id,
+          account.market_id,
+          account.book_type,
+          JSON.stringify({
+            admin_telegram_id: input.admin_telegram_id || null,
+            risk_capital: riskCapital,
+          }),
+        ],
+      );
+      restarted.push(mapMarketMakerAccount(updatedResult.rows[0]));
+    }
+    const bookTypes = [...new Set(result.rows.map((row) => row.book_type))];
+    let globalRisk = [];
+    if (bookTypes.length > 0) {
+      const globalRiskResult = await client.query(
+        `
+          UPDATE market_maker_risk_state
+          SET allocation_multiplier = 1,
+              loss_streak = 0,
+              status = 'ACTIVE',
+              reset_at = now(),
+              updated_at = now()
+          WHERE book_type = ANY($1::text[])
+          RETURNING *
+        `,
+        [bookTypes],
+      );
+      globalRisk = globalRiskResult.rows.map(mapMarketMakerRiskState);
+    }
+    return { ok: true, restarted, global_risk: globalRisk };
+  });
+}
+
+async function recordMarketMakerSettlementRisk(client, settings, account, realizedPnl) {
+  const riskState = await getMarketMakerRiskStateWithClient(client, account.book_type, true);
+  const configuredCollateral = Math.max(0, collateralForBook(settings, account.book_type));
+  const minimumMultiplier = configuredCollateral > 0
+    ? Math.min(1, Math.max(0, settings.minimum_quote_capital / configuredCollateral))
+    : 0;
+  const next = calculateNextAmmAllocation({
+    currentMultiplier: riskState?.allocation_multiplier ?? 1,
+    initialCollateral: account.initial_collateral,
+    realizedPnl,
+    lossStreak: riskState?.loss_streak || 0,
+    minimumMultiplier,
+  });
+  const result = await client.query(
+    `
+      UPDATE market_maker_risk_state
+      SET allocation_multiplier = $2::numeric,
+          loss_streak = $3::integer,
+          wins = wins + CASE WHEN $4::numeric > 0 THEN 1 ELSE 0 END,
+          losses = losses + CASE WHEN $4::numeric < 0 THEN 1 ELSE 0 END,
+          cumulative_realized_pnl = cumulative_realized_pnl + $4::numeric,
+          last_realized_pnl = $4::numeric,
+          status = $5::text,
+          last_settled_at = now(),
+          updated_at = now()
+      WHERE book_type = $1::text
+      RETURNING *
+    `,
+    [
+      account.book_type,
+      next.allocationMultiplier,
+      next.lossStreak,
+      realizedPnl,
+      next.status,
+    ],
+  );
+  return {
+    ...mapMarketMakerRiskState(result.rows[0]),
+    loss_ratio: next.lossRatio,
+  };
+}
+
+async function recordClobTradeFee(client, input) {
+  const amount = roundMoney(input.amount);
+  if (amount <= 0) {
+    return;
+  }
+  await client.query(
+    `
+      INSERT INTO market_trade_fees (
+        market_id,
+        user_id,
+        trade_id,
+        order_id,
+        book_type,
+        currency,
+        amount,
+        reason
+      )
+      VALUES ($1::bigint, $2::bigint, $3::bigint, $4::bigint, $5::text, $6::text, $7::numeric, $8::text)
+    `,
+    [
+      input.marketId,
+      input.userId,
+      input.tradeId || null,
+      input.orderId || null,
+      input.bookType,
+      currencyForBookType(input.bookType),
+      amount,
+      input.reason || "clob_execution_fee",
+    ],
+  );
+}
+
+async function upsertClobBuyerPosition(client, input) {
+  const currency = currencyForBookType(input.bookType);
+  const spent = roundMoney(input.spent);
+  const shares = roundShares(input.shares);
+  const result = await client.query(
+    `
+      INSERT INTO positions (
+        user_id,
+        market_id,
+        side,
+        shares,
+        spent,
+        avg_price,
+        bonus_spent,
+        currency,
+        book_type,
+        lucky_spent,
+        status,
+        updated_at
+      )
+      VALUES ($1::bigint, $2::bigint, $3::text, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8::text, $9::text, 0, 'open', now())
+      ON CONFLICT (user_id, market_id, side, currency, book_type) DO UPDATE SET
+        shares = positions.shares + EXCLUDED.shares,
+        spent = positions.spent + EXCLUDED.spent,
+        bonus_spent = positions.bonus_spent + EXCLUDED.bonus_spent,
+        avg_price = (positions.spent + EXCLUDED.spent)
+          / NULLIF(positions.shares + EXCLUDED.shares, 0),
+        status = 'open',
+        updated_at = now()
+      RETURNING *
+    `,
+    [
+      input.userId,
+      input.marketId,
+      input.side,
+      shares,
+      spent,
+      shares > 0 ? spent / shares : 0,
+      isBonusBookType(input.bookType) ? spent : 0,
+      currency,
+      input.bookType,
+    ],
+  );
+  return result.rows[0];
+}
+
+async function insertClobTrade(client, input) {
+  const result = await client.query(
+    `
+      INSERT INTO trades (
+        user_id,
+        market_id,
+        action,
+        side,
+        amount,
+        fee,
+        price,
+        shares,
+        currency,
+        book_type,
+        gross_amount,
+        trade_fee,
+        maker_order_id,
+        counterparty_user_id,
+        liquidity_role
+      )
+      VALUES (
+        $1::bigint, $2::bigint, $3::text, $4::text, $5::numeric, $6::numeric,
+        $7::numeric, $8::numeric, $9::text, $10::text, $11::numeric,
+        $12::numeric, $13::bigint, $14::bigint, $15::text
+      )
+      RETURNING *
+    `,
+    [
+      input.userId,
+      input.marketId,
+      input.action,
+      input.side,
+      roundMoney(input.amount),
+      roundMoney(input.fee),
+      input.price,
+      roundShares(input.shares),
+      currencyForBookType(input.bookType),
+      input.bookType,
+      roundMoney(input.grossAmount),
+      roundMoney(input.tradeFee),
+      input.makerOrderId || null,
+      input.counterpartyUserId || null,
+      input.liquidityRole || "TAKER",
+    ],
+  );
+  return result.rows[0];
+}
+
+async function recordClobBuyerFill(client, input) {
+  const gross = roundMoney(input.price * input.shares);
+  const tradeFee = roundMoney(calculateExecutionFee(gross, input.tradeFeeBps));
+  const totalCost = roundMoney(gross + tradeFee);
+  const position = await upsertClobBuyerPosition(client, {
+    ...input,
+    spent: totalCost,
+  });
+  const trade = await insertClobTrade(client, {
+    ...input,
+    action: "BUY",
+    amount: totalCost,
+    fee: tradeFee,
+    grossAmount: gross,
+    tradeFee,
+  });
+  await recordClobTradeFee(client, {
+    ...input,
+    tradeId: trade.id,
+    amount: tradeFee,
+    reason: "clob_buy_execution_fee",
+  });
+  return { position, trade, gross, tradeFee, totalCost };
+}
+
+async function recordClobSellerFill(client, input) {
+  const positionResult = await client.query(
+    "SELECT * FROM positions WHERE id = $1::bigint AND user_id = $2::bigint FOR UPDATE",
+    [input.positionId, input.userId],
+  );
+  const position = positionResult.rows[0];
+  if (!position) {
+    throw new Error("position_not_open");
+  }
+  const currentShares = toNumber(position.shares);
+  const shares = Math.min(currentShares, roundShares(input.shares));
+  if (shares <= CLOB_MIN_FILL_SHARES) {
+    throw new Error("insufficient_shares");
+  }
+  const ratio = Math.min(1, shares / currentShares);
+  const costBasis = roundMoney(toNumber(position.spent) * ratio);
+  const bonusCostBasis = roundMoney(toNumber(position.bonus_spent) * ratio);
+  const gross = roundMoney(input.price * shares);
+  const tradeFee = roundMoney(calculateExecutionFee(gross, input.tradeFeeBps));
+  const economySettings = input.economySettings || await getEconomySettingsWithClient(client);
+  const profitAfterTradeFee = gross - tradeFee - costBasis;
+  const profitFee = calculateProfitFeeFromSettings(
+    profitAfterTradeFee,
+    economySettings,
+    currencyForBookType(input.bookType),
+  );
+  const proceeds = Math.max(0, roundMoney(gross - tradeFee - profitFee));
+  const pnl = roundMoney(proceeds - costBasis);
+  const remainingShares = roundShares(currentShares - shares);
+  const remainingSpent = roundMoney(toNumber(position.spent) - costBasis);
+  const remainingBonusSpent = roundMoney(toNumber(position.bonus_spent) - bonusCostBasis);
+
+  await adjustClobBookBalance(
+    client,
+    input.userId,
+    input.bookType,
+    proceeds,
+    `clob_sell_${String(input.side).toLowerCase()}`,
+    `market:${input.marketId}:trade`,
+  );
+
+  const trade = await insertClobTrade(client, {
+    ...input,
+    action: "SELL",
+    shares,
+    amount: proceeds,
+    fee: tradeFee + profitFee,
+    grossAmount: gross,
+    tradeFee,
+  });
+  await recordClobTradeFee(client, {
+    ...input,
+    tradeId: trade.id,
+    amount: tradeFee,
+    reason: "clob_sell_execution_fee",
+  });
+  if (profitFee > 0) {
+    await distributeProfitFee(client, {
+      settings: economySettings,
+      userId: input.userId,
+      marketId: input.marketId,
+      positionId: position.id,
+      tradeId: trade.id,
+      currency: currencyForBookType(input.bookType),
+      grossProfit: profitAfterTradeFee,
+      totalFee: profitFee,
+      cashRatio: input.bookType === BOOK_TYPE_USDT_CASH ? 1 : 0,
+      reason: "clob_sell_profit_fee",
+      source: `market:${input.marketId}:sell:${trade.id}`,
+      eventKey: `trade:${trade.id}:clob_profit_fee`,
+    });
+  }
+
+  const updatedResult = await client.query(
+    `
+      UPDATE positions
+      SET shares = $2::numeric,
+          spent = $3::numeric,
+          bonus_spent = $4::numeric,
+          avg_price = CASE WHEN $2::numeric > 0 THEN $3::numeric / $2::numeric ELSE 0 END,
+          payout = payout + $5::numeric,
+          pnl = pnl + $6::numeric,
+          status = CASE WHEN $2::numeric > $7::numeric THEN 'open' ELSE 'sold' END,
+          updated_at = now()
+      WHERE id = $1::bigint
+      RETURNING *
+    `,
+    [position.id, remainingShares, remainingSpent, remainingBonusSpent, proceeds, pnl, CLOB_MIN_FILL_SHARES],
+  );
+  return {
+    position: updatedResult.rows[0],
+    trade,
+    gross,
+    tradeFee,
+    profitFee,
+    proceeds,
+    pnl,
+    costBasis,
+    shares,
+  };
+}
+
+async function getBestRestingClobOrder(client, input) {
+  const isIncomingBuy = input.action === "BUY";
+  const comparison = isIncomingBuy ? "<=" : ">=";
+  const ordering = isIncomingBuy ? "ASC" : "DESC";
+  const result = await client.query(
+    `
+      SELECT *
+      FROM limit_orders
+      WHERE market_id = $1::bigint
+        AND book_type = $2::text
+        AND side = $3::text
+        AND order_side = $4::text
+        AND status = 'open'
+        AND remaining_shares > $5::numeric
+        AND user_id <> $6::bigint
+        AND limit_price ${comparison} $7::numeric
+      ORDER BY limit_price ${ordering}, created_at ASC, id ASC
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    `,
+    [
+      input.marketId,
+      input.bookType,
+      input.side,
+      isIncomingBuy ? "SELL" : "BUY",
+      CLOB_MIN_FILL_SHARES,
+      input.userId,
+      input.limitPrice,
+    ],
+  );
+  return result.rows[0] || null;
+}
+
+async function updateAmmForFill(client, input) {
+  const account = input.account;
+  const before = {
+    cash: toNumber(account.cash_balance),
+    yes: toNumber(account.yes_inventory),
+    no: toNumber(account.no_inventory),
+  };
+  const shares = roundShares(input.shares);
+  const gross = roundMoney(shares * input.price);
+  const next = applyAmmInventoryFill({
+    action: input.action,
+    side: input.side,
+    price: input.price,
+    shares,
+    cashBalance: before.cash,
+    yesInventory: before.yes,
+    noInventory: before.no,
+  });
+
+  const result = await client.query(
+    `
+      UPDATE market_maker_accounts
+      SET cash_balance = $2::numeric,
+          yes_inventory = $3::numeric,
+          no_inventory = $4::numeric,
+          updated_at = now()
+      WHERE id = $1::bigint
+      RETURNING *
+    `,
+    [
+      account.id,
+      roundMoney(next.cashBalance),
+      roundShares(next.yesInventory),
+      roundShares(next.noInventory),
+    ],
+  );
+  const updated = mapMarketMakerAccount(result.rows[0]);
+  await client.query(
+    `
+      INSERT INTO market_maker_ledger (
+        account_id, market_id, book_type, event_type, side,
+        cash_delta, yes_delta, no_delta, price, shares,
+        counterparty_user_id, trade_id, metadata
+      )
+      VALUES (
+        $1::bigint, $2::bigint, $3::text, $4::text, $5::text,
+        $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric,
+        $11::bigint, $12::bigint, $13::jsonb
+      )
+    `,
+    [
+      account.id,
+      input.marketId,
+      input.bookType,
+      input.action === "BUY" ? "AMM_SELL" : "AMM_BUY",
+      input.side,
+      roundMoney(updated.cash_balance - before.cash),
+      roundShares(updated.yes_inventory - before.yes),
+      roundShares(updated.no_inventory - before.no),
+      input.price,
+      shares,
+      input.userId,
+      input.tradeId || null,
+      JSON.stringify({ gross }),
+    ],
+  );
+  return updated;
+}
+
+function getAmmLevelsForAction(quotes, side, action) {
+  const sideQuotes = String(side).toUpperCase() === "YES" ? quotes.yes : quotes.no;
+  return action === "BUY"
+    ? [...(sideQuotes?.asks || [])].sort((left, right) => left.price - right.price)
+    : [...(sideQuotes?.bids || [])].sort((left, right) => right.price - left.price);
+}
+
+function assertAmmQuoteFresh(context) {
+  const quoteAt = new Date(context?.fair?.btc?.at || 0).getTime();
+  if (!quoteAt || Date.now() - quoteAt > CLOB_QUOTE_MAX_AGE_MS) {
+    throw new Error("price_unavailable");
+  }
+}
+
+function getFillWithinBudget(availableBudget, price, maxShares, tradeFeeBps) {
+  const feeRate = Math.max(0, Number(tradeFeeBps || 0)) / 10_000;
+  let shares = Math.min(
+    roundShares(maxShares),
+    roundShares(Math.max(0, availableBudget) / Math.max(0.00000001, price * (1 + feeRate))),
+  );
+  while (shares > CLOB_MIN_FILL_SHARES) {
+    const gross = roundMoney(shares * price);
+    const fee = roundMoney(calculateExecutionFee(gross, tradeFeeBps));
+    if (gross + fee <= availableBudget + 0.00000001) {
+      return shares;
+    }
+    shares = roundShares(shares - Math.max(CLOB_MIN_FILL_SHARES, 0.01 / Math.max(price, 0.001)));
+  }
+  return 0;
+}
+
+async function recordRestingSellOrderFill(client, input) {
+  const order = input.order;
+  const shares = Math.min(roundShares(input.shares), toNumber(order.remaining_shares));
+  const remainingBefore = toNumber(order.remaining_shares);
+  const costRatio = remainingBefore > 0 ? shares / remainingBefore : 0;
+  const costBasis = roundMoney(toNumber(order.remaining_spent) * costRatio);
+  const bonusCostBasis = roundMoney(toNumber(order.remaining_bonus_spent) * costRatio);
+  const gross = roundMoney(shares * input.price);
+  const tradeFee = roundMoney(calculateExecutionFee(gross, input.tradeFeeBps));
+  const profitAfterTradeFee = gross - tradeFee - costBasis;
+  const profitFee = calculateProfitFeeFromSettings(
+    profitAfterTradeFee,
+    input.economySettings,
+    currencyForBookType(order.book_type),
+  );
+  const proceeds = Math.max(0, roundMoney(gross - tradeFee - profitFee));
+  const pnl = roundMoney(proceeds - costBasis);
+  const remainingShares = roundShares(remainingBefore - shares);
+  const remainingSpent = roundMoney(toNumber(order.remaining_spent) - costBasis);
+  const remainingBonusSpent = roundMoney(toNumber(order.remaining_bonus_spent) - bonusCostBasis);
+  const filled = remainingShares <= CLOB_MIN_FILL_SHARES;
+
+  await adjustClobBookBalance(
+    client,
+    order.user_id,
+    order.book_type,
+    proceeds,
+    `clob_limit_sell_${String(order.side).toLowerCase()}`,
+    `market:${order.market_id}:limit_order:${order.id}`,
+  );
+  const trade = await insertClobTrade(client, {
+    userId: order.user_id,
+    marketId: order.market_id,
+    action: "SELL",
+    side: order.side,
+    amount: proceeds,
+    fee: tradeFee + profitFee,
+    price: input.price,
+    shares,
+    bookType: order.book_type,
+    grossAmount: gross,
+    tradeFee,
+    makerOrderId: input.makerOrderId === undefined ? order.id : input.makerOrderId,
+    counterpartyUserId: input.counterpartyUserId,
+    liquidityRole: input.liquidityRole || "MAKER",
+  });
+  await recordClobTradeFee(client, {
+    marketId: order.market_id,
+    userId: order.user_id,
+    tradeId: trade.id,
+    orderId: order.id,
+    bookType: order.book_type,
+    amount: tradeFee,
+    reason: "clob_limit_sell_execution_fee",
+  });
+  if (profitFee > 0) {
+    await distributeProfitFee(client, {
+      settings: input.economySettings,
+      userId: order.user_id,
+      marketId: order.market_id,
+      positionId: order.position_id,
+      tradeId: trade.id,
+      currency: currencyForBookType(order.book_type),
+      grossProfit: profitAfterTradeFee,
+      totalFee: profitFee,
+      cashRatio: order.book_type === BOOK_TYPE_USDT_CASH ? 1 : 0,
+      reason: "clob_limit_sell_profit_fee",
+      source: `market:${order.market_id}:limit_sell:${trade.id}`,
+      eventKey: `trade:${trade.id}:clob_limit_profit_fee`,
+    });
+  }
+  const updatedOrderResult = await client.query(
+    `
+      UPDATE limit_orders
+      SET remaining_shares = $2::numeric,
+          remaining_reserved = GREATEST(0, remaining_reserved - $3::numeric),
+          remaining_spent = $4::numeric,
+          remaining_bonus_spent = $5::numeric,
+          filled_shares = filled_shares + $6::numeric,
+          fee_paid = fee_paid + $7::numeric,
+          status = $8::text,
+          filled_at = CASE WHEN $8::text = 'filled' THEN now() ELSE filled_at END,
+          updated_at = now()
+      WHERE id = $1::bigint
+      RETURNING *
+    `,
+    [
+      order.id,
+      filled ? 0 : remainingShares,
+      gross,
+      filled ? 0 : remainingSpent,
+      filled ? 0 : remainingBonusSpent,
+      shares,
+      tradeFee,
+      filled ? "filled" : "open",
+    ],
+  );
+  if (order.position_id) {
+    await client.query(
+      `
+        UPDATE positions
+        SET payout = payout + $2::numeric,
+            pnl = pnl + $3::numeric,
+            status = CASE
+              WHEN shares > $4::numeric THEN 'open'
+              WHEN EXISTS (
+                SELECT 1 FROM limit_orders open_orders
+                WHERE open_orders.position_id = positions.id
+                  AND open_orders.order_side = 'SELL'
+                  AND open_orders.status = 'open'
+              ) THEN 'reserved'
+              ELSE 'sold'
+            END,
+            updated_at = now()
+        WHERE id = $1::bigint
+      `,
+      [order.position_id, proceeds, pnl, CLOB_MIN_FILL_SHARES],
+    );
+  }
+  return {
+    order: updatedOrderResult.rows[0],
+    trade,
+    shares,
+    gross,
+    tradeFee,
+    profitFee,
+    proceeds,
+  };
+}
+
+async function recordRestingBuyOrderFill(client, input) {
+  const order = input.order;
+  const shares = Math.min(roundShares(input.shares), toNumber(order.remaining_shares));
+  const gross = roundMoney(shares * input.price);
+  const tradeFee = roundMoney(calculateExecutionFee(gross, input.tradeFeeBps));
+  const totalCost = roundMoney(gross + tradeFee);
+  if (totalCost > toNumber(order.remaining_reserved) + 0.00000001) {
+    throw new Error("limit_order_reserve_exhausted");
+  }
+  const remainingShares = roundShares(toNumber(order.remaining_shares) - shares);
+  const remainingReserved = roundMoney(toNumber(order.remaining_reserved) - totalCost);
+  const filled = remainingShares <= CLOB_MIN_FILL_SHARES;
+  const position = await upsertClobBuyerPosition(client, {
+    userId: order.user_id,
+    marketId: order.market_id,
+    side: order.side,
+    bookType: order.book_type,
+    shares,
+    spent: totalCost,
+  });
+  const trade = await insertClobTrade(client, {
+    userId: order.user_id,
+    marketId: order.market_id,
+    action: "BUY",
+    side: order.side,
+    amount: totalCost,
+    fee: tradeFee,
+    price: input.price,
+    shares,
+    bookType: order.book_type,
+    grossAmount: gross,
+    tradeFee,
+    makerOrderId: input.makerOrderId === undefined ? order.id : input.makerOrderId,
+    counterpartyUserId: input.counterpartyUserId,
+    liquidityRole: input.liquidityRole || "MAKER",
+  });
+  await recordClobTradeFee(client, {
+    marketId: order.market_id,
+    userId: order.user_id,
+    tradeId: trade.id,
+    orderId: order.id,
+    bookType: order.book_type,
+    amount: tradeFee,
+    reason: "clob_limit_buy_execution_fee",
+  });
+  const updatedOrderResult = await client.query(
+    `
+      UPDATE limit_orders
+      SET remaining_shares = $2::numeric,
+          remaining_reserved = $3::numeric,
+          filled_shares = filled_shares + $4::numeric,
+          fee_paid = fee_paid + $5::numeric,
+          status = $6::text,
+          filled_at = CASE WHEN $6::text = 'filled' THEN now() ELSE filled_at END,
+          updated_at = now()
+      WHERE id = $1::bigint
+      RETURNING *
+    `,
+    [order.id, filled ? 0 : remainingShares, filled ? 0 : remainingReserved, shares, tradeFee, filled ? "filled" : "open"],
+  );
+  if (filled && remainingReserved > 0) {
+    await adjustClobBookBalance(
+      client,
+      order.user_id,
+      order.book_type,
+      remainingReserved,
+      "clob_limit_buy_refund",
+      `limit_order:${order.id}`,
+    );
+  }
+  return { order: updatedOrderResult.rows[0], position, trade, shares, gross, tradeFee, totalCost };
+}
+
+async function matchIncomingClobLimitOrder(client, input) {
+  let order = input.order;
+  const incomingUserId = Number(order.user_id);
+  const settings = await getMarketMakerSettingsWithClient(client);
+  const economySettings = await getEconomySettingsWithClient(client);
+  const context = await refreshMarketMakerAccount(client, input.market, order.book_type, true);
+  const action = String(order.order_side).toUpperCase();
+  const ammLevels = getAmmLevelsForAction(context.quotes, order.side, action)
+    .filter((level) => action === "BUY"
+      ? level.price <= toNumber(order.limit_price)
+      : level.price >= toNumber(order.limit_price))
+    .map((level) => ({ ...level, remaining: toNumber(level.shares) }));
+  let ammAccount = context.account;
+  let ammIndex = 0;
+  const fills = [];
+  const participantUserIds = new Set();
+  let grossTotal = 0;
+
+  for (let iteration = 0; iteration < 200 && order.status === "open"; iteration += 1) {
+    const makerOrder = await getBestRestingClobOrder(client, {
+      marketId: order.market_id,
+      bookType: order.book_type,
+      side: order.side,
+      action,
+      userId: order.user_id,
+      limitPrice: toNumber(order.limit_price),
+    });
+    while (ammLevels[ammIndex] && ammLevels[ammIndex].remaining <= CLOB_MIN_FILL_SHARES) {
+      ammIndex += 1;
+    }
+    const ammLevel = ammAccount.status === "ACTIVE" ? ammLevels[ammIndex] : null;
+    const useMakerOrder = makerOrder && (!ammLevel || (
+      action === "BUY"
+        ? toNumber(makerOrder.limit_price) <= ammLevel.price
+        : toNumber(makerOrder.limit_price) >= ammLevel.price
+    ));
+    const price = useMakerOrder ? toNumber(makerOrder.limit_price) : toNumber(ammLevel?.price);
+    const makerShares = useMakerOrder
+      ? toNumber(makerOrder.remaining_shares)
+      : toNumber(ammLevel?.remaining);
+    if (!(price > 0) || makerShares <= CLOB_MIN_FILL_SHARES) {
+      break;
+    }
+
+    let fillShares = Math.min(toNumber(order.remaining_shares), makerShares);
+    if (action === "BUY") {
+      fillShares = Math.min(
+        fillShares,
+        getFillWithinBudget(
+          toNumber(order.remaining_reserved),
+          price,
+          fillShares,
+          settings.user_trade_fee_bps,
+        ),
+      );
+    } else if (useMakerOrder) {
+      fillShares = Math.min(
+        fillShares,
+        getFillWithinBudget(
+          toNumber(makerOrder.remaining_reserved),
+          price,
+          fillShares,
+          settings.user_trade_fee_bps,
+        ),
+      );
+    }
+    fillShares = roundShares(fillShares);
+    if (fillShares <= CLOB_MIN_FILL_SHARES) {
+      break;
+    }
+
+    let incomingFill;
+    if (action === "BUY") {
+      incomingFill = await recordRestingBuyOrderFill(client, {
+        order,
+        shares: fillShares,
+        price,
+        tradeFeeBps: settings.user_trade_fee_bps,
+        counterpartyUserId: useMakerOrder ? makerOrder.user_id : null,
+        makerOrderId: useMakerOrder ? makerOrder.id : null,
+        liquidityRole: "TAKER",
+      });
+      if (useMakerOrder) {
+        await recordRestingSellOrderFill(client, {
+          order: makerOrder,
+          shares: incomingFill.shares,
+          price,
+          tradeFeeBps: settings.user_trade_fee_bps,
+          economySettings,
+          counterpartyUserId: order.user_id,
+        });
+      }
+    } else {
+      incomingFill = await recordRestingSellOrderFill(client, {
+        order,
+        shares: fillShares,
+        price,
+        tradeFeeBps: settings.user_trade_fee_bps,
+        economySettings,
+        counterpartyUserId: useMakerOrder ? makerOrder.user_id : null,
+        makerOrderId: useMakerOrder ? makerOrder.id : null,
+        liquidityRole: "TAKER",
+      });
+      if (useMakerOrder) {
+        await recordRestingBuyOrderFill(client, {
+          order: makerOrder,
+          shares: incomingFill.shares,
+          price,
+          tradeFeeBps: settings.user_trade_fee_bps,
+          counterpartyUserId: order.user_id,
+        });
+      }
+    }
+
+    if (!useMakerOrder) {
+      assertAmmQuoteFresh(context);
+      ammAccount = await updateAmmForFill(client, {
+        account: ammAccount,
+        marketId: order.market_id,
+        bookType: order.book_type,
+        action,
+        side: order.side,
+        price,
+        shares: incomingFill.shares,
+        userId: order.user_id,
+        tradeId: incomingFill.trade.id,
+      });
+      ammLevel.remaining = roundShares(ammLevel.remaining - incomingFill.shares);
+    }
+    order = incomingFill.order;
+    participantUserIds.add(incomingUserId);
+    if (useMakerOrder) {
+      participantUserIds.add(Number(makerOrder.user_id));
+    }
+    grossTotal = roundMoney(grossTotal + incomingFill.gross);
+    fills.push({
+      price,
+      shares: incomingFill.shares,
+      gross: incomingFill.gross,
+      source: useMakerOrder ? "USER" : "AMM",
+      maker_order_id: useMakerOrder ? Number(makerOrder.id) : null,
+    });
+  }
+
+  if (fills.length > 0) {
+    await client.query(
+      `
+        UPDATE markets
+        SET current_price = $2::numeric,
+            yes_price = $3::numeric,
+            no_price = $4::numeric,
+            yes_volume = yes_volume + $5::numeric,
+            no_volume = no_volume + $6::numeric
+        WHERE id = $1::bigint
+      `,
+      [
+        input.market.id,
+        context.fair.btc.price,
+        context.fair.fairYes,
+        1 - context.fair.fairYes,
+        order.side === "YES" ? grossTotal : 0,
+        order.side === "NO" ? grossTotal : 0,
+      ],
+    );
+    await refreshMarketMakerAccount(client, input.market, order.book_type, false, true);
+  }
+  let referralBonus = null;
+  for (const userId of participantUserIds) {
+    const awarded = await awardReferralBetBonusByUserId(client, userId, order.market_id);
+    if (userId === incomingUserId) {
+      referralBonus = awarded;
+    }
+  }
+  return { order, fills, referralBonus };
+}
+
+async function createClobLimitOrder(client, input) {
+  const limitPrice = ensureLimitPrice(input.limitPrice, input.market);
+  const settings = await getMarketMakerSettingsWithClient(client);
+  let order;
+  let position = null;
+  let bookType;
+
+  if (input.orderSide === "BUY") {
+    const funding = await getLockedClobFunding(
+      client,
+      input.user.id,
+      input.currency,
+      input.amount,
+      input.bookType,
+    );
+    bookType = funding.bookType;
+    const shares = roundShares(
+      input.amount / (limitPrice * (1 + settings.user_trade_fee_bps / 10_000)),
+    );
+    if (shares <= CLOB_MIN_FILL_SHARES) {
+      throw new Error("invalid_limit_order");
+    }
+    await adjustClobBookBalance(
+      client,
+      input.user.id,
+      bookType,
+      -input.amount,
+      `clob_limit_buy_${String(input.side).toLowerCase()}`,
+      `market:${input.market.id}:limit_order`,
+    );
+    const orderResult = await client.query(
+      `
+        INSERT INTO limit_orders (
+          user_id, market_id, side, order_side, currency, book_type,
+          limit_price, shares, remaining_shares, reserved_amount,
+          remaining_reserved, bonus_reserved, status
+        )
+        VALUES (
+          $1::bigint, $2::bigint, $3::text, 'BUY', $4::text, $5::text,
+          $6::numeric, $7::numeric, $7::numeric, $8::numeric,
+          $8::numeric, $9::numeric, 'open'
+        )
+        RETURNING *
+      `,
+      [
+        input.user.id,
+        input.market.id,
+        input.side,
+        currencyForBookType(bookType),
+        bookType,
+        limitPrice,
+        shares,
+        input.amount,
+        isBonusBookType(bookType) ? input.amount : 0,
+      ],
+    );
+    order = orderResult.rows[0];
+  } else {
+    const desiredShares = roundShares(input.amount / limitPrice);
+    const explicitBook = input.bookType
+      ? normalizeClobBookType(input.bookType, input.currency)
+      : null;
+    const positionResult = await client.query(
+      `
+        SELECT *
+        FROM positions
+        WHERE user_id = $1::bigint
+          AND market_id = $2::bigint
+          AND side = $3::text
+          AND currency = $4::text
+          AND status = 'open'
+          AND shares >= $5::numeric
+          AND book_type <> 'LEGACY'
+          AND ($6::text IS NULL OR book_type = $6::text)
+        ORDER BY CASE book_type WHEN 'USDT_CASH' THEN 0 WHEN 'USDT_BONUS' THEN 1 ELSE 2 END, id ASC
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [input.user.id, input.market.id, input.side, input.currency, desiredShares, explicitBook],
+    );
+    position = positionResult.rows[0];
+    if (!position) {
+      throw new Error("insufficient_shares");
+    }
+    bookType = position.book_type;
+    const ratio = desiredShares / toNumber(position.shares);
+    const reservedSpent = roundMoney(toNumber(position.spent) * ratio);
+    const reservedBonusSpent = roundMoney(toNumber(position.bonus_spent) * ratio);
+    const remainingShares = roundShares(toNumber(position.shares) - desiredShares);
+    const remainingSpent = roundMoney(toNumber(position.spent) - reservedSpent);
+    const remainingBonusSpent = roundMoney(toNumber(position.bonus_spent) - reservedBonusSpent);
+    const positionUpdate = await client.query(
+      `
+        UPDATE positions
+        SET shares = $2::numeric,
+            spent = $3::numeric,
+            bonus_spent = $4::numeric,
+            avg_price = CASE WHEN $2::numeric > 0 THEN $3::numeric / $2::numeric ELSE 0 END,
+            status = CASE WHEN $2::numeric > $5::numeric THEN 'open' ELSE 'reserved' END,
+            updated_at = now()
+        WHERE id = $1::bigint
+        RETURNING *
+      `,
+      [position.id, remainingShares, remainingSpent, remainingBonusSpent, CLOB_MIN_FILL_SHARES],
+    );
+    position = positionUpdate.rows[0];
+    const orderResult = await client.query(
+      `
+        INSERT INTO limit_orders (
+          user_id, market_id, position_id, side, order_side, currency,
+          book_type, limit_price, shares, remaining_shares,
+          reserved_amount, remaining_reserved, reserved_spent,
+          remaining_spent, reserved_bonus_spent, remaining_bonus_spent, status
+        )
+        VALUES (
+          $1::bigint, $2::bigint, $3::bigint, $4::text, 'SELL', $5::text,
+          $6::text, $7::numeric, $8::numeric, $8::numeric,
+          $9::numeric, $9::numeric, $10::numeric,
+          $10::numeric, $11::numeric, $11::numeric, 'open'
+        )
+        RETURNING *
+      `,
+      [
+        input.user.id,
+        input.market.id,
+        position.id,
+        input.side,
+        currencyForBookType(bookType),
+        bookType,
+        limitPrice,
+        desiredShares,
+        roundMoney(desiredShares * limitPrice),
+        reservedSpent,
+        reservedBonusSpent,
+      ],
+    );
+    order = orderResult.rows[0];
+  }
+
+  const matched = await matchIncomingClobLimitOrder(client, {
+    market: input.market,
+    order,
+  });
+  const finalBalance = await getCurrencyBalanceSnapshot(
+    client,
+    input.user.id,
+    currencyForBookType(bookType),
+  );
+  return {
+    ok: true,
+    currency: currencyForBookType(bookType),
+    book_type: bookType,
+    balance: finalBalance.total,
+    currency_balance: finalBalance.total,
+    currency_cash_balance: finalBalance.cash,
+    currency_bonus_balance: finalBalance.bonus,
+    order: mapLimitOrder(matched.order),
+    position: position ? mapPosition(position) : undefined,
+    fills: matched.fills,
+    referral_bonus: matched.referralBonus,
+  };
+}
+
+async function executeClobMarketBuy(client, input) {
+  const funding = await getLockedClobFunding(
+    client,
+    input.user.id,
+    input.currency,
+    input.amount,
+    input.bookType,
+  );
+  const context = await refreshMarketMakerAccount(client, input.market, funding.bookType, true);
+  const tradeFeeBps = context.settings.user_trade_fee_bps;
+  const economySettings = await getEconomySettingsWithClient(client);
+  const ammLevels = getAmmLevelsForAction(context.quotes, input.side, "BUY")
+    .map((level) => ({ ...level, remaining: toNumber(level.shares) }));
+  let ammAccount = context.account;
+  let ammIndex = 0;
+  let spent = 0;
+  let grossTotal = 0;
+  let feeTotal = 0;
+  let sharesTotal = 0;
+  let latestPosition = null;
+  const takerTrades = [];
+  const fills = [];
+  const participantUserIds = new Set();
+
+  for (let iteration = 0; iteration < 200 && spent + 0.01 <= input.amount; iteration += 1) {
+    const userOrder = await getBestRestingClobOrder(client, {
+      marketId: input.market.id,
+      bookType: funding.bookType,
+      side: input.side,
+      action: "BUY",
+      userId: input.user.id,
+      limitPrice: 0.999,
+    });
+    while (ammLevels[ammIndex] && ammLevels[ammIndex].remaining <= CLOB_MIN_FILL_SHARES) {
+      ammIndex += 1;
+    }
+    const ammLevel = ammAccount.status === "ACTIVE" ? ammLevels[ammIndex] : null;
+    const useUserOrder = userOrder && (!ammLevel || toNumber(userOrder.limit_price) <= ammLevel.price);
+    const price = useUserOrder ? toNumber(userOrder.limit_price) : toNumber(ammLevel?.price);
+    const availableShares = useUserOrder
+      ? toNumber(userOrder.remaining_shares)
+      : toNumber(ammLevel?.remaining);
+    if (!(price > 0) || availableShares <= CLOB_MIN_FILL_SHARES) {
+      break;
+    }
+    const fillShares = getFillWithinBudget(input.amount - spent, price, availableShares, tradeFeeBps);
+    if (fillShares <= CLOB_MIN_FILL_SHARES) {
+      break;
+    }
+    const buyerFill = await recordClobBuyerFill(client, {
+      userId: input.user.id,
+      marketId: input.market.id,
+      side: input.side,
+      price,
+      shares: fillShares,
+      bookType: funding.bookType,
+      tradeFeeBps,
+      makerOrderId: useUserOrder ? userOrder.id : null,
+      counterpartyUserId: useUserOrder ? userOrder.user_id : null,
+      liquidityRole: "TAKER",
+    });
+    if (useUserOrder) {
+      await recordRestingSellOrderFill(client, {
+        order: userOrder,
+        shares: fillShares,
+        price,
+        tradeFeeBps,
+        economySettings,
+        counterpartyUserId: input.user.id,
+      });
+    } else {
+      assertAmmQuoteFresh(context);
+      ammAccount = await updateAmmForFill(client, {
+        account: ammAccount,
+        marketId: input.market.id,
+        bookType: funding.bookType,
+        action: "BUY",
+        side: input.side,
+        price,
+        shares: fillShares,
+        userId: input.user.id,
+        tradeId: buyerFill.trade.id,
+      });
+      ammLevel.remaining = roundShares(ammLevel.remaining - fillShares);
+    }
+    latestPosition = buyerFill.position;
+    participantUserIds.add(Number(input.user.id));
+    if (useUserOrder) {
+      participantUserIds.add(Number(userOrder.user_id));
+    }
+    takerTrades.push(buyerFill.trade);
+    spent = roundMoney(spent + buyerFill.totalCost);
+    grossTotal = roundMoney(grossTotal + buyerFill.gross);
+    feeTotal = roundMoney(feeTotal + buyerFill.tradeFee);
+    sharesTotal = roundShares(sharesTotal + fillShares);
+    fills.push({
+      price,
+      shares: fillShares,
+      gross: buyerFill.gross,
+      source: useUserOrder ? "USER" : "AMM",
+      maker_order_id: useUserOrder ? Number(userOrder.id) : null,
+    });
+  }
+
+  if (sharesTotal <= CLOB_MIN_FILL_SHARES || spent <= 0) {
+    throw new Error("insufficient_market_liquidity");
+  }
+  await adjustClobBookBalance(
+    client,
+    input.user.id,
+    funding.bookType,
+    -spent,
+    `clob_buy_${String(input.side).toLowerCase()}`,
+    `market:${input.market.id}`,
+  );
+  await client.query(
+    `
+      UPDATE markets
+      SET current_price = $2::numeric,
+          yes_price = $3::numeric,
+          no_price = $4::numeric,
+          yes_volume = yes_volume + $5::numeric,
+          no_volume = no_volume + $6::numeric
+      WHERE id = $1::bigint
+    `,
+    [
+      input.market.id,
+      context.fair.btc.price,
+      context.fair.fairYes,
+      1 - context.fair.fairYes,
+      input.side === "YES" ? grossTotal : 0,
+      input.side === "NO" ? grossTotal : 0,
+    ],
+  );
+  let referralBonus = null;
+  for (const userId of participantUserIds) {
+    const awarded = await awardReferralBetBonusByUserId(client, userId, input.market.id);
+    if (userId === Number(input.user.id)) {
+      referralBonus = awarded;
+    }
+  }
+  const balance = await getCurrencyBalanceSnapshot(
+    client,
+    input.user.id,
+    currencyForBookType(funding.bookType),
+  );
+  const refreshedAccount = ammAccount.id === context.account.id
+    ? await refreshMarketMakerAccount(client, input.market, funding.bookType, false, true)
+    : context;
+  return {
+    ok: true,
+    currency: currencyForBookType(funding.bookType),
+    book_type: funding.bookType,
+    balance: balance.total,
+    currency_balance: balance.total,
+    currency_cash_balance: balance.cash,
+    currency_bonus_balance: balance.bonus,
+    position: mapPosition(latestPosition),
+    trade: mapTrade(takerTrades[takerTrades.length - 1]),
+    trades: takerTrades.map(mapTrade),
+    fills,
+    execution: {
+      requested: input.amount,
+      spent,
+      gross: grossTotal,
+      fee: feeTotal,
+      shares: sharesTotal,
+      average_price: grossTotal / sharesTotal,
+    },
+    referral_bonus: referralBonus,
+    market: mapMarket({
+      ...input.market,
+      current_price: context.fair.btc.price,
+      yes_price: context.fair.fairYes,
+      no_price: 1 - context.fair.fairYes,
+      yes_volume: toNumber(input.market.yes_volume) + (input.side === "YES" ? grossTotal : 0),
+      no_volume: toNumber(input.market.no_volume) + (input.side === "NO" ? grossTotal : 0),
+    }),
+    amm: {
+      status: refreshedAccount.account.status,
+      risk_multiplier: refreshedAccount.account.risk_multiplier,
+    },
+  };
+}
+
+async function executeClobMarketSell(client, input) {
+  const bookType = normalizeClobBookType(input.position.book_type, input.position.currency);
+  const context = await refreshMarketMakerAccount(client, input.market, bookType, true);
+  const tradeFeeBps = context.settings.user_trade_fee_bps;
+  const economySettings = await getEconomySettingsWithClient(client);
+  const ammLevels = getAmmLevelsForAction(context.quotes, input.side, "SELL")
+    .map((level) => ({ ...level, remaining: toNumber(level.shares) }));
+  let ammAccount = context.account;
+  let ammIndex = 0;
+  let remainingToSell = roundShares(input.shares);
+  let sharesTotal = 0;
+  let grossTotal = 0;
+  let proceedsTotal = 0;
+  let feeTotal = 0;
+  let latestPosition = input.position;
+  const takerTrades = [];
+  const fills = [];
+  const participantUserIds = new Set();
+
+  for (let iteration = 0; iteration < 200 && remainingToSell > CLOB_MIN_FILL_SHARES; iteration += 1) {
+    const userOrder = await getBestRestingClobOrder(client, {
+      marketId: input.market.id,
+      bookType,
+      side: input.side,
+      action: "SELL",
+      userId: input.user.id,
+      limitPrice: 0.001,
+    });
+    while (ammLevels[ammIndex] && ammLevels[ammIndex].remaining <= CLOB_MIN_FILL_SHARES) {
+      ammIndex += 1;
+    }
+    const ammLevel = ammAccount.status === "ACTIVE" ? ammLevels[ammIndex] : null;
+    const useUserOrder = userOrder && (!ammLevel || toNumber(userOrder.limit_price) >= ammLevel.price);
+    const price = useUserOrder ? toNumber(userOrder.limit_price) : toNumber(ammLevel?.price);
+    const availableShares = useUserOrder
+      ? toNumber(userOrder.remaining_shares)
+      : toNumber(ammLevel?.remaining);
+    if (!(price > 0) || availableShares <= CLOB_MIN_FILL_SHARES) {
+      break;
+    }
+    let fillShares = Math.min(remainingToSell, availableShares);
+    if (useUserOrder) {
+      fillShares = Math.min(
+        fillShares,
+        getFillWithinBudget(
+          toNumber(userOrder.remaining_reserved),
+          price,
+          fillShares,
+          tradeFeeBps,
+        ),
+      );
+    }
+    fillShares = roundShares(fillShares);
+    if (fillShares <= CLOB_MIN_FILL_SHARES) {
+      break;
+    }
+    const sellerFill = await recordClobSellerFill(client, {
+      userId: input.user.id,
+      marketId: input.market.id,
+      positionId: latestPosition.id,
+      action: "SELL",
+      side: input.side,
+      price,
+      shares: fillShares,
+      bookType,
+      tradeFeeBps,
+      economySettings,
+      makerOrderId: useUserOrder ? userOrder.id : null,
+      counterpartyUserId: useUserOrder ? userOrder.user_id : null,
+      liquidityRole: "TAKER",
+    });
+    if (useUserOrder) {
+      await recordRestingBuyOrderFill(client, {
+        order: userOrder,
+        shares: sellerFill.shares,
+        price,
+        tradeFeeBps,
+        counterpartyUserId: input.user.id,
+      });
+    } else {
+      assertAmmQuoteFresh(context);
+      ammAccount = await updateAmmForFill(client, {
+        account: ammAccount,
+        marketId: input.market.id,
+        bookType,
+        action: "SELL",
+        side: input.side,
+        price,
+        shares: sellerFill.shares,
+        userId: input.user.id,
+        tradeId: sellerFill.trade.id,
+      });
+      ammLevel.remaining = roundShares(ammLevel.remaining - sellerFill.shares);
+    }
+    latestPosition = sellerFill.position;
+    participantUserIds.add(Number(input.user.id));
+    if (useUserOrder) {
+      participantUserIds.add(Number(userOrder.user_id));
+    }
+    takerTrades.push(sellerFill.trade);
+    remainingToSell = roundShares(remainingToSell - sellerFill.shares);
+    sharesTotal = roundShares(sharesTotal + sellerFill.shares);
+    grossTotal = roundMoney(grossTotal + sellerFill.gross);
+    proceedsTotal = roundMoney(proceedsTotal + sellerFill.proceeds);
+    feeTotal = roundMoney(feeTotal + sellerFill.tradeFee + sellerFill.profitFee);
+    fills.push({
+      price,
+      shares: sellerFill.shares,
+      gross: sellerFill.gross,
+      source: useUserOrder ? "USER" : "AMM",
+      maker_order_id: useUserOrder ? Number(userOrder.id) : null,
+    });
+  }
+
+  if (sharesTotal <= CLOB_MIN_FILL_SHARES) {
+    throw new Error("insufficient_market_liquidity");
+  }
+  await client.query(
+    `
+      UPDATE markets
+      SET current_price = $2::numeric,
+          yes_price = $3::numeric,
+          no_price = $4::numeric,
+          yes_volume = yes_volume + $5::numeric,
+          no_volume = no_volume + $6::numeric
+      WHERE id = $1::bigint
+    `,
+    [
+      input.market.id,
+      context.fair.btc.price,
+      context.fair.fairYes,
+      1 - context.fair.fairYes,
+      input.side === "YES" ? grossTotal : 0,
+      input.side === "NO" ? grossTotal : 0,
+    ],
+  );
+  const balance = await getCurrencyBalanceSnapshot(
+    client,
+    input.user.id,
+    currencyForBookType(bookType),
+  );
+  for (const userId of participantUserIds) {
+    await awardReferralBetBonusByUserId(client, userId, input.market.id);
+  }
+  const refreshedAccount = await refreshMarketMakerAccount(client, input.market, bookType, false, true);
+  return {
+    ok: true,
+    currency: currencyForBookType(bookType),
+    book_type: bookType,
+    balance: balance.total,
+    currency_balance: balance.total,
+    currency_cash_balance: balance.cash,
+    currency_bonus_balance: balance.bonus,
+    position: mapPosition(latestPosition),
+    trade: mapTrade(takerTrades[takerTrades.length - 1]),
+    trades: takerTrades.map(mapTrade),
+    fills,
+    market: mapMarket({
+      ...input.market,
+      current_price: context.fair.btc.price,
+      yes_price: context.fair.fairYes,
+      no_price: 1 - context.fair.fairYes,
+      yes_volume: toNumber(input.market.yes_volume) + (input.side === "YES" ? grossTotal : 0),
+      no_volume: toNumber(input.market.no_volume) + (input.side === "NO" ? grossTotal : 0),
+    }),
+    sale: {
+      side: input.side,
+      price: grossTotal / sharesTotal,
+      shares: sharesTotal,
+      gross: grossTotal,
+      fee: feeTotal,
+      proceeds: proceedsTotal,
+      pnl: roundMoney(proceedsTotal - (toNumber(input.position.spent) * (sharesTotal / toNumber(input.position.shares)))),
+    },
+    amm: {
+      status: refreshedAccount.account.status,
+      risk_multiplier: refreshedAccount.account.risk_multiplier,
+    },
+  };
+}
+
 function ensureLimitPrice(price, market) {
   const value = Number(price);
   const minPrice = getMarketMinOutcomePrice(market);
@@ -9333,6 +11549,130 @@ export async function getMarketOrderBook(input) {
     throw new Error("market_not_found");
   }
 
+  if (market.trading_mode === CLOB_TRADING_MODE && isBtcMarketSymbol(market.symbol)) {
+    const requestedBook = normalizeClobBookType(
+      input.book_type || input.bookType,
+      currency,
+    );
+    return withTransaction(async (client) => {
+      const context = await refreshMarketMakerAccount(client, market, requestedBook, false);
+      const userLevelsResult = await client.query(
+        `
+          SELECT
+            side,
+            currency,
+            book_type,
+            order_side,
+            limit_price,
+            SUM(remaining_shares) AS shares,
+            SUM(remaining_reserved) AS amount,
+            COUNT(*) AS orders_count
+          FROM limit_orders
+          WHERE market_id = $1::bigint
+            AND status = 'open'
+            AND book_type = $2::text
+          GROUP BY side, currency, book_type, order_side, limit_price
+          ORDER BY side ASC, order_side ASC, limit_price DESC
+          LIMIT 120
+        `,
+        [marketId, requestedBook],
+      );
+      const levels = userLevelsResult.rows.map((row) => ({
+        side: row.side,
+        currency: normalizeCurrency(row.currency),
+        book_type: row.book_type,
+        price: toNumber(row.limit_price),
+        shares: toNumber(row.shares),
+        amount: toNumber(row.amount),
+        orders_count: Number(row.orders_count || 0),
+        order_side: String(row.order_side || "BUY").toUpperCase(),
+        is_market_maker: false,
+      }));
+      for (const side of ["YES", "NO"]) {
+        const quoteSide = side === "YES" ? context.quotes.yes : context.quotes.no;
+        for (const level of quoteSide?.bids || []) {
+          levels.push({
+            side,
+            currency: currencyForBookType(requestedBook),
+            book_type: requestedBook,
+            price: toNumber(level.price),
+            shares: toNumber(level.shares),
+            amount: toNumber(level.amount),
+            orders_count: 1,
+            order_side: "BUY",
+            is_market_maker: true,
+          });
+        }
+        for (const level of quoteSide?.asks || []) {
+          levels.push({
+            side,
+            currency: currencyForBookType(requestedBook),
+            book_type: requestedBook,
+            price: toNumber(level.price),
+            shares: toNumber(level.shares),
+            amount: toNumber(level.amount),
+            orders_count: 1,
+            order_side: "SELL",
+            is_market_maker: true,
+          });
+        }
+      }
+
+      let myOrders = [];
+      const telegramId = String(input.telegram_id || "").trim();
+      if (telegramId) {
+        const userResult = await client.query(
+          "SELECT id FROM users WHERE telegram_id = $1::text LIMIT 1",
+          [telegramId],
+        );
+        if (userResult.rows[0]) {
+          const myOrdersResult = await client.query(
+            `
+              SELECT *
+              FROM limit_orders
+              WHERE user_id = $1::bigint
+                AND market_id = $2::bigint
+                AND status = 'open'
+              ORDER BY created_at DESC, id DESC
+              LIMIT 40
+            `,
+            [userResult.rows[0].id, marketId],
+          );
+          myOrders = myOrdersResult.rows.map(mapLimitOrder);
+        }
+      }
+
+      const best = (side, orderSide) => levels
+        .filter((level) => level.side === side && level.order_side === orderSide)
+        .sort((left, right) => orderSide === "SELL" ? left.price - right.price : right.price - left.price)[0]
+        ?.price ?? null;
+      return {
+        ok: true,
+        market_id: marketId,
+        currency: currencyForBookType(requestedBook),
+        book_type: requestedBook,
+        market: mapMarket({
+          ...market,
+          current_price: context.fair.btc.price,
+          yes_price: context.fair.fairYes,
+          no_price: 1 - context.fair.fairYes,
+        }),
+        levels,
+        best_quotes: {
+          YES: { bid: best("YES", "BUY"), ask: best("YES", "SELL") },
+          NO: { bid: best("NO", "BUY"), ask: best("NO", "SELL") },
+        },
+        fair_yes_price: context.fair.fairYes,
+        my_orders: myOrders,
+        amm: {
+          status: context.account.status,
+          risk_multiplier: context.account.risk_multiplier,
+          quote_age_ms: 0,
+        },
+      };
+    });
+  }
+
   const levelsResult = await query(
     `
       SELECT
@@ -9437,9 +11777,35 @@ export async function createLimitOrder(input) {
     }
     if (
       isBtcMarketSymbol(market.symbol)
-      && endMs - nowMs <= Math.max(0, Number(config.marketBuyFreezeSeconds || 0)) * 1_000
+      && endMs - nowMs <= Math.max(
+        0,
+        Number(
+          orderSide === "SELL"
+            ? config.marketSellFreezeSeconds
+            : config.marketBuyFreezeSeconds,
+        ) || 0,
+      ) * 1_000
     ) {
-      throw new Error("market_buy_frozen");
+      throw new Error(orderSide === "SELL" ? "sell_frozen" : "market_buy_frozen");
+    }
+    if (isBtcMarketSymbol(market.symbol) && orderSide === "BUY") {
+      ensureMinimumBtcStake(amount, currency);
+    }
+
+    if (market.trading_mode === CLOB_TRADING_MODE && isBtcMarketSymbol(market.symbol)) {
+      return createClobLimitOrder(client, {
+        market,
+        user,
+        side,
+        orderSide,
+        amount,
+        currency,
+        limitPrice: input.limit_price ?? input.price,
+        bookType: input.book_type || input.bookType,
+      });
+    }
+    if (!isBtcMarketSymbol(market.symbol)) {
+      throw new Error("market_trading_paused");
     }
 
     const limitPrice = ensureLimitPrice(input.limit_price ?? input.price, market);
@@ -9657,6 +12023,100 @@ export async function cancelLimitOrder(input) {
   });
 }
 
+export async function matchOpenClobLimitOrders(limit = 60) {
+  const safeLimit = Math.max(1, Math.min(200, Number(limit) || 60));
+  const freezeSeconds = Math.max(
+    Number(config.marketBuyFreezeSeconds || 0),
+    Number(config.marketSellFreezeSeconds || 0),
+  );
+  const candidates = await query(
+    `
+      SELECT orders.id
+      FROM limit_orders orders
+      JOIN markets ON markets.id = orders.market_id
+      CROSS JOIN market_maker_settings settings
+      WHERE orders.status = 'open'
+        AND orders.book_type <> 'LEGACY'
+        AND markets.status = 'open'
+        AND markets.trading_mode = $1::text
+        AND markets.symbol = ANY($2)
+        AND markets.end_time > now() + ($3::numeric * interval '1 second')
+        AND (
+          (
+            orders.order_side = 'BUY'
+            AND orders.limit_price >= (
+              CASE WHEN orders.side = 'YES' THEN markets.yes_price ELSE markets.no_price END
+              + settings.spread_bps::numeric / 20000
+              - 0.003
+            )
+          )
+          OR
+          (
+            orders.order_side = 'SELL'
+            AND orders.limit_price <= (
+              CASE WHEN orders.side = 'YES' THEN markets.yes_price ELSE markets.no_price END
+              - settings.spread_bps::numeric / 20000
+              + 0.003
+            )
+          )
+        )
+      ORDER BY orders.created_at ASC, orders.id ASC
+      LIMIT $4::integer
+    `,
+    [CLOB_TRADING_MODE, BTC_MARKET_SYMBOLS, freezeSeconds, safeLimit],
+  );
+  let matchedOrders = 0;
+  let fills = 0;
+  for (const candidate of candidates.rows) {
+    try {
+      const result = await withTransaction(async (client) => {
+        const marketResult = await client.query(
+          `
+            SELECT markets.*
+            FROM markets
+            JOIN limit_orders ON limit_orders.market_id = markets.id
+            WHERE limit_orders.id = $1::bigint
+              AND limit_orders.status = 'open'
+              AND markets.status = 'open'
+              AND markets.trading_mode = $2::text
+              AND markets.end_time > now() + ($3::numeric * interval '1 second')
+            FOR UPDATE OF markets
+          `,
+          [candidate.id, CLOB_TRADING_MODE, freezeSeconds],
+        );
+        const market = marketResult.rows[0];
+        if (!market) {
+          return null;
+        }
+        const orderResult = await client.query(
+          `
+            SELECT *
+            FROM limit_orders
+            WHERE id = $1::bigint
+              AND status = 'open'
+            FOR UPDATE
+          `,
+          [candidate.id],
+        );
+        const order = orderResult.rows[0];
+        if (!order) {
+          return null;
+        }
+        return matchIncomingClobLimitOrder(client, { market, order });
+      });
+      if (result?.fills?.length) {
+        matchedOrders += 1;
+        fills += result.fills.length;
+      }
+    } catch (error) {
+      if (!["price_unavailable", "market_maker_unavailable"].includes(error?.message)) {
+        throw error;
+      }
+    }
+  }
+  return { ok: true, scanned: candidates.rowCount, matched_orders: matchedOrders, fills };
+}
+
 export async function buyOutcome(input) {
   const marketId = Number(input.marketId);
   const side = String(input.side || "").toUpperCase();
@@ -9702,6 +12162,23 @@ export async function buyOutcome(input) {
       && endMs - nowMs <= Math.max(0, Number(config.marketBuyFreezeSeconds || 0)) * 1_000
     ) {
       throw new Error("market_buy_frozen");
+    }
+    if (isBtcMarketSymbol(market.symbol)) {
+      ensureMinimumBtcStake(amount, currency);
+    }
+
+    if (market.trading_mode === CLOB_TRADING_MODE && isBtcMarketSymbol(market.symbol)) {
+      return executeClobMarketBuy(client, {
+        market,
+        user,
+        side,
+        amount,
+        currency,
+        bookType: input.book_type || input.bookType,
+      });
+    }
+    if (!isBtcMarketSymbol(market.symbol)) {
+      throw new Error("market_trading_paused");
     }
 
     const oppositePositionResult = await client.query(
@@ -9833,7 +12310,7 @@ export async function buyOutcome(input) {
           updated_at
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open', now())
-        ON CONFLICT (user_id, market_id, side, currency) DO UPDATE SET
+        ON CONFLICT (user_id, market_id, side, currency, book_type) DO UPDATE SET
           shares = positions.shares + EXCLUDED.shares,
           spent = positions.spent + EXCLUDED.spent,
           bonus_spent = positions.bonus_spent + EXCLUDED.bonus_spent,
@@ -10018,6 +12495,21 @@ export async function sellOutcome(input) {
     }
 
     const sharesToSell = Math.min(positionShares, requestedShares);
+    if (market.trading_mode === CLOB_TRADING_MODE && isBtcMarketSymbol(market.symbol)) {
+      if (String(position.book_type || "LEGACY") === "LEGACY") {
+        throw new Error("legacy_position_settlement_only");
+      }
+      return executeClobMarketSell(client, {
+        market,
+        user,
+        position,
+        side,
+        shares: sharesToSell,
+      });
+    }
+    if (!isBtcMarketSymbol(market.symbol)) {
+      throw new Error("market_trading_paused");
+    }
     const marketMinPrice = getMarketMinOutcomePrice(market);
     const quote = getSellExecutionQuote(market, side, sharesToSell, {
       pricingWeight: getPricingWeight(currency),
@@ -10493,13 +12985,7 @@ export function calculateResolvedPositionSettlement(position, market, winner, ec
   );
   const basePayout = Math.max(0, roundMoney(grossPayout - fee));
   const basePnl = roundMoney(basePayout - spent);
-  const luckySpent = Math.min(toNumber(position.lucky_spent), spent);
-  const luckyShare = market.is_lucky
-    ? 1
-    : spent > 0 ? luckySpent / spent : 0;
-  const luckyBonus = basePnl > 0 && luckyShare > 0
-    ? roundMoney(basePnl * luckyShare)
-    : 0;
+  const luckyBonus = 0;
   const payout = roundMoney(basePayout + luckyBonus);
   const pnl = roundMoney(basePnl + luckyBonus);
 
@@ -10540,6 +13026,9 @@ async function settleOpenMarketPositions(client, market, winner) {
     [market.id],
   );
   const economySettings = await getEconomySettingsWithClient(client);
+  const marketMakerSettings = market.trading_mode === CLOB_TRADING_MODE
+    ? await getMarketMakerSettingsWithClient(client)
+    : null;
   const realResultsByUser = new Map();
   const usdtResultsByUser = new Map();
   // Стороны считаем по пользователю целиком, без разбивки по валютам: хедж
@@ -10584,8 +13073,8 @@ async function settleOpenMarketPositions(client, market, winner) {
     await client.query(
       `
         UPDATE positions
-        SET payout = $2,
-            pnl = $3,
+        SET payout = payout + $2,
+            pnl = pnl + $3,
             status = 'resolved',
             updated_at = now()
         WHERE id = $1
@@ -10711,6 +13200,78 @@ async function settleOpenMarketPositions(client, market, winner) {
       );
     }
   }
+
+  if (market.trading_mode === CLOB_TRADING_MODE) {
+    const accountsResult = await client.query(
+      `
+        SELECT *
+        FROM market_maker_accounts
+        WHERE market_id = $1::bigint
+        FOR UPDATE
+      `,
+      [market.id],
+    );
+    for (const account of accountsResult.rows) {
+      const cashBefore = toNumber(account.cash_balance);
+      const yesBefore = toNumber(account.yes_inventory);
+      const noBefore = toNumber(account.no_inventory);
+      const tokenPayout = winner === "YES" ? yesBefore : noBefore;
+      const finalCash = roundMoney(cashBefore + tokenPayout);
+      const realizedPnl = roundMoney(finalCash - toNumber(account.initial_collateral));
+      const globalRisk = await recordMarketMakerSettlementRisk(
+        client,
+        marketMakerSettings,
+        account,
+        realizedPnl,
+      );
+      await client.query(
+        `
+          UPDATE market_maker_accounts
+          SET cash_balance = $2::numeric,
+              yes_inventory = 0,
+              no_inventory = 0,
+              current_nav = $2::numeric,
+              peak_nav = GREATEST(peak_nav, $2::numeric),
+              realized_pnl = $3::numeric,
+              risk_multiplier = 0,
+              quotes = '{}'::jsonb,
+              status = 'SETTLED',
+              stop_reason = NULL,
+              settled_at = now(),
+              updated_at = now()
+          WHERE id = $1::bigint
+        `,
+        [account.id, finalCash, realizedPnl],
+      );
+      await client.query(
+        `
+          INSERT INTO market_maker_ledger (
+            account_id, market_id, book_type, event_type, side,
+            cash_delta, yes_delta, no_delta, metadata
+          )
+          VALUES (
+            $1::bigint, $2::bigint, $3::text, 'SETTLEMENT_REDEEM', $4::text,
+            $5::numeric, $6::numeric, $7::numeric, $8::jsonb
+          )
+        `,
+        [
+          account.id,
+          market.id,
+          account.book_type,
+          winner,
+          tokenPayout,
+          -yesBefore,
+          -noBefore,
+          JSON.stringify({
+            final_cash: finalCash,
+            realized_pnl: realizedPnl,
+            next_allocation_multiplier: globalRisk.allocation_multiplier,
+            loss_streak: globalRisk.loss_streak,
+          }),
+        ],
+      );
+    }
+  }
 }
 
 async function refundMarket(client, market, message) {
@@ -10756,6 +13317,52 @@ async function refundMarket(client, market, message) {
     `,
     [market.id],
   );
+
+  if (market.trading_mode === CLOB_TRADING_MODE) {
+    const accounts = await client.query(
+      `
+        SELECT *
+        FROM market_maker_accounts
+        WHERE market_id = $1::bigint
+        FOR UPDATE
+      `,
+      [market.id],
+    );
+    for (const account of accounts.rows) {
+      await client.query(
+        `
+          UPDATE market_maker_accounts
+          SET cash_balance = initial_collateral,
+              yes_inventory = 0,
+              no_inventory = 0,
+              current_nav = initial_collateral,
+              realized_pnl = 0,
+              risk_multiplier = 0,
+              quotes = '{}'::jsonb,
+              status = 'REFUNDED',
+              stop_reason = $2::text,
+              settled_at = now(),
+              updated_at = now()
+          WHERE id = $1::bigint
+        `,
+        [account.id, message],
+      );
+      await client.query(
+        `
+          INSERT INTO market_maker_ledger (
+            account_id, market_id, book_type, event_type, metadata
+          )
+          VALUES ($1::bigint, $2::bigint, $3::text, 'MARKET_REFUND', $4::jsonb)
+        `,
+        [
+          account.id,
+          market.id,
+          account.book_type,
+          JSON.stringify({ reason: message, collateral_restored: toNumber(account.initial_collateral) }),
+        ],
+      );
+    }
+  }
 }
 
 export async function resolveExpiredMarkets() {

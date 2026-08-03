@@ -196,6 +196,8 @@ const state = {
   orderbook: {
     marketId: null,
     currency: "USDT",
+    bookType: "USDT_CASH",
+    bestQuotes: null,
     loading: false,
     levels: [],
     myOrders: [],
@@ -272,6 +274,7 @@ const state = {
     task_daily_cap_fire: 750,
     market_profit_fee_bps: 700,
     market_star_profit_fee_bps: 1500,
+    market_trade_fee_bps: 100,
     market_buy_freeze_seconds: 5,
     market_tail_protection_seconds: 60,
     star_usdt_conversion_stars_per_usdt: 1000,
@@ -442,6 +445,15 @@ const getAvailableBetBalance = (currency = state.currency) => (
     ? Math.max(Number(state.usdtCashBalance || 0), Number(state.usdtBonusBalance || 0))
     : Number(state.balance || 0)
 );
+const getPreferredBookType = (currency = state.currency, amount = state.selectedAmount) => {
+  if (normalizeCurrency(currency) !== "USDT") {
+    return "STAR";
+  }
+  const requested = Math.max(0, Number(amount || 0));
+  return Number(state.usdtCashBalance || 0) + 0.00000001 >= requested
+    ? "USDT_CASH"
+    : "USDT_BONUS";
+};
 const formatSignedCurrencyAmount = (value, currency = state.currency) => {
   const numeric = Number(value || 0);
   return `${numeric > 0 ? "+" : ""}${formatCurrencyAmount(numeric, currency)}`;
@@ -1506,7 +1518,12 @@ function renderLegendSceneTask() {
 }
 
 function isMarketOpenForBuy(market, bufferMs = MARKET_BUY_CLOSE_BUFFER_MS) {
-  if (!market || market.status !== "open" || !market.end_time) {
+  if (
+    !market
+    || market.status !== "open"
+    || !market.end_time
+    || market.trading_enabled === false
+  ) {
     return false;
   }
   const closeBufferMs = isBtcMarket(market)
@@ -4314,6 +4331,14 @@ function renderComments() {
 
 function getOutcomePrice(market, side) {
   const minPrice = getMarketMinOutcomePrice(market);
+  const preferredBook = getPreferredBookType(state.currency, state.selectedAmount);
+  const liveAsk = state.orderbook.marketId === Number(market?.id)
+    && state.orderbook.bookType === preferredBook
+    ? Number(state.orderbook.bestQuotes?.[side]?.ask)
+    : NaN;
+  if (market?.trading_mode === "CLOB" && Number.isFinite(liveAsk) && liveAsk > 0) {
+    return Math.min(1 - minPrice, Math.max(minPrice, liveAsk));
+  }
   const raw = side === "YES" ? Number(market?.yes_price || 0.5) : Number(market?.no_price || 0.5);
   return Math.min(1 - minPrice, Math.max(minPrice, raw));
 }
@@ -4361,9 +4386,16 @@ function getLimitOrderDefaultPrice(market, side, orderSide = state.orderbook.ord
 
 function syncLimitOrderDefaults(market, side) {
   const marketId = Number(market?.id || 0);
-  if (state.orderbook.marketId !== marketId || state.orderbook.currency !== state.currency) {
+  const bookType = getPreferredBookType(state.currency, state.selectedAmount);
+  if (
+    state.orderbook.marketId !== marketId
+    || state.orderbook.currency !== state.currency
+    || state.orderbook.bookType !== bookType
+  ) {
     state.orderbook.marketId = marketId || null;
     state.orderbook.currency = state.currency;
+    state.orderbook.bookType = bookType;
+    state.orderbook.bestQuotes = null;
     state.orderbook.levels = [];
     state.orderbook.myOrders = [];
     state.orderbook.loadedAt = 0;
@@ -4390,6 +4422,7 @@ function getRealOrderbookRows(side) {
       order_side: String(row.order_side || "BUY").toUpperCase(),
       type: String(row.order_side || "BUY").toUpperCase() === "SELL" ? "ask" : "bid",
       real: true,
+      market_maker: Boolean(row.is_market_maker),
     }))
     .filter((row) => Number.isFinite(row.price) && row.price > 0);
 }
@@ -4403,6 +4436,11 @@ function getSellableLimitPosition(market, side) {
     && position.side === side
     && position.status === "open"
     && normalizeCurrency(position.currency) === state.currency
+    && (
+      !position.book_type
+      || position.book_type === "LEGACY"
+      || position.book_type === state.orderbook.bookType
+    )
     && Number(position.shares || 0) > 0
   )) || null;
 }
@@ -4499,7 +4537,10 @@ async function loadOrderbook({ force = false } = {}) {
   }
 
   const now = Date.now();
-  const sameBook = state.orderbook.marketId === Number(market.id) && state.orderbook.currency === state.currency;
+  const bookType = getPreferredBookType(state.currency, state.selectedAmount);
+  const sameBook = state.orderbook.marketId === Number(market.id)
+    && state.orderbook.currency === state.currency
+    && state.orderbook.bookType === bookType;
   if (!force && sameBook && now - state.orderbook.loadedAt < 4_000) {
     return;
   }
@@ -4507,14 +4548,17 @@ async function loadOrderbook({ force = false } = {}) {
   state.orderbook.loading = true;
   renderOrderbookPanel();
   try {
-    const data = await api(`/api/market/${market.id}/orderbook?telegram_id=${encodeURIComponent(state.user.telegram_id)}&currency=${encodeURIComponent(state.currency)}`);
+    const data = await api(`/api/market/${market.id}/orderbook?telegram_id=${encodeURIComponent(state.user.telegram_id)}&currency=${encodeURIComponent(state.currency)}&book_type=${encodeURIComponent(bookType)}`);
     state.orderbook.marketId = Number(market.id);
     state.orderbook.currency = normalizeCurrency(data.currency || state.currency);
+    state.orderbook.bookType = data.book_type || bookType;
+    state.orderbook.bestQuotes = data.best_quotes || null;
     state.orderbook.levels = Array.isArray(data.levels) ? data.levels : [];
     state.orderbook.myOrders = Array.isArray(data.my_orders) ? data.my_orders : [];
     state.orderbook.loadedAt = Date.now();
+    renderTradeTicket();
   } catch {
-    // Keep the synthetic book visible even if the network hiccups.
+    // Keep the latest successful book visible through a short network hiccup.
   } finally {
     state.orderbook.loading = false;
     renderOrderbookPanel();
@@ -4563,7 +4607,7 @@ function renderOrderbookPanel() {
   }
   renderLimitOrderControls(market, side);
 
-  const syntheticRows = buildSyntheticOrderbook(market, side);
+  const syntheticRows = market.trading_mode === "CLOB" ? [] : buildSyntheticOrderbook(market, side);
   const realRows = getRealOrderbookRows(side);
   const rows = [...realRows, ...syntheticRows].sort((a, b) => b.price - a.price).slice(0, 8);
   const maxSize = Math.max(1, ...rows.map((row) => Number(row.size) || 0));
@@ -4590,7 +4634,7 @@ function renderOrderbookPanel() {
       const labelEl = rowEl.querySelector("span");
       if (priceEl) priceEl.textContent = formatCents(row.price);
       if (labelEl) labelEl.textContent = row.real
-        ? (row.order_side === "SELL" ? "Limit Ask" : "Limit Bid")
+        ? (row.market_maker ? (row.order_side === "SELL" ? "AMM Ask" : "AMM Bid") : (row.order_side === "SELL" ? "Limit Ask" : "Limit Bid"))
         : (row.type === "bid" ? "Bid" : "Ask");
       if (sizeEl) sizeEl.textContent = row.real
         ? `${row.size.toLocaleString("ru-RU")} / ${row.orders_count}`
@@ -4608,7 +4652,7 @@ function renderOrderbookPanel() {
     </div>
     ${rows.map((row) => `
       <div class="orderbook-row ${row.type} ${row.real ? "real" : ""}" style="--depth:${depthFor(row)}">
-        <span>${row.real ? (row.order_side === "SELL" ? "Limit Ask" : "Limit Bid") : (row.type === "bid" ? "Bid" : "Ask")}</span>
+        <span>${row.real ? (row.market_maker ? (row.order_side === "SELL" ? "AMM Ask" : "AMM Bid") : (row.order_side === "SELL" ? "Limit Ask" : "Limit Bid")) : (row.type === "bid" ? "Bid" : "Ask")}</span>
         <b>${formatCents(row.price)}</b>
         <small>${row.real ? `${row.size.toLocaleString("ru-RU")} / ${row.orders_count}` : row.size.toLocaleString("ru-RU")}</small>
       </div>
@@ -4832,12 +4876,12 @@ function getSelectedPrice() {
     return 0.5;
   }
 
-  return Number(state.selectedSide === "YES" ? market.yes_price : market.no_price) || 0.5;
+  return getOutcomePrice(market, state.selectedSide);
 }
 
 function getDefaultSideForMarket(market) {
-  const yes = Number(market?.yes_price || 0.5);
-  const no = Number(market?.no_price || 0.5);
+  const yes = getOutcomePrice(market, "YES");
+  const no = getOutcomePrice(market, "NO");
   return yes <= no ? "YES" : "NO";
 }
 
@@ -4854,7 +4898,10 @@ function getPreview(amount = state.selectedAmount, side = state.selectedSide) {
   const quote = estimateBuyQuote({ market, side, amount });
   const safePrice = quote.executionPrice;
   const net = Number(amount || 0);
-  const shares = net / safePrice;
+  const quotedShares = Number(quote.shares || 0);
+  const shares = market?.trading_mode === "CLOB"
+    ? quotedShares
+    : quotedShares || net / safePrice;
   const profit = shares - Number(amount || 0);
 
   return {
@@ -4885,6 +4932,35 @@ function estimateMarketMakerLiquidity(market, outcomePrice) {
 
 function estimateBuyQuote({ market, side, amount }) {
   const minPrice = getMarketMinOutcomePrice(market);
+  if (market?.trading_mode === "CLOB") {
+    const budget = Math.max(0, Number(amount || 0));
+    const asks = getRealOrderbookRows(side)
+      .filter((row) => row.order_side === "SELL")
+      .sort((left, right) => left.price - right.price);
+    let remaining = budget;
+    let gross = 0;
+    let shares = 0;
+    const tradeFeeRate = Math.max(0, Number(state.publicConfig.market_trade_fee_bps || 100)) / 10_000;
+    for (const level of asks) {
+      if (remaining <= 0.00000001) break;
+      const levelShares = Math.max(0, Number(level.shares || 0));
+      const fillShares = Math.min(levelShares, remaining / (level.price * (1 + tradeFeeRate)));
+      if (fillShares <= 0) continue;
+      const fillGross = fillShares * level.price;
+      gross += fillGross;
+      shares += fillShares;
+      remaining -= fillGross * (1 + tradeFeeRate);
+    }
+    const fallbackPrice = getOutcomePrice(market, side);
+    return {
+      executionPrice: shares > 0 ? gross / shares : fallbackPrice,
+      nextPrice: asks[0]?.price || fallbackPrice,
+      shares,
+      fee: Math.max(0, budget - remaining - gross),
+      unfilled: Math.max(0, remaining),
+      liquidityAvailable: shares > 0,
+    };
+  }
   const rawPrice = market
     ? Number(side === "YES" ? market.yes_price : market.no_price)
     : 0.5;
@@ -5040,9 +5116,11 @@ function renderMarket() {
 
   const marketStatus = $("marketStatus");
   const sportsEventLive = sportsMarket && isSportsEventLive(market);
-  marketStatus.textContent = canBuyMarket && sportsMarket
-    ? (sportsEventLive ? "LIVE" : "OPEN")
-    : marketStatusLabel(canBuyMarket ? market?.status : (market ? "closed" : market?.status));
+  marketStatus.textContent = market?.trading_enabled === false && market?.status === "open"
+    ? "PAUSED"
+    : (canBuyMarket && sportsMarket
+      ? (sportsEventLive ? "LIVE" : "OPEN")
+      : marketStatusLabel(canBuyMarket ? market?.status : (market ? "closed" : market?.status)));
   marketStatus.classList.toggle("live", canBuyMarket && (!sportsMarket || sportsEventLive));
   $("marketTitle").textContent = worldCup
     ? ((topMarket || sportsMarket || specialMarket) ? (market.title || market.question) : `${market.team} Winner`)
@@ -5114,6 +5192,9 @@ function renderMarket() {
     button.disabled = !hasMarket || !state.user || !canBuyMarket;
   });
   renderOrderbookPanel();
+  if (market?.trading_mode === "CLOB") {
+    void loadOrderbook();
+  }
   updateMarketNavArrows();
 }
 
@@ -5373,6 +5454,52 @@ function estimateSellQuote({ position, market, outcomePrice }) {
   const shares = Number(position.shares || 0);
   const minPrice = getMarketMinOutcomePrice(market);
   const price = Math.max(minPrice, Number(outcomePrice || 0));
+  if (market?.trading_mode === "CLOB") {
+    const bookType = position.book_type || getPreferredBookType(position.currency, 0);
+    const bids = state.orderbook.marketId === Number(position.market_id)
+      && state.orderbook.bookType === bookType
+      ? (state.orderbook.levels || [])
+      .filter((row) => (
+        row.side === position.side
+        && String(row.order_side || "BUY").toUpperCase() === "BUY"
+        && (!row.book_type || row.book_type === bookType)
+      ))
+      .sort((left, right) => Number(right.price) - Number(left.price))
+      : [];
+    let sharesLeft = shares;
+    let filledShares = 0;
+    let grossExitValue = 0;
+    for (const level of bids) {
+      if (sharesLeft <= 0.00000001) break;
+      const fillShares = Math.min(sharesLeft, Number(level.shares || 0));
+      if (fillShares <= 0) continue;
+      grossExitValue += fillShares * Number(level.price || 0);
+      filledShares += fillShares;
+      sharesLeft -= fillShares;
+    }
+    const fallbackBid = Number(position.best_bid || 0);
+    if (filledShares <= 0 && fallbackBid > 0) {
+      filledShares = shares;
+      sharesLeft = 0;
+      grossExitValue = shares * fallbackBid;
+    }
+    const bidPrice = filledShares > 0 ? grossExitValue / filledShares : price;
+    const costBasis = shares > 0 ? Number(position.spent || 0) * (filledShares / shares) : 0;
+    const executionFee = grossExitValue
+      * Math.max(0, Number(state.publicConfig.market_trade_fee_bps || 100)) / 10_000;
+    const profitBeforeFee = grossExitValue - executionFee - costBasis;
+    const exitValue = Math.max(
+      0,
+      grossExitValue - executionFee - Math.max(0, profitBeforeFee) * getProfitFeeRate(position.currency),
+    );
+    return {
+      bidPrice,
+      exitValue,
+      pnl: exitValue - costBasis,
+      filledShares,
+      unfilledShares: Math.max(0, sharesLeft),
+    };
+  }
   if (isSpecialMarket(market)) {
     const depth = Math.max(100, Number(market?.liquidity || 7_000));
     const estimatedGross = shares * price;
@@ -5484,7 +5611,11 @@ function renderMe() {
     const secondsLeft = expiresAt > 0 ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 1_000)) : null;
     const marketIsLive = position.market_status === "open";
     const frozen = secondsLeft !== null && secondsLeft <= MARKET_SELL_FREEZE_SECONDS;
-    const canSell = marketIsLive && secondsLeft !== null && secondsLeft > MARKET_SELL_FREEZE_SECONDS;
+    const canSell = marketIsLive
+      && position.market_trading_mode === "CLOB"
+      && position.book_type !== "LEGACY"
+      && secondsLeft !== null
+      && secondsLeft > MARKET_SELL_FREEZE_SECONDS;
     const sellLockMessage = !marketIsLive
       ? "Рынок уже рассчитан."
       : secondsLeft === 0
@@ -6981,7 +7112,10 @@ function renderBetSheet() {
   const isBtc = isBtcMarket(market);
   const quote = estimateBuyQuote({ market, side, amount });
   const price = quote.executionPrice;
-  const shares = Number(amount || 0) / price;
+  const quotedShares = Number(quote.shares || 0);
+  const shares = market?.trading_mode === "CLOB"
+    ? quotedShares
+    : quotedShares || Number(amount || 0) / price;
   const sportsMarket = isSportsListMarket(market);
   setTeamIconElement($("betTeamIcon"), isBtc ? "₿" : market.icon, isBtc ? "BTC" : market.team);
   if ($("betMarketTitle")) $("betMarketTitle").textContent = market.title || (isBtc ? "Bitcoin Up / Down" : "World Cup Winner");
@@ -8291,6 +8425,7 @@ async function submitLimitOrder() {
         amount,
         limit_price: limitPrice,
         currency: state.currency,
+        book_type: getPreferredBookType(state.currency, amount),
       }),
     });
     applyCurrencyMutationPayload(result.currency || state.currency, result);
@@ -8400,6 +8535,7 @@ async function buy(amount = state.selectedAmount, forcedIntent = null) {
         side,
         amount: buyAmount,
         currency,
+        book_type: getPreferredBookType(currency, buyAmount),
       }),
     });
     applyCurrencyMutationPayload(result.currency || currency, result);
@@ -9217,6 +9353,8 @@ document.querySelectorAll("[data-currency-toggle]").forEach((button) => {
     }
     state.buyQueue = [];
     state.orderbook.currency = nextCurrency;
+    state.orderbook.bookType = getPreferredBookType(nextCurrency, state.selectedAmount);
+    state.orderbook.bestQuotes = null;
     state.orderbook.levels = [];
     state.orderbook.myOrders = [];
     state.orderbook.loadedAt = 0;

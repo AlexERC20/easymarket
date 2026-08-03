@@ -108,6 +108,8 @@ export const config = {
   cleanupExpiredDepositIntentsDays: parseNumber(process.env.CLEANUP_EXPIRED_DEPOSIT_INTENTS_DAYS, 30, 1),
   cleanupTaskClaimsDays: parseNumber(process.env.CLEANUP_TASK_CLAIMS_DAYS, 60, 1),
   cleanupEmptyMarketsDays: parseNumber(process.env.CLEANUP_EMPTY_MARKETS_DAYS, 14, 1),
+  cleanupAmmLedgerDays: parseNumber(process.env.CLEANUP_AMM_LEDGER_DAYS, 30, 1),
+  cleanupMarketTradeFeesDays: parseNumber(process.env.CLEANUP_MARKET_TRADE_FEES_DAYS, 180, 30),
   referralBetBonusFire: parseNumber(process.env.REFERRAL_BET_BONUS_FIRE, 500, 0),
   referralSignupBonusUsdt: parseNumber(process.env.REFERRAL_SIGNUP_BONUS_USDT, 5, 0),
   referralBetBonusUsdt: parseNumber(process.env.REFERRAL_BET_BONUS_USDT, 30, 0),

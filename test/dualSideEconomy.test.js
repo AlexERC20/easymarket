@@ -368,11 +368,11 @@ test("an account snapshot started before a balance mutation is rejected", () => 
   assert.equal(isAccountSnapshotCurrent(4, 5), false);
 });
 
-test("lucky x2 is revoked when the user holds the opposite side", () => {
+test("lucky x2 is disabled for every market buy", () => {
   const luckyMarket = buildMarket({
     lucky_until: new Date(Date.now() + 30_000).toISOString(),
   });
-  assert.equal(getLuckySpentForBuy(luckyMarket, false, 100), 100);
+  assert.equal(getLuckySpentForBuy(luckyMarket, false, 100), 0);
   assert.equal(getLuckySpentForBuy(luckyMarket, true, 100), 0);
   assert.equal(
     getLuckySpentForBuy(

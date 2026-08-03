@@ -364,6 +364,9 @@ export async function runMigrations() {
       resolved_at TIMESTAMPTZ
     );
 
+    ALTER TABLE markets
+      ADD COLUMN IF NOT EXISTS trading_mode TEXT NOT NULL DEFAULT 'LEGACY';
+
     CREATE INDEX IF NOT EXISTS idx_markets_status_end_time
       ON markets(status, end_time);
 
@@ -762,6 +765,121 @@ export async function runMigrations() {
     ALTER TABLE limit_orders
       ADD COLUMN IF NOT EXISTS remaining_bonus_spent NUMERIC(20, 8) NOT NULL DEFAULT 0;
 
+    ALTER TABLE limit_orders
+      ADD COLUMN IF NOT EXISTS book_type TEXT NOT NULL DEFAULT 'LEGACY';
+    ALTER TABLE limit_orders
+      ADD COLUMN IF NOT EXISTS is_market_maker BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE limit_orders
+      ADD COLUMN IF NOT EXISTS filled_shares NUMERIC(20, 8) NOT NULL DEFAULT 0;
+    ALTER TABLE limit_orders
+      ADD COLUMN IF NOT EXISTS fee_paid NUMERIC(20, 8) NOT NULL DEFAULT 0;
+
+    CREATE INDEX IF NOT EXISTS idx_limit_orders_clob_match
+      ON limit_orders(market_id, book_type, side, order_side, status, limit_price, created_at, id);
+
+    CREATE TABLE IF NOT EXISTS market_maker_settings (
+      id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      enabled BOOLEAN NOT NULL DEFAULT true,
+      collateral_usdt NUMERIC(20, 8) NOT NULL DEFAULT 1000,
+      collateral_bonus NUMERIC(20, 8) NOT NULL DEFAULT 1000,
+      collateral_star NUMERIC(20, 8) NOT NULL DEFAULT 1000,
+      spread_bps INTEGER NOT NULL DEFAULT 200,
+      user_trade_fee_bps INTEGER NOT NULL DEFAULT 100,
+      max_drawdown_bps INTEGER NOT NULL DEFAULT 1500,
+      rapid_loss_bps INTEGER NOT NULL DEFAULT 500,
+      minimum_quote_capital NUMERIC(20, 8) NOT NULL DEFAULT 20,
+      quote_levels INTEGER NOT NULL DEFAULT 5,
+      updated_by_telegram_id TEXT,
+      updated_by_username TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    INSERT INTO market_maker_settings (id)
+    VALUES (1)
+    ON CONFLICT (id) DO NOTHING;
+
+    CREATE TABLE IF NOT EXISTS market_maker_accounts (
+      id BIGSERIAL PRIMARY KEY,
+      market_id BIGINT NOT NULL REFERENCES markets(id) ON DELETE CASCADE,
+      book_type TEXT NOT NULL,
+      initial_collateral NUMERIC(20, 8) NOT NULL,
+      risk_capital NUMERIC(20, 8) NOT NULL,
+      cash_balance NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      yes_inventory NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      no_inventory NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      realized_pnl NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      peak_nav NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      current_nav NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      risk_multiplier NUMERIC(10, 8) NOT NULL DEFAULT 1,
+      fair_yes_price NUMERIC(10, 8) NOT NULL DEFAULT 0.5,
+      quotes JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      stop_reason TEXT,
+      last_quote_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      settled_at TIMESTAMPTZ,
+      UNIQUE(market_id, book_type)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_market_maker_accounts_status
+      ON market_maker_accounts(status, market_id, book_type);
+
+    CREATE TABLE IF NOT EXISTS market_maker_risk_state (
+      book_type TEXT PRIMARY KEY,
+      allocation_multiplier NUMERIC(10, 8) NOT NULL DEFAULT 1,
+      loss_streak INTEGER NOT NULL DEFAULT 0,
+      wins BIGINT NOT NULL DEFAULT 0,
+      losses BIGINT NOT NULL DEFAULT 0,
+      cumulative_realized_pnl NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      last_realized_pnl NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      last_settled_at TIMESTAMPTZ,
+      reset_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    INSERT INTO market_maker_risk_state (book_type)
+    VALUES ('USDT_CASH'), ('USDT_BONUS'), ('STAR')
+    ON CONFLICT (book_type) DO NOTHING;
+
+    CREATE TABLE IF NOT EXISTS market_maker_ledger (
+      id BIGSERIAL PRIMARY KEY,
+      account_id BIGINT NOT NULL REFERENCES market_maker_accounts(id) ON DELETE CASCADE,
+      market_id BIGINT NOT NULL REFERENCES markets(id) ON DELETE CASCADE,
+      book_type TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      side TEXT,
+      cash_delta NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      yes_delta NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      no_delta NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      price NUMERIC(10, 8),
+      shares NUMERIC(20, 8),
+      counterparty_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      trade_id BIGINT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_market_maker_ledger_account_created
+      ON market_maker_ledger(account_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS market_trade_fees (
+      id BIGSERIAL PRIMARY KEY,
+      market_id BIGINT NOT NULL REFERENCES markets(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      trade_id BIGINT,
+      order_id BIGINT,
+      book_type TEXT NOT NULL,
+      currency TEXT NOT NULL,
+      amount NUMERIC(20, 8) NOT NULL,
+      reason TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_market_trade_fees_market_created
+      ON market_trade_fees(market_id, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS market_comments (
       id BIGSERIAL PRIMARY KEY,
       market_id BIGINT NOT NULL REFERENCES markets(id) ON DELETE CASCADE,
@@ -838,14 +956,32 @@ export async function runMigrations() {
     ALTER TABLE positions
       ADD COLUMN IF NOT EXISTS bonus_spent NUMERIC(20, 8) NOT NULL DEFAULT 0;
 
+    ALTER TABLE positions
+      ADD COLUMN IF NOT EXISTS book_type TEXT NOT NULL DEFAULT 'LEGACY';
+
     ALTER TABLE trades
       ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'STAR';
+
+    ALTER TABLE trades
+      ADD COLUMN IF NOT EXISTS book_type TEXT NOT NULL DEFAULT 'LEGACY';
+    ALTER TABLE trades
+      ADD COLUMN IF NOT EXISTS gross_amount NUMERIC(20, 8) NOT NULL DEFAULT 0;
+    ALTER TABLE trades
+      ADD COLUMN IF NOT EXISTS trade_fee NUMERIC(20, 8) NOT NULL DEFAULT 0;
+    ALTER TABLE trades
+      ADD COLUMN IF NOT EXISTS maker_order_id BIGINT;
+    ALTER TABLE trades
+      ADD COLUMN IF NOT EXISTS counterparty_user_id BIGINT;
+    ALTER TABLE trades
+      ADD COLUMN IF NOT EXISTS liquidity_role TEXT NOT NULL DEFAULT 'TAKER';
 
     ALTER TABLE positions
       DROP CONSTRAINT IF EXISTS positions_user_id_market_id_side_key;
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_user_market_side_currency
-      ON positions(user_id, market_id, side, currency);
+    DROP INDEX IF EXISTS idx_positions_user_market_side_currency;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_user_market_side_book
+      ON positions(user_id, market_id, side, currency, book_type);
 
     CREATE INDEX IF NOT EXISTS idx_positions_user_status_currency
       ON positions(user_id, status, currency);

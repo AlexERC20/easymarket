@@ -46,6 +46,7 @@ import {
   getKyivstonerMarket,
   getMarketActivity,
   getMarketComments,
+  getMarketMakerAdminState,
   getMarketMakerEconomyAudit,
   getMarketOrderBook,
   getMarketChart,
@@ -61,7 +62,9 @@ import {
   getWorldCupMarkets,
   finalizeWorldCupMarkets,
   joinClan,
+  matchOpenClobLimitOrders,
   resetUserMarketStateByUsername,
+  restartMarketMaker,
   resolveExpiredMarkets,
   sellOutcome,
   syncTopMarkets,
@@ -69,6 +72,7 @@ import {
   syncFireBalanceByUsername,
   syncFireBalance,
   updateProjectEconomySettings,
+  updateMarketMakerSettings,
   updateLiveBtcPrice,
   upsertPromoCampaign,
   upsertUser,
@@ -80,7 +84,7 @@ import {
   getStarConversionReminderTargets,
   markStarConversionRemindersSent,
 } from "./services/bonusEconomyService.js";
-import { PriceUnavailableError } from "./services/priceService.js";
+import { PriceUnavailableError, startBtcPriceStream } from "./services/priceService.js";
 import { runDatabaseCleanup, runStartupDatabaseRescue } from "./services/databaseCleanupService.js";
 import {
   cancelUserDepositIntent,
@@ -145,6 +149,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "amount_must_be_non_negative",
     "invalid_market_id",
     "invalid_side",
+    "amount_below_minimum",
     "invalid_limit_price",
     "invalid_limit_order",
     "invalid_limit_order_id",
@@ -154,6 +159,13 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "market_not_open",
     "market_closed",
     "market_buy_frozen",
+    "market_trading_paused",
+    "price_unavailable",
+    "insufficient_market_liquidity",
+    "market_maker_unavailable",
+    "market_maker_disabled",
+    "limit_order_reserve_exhausted",
+    "legacy_position_settlement_only",
     "insufficient_fire",
     "insufficient_usdt",
     "invalid_deposit_amount",
@@ -194,6 +206,16 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "clan_exists",
     "clan_default_locked",
     "invalid_economy_settings",
+    "invalid_amm_collateral_usdt",
+    "invalid_amm_collateral_bonus",
+    "invalid_amm_collateral_star",
+    "invalid_amm_spread",
+    "invalid_amm_trade_fee",
+    "invalid_amm_drawdown",
+    "invalid_amm_rapid_loss",
+    "invalid_amm_minimum_capital",
+    "invalid_amm_quote_levels",
+    "invalid_amm_risk_thresholds",
     "invalid_promo_campaign_code",
     "invalid_promo_campaign_start",
     "invalid_promo_campaign_end",
@@ -348,8 +370,13 @@ app.get("/api/public/config", async (_req, res) => {
     profit_fee_bps: config.marketProfitFeeBps,
     star_profit_fee_bps: config.marketStarProfitFeeBps,
   };
+  let ammTradeFeeBps = 100;
   try {
     economySettings = await getProjectEconomySettings();
+    const ammSettingsResult = await query(
+      "SELECT user_trade_fee_bps FROM market_maker_settings WHERE id = 1",
+    );
+    ammTradeFeeBps = Number(ammSettingsResult.rows[0]?.user_trade_fee_bps || 100);
   } catch {
     // Keep the public config available during a transient database outage.
   }
@@ -368,6 +395,7 @@ app.get("/api/public/config", async (_req, res) => {
     market_star_profit_fee_bps: Number(
       economySettings.star_profit_fee_bps || config.marketStarProfitFeeBps,
     ),
+    market_trade_fee_bps: ammTradeFeeBps,
     market_star_max_payout_multiplier: config.marketStarMaxPayoutMultiplier,
     market_usdt_max_payout_multiplier: config.marketUsdtMaxPayoutMultiplier,
     market_usdt_risk_budget: config.marketUsdtRiskBudget,
@@ -949,6 +977,7 @@ app.post("/api/market/:marketId/buy", async (req, res) => {
       side: req.body?.side,
       amount: req.body?.amount,
       currency: req.body?.currency,
+      book_type: req.body?.book_type ?? req.body?.bookType,
     });
     res.status(200).json(result);
   } catch (error) {
@@ -962,6 +991,7 @@ app.get("/api/market/:marketId/orderbook", async (req, res) => {
       marketId: req.params.marketId,
       telegram_id: req.query?.telegram_id,
       currency: req.query?.currency,
+      book_type: req.query?.book_type ?? req.query?.bookType,
     });
     res.status(200).json(result);
   } catch (error) {
@@ -979,6 +1009,7 @@ app.post("/api/market/:marketId/limit-orders", async (req, res) => {
       amount: req.body?.amount,
       limit_price: req.body?.limit_price ?? req.body?.price,
       currency: req.body?.currency,
+      book_type: req.body?.book_type ?? req.body?.bookType,
     });
     res.status(200).json(result);
   } catch (error) {
@@ -1689,6 +1720,48 @@ app.post("/api/bridge/economy/settings", requireBridgeSecret, async (req, res) =
   }
 });
 
+app.get("/api/bridge/amm", requireBridgeSecret, async (_req, res) => {
+  try {
+    res.status(200).json(await getMarketMakerAdminState());
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/amm/settings", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await updateMarketMakerSettings({
+      enabled: req.body?.enabled,
+      collateral_usdt: req.body?.collateral_usdt ?? req.body?.collateralUsdt,
+      collateral_bonus: req.body?.collateral_bonus ?? req.body?.collateralBonus,
+      collateral_star: req.body?.collateral_star ?? req.body?.collateralStar,
+      spread_bps: req.body?.spread_bps ?? req.body?.spreadBps,
+      user_trade_fee_bps: req.body?.user_trade_fee_bps ?? req.body?.userTradeFeeBps,
+      max_drawdown_bps: req.body?.max_drawdown_bps ?? req.body?.maxDrawdownBps,
+      rapid_loss_bps: req.body?.rapid_loss_bps ?? req.body?.rapidLossBps,
+      minimum_quote_capital: req.body?.minimum_quote_capital ?? req.body?.minimumQuoteCapital,
+      quote_levels: req.body?.quote_levels ?? req.body?.quoteLevels,
+      admin_telegram_id: req.body?.admin_telegram_id ?? req.body?.adminTelegramId,
+      admin_username: req.body?.admin_username ?? req.body?.adminUsername,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/amm/restart", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await restartMarketMaker({
+      market_id: req.body?.market_id ?? req.body?.marketId,
+      admin_telegram_id: req.body?.admin_telegram_id ?? req.body?.adminTelegramId,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
 app.post("/api/bridge/economy/correct-star-settlement", requireBridgeSecret, async (req, res) => {
   try {
     const result = await correctStarMarketSettlement(req.body || {});
@@ -1909,6 +1982,7 @@ async function priceTick() {
   try {
     const timeoutMs = Math.max(3_000, Math.min(10_000, config.pricePollMs * 4));
     await withTimeout(updateLiveBtcPrice(), timeoutMs, "BTC price tick timed out.");
+    await withTimeout(matchOpenClobLimitOrders(), timeoutMs, "CLOB matcher timed out.");
   } catch (error) {
     if (!(error instanceof PriceUnavailableError)) {
       console.warn("[easymarket] price tick failed:", error instanceof Error ? error.message : "unknown error");
@@ -1983,6 +2057,7 @@ async function startMarketEngine() {
   }
 
   marketEngineStarted = true;
+  startBtcPriceStream();
   try {
     if (config.startupDatabaseRescueEnabled) {
       const rescueSummary = await runStartupDatabaseRescue();
@@ -1992,6 +2067,7 @@ async function startMarketEngine() {
     const worldCupResult = await finalizeWorldCupMarkets();
     console.log("[easymarket] World Cup markets finalized", worldCupResult);
     await resolveExpiredMarkets();
+    await priceTick();
     await getKyivstonerMarket();
     void clanRewardDistributionTick("startup");
   } catch (error) {
