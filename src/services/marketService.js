@@ -11390,10 +11390,6 @@ async function executeClobMarketBuy(client, input) {
       yes_volume: toNumber(input.market.yes_volume) + (input.side === "YES" ? grossTotal : 0),
       no_volume: toNumber(input.market.no_volume) + (input.side === "NO" ? grossTotal : 0),
     }),
-    amm: {
-      status: refreshedAccount.account.status,
-      risk_multiplier: refreshedAccount.account.risk_multiplier,
-    },
   };
 }
 
@@ -11570,10 +11566,6 @@ async function executeClobMarketSell(client, input) {
       fee: feeTotal,
       proceeds: proceedsTotal,
       pnl: roundMoney(proceedsTotal - (toNumber(input.position.spent) * (sharesTotal / toNumber(input.position.shares)))),
-    },
-    amm: {
-      status: refreshedAccount.account.status,
-      risk_multiplier: refreshedAccount.account.risk_multiplier,
     },
   };
 }
@@ -11838,9 +11830,8 @@ export async function getMarketOrderBook(input) {
         },
         fair_yes_price: context.fair.fairYes,
         my_orders: myOrders,
-        amm: {
-          status: context.account.status,
-          risk_multiplier: context.account.risk_multiplier,
+        book: {
+          quoting: context.account.status === "ACTIVE",
           quote_age_ms: 0,
         },
       };
