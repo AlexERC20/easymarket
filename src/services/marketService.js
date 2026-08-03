@@ -6876,9 +6876,13 @@ function mapClan(row) {
     icon_key: normalizeClanIconKey(row.icon_key),
     kind: row.kind,
     members_count: Number(row.members_count || 0),
+    // score is the running month, which is what the bank is actually awarded on.
+    // The lifetime figure is kept beside it as a title rather than a race.
     score: toNumber(row.score),
+    lifetime_score: toNumber(row.lifetime_score),
     user_is_member: Boolean(row.user_is_member),
     user_contribution_score: toNumber(row.user_contribution_score),
+    user_lifetime_contribution: toNumber(row.user_lifetime_contribution),
     rank: Number(row.rank || 0),
   };
 }
@@ -6922,7 +6926,12 @@ async function getClansWithClient(client, userId = 0) {
   const result = await client.query(
       `
         WITH scores AS (
-          SELECT clan_id, COALESCE(SUM(points), 0) AS score
+          SELECT
+            clan_id,
+            COALESCE(SUM(points), 0) AS lifetime_score,
+            COALESCE(SUM(points) FILTER (
+              WHERE to_char(created_at, 'YYYY-MM') = $2::text
+            ), 0) AS score
           FROM clan_score_events
           GROUP BY clan_id
         ),
@@ -6936,17 +6945,27 @@ async function getClansWithClient(client, userId = 0) {
           FROM clan_members
           WHERE user_id = $1
         ),
+        user_month AS (
+          SELECT clan_id, COALESCE(SUM(points), 0) AS contribution_score
+          FROM clan_score_events
+          WHERE user_id = $1
+            AND to_char(created_at, 'YYYY-MM') = $2::text
+          GROUP BY clan_id
+        ),
         clan_totals AS (
           SELECT
             clans.*,
             COALESCE(scores.score, 0) AS score,
+            COALESCE(scores.lifetime_score, 0) AS lifetime_score,
             COALESCE(members.members_count, 0) AS members_count,
             CASE WHEN user_membership.clan_id IS NULL THEN 0 ELSE 1 END AS user_is_member,
-            COALESCE(user_membership.contribution_score, 0) AS user_contribution_score
+            COALESCE(user_month.contribution_score, 0) AS user_contribution_score,
+            COALESCE(user_membership.contribution_score, 0) AS user_lifetime_contribution
           FROM clans
           LEFT JOIN scores ON scores.clan_id = clans.id
           LEFT JOIN members ON members.clan_id = clans.id
           LEFT JOIN user_membership ON user_membership.clan_id = clans.id
+          LEFT JOIN user_month ON user_month.clan_id = clans.id
         )
         SELECT
           *,
@@ -6955,16 +6974,27 @@ async function getClansWithClient(client, userId = 0) {
         ORDER BY score DESC, members_count DESC, id ASC
         LIMIT 50
       `,
-    [userId || 0],
+    [userId || 0, getMonthKey()],
   );
 
   const clans = result.rows.map(mapClan);
   if (clans.length) {
+    // The bank is split by contribution earned this month, so the roster has to
+    // rank by the same number the payout will use. The stored lifetime counter
+    // would put members in an order the reward never follows.
     const membersResult = await client.query(
       `
+        WITH monthly AS (
+          SELECT clan_id, user_id, GREATEST(COALESCE(SUM(points), 0), 0) AS contribution_score
+          FROM clan_score_events
+          WHERE clan_id = ANY($1)
+            AND to_char(created_at, 'YYYY-MM') = $2::text
+          GROUP BY clan_id, user_id
+        )
         SELECT
           clan_members.clan_id,
-          clan_members.contribution_score,
+          COALESCE(monthly.contribution_score, 0) AS contribution_score,
+          clan_members.contribution_score AS lifetime_contribution_score,
           clan_members.role,
           clan_members.joined_at,
           users.telegram_id,
@@ -6972,14 +7002,20 @@ async function getClansWithClient(client, userId = 0) {
           users.first_name,
           ROW_NUMBER() OVER (
             PARTITION BY clan_members.clan_id
-            ORDER BY clan_members.contribution_score DESC, clan_members.joined_at ASC
+            ORDER BY COALESCE(monthly.contribution_score, 0) DESC, clan_members.joined_at ASC
           ) AS rank
         FROM clan_members
         JOIN users ON users.id = clan_members.user_id
+        LEFT JOIN monthly
+          ON monthly.clan_id = clan_members.clan_id
+          AND monthly.user_id = clan_members.user_id
         WHERE clan_members.clan_id = ANY($1)
-        ORDER BY clan_members.clan_id, clan_members.contribution_score DESC, clan_members.joined_at ASC
+        ORDER BY
+          clan_members.clan_id,
+          COALESCE(monthly.contribution_score, 0) DESC,
+          clan_members.joined_at ASC
       `,
-      [clans.map((clan) => clan.id)],
+      [clans.map((clan) => clan.id), getMonthKey()],
     );
 
     const membersByClan = new Map();
@@ -13630,6 +13666,135 @@ export async function unwindMarket(input = {}) {
       open_orders: ordersResult.rows[0]?.open ?? 0,
       totals,
       adjustments: adjustments.sort((left, right) => left.correction - right.correction),
+    };
+  });
+}
+
+// Zeroing a farmed account removes its trades and positions but leaves the clan
+// points it earned along the way, which keeps inflating whatever clan it sat in
+// and skews the month the bank is awarded on. This strips those points and
+// rebuilds the stored per-member counter from what is left.
+export async function purgeClanScoreForUsers(input = {}) {
+  const telegramIds = (Array.isArray(input.telegram_ids) ? input.telegram_ids : [])
+    .map((id) => String(id || "").trim())
+    .filter(Boolean);
+  if (telegramIds.length === 0) {
+    throw new Error("telegram_ids_required");
+  }
+  const dryRun = input.dry_run !== false && input.dryRun !== false;
+
+  return withTransaction(async (client) => {
+    const usersResult = await client.query(
+      "SELECT id, telegram_id, username FROM users WHERE telegram_id = ANY($1::text[])",
+      [telegramIds],
+    );
+    const userIds = usersResult.rows.map((row) => Number(row.id));
+    if (userIds.length === 0) {
+      throw new Error("user_not_found");
+    }
+
+    const impactResult = await client.query(
+      `
+        SELECT
+          events.clan_id,
+          clans.name AS clan_name,
+          COUNT(*)::int AS events,
+          COALESCE(SUM(events.points), 0) AS points,
+          COALESCE(SUM(events.points) FILTER (
+            WHERE to_char(events.created_at, 'YYYY-MM') = $2::text
+          ), 0) AS points_this_month
+        FROM clan_score_events events
+        LEFT JOIN clans ON clans.id = events.clan_id
+        WHERE events.user_id = ANY($1::bigint[])
+        GROUP BY events.clan_id, clans.name
+        ORDER BY points DESC
+      `,
+      [userIds, getMonthKey()],
+    );
+
+    const beforeResult = await client.query(
+      `
+        SELECT
+          clans.id,
+          clans.name,
+          COALESCE(SUM(events.points) FILTER (
+            WHERE to_char(events.created_at, 'YYYY-MM') = $1::text
+          ), 0) AS score_this_month
+        FROM clans
+        LEFT JOIN clan_score_events events ON events.clan_id = clans.id
+        GROUP BY clans.id, clans.name
+        ORDER BY score_this_month DESC
+      `,
+      [getMonthKey()],
+    );
+
+    let removedEvents = 0;
+    if (!dryRun) {
+      const deleted = await client.query(
+        "DELETE FROM clan_score_events WHERE user_id = ANY($1::bigint[])",
+        [userIds],
+      );
+      removedEvents = deleted.rowCount ?? 0;
+      // The per-member counter is a cached sum, so rebuild it from the events
+      // that survived rather than subtracting and hoping the two stay in step.
+      await client.query(
+        `
+          UPDATE clan_members
+          SET contribution_score = COALESCE(rebuilt.points, 0)
+          FROM (
+            SELECT clan_members.clan_id, clan_members.user_id, SUM(events.points) AS points
+            FROM clan_members
+            LEFT JOIN clan_score_events events
+              ON events.clan_id = clan_members.clan_id
+              AND events.user_id = clan_members.user_id
+            GROUP BY clan_members.clan_id, clan_members.user_id
+          ) rebuilt
+          WHERE clan_members.clan_id = rebuilt.clan_id
+            AND clan_members.user_id = rebuilt.user_id
+        `,
+      );
+    }
+
+    const afterResult = await client.query(
+      `
+        SELECT
+          clans.id,
+          clans.name,
+          COALESCE(SUM(events.points) FILTER (
+            WHERE to_char(events.created_at, 'YYYY-MM') = $1::text
+          ), 0) AS score_this_month
+        FROM clans
+        LEFT JOIN clan_score_events events ON events.clan_id = clans.id
+        GROUP BY clans.id, clans.name
+        ORDER BY score_this_month DESC
+      `,
+      [getMonthKey()],
+    );
+
+    return {
+      ok: true,
+      dry_run: dryRun,
+      month_key: getMonthKey(),
+      users: usersResult.rows.map((row) => ({
+        telegram_id: row.telegram_id,
+        username: row.username,
+      })),
+      per_clan: impactResult.rows.map((row) => ({
+        clan_id: row.clan_id === null ? null : Number(row.clan_id),
+        clan_name: row.clan_name,
+        events: row.events,
+        points: toNumber(row.points),
+        points_this_month: toNumber(row.points_this_month),
+      })),
+      removed_events: removedEvents,
+      standings_before: beforeResult.rows.map((row) => ({
+        clan: row.name,
+        score_this_month: toNumber(row.score_this_month),
+      })),
+      standings_after: afterResult.rows.map((row) => ({
+        clan: row.name,
+        score_this_month: toNumber(row.score_this_month),
+      })),
     };
   });
 }

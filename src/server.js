@@ -67,6 +67,7 @@ import {
   restartMarketMaker,
   applyMarketMakerCollateral,
   unwindMarket,
+  purgeClanScoreForUsers,
   resolveExpiredMarkets,
   sellOutcome,
   syncTopMarkets,
@@ -1784,6 +1785,18 @@ app.post("/api/bridge/admin/unwind-market", requireBridgeSecret, async (req, res
   try {
     const result = await unwindMarket({
       market_id: req.body?.market_id ?? req.body?.marketId,
+      dry_run: req.body?.dry_run ?? req.body?.dryRun,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/admin/purge-clan-score", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await purgeClanScoreForUsers({
+      telegram_ids: req.body?.telegram_ids ?? req.body?.telegramIds,
       dry_run: req.body?.dry_run ?? req.body?.dryRun,
     });
     res.status(200).json(result);

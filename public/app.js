@@ -6165,7 +6165,7 @@ function renderClans() {
       ${clanIconMarkup(uc, "user-clan-icon")}
       <div class="user-clan-body">
         <strong>Твой клан: ${escapeHtml(uc.name)}</strong>
-        <small>Вклад ${formatFire(contribution)} · место #${uc.rank || "-"}</small>
+        <small>Вклад за месяц ${formatFire(contribution)} · место #${uc.rank || "-"}</small>
         ${share > 0 ? `<span class="user-clan-bar"><i style="transform:scaleX(${share.toFixed(3)})"></i></span>` : ""}
       </div>
       <span class="user-clan-go" aria-hidden="true">›</span>
@@ -6216,7 +6216,7 @@ function renderClans() {
             ${clanMemberAvatarMarkup(member, name)}
             <div>
               <strong>${escapeHtml(name)}</strong>
-              <small>${formatFire(member.contribution_score)} очков${member.role === "owner" ? " · owner" : ""}</small>
+              <small>${formatFire(member.contribution_score)} очков за месяц${member.role === "owner" ? " · owner" : ""}</small>
             </div>
           </div>
         `;
@@ -6233,13 +6233,14 @@ function renderClans() {
       </div>
       <div class="clan-stat-grid">
         <div><b>${rank || "-"}</b><span>место</span></div>
-        <div><b>${formatFire(selectedClan.score)}</b><span>очки</span></div>
+        <div><b>${formatFire(selectedClan.score)}</b><span>очки месяца</span></div>
+        <div><b>${formatFire(selectedClan.lifetime_score)}</b><span>за всё время</span></div>
         <div><b>${formatFire(selectedClan.members_count)}</b><span>состав</span></div>
       </div>
       <div class="clan-goal-card ${isLeader ? "is-leader" : ""}">
         <small>Банк месяца · ${bankLabel}</small>
         <strong>${goalLine}</strong>
-        <span>В конце месяца весь банк уходит клану №1 и делится между топ-30 участниками пропорционально личным очкам вклада.</span>
+        <span>Счёт идёт за текущий месяц и обнуляется первого числа. В конце месяца весь банк уходит клану №1 и делится между топ-30 участниками пропорционально их очкам за этот месяц.</span>
       </div>
       <div class="clan-todo">
         <p class="clan-todo-title">Как поднять клан наверх</p>
@@ -6278,7 +6279,7 @@ function renderClans() {
       ${clanIconMarkup(clan)}
       <div class="clan-info">
         <strong>${escapeHtml(clan.name)}</strong>
-        <small>${formatFire(clan.members_count)} участников · ${formatFire(clan.score)} очков</small>
+        <small>${formatFire(clan.members_count)} участников · ${formatFire(clan.score)} очков за месяц${Number(clan.lifetime_score) > Number(clan.score) ? ` · ${formatFire(clan.lifetime_score)} всего` : ""}</small>
       </div>
       <button class="task-button" data-join-clan="${clan.id}" type="button" ${clan.user_is_member ? "disabled" : ""}>
         ${clan.user_is_member ? "Твой" : "Войти"}
