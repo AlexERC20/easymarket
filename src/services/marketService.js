@@ -42,6 +42,9 @@ const KYIVSTONER_NO_LABEL = "Меньше 8";
 const KYIVSTONER_TEST_RESET_MIGRATION = "kyivstoner_test_market_reset_v2";
 const SPECIAL_MARKET_SPREAD_BPS = 100;
 const SPECIAL_MARKET_MAX_SHIFT = 0.2;
+// Payout owed to a single side may not exceed the market's own liquidity, the
+// special-market equivalent of a CLOB book never owing more than its collateral.
+const SPECIAL_MARKET_LIABILITY_RATIO = 1;
 const MIN_PRICE = 0.001;
 const MAX_PRICE = 0.999;
 const BTC_MIN_PRICE = 0.001;
@@ -1087,6 +1090,39 @@ function buildDualBookPrices(market, side, nextSidePrice, options = {}) {
 
 function getSpecialMarketDepth(market) {
   return Math.max(100, toNumber(market?.liquidity, KYIVSTONER_MARKET_LIQUIDITY));
+}
+
+// The CLOB solvency rule ported to special markets. A collateralised book can
+// never owe more than it locked, because every share it sells was minted out of
+// posted collateral. Special markets mint shares out of nothing - amount over
+// price - so the same guarantee has to be asserted explicitly: the payout owed
+// to one side, converted to the collateral's own unit, stays inside the
+// market's liquidity. Without it a floor-priced tail turns a few stars into a
+// payout worth many times the book.
+export function assertSpecialMarketSolvency({ market, side, shares, currency, outstandingShares }) {
+  const liquidity = getSpecialMarketDepth(market);
+  const weight = getPricingWeight(currency);
+  const nextLiability = (Math.max(0, outstandingShares) + Math.max(0, shares)) * weight;
+  const cap = liquidity * SPECIAL_MARKET_LIABILITY_RATIO;
+  if (nextLiability > cap + 0.00000001) {
+    throw new Error("market_liability_cap");
+  }
+  return { side, liability: nextLiability, cap };
+}
+
+async function getSpecialMarketOutstandingShares(client, marketId, side, currency) {
+  const result = await client.query(
+    `
+      SELECT COALESCE(SUM(shares), 0) AS shares
+      FROM positions
+      WHERE market_id = $1::bigint
+        AND side = $2::text
+        AND currency = $3::text
+        AND status = 'open'
+    `,
+    [marketId, String(side).toUpperCase(), normalizeCurrency(currency)],
+  );
+  return toNumber(result.rows[0]?.shares);
 }
 
 function getSpecialBuyExecutionQuote(market, side, amount, pricingWeight = 1) {
@@ -12357,6 +12393,15 @@ export async function buyOutcome(input) {
     const fee = 0;
     const netAmount = Math.max(0, amount - fee);
     const shares = netAmount / quote.executionPrice;
+    if (isSpecialMarket(market)) {
+      assertSpecialMarketSolvency({
+        market,
+        side,
+        shares,
+        currency,
+        outstandingShares: await getSpecialMarketOutstandingShares(client, marketId, side, currency),
+      });
+    }
     const nextYesPrice = quote.nextYesPrice;
     const nextNoPrice = quote.nextNoPrice;
     if (hasOppositePosition) {

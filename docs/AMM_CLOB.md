@@ -138,6 +138,48 @@ Worth considering: a spread of 600-1,000 bps, a spread or quote size that scales
 with time to expiry, a longer pre-settlement freeze, and turning the automatic
 risk reduction back on once the bot controls have been exercised.
 
+## Special markets
+
+Special markets price off internal order flow rather than an external feed, so
+they cannot run the BTC book's oracle-driven quoting. The solvency half of the
+CLOB model still applies and is asserted explicitly.
+
+A collateralised book can never owe more than it locked, because every share it
+sells was minted out of posted collateral. A special market mints shares as
+`amount / price`, out of nothing, so the same guarantee has to be checked:
+payout owed to one side, converted into the collateral's own unit, must stay
+within the market's liquidity. A star share redeems for one star and a cash
+share for one unit of USDT, so the star book is converted at the configured
+star-per-USDT rate before the comparison.
+
+Without that check a floor-priced tail turns a few stars into a payout worth
+many times the book: at a price of 0.001 one star buys a thousand shares, and
+the price impact of a star trade is deliberately scaled down, so the position
+can be accumulated without moving the price back. That is what drained the
+Kyivstoner market, and the cap is the invariant that makes it impossible rather
+than merely expensive.
+
+The complementary guard holds structurally here: the opposite price is always
+`1 - price`, and the spread is applied outward on both sides, so a pair of buys
+costs more than one unit and a pair of sells returns less.
+
+### Unwinding a mispriced market
+
+```http
+POST /api/bridge/admin/unwind-market
+Content-Type: application/json
+
+{ "market_id": 15448, "dry_run": true }
+```
+
+Returns every participant to the cash flow they started with: stakes back,
+realised profits back, positions closed, market marked `unwound` so it can never
+settle. The rule is identical for everyone, so it does not depend on sorting
+exploiters from honest traders after the fact. It runs as a dry run unless
+`dry_run` is explicitly `false`, reports the full per-user breakdown either way,
+and a clawback never pushes a balance below zero — it takes what is there and
+reports the rest as unrecoverable.
+
 ## Polymarket reference model
 
 The implementation follows the public Polymarket model where it matters for
