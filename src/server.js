@@ -75,6 +75,7 @@ import {
   syncFireBalanceByUsername,
   syncFireBalance,
   updateProjectEconomySettings,
+  updateMarketMakerBookSettings,
   updateMarketMakerSettings,
   updateLiveBtcPrice,
   upsertPromoCampaign,
@@ -1776,6 +1777,23 @@ app.post("/api/bridge/amm/settings", requireBridgeSecret, async (req, res) => {
       admin_username: req.body?.admin_username ?? req.body?.adminUsername,
     });
     res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/amm/book-settings", requireBridgeSecret, async (req, res) => {
+  try {
+    res.status(200).json(await updateMarketMakerBookSettings({
+      book_type: req.body?.book_type ?? req.body?.bookType,
+      spread_bps: req.body?.spread_bps,
+      max_level_loss_bps: req.body?.max_level_loss_bps,
+      tail_band_seconds: req.body?.tail_band_seconds,
+      tail_band_floor_bps: req.body?.tail_band_floor_bps,
+      gamma_guard_seconds: req.body?.gamma_guard_seconds,
+      momentum_guard_seconds: req.body?.momentum_guard_seconds,
+      admin_telegram_id: req.body?.admin_telegram_id ?? req.body?.adminTelegramId,
+    }));
   } catch (error) {
     sendApiError(res, error);
   }

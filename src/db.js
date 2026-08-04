@@ -817,6 +817,25 @@ export async function runMigrations() {
     VALUES (1)
     ON CONFLICT (id) DO NOTHING;
 
+    -- Per-book risk overrides. NULL inherits the global setting, so a book only
+    -- carries the values that genuinely differ. Star and bonus losses cost the
+    -- house nothing real, so those books can run loose while cash stays strict.
+    CREATE TABLE IF NOT EXISTS market_maker_book_settings (
+      book_type TEXT PRIMARY KEY,
+      spread_bps INTEGER,
+      max_level_loss_bps INTEGER,
+      tail_band_seconds INTEGER,
+      tail_band_floor_bps INTEGER,
+      gamma_guard_seconds INTEGER,
+      momentum_guard_seconds INTEGER,
+      updated_by_telegram_id TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    INSERT INTO market_maker_book_settings (book_type)
+    VALUES ('USDT_CASH'), ('USDT_BONUS'), ('STAR')
+    ON CONFLICT (book_type) DO NOTHING;
+
     CREATE TABLE IF NOT EXISTS market_maker_accounts (
       id BIGSERIAL PRIMARY KEY,
       market_id BIGINT NOT NULL REFERENCES markets(id) ON DELETE CASCADE,

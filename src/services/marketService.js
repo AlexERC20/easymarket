@@ -9531,6 +9531,42 @@ async function getMarketMakerSettingsWithClient(client, lock = false) {
   return mapMarketMakerSettings(result.rows[0]);
 }
 
+// The five risk guards can differ per book because the books differ in what a
+// loss actually costs: a star or bonus payout is a liability that was never real
+// money, while the cash book pays out of the house's own funds. A null override
+// inherits the global value.
+const BOOK_OVERRIDABLE_SETTINGS = [
+  "spread_bps",
+  "max_level_loss_bps",
+  "tail_band_seconds",
+  "tail_band_floor_bps",
+  "gamma_guard_seconds",
+  "momentum_guard_seconds",
+];
+
+async function getMarketMakerBookSettingsWithClient(client, bookType) {
+  const normalizedBook = normalizeClobBookType(bookType, currencyForBookType(bookType));
+  const result = await client.query(
+    "SELECT * FROM market_maker_book_settings WHERE book_type = $1::text",
+    [normalizedBook],
+  );
+  return result.rows[0] || null;
+}
+
+function applyBookOverrides(settings, overrides) {
+  if (!overrides) {
+    return settings;
+  }
+  const merged = { ...settings };
+  for (const key of BOOK_OVERRIDABLE_SETTINGS) {
+    const value = overrides[key];
+    if (value !== null && value !== undefined) {
+      merged[key] = Number(value);
+    }
+  }
+  return merged;
+}
+
 async function getMarketMakerRiskStateWithClient(client, bookType, lock = false) {
   const normalizedBook = normalizeClobBookType(bookType, currencyForBookType(bookType));
   await client.query(
@@ -9672,7 +9708,11 @@ function getFreshBtcFairPrice(market) {
 }
 
 async function refreshMarketMakerAccount(client, market, bookType, lock = true, persist = lock) {
-  const settings = await getMarketMakerSettingsWithClient(client);
+  const baseSettings = await getMarketMakerSettingsWithClient(client);
+  const settings = applyBookOverrides(
+    baseSettings,
+    await getMarketMakerBookSettingsWithClient(client, bookType),
+  );
   const globalRisk = await getMarketMakerRiskStateWithClient(client, bookType);
   const result = await client.query(
     `
@@ -9934,7 +9974,7 @@ export async function getMarketMakerAdminState() {
       throw error;
     }
   }
-  const [settingsResult, accountsResult, feesResult, riskResult, performanceResult] = await Promise.all([
+  const [settingsResult, accountsResult, feesResult, riskResult, bookSettingsResult, performanceResult] = await Promise.all([
     query("SELECT * FROM market_maker_settings WHERE id = 1"),
     query(
       `
@@ -9962,6 +10002,13 @@ export async function getMarketMakerAdminState() {
       `
         SELECT *
         FROM market_maker_risk_state
+        ORDER BY book_type ASC
+      `,
+    ),
+    query(
+      `
+        SELECT *
+        FROM market_maker_book_settings
         ORDER BY book_type ASC
       `,
     ),
@@ -10010,6 +10057,7 @@ export async function getMarketMakerAdminState() {
   return {
     ok: true,
     settings: mapMarketMakerSettings(settingsResult.rows[0]),
+    book_settings: bookSettingsResult.rows.map(mapMarketMakerBookSettings),
     totals,
     fees: feesResult.rows.map((row) => ({
       book_type: row.book_type,
@@ -10118,6 +10166,80 @@ export async function updateMarketMakerSettings(input = {}) {
     ],
   );
   return { ok: true, settings: mapMarketMakerSettings(result.rows[0]) };
+}
+
+export async function updateMarketMakerBookSettings(input = {}) {
+  const bookType = String(input.book_type ?? input.bookType ?? "").trim().toUpperCase();
+  if (!CLOB_BOOK_TYPES.includes(bookType)) {
+    throw new Error("invalid_book_type");
+  }
+
+  // An explicit null clears an override and puts the book back on the global
+  // value; leaving a field out changes nothing.
+  const bounds = {
+    spread_bps: [10, 5_000],
+    max_level_loss_bps: [0, 10_000],
+    tail_band_seconds: [0, 3_600],
+    tail_band_floor_bps: [0, 4_900],
+    gamma_guard_seconds: [0, 600],
+    momentum_guard_seconds: [0, 600],
+  };
+  const values = {};
+  for (const [key, [min, max]] of Object.entries(bounds)) {
+    if (!(key in input)) {
+      continue;
+    }
+    const raw = input[key];
+    if (raw === null || raw === "") {
+      values[key] = null;
+      continue;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+      throw new Error(`invalid_${key}`);
+    }
+    values[key] = Math.round(parsed);
+  }
+  if (Object.keys(values).length === 0) {
+    throw new Error("no_settings_provided");
+  }
+
+  const assignments = Object.keys(values)
+    .map((key, index) => `${key} = $${index + 2}::integer`)
+    .join(", ");
+  const result = await query(
+    `
+      INSERT INTO market_maker_book_settings (book_type)
+      VALUES ($1::text)
+      ON CONFLICT (book_type) DO NOTHING
+    `,
+    [bookType],
+  );
+  void result;
+  const updated = await query(
+    `
+      UPDATE market_maker_book_settings
+      SET ${assignments},
+          updated_by_telegram_id = $${Object.keys(values).length + 2}::text,
+          updated_at = now()
+      WHERE book_type = $1::text
+      RETURNING *
+    `,
+    [bookType, ...Object.values(values), input.admin_telegram_id ? String(input.admin_telegram_id) : null],
+  );
+  return { ok: true, book: mapMarketMakerBookSettings(updated.rows[0]) };
+}
+
+function mapMarketMakerBookSettings(row) {
+  if (!row) {
+    return null;
+  }
+  const mapped = { book_type: row.book_type };
+  for (const key of BOOK_OVERRIDABLE_SETTINGS) {
+    mapped[key] = row[key] === null || row[key] === undefined ? null : Number(row[key]);
+  }
+  mapped.updated_at = row.updated_at;
+  return mapped;
 }
 
 export async function restartMarketMaker(input = {}) {
