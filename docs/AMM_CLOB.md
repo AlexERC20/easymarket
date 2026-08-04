@@ -80,6 +80,14 @@ the band is 0.30-0.70 for the first three minutes and opens linearly after that,
 so by settlement a genuine tail trades at its real price. Both clamps push
 outward, so the book cannot cross and only the side beyond the band is touched.
 
+`bid_floor_bps` keeps the buy-back price a fraction of fair value rather than an
+absolute minimum. Close to settlement the gamma guard widens the quote by more
+than the losing side is worth - two minutes out a side still worth six cents was
+being bid at a tenth of a cent, because subtracting the half-spread from a cheap
+centre lands below zero and clamps. A holder could not exit a losing but still
+live position for anything. The floor is the mirror of the tail band: one stops
+the book selling a tail too cheap, the other stops it buying one too cheap.
+
 Raising `spread_bps` also raises the cheapest price the AMM will sell a tail at,
 since every ask sits at least a half-spread above fair value.
 

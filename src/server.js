@@ -1773,6 +1773,7 @@ app.post("/api/bridge/amm/settings", requireBridgeSecret, async (req, res) => {
       momentum_guard_seconds: req.body?.momentum_guard_seconds ?? req.body?.momentumGuardSeconds,
       tail_band_seconds: req.body?.tail_band_seconds ?? req.body?.tailBandSeconds,
       tail_band_floor_bps: req.body?.tail_band_floor_bps ?? req.body?.tailBandFloorBps,
+      bid_floor_bps: req.body?.bid_floor_bps ?? req.body?.bidFloorBps,
       admin_telegram_id: req.body?.admin_telegram_id ?? req.body?.adminTelegramId,
       admin_username: req.body?.admin_username ?? req.body?.adminUsername,
     });
@@ -1790,6 +1791,7 @@ app.post("/api/bridge/amm/book-settings", requireBridgeSecret, async (req, res) 
       max_level_loss_bps: req.body?.max_level_loss_bps,
       tail_band_seconds: req.body?.tail_band_seconds,
       tail_band_floor_bps: req.body?.tail_band_floor_bps,
+      bid_floor_bps: req.body?.bid_floor_bps,
       gamma_guard_seconds: req.body?.gamma_guard_seconds,
       momentum_guard_seconds: req.body?.momentum_guard_seconds,
       admin_telegram_id: req.body?.admin_telegram_id ?? req.body?.adminTelegramId,

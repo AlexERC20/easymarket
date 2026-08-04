@@ -9466,6 +9466,7 @@ function mapMarketMakerSettings(row) {
     momentum_guard_seconds: Number(row.momentum_guard_seconds ?? 0),
     tail_band_seconds: Number(row.tail_band_seconds ?? 0),
     tail_band_floor_bps: Number(row.tail_band_floor_bps ?? 0),
+    bid_floor_bps: Number(row.bid_floor_bps ?? 0),
     updated_by_telegram_id: row.updated_by_telegram_id || null,
     updated_by_username: row.updated_by_username || null,
     updated_at: row.updated_at,
@@ -9540,6 +9541,7 @@ const BOOK_OVERRIDABLE_SETTINGS = [
   "max_level_loss_bps",
   "tail_band_seconds",
   "tail_band_floor_bps",
+  "bid_floor_bps",
   "gamma_guard_seconds",
   "momentum_guard_seconds",
 ];
@@ -9791,6 +9793,7 @@ async function refreshMarketMakerAccount(client, market, bookType, lock = true, 
       driftRatio: getBtcDrift(settings.momentum_guard_seconds || 20).ratio,
       tailBandSeconds: settings.tail_band_seconds,
       tailBandFloor: (settings.tail_band_floor_bps || 0) / 10_000,
+      bidFloorRatio: (settings.bid_floor_bps || 0) / 10_000,
       secondsLeft: fair.secondsLeft,
       sigmaPerSqrtSecond: fair.sigmaPerSqrtSecond,
       openPrice: fair.openPrice,
@@ -10104,6 +10107,7 @@ export async function updateMarketMakerSettings(input = {}) {
   const momentumGuardSeconds = numeric(input.momentum_guard_seconds, 0, 600, "invalid_amm_momentum_guard");
   const tailBandSeconds = numeric(input.tail_band_seconds, 0, 3_600, "invalid_amm_tail_band_seconds");
   const tailBandFloorBps = numeric(input.tail_band_floor_bps, 0, 4_900, "invalid_amm_tail_band_floor");
+  const bidFloorBps = numeric(input.bid_floor_bps, 0, 9_500, "invalid_amm_bid_floor");
   const boolean = (value) => (value === undefined || value === null
     ? null
     : [true, 1, "1", "true", "yes", "on"].includes(
@@ -10138,6 +10142,7 @@ export async function updateMarketMakerSettings(input = {}) {
           momentum_guard_seconds = COALESCE($16::integer, momentum_guard_seconds),
           tail_band_seconds = COALESCE($17::integer, tail_band_seconds),
           tail_band_floor_bps = COALESCE($18::integer, tail_band_floor_bps),
+          bid_floor_bps = COALESCE($19::integer, bid_floor_bps),
           updated_by_telegram_id = $11::text,
           updated_by_username = $12::text,
           updated_at = now()
@@ -10163,6 +10168,7 @@ export async function updateMarketMakerSettings(input = {}) {
       momentumGuardSeconds === null ? null : Math.round(momentumGuardSeconds),
       tailBandSeconds === null ? null : Math.round(tailBandSeconds),
       tailBandFloorBps === null ? null : Math.round(tailBandFloorBps),
+      bidFloorBps === null ? null : Math.round(bidFloorBps),
     ],
   );
   return { ok: true, settings: mapMarketMakerSettings(result.rows[0]) };
@@ -10181,6 +10187,7 @@ export async function updateMarketMakerBookSettings(input = {}) {
     max_level_loss_bps: [0, 10_000],
     tail_band_seconds: [0, 3_600],
     tail_band_floor_bps: [0, 4_900],
+    bid_floor_bps: [0, 9_500],
     gamma_guard_seconds: [0, 600],
     momentum_guard_seconds: [0, 600],
   };

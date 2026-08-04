@@ -795,6 +795,7 @@ export async function runMigrations() {
       momentum_guard_seconds INTEGER NOT NULL DEFAULT 20,
       tail_band_seconds INTEGER NOT NULL DEFAULT 180,
       tail_band_floor_bps INTEGER NOT NULL DEFAULT 3000,
+      bid_floor_bps INTEGER NOT NULL DEFAULT 5000,
       updated_by_telegram_id TEXT,
       updated_by_username TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -812,6 +813,8 @@ export async function runMigrations() {
       ADD COLUMN IF NOT EXISTS tail_band_seconds INTEGER NOT NULL DEFAULT 180;
     ALTER TABLE market_maker_settings
       ADD COLUMN IF NOT EXISTS tail_band_floor_bps INTEGER NOT NULL DEFAULT 3000;
+    ALTER TABLE market_maker_settings
+      ADD COLUMN IF NOT EXISTS bid_floor_bps INTEGER NOT NULL DEFAULT 5000;
 
     INSERT INTO market_maker_settings (id)
     VALUES (1)
@@ -826,6 +829,7 @@ export async function runMigrations() {
       max_level_loss_bps INTEGER,
       tail_band_seconds INTEGER,
       tail_band_floor_bps INTEGER,
+      bid_floor_bps INTEGER,
       gamma_guard_seconds INTEGER,
       momentum_guard_seconds INTEGER,
       updated_by_telegram_id TEXT,

@@ -619,3 +619,73 @@ test("the band keeps the book uncrossed and the pair guards intact", () => {
     }
   }
 });
+
+test("a losing side is still bought back for something, not for nothing", () => {
+  const base = {
+    spreadBps: 400,
+    levels: 5,
+    riskCapital: 1_000,
+    riskMultiplier: 1,
+    yesInventory: 1_000,
+    noInventory: 1_000,
+    maxLevelLoss: 30,
+    gammaGuardSeconds: 10,
+    momentumGuardSeconds: 20,
+    driftRatio: 0,
+    tailBandSeconds: 180,
+    tailBandFloor: 0.3,
+    openPrice: 63_398,
+    currentPrice: 63_398,
+    sigmaPerSqrtSecond: 0.0000365,
+  };
+  // Two minutes out with the losing side still worth six cents: the gamma guard
+  // widens the quote by more than the side is worth, so without a floor the bid
+  // lands on the absolute minimum and the holder gets nothing.
+  const bare = buildAmmQuoteLadder({ ...base, fairYes: 0.94, secondsLeft: 120 });
+  const floored = buildAmmQuoteLadder({
+    ...base, fairYes: 0.94, secondsLeft: 120, bidFloorRatio: 0.5,
+  });
+
+  assert.ok(bare.no.bids[0].price <= 0.002, `bare bid ${bare.no.bids[0].price}`);
+  assert.ok(floored.no.bids[0].price >= 0.025, `floored bid ${floored.no.bids[0].price}`);
+  // Never above fair: the book still buys the losing side at a discount.
+  assert.ok(floored.no.bids[0].price < 0.06);
+});
+
+test("the bid floor leaves the rich side and the pair guards alone", () => {
+  for (const secondsLeft of [300, 120, 30]) {
+    for (const fairYes of [0.5, 0.8, 0.94, 0.99]) {
+      const book = buildAmmQuoteLadder({
+        fairYes,
+        spreadBps: 400,
+        levels: 5,
+        riskCapital: 1_000,
+        riskMultiplier: 1,
+        yesInventory: 1_000,
+        noInventory: 1_000,
+        maxLevelLoss: 30,
+        gammaGuardSeconds: 10,
+        momentumGuardSeconds: 20,
+        driftRatio: 0.0002,
+        tailBandSeconds: 180,
+        tailBandFloor: 0.3,
+        bidFloorRatio: 0.5,
+        secondsLeft,
+        openPrice: 63_398,
+        currentPrice: 63_398,
+        sigmaPerSqrtSecond: 0.0000365,
+      });
+      const ctx = `t=${secondsLeft} fair=${fairYes}`;
+      for (const side of ["yes", "no"]) {
+        const bestBid = Math.max(...book[side].bids.map((l) => l.price), -Infinity);
+        const bestAsk = Math.min(...book[side].asks.map((l) => l.price), Infinity);
+        if (Number.isFinite(bestBid) && Number.isFinite(bestAsk)) {
+          assert.ok(bestBid < bestAsk, `${ctx} ${side} crossed ${bestBid}/${bestAsk}`);
+        }
+      }
+      const pairBid = Math.max(...book.yes.bids.map((l) => l.price), -Infinity)
+        + Math.max(...book.no.bids.map((l) => l.price), -Infinity);
+      if (Number.isFinite(pairBid)) assert.ok(pairBid < 1, `${ctx} pair bid ${pairBid}`);
+    }
+  }
+});

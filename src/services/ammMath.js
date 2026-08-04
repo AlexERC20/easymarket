@@ -279,6 +279,7 @@ function buildSideLevels({
   askBias = 0,
   bidBias = 0,
   bandFloor = 0,
+  bidFloorRatio = 0,
 }) {
   const tailDistance = Math.min(center, 1 - center);
   const tailDepth = clamp(tailDistance * 4, 0.035, 1);
@@ -295,8 +296,12 @@ function buildSideLevels({
       center + distance + Math.max(0, askBias),
       bandFloor,
     ));
+    // Гамма у экспирации раздувает расстояние сильнее, чем стоит сама дешёвая
+    // сторона, поэтому её бид проваливался в абсолютный пол 0.001: человек с
+    // проигрышной, но ещё не обнулившейся позицией получал за неё ничего.
+    // Пол бида задаётся долей от честной цены, а не константой.
     const bidPrice = roundPrice(Math.min(
-      center - distance - Math.max(0, bidBias),
+      Math.max(center - distance - Math.max(0, bidBias), center * bidFloorRatio),
       1 - bandFloor,
     ));
     const levelWeight = 1 / (1 + index * 0.55);
@@ -359,6 +364,7 @@ export function buildAmmQuoteLadder(input) {
   // two step outward; a falling BTC moves the bias to the other pair.
   const momentumBias = calculateMomentumBias(input);
   const bandFloor = calculateTailBandFloor(input);
+  const bidFloorRatio = clamp(Number(input?.bidFloorRatio || 0), 0, 0.95);
   const yes = buildSideLevels({
     center: yesCenter,
     halfSpread,
@@ -371,6 +377,7 @@ export function buildAmmQuoteLadder(input) {
     askBias: Math.max(0, momentumBias),
     bidBias: Math.max(0, -momentumBias),
     bandFloor,
+    bidFloorRatio,
   });
   const no = buildSideLevels({
     center: noCenter,
@@ -384,6 +391,7 @@ export function buildAmmQuoteLadder(input) {
     askBias: Math.max(0, -momentumBias),
     bidBias: Math.max(0, momentumBias),
     bandFloor,
+    bidFloorRatio,
   });
 
   // Complementary tokens must never expose a crossed synthetic pair. A trader
