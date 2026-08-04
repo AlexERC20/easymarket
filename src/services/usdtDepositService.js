@@ -1339,6 +1339,16 @@ async function maybeBackfillRecentDeposits(network, provider, latestBlock) {
   };
 }
 
+// "Upstream lower height 113211882 of type RECEIPTS is greater than 112949909"
+// is the node saying which block it still has. Pull that number out so a cursor
+// stranded behind a pruned range can jump to it: retrying the same range would
+// fail identically forever, and the scanner would never move again on its own.
+function detectPrunedLowerBound(error) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const lowerHeight = message.match(/lower height (\d+)/i);
+  return lowerHeight ? Number(lowerHeight[1]) : null;
+}
+
 function canUseExplorerScan(network) {
   return Boolean(network.explorerApiKey)
     && Boolean(network.explorerApiUrl)
@@ -1472,7 +1482,33 @@ async function scanNetwork(network) {
 
   const blockCache = new Map();
   blockCache.latestBlock = latestBlock;
-  const logs = await getTransferLogs(provider, network, fromBlock, toBlock);
+
+  let logs;
+  try {
+    logs = await getTransferLogs(provider, network, fromBlock, toBlock);
+  } catch (error) {
+    // The history we are asking for is gone from the node. Step over it rather
+    // than wedging here; the gap is reported so it can be recovered through the
+    // explorer, which looks up by address and needs no archive access.
+    const prunedFrom = detectPrunedLowerBound(error);
+    if (!prunedFrom || prunedFrom <= fromBlock) {
+      throw error;
+    }
+    const resumeAt = Math.min(prunedFrom, safeToBlock);
+    await setScannerState(network, resumeAt);
+    console.warn(
+      `[EasyMarket] ${network.key} deposit scan stepped over pruned blocks ${fromBlock}-${resumeAt}`,
+    );
+    const reconcile = await reconcileUnmatchedDepositEvents(network, latestBlock);
+    return {
+      network: network.key,
+      scanned: 0,
+      latestBlock,
+      explorer,
+      reconcile,
+      skipped_pruned: { from: fromBlock, to: resumeAt },
+    };
+  }
 
   for (const log of logs) {
     await processDepositLog(network, log, provider, blockCache);
