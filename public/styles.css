@@ -6957,6 +6957,20 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   color: var(--muted);
 }
 
+/* Пустой слот держит высоту книги и явно читается как отсутствие уровня,
+   а не как строка с нулём. */
+.orderbook-row.empty {
+  cursor: default;
+  pointer-events: none;
+}
+
+.orderbook-row.empty b,
+.orderbook-row.empty .ob-size,
+.orderbook-row.empty .ob-total {
+  color: rgba(255, 255, 255, 0.16);
+  font-weight: 700;
+}
+
 .orderbook-empty {
   padding: 10px 9px;
   font-size: 12px;

@@ -4628,8 +4628,14 @@ function renderOrderbookPanel() {
       return { ...row, total: running };
     });
   };
-  const askRows = withTotals(asks).reverse();
-  const bidRows = withTotals(bids);
+  // Книга всегда занимает одну и ту же высоту: недостающие уровни остаются
+  // пустыми строками. Иначе на тонком рынке она схлопывается и разъезжается,
+  // а цены прыгают по экрану при каждом обновлении.
+  const DEPTH = 5;
+  const padTop = (list) => [...Array(Math.max(0, DEPTH - list.length)).fill(null), ...list];
+  const padBottom = (list) => [...list, ...Array(Math.max(0, DEPTH - list.length)).fill(null)];
+  const askRows = padTop(withTotals(asks).reverse().slice(0, DEPTH));
+  const bidRows = padBottom(withTotals(bids).slice(0, DEPTH));
 
   const bestAsk = asks[0]?.price ?? null;
   const bestBid = bids[0]?.price ?? null;
@@ -4644,6 +4650,13 @@ function renderOrderbookPanel() {
     : null;
 
   const rowMarkup = (row) => {
+    if (!row) {
+      return `
+        <div class="orderbook-row empty" aria-hidden="true">
+          <b>—</b><span class="ob-size">—</span><span class="ob-total">—</span>
+        </div>
+      `;
+    }
     const mine = myPrices.has(formatCents(row.price)) ? " mine" : "";
     return `
       <button class="orderbook-row ${row.type}${mine}" type="button"
@@ -4661,18 +4674,14 @@ function renderOrderbookPanel() {
     <div class="orderbook-cols">
       <span>Цена</span><span>Объём</span><span>Всего</span>
     </div>
-    ${askRows.length
-      ? askRows.map(rowMarkup).join("")
-      : '<p class="orderbook-empty">Продавцов пока нет</p>'}
+    ${askRows.map(rowMarkup).join("")}
     <div class="orderbook-spread">
       <b>${formatCents(mid)}</b>
       <small>${spreadCents === null
         ? (state.orderbook.loading ? "загружаю" : "нет двух сторон")
         : `спред ${spreadCents.toFixed(1)}¢${spreadShare !== null ? ` · ${spreadShare}%` : ""}`}</small>
     </div>
-    ${bidRows.length
-      ? bidRows.map(rowMarkup).join("")
-      : '<p class="orderbook-empty">Покупателей пока нет</p>'}
+    ${bidRows.map(rowMarkup).join("")}
   `;
   list.dataset.bookSide = `${market.id}:${side}:${state.currency}`;
   renderMyLimitOrders();
