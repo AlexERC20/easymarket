@@ -251,6 +251,22 @@ export function calculateMomentumBias(input) {
   return clamp(shocked - fair, -0.45, 0.45);
 }
 
+// Early in a market a cheap tail is not the long shot the model calls it: with
+// minutes left the price has plenty of room to come back, and the fair value
+// leans entirely on a volatility estimate read off recent ticks, which understates
+// exactly when the market wakes up. So the quotable band is held near even money
+// while time remains and opens up as the clock runs down, by which point a tail
+// really is one.
+export function calculateTailBandFloor(input) {
+  const guardSeconds = Math.max(0, Number(input?.tailBandSeconds || 0));
+  const maxFloor = clamp(Number(input?.tailBandFloor || 0), 0, 0.49);
+  const secondsLeft = Number(input?.secondsLeft || 0);
+  if (guardSeconds <= 0 || maxFloor <= 0 || !(secondsLeft > 0)) {
+    return 0;
+  }
+  return clamp((maxFloor * secondsLeft) / guardSeconds, 0, maxFloor);
+}
+
 function buildSideLevels({
   center,
   halfSpread,
@@ -262,6 +278,7 @@ function buildSideLevels({
   maxLevelLoss,
   askBias = 0,
   bidBias = 0,
+  bandFloor = 0,
 }) {
   const tailDistance = Math.min(center, 1 - center);
   const tailDepth = clamp(tailDistance * 4, 0.035, 1);
@@ -272,8 +289,16 @@ function buildSideLevels({
 
   for (let index = 0; index < levels; index += 1) {
     const distance = halfSpread * (1 + index * 0.8) + PRICE_TICK * index;
-    const askPrice = roundPrice(center + distance + Math.max(0, askBias));
-    const bidPrice = roundPrice(center - distance - Math.max(0, bidBias));
+    // Both clamps push outward, so the book cannot cross itself and only the
+    // side that sits beyond the band is ever touched.
+    const askPrice = roundPrice(Math.max(
+      center + distance + Math.max(0, askBias),
+      bandFloor,
+    ));
+    const bidPrice = roundPrice(Math.min(
+      center - distance - Math.max(0, bidBias),
+      1 - bandFloor,
+    ));
     const levelWeight = 1 / (1 + index * 0.55);
     const levelNotional = quoteCapital * 0.12 * tailDepth * riskMultiplier * levelWeight;
     // Notional alone does not bound risk: a cheap tail turns a few units of
@@ -333,6 +358,7 @@ export function buildAmmQuoteLadder(input) {
   // A rising BTC makes the YES ask and the NO bid the losing sides, so those
   // two step outward; a falling BTC moves the bias to the other pair.
   const momentumBias = calculateMomentumBias(input);
+  const bandFloor = calculateTailBandFloor(input);
   const yes = buildSideLevels({
     center: yesCenter,
     halfSpread,
@@ -344,6 +370,7 @@ export function buildAmmQuoteLadder(input) {
     inventoryAvailable: yesInventory,
     askBias: Math.max(0, momentumBias),
     bidBias: Math.max(0, -momentumBias),
+    bandFloor,
   });
   const no = buildSideLevels({
     center: noCenter,
@@ -356,6 +383,7 @@ export function buildAmmQuoteLadder(input) {
     inventoryAvailable: noInventory,
     askBias: Math.max(0, -momentumBias),
     bidBias: Math.max(0, momentumBias),
+    bandFloor,
   });
 
   // Complementary tokens must never expose a crossed synthetic pair. A trader
@@ -384,6 +412,7 @@ export function buildAmmQuoteLadder(input) {
     halfSpread: roundTo(halfSpread, 6),
     gammaHalfSpread: roundTo(gammaHalfSpread, 6),
     momentumBias: roundTo(momentumBias, 6),
+    bandFloor: roundTo(bandFloor, 6),
     yes,
     no,
   };

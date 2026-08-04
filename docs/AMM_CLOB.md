@@ -71,6 +71,15 @@ terms and steps those two sides outward, leaving the two winning sides where
 they were. Both steps go outward, so the book never crosses itself and the
 complementary guards still hold.
 
+`tail_band_seconds` and `tail_band_floor_bps` hold the quotable price near even
+money while time remains. Early in a market a cheap tail is not the long shot the
+model calls it: with minutes left the price has room to come back, and fair value
+leans entirely on a volatility estimate read off recent ticks, which understates
+exactly when the market wakes up. At a floor of 30% and a window of 180 seconds
+the band is 0.30-0.70 for the first three minutes and opens linearly after that,
+so by settlement a genuine tail trades at its real price. Both clamps push
+outward, so the book cannot cross and only the side beyond the band is touched.
+
 Raising `spread_bps` also raises the cheapest price the AMM will sell a tail at,
 since every ask sits at least a half-spread above fair value.
 

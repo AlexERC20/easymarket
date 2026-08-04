@@ -11,6 +11,7 @@ import {
   calculateGammaHalfSpread,
   calculateMomentumBias,
   calculateNextAmmAllocation,
+  calculateTailBandFloor,
 } from "../src/services/ammMath.js";
 
 function buildBook(overrides = {}) {
@@ -530,4 +531,91 @@ test("the momentum guard is off when it is not configured", () => {
     driftRatio: 0.001, secondsLeft: 300, currentPrice: 62_600,
     openPrice: 62_600, sigmaPerSqrtSecond: 0.0000365, momentumGuardSeconds: 0,
   }), 0);
+});
+
+test("early in a market the quotable band stays near even money", () => {
+  const band = { tailBandSeconds: 180, tailBandFloor: 0.3 };
+  assert.equal(calculateTailBandFloor({ ...band, secondsLeft: 300 }), 0.3);
+  assert.equal(calculateTailBandFloor({ ...band, secondsLeft: 180 }), 0.3);
+  assert.ok(Math.abs(calculateTailBandFloor({ ...band, secondsLeft: 90 }) - 0.15) < 1e-9);
+  assert.ok(Math.abs(calculateTailBandFloor({ ...band, secondsLeft: 30 }) - 0.05) < 1e-9);
+  // Switched off it contributes nothing.
+  assert.equal(calculateTailBandFloor({ tailBandSeconds: 0, tailBandFloor: 0.3, secondsLeft: 300 }), 0);
+});
+
+test("the band stops a cheap tail being sold with minutes still on the clock", () => {
+  const base = {
+    spreadBps: 200,
+    levels: 5,
+    riskCapital: 1_000,
+    riskMultiplier: 1,
+    yesInventory: 1_000,
+    noInventory: 1_000,
+    maxLevelLoss: 50,
+    secondsLeft: 258,
+    openPrice: 63_398,
+    currentPrice: 63_435,
+    sigmaPerSqrtSecond: 0.0000365,
+  };
+  // The trade that prompted this: NO fair at about 0.16 with 4m18s left.
+  const unbanded = buildAmmQuoteLadder({ ...base, fairYes: 0.84 });
+  const banded = buildAmmQuoteLadder({
+    ...base, fairYes: 0.84, tailBandSeconds: 180, tailBandFloor: 0.3,
+  });
+
+  assert.ok(unbanded.no.asks[0].price < 0.2);
+  assert.ok(banded.no.asks[0].price >= 0.3, `banded tail ask ${banded.no.asks[0].price}`);
+  // The rich side is stopped from bidding through the band from the other end.
+  assert.ok(banded.yes.bids[0].price <= 0.7 + 1e-9, `banded rich bid ${banded.yes.bids[0].price}`);
+  // Near settlement a genuine tail is tradeable again.
+  const late = buildAmmQuoteLadder({
+    ...base, fairYes: 0.84, secondsLeft: 15, tailBandSeconds: 180, tailBandFloor: 0.3,
+  });
+  // The band has released: the ask is back at fair plus the ordinary spread,
+  // well under what the band forced with minutes left.
+  assert.ok(
+    late.no.asks[0].price < banded.no.asks[0].price - 0.1,
+    `late tail ask ${late.no.asks[0].price} vs banded ${banded.no.asks[0].price}`,
+  );
+  assert.equal(late.no.asks[0].price, unbanded.no.asks[0].price);
+});
+
+test("the band keeps the book uncrossed and the pair guards intact", () => {
+  for (const secondsLeft of [300, 180, 90, 30, 5]) {
+    for (const fairYes of [0.05, 0.2, 0.5, 0.8, 0.95]) {
+      const book = buildAmmQuoteLadder({
+        fairYes,
+        spreadBps: 200,
+        levels: 5,
+        riskCapital: 1_000,
+        riskMultiplier: 1,
+        yesInventory: 1_000,
+        noInventory: 1_000,
+        maxLevelLoss: 50,
+        secondsLeft,
+        openPrice: 63_398,
+        currentPrice: 63_398,
+        sigmaPerSqrtSecond: 0.0000365,
+        tailBandSeconds: 180,
+        tailBandFloor: 0.3,
+        gammaGuardSeconds: 10,
+        momentumGuardSeconds: 20,
+        driftRatio: 0.0003,
+      });
+      const ctx = `t=${secondsLeft} fair=${fairYes}`;
+      for (const side of ["yes", "no"]) {
+        const bestBid = Math.max(...book[side].bids.map((l) => l.price), -Infinity);
+        const bestAsk = Math.min(...book[side].asks.map((l) => l.price), Infinity);
+        if (Number.isFinite(bestBid) && Number.isFinite(bestAsk)) {
+          assert.ok(bestBid < bestAsk, `${ctx} ${side} crossed ${bestBid}/${bestAsk}`);
+        }
+      }
+      const pairAsk = Math.min(...book.yes.asks.map((l) => l.price), Infinity)
+        + Math.min(...book.no.asks.map((l) => l.price), Infinity);
+      const pairBid = Math.max(...book.yes.bids.map((l) => l.price), -Infinity)
+        + Math.max(...book.no.bids.map((l) => l.price), -Infinity);
+      if (Number.isFinite(pairAsk)) assert.ok(pairAsk > 1, `${ctx} pair ask ${pairAsk}`);
+      if (Number.isFinite(pairBid)) assert.ok(pairBid < 1, `${ctx} pair bid ${pairBid}`);
+    }
+  }
 });
