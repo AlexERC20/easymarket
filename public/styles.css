@@ -6774,19 +6774,12 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   filter: grayscale(0.45);
 }
 
-/* Форма и стакан стоят рядом: цену выбирают глазами по книге и тут же вводят
-   объём, не теряя книгу из виду. Так устроены мобильные экраны бирж. */
+/* Стакан и заявка живут в одном экране, друг под другом: цены сверху во всю
+   ширину, форма сразу под ними. Две колонки на телефоне сжимают и то и другое
+   до нечитаемого. */
 .orderbook-trade {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(132px, 0.95fr);
-  gap: 10px;
-  align-items: start;
-}
-
-@media (max-width: 330px) {
-  .orderbook-trade {
-    grid-template-columns: 1fr;
-  }
+  gap: 12px;
 }
 
 .orderbook-trade.hidden {
@@ -6850,9 +6843,9 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
 
 .orderbook-cols {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px;
-  padding: 0 6px 5px;
+  grid-template-columns: 1fr 5em 5.4em;
+  gap: 10px;
+  padding: 0 10px 6px;
   font-size: 10px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -6867,10 +6860,10 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
 .orderbook-row {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px;
+  grid-template-columns: 1fr 5em 5.4em;
+  gap: 10px;
   align-items: center;
-  padding: 3px 6px;
+  padding: 4px 10px;
   border-radius: 6px;
   border: 0;
   width: 100%;
@@ -6910,17 +6903,15 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
 .orderbook-row.bid b { color: var(--yes); }
 .orderbook-row.ask b { color: var(--no); }
 
-.orderbook-row .ob-size {
+.orderbook-row .ob-size,
+.orderbook-row .ob-total {
   text-align: right;
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 750;
-  color: var(--muted);
+  color: var(--text);
 }
 
-/* Накопительный объём — роскошь широкого экрана: в колонке 140px он только
-   мешает, поэтому колонка есть в разметке, но скрыта. */
-.orderbook-row .ob-total,
-.orderbook-cols .ob-total-head { display: none; }
+.orderbook-row .ob-total { color: var(--muted); }
 
 .orderbook-row:hover,
 .orderbook-row:focus-visible {
@@ -6945,17 +6936,17 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
 
 .orderbook-spread {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  margin: 4px 0;
-  padding: 5px 6px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 6px 0;
+  padding: 8px 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.09);
   border-bottom: 1px solid rgba(255, 255, 255, 0.09);
 }
 
 .orderbook-spread b {
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 900;
   letter-spacing: -0.02em;
 }

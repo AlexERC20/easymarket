@@ -4659,7 +4659,7 @@ function renderOrderbookPanel() {
 
   list.innerHTML = `
     <div class="orderbook-cols">
-      <span>Цена</span><span>Объём</span><span class="ob-total-head">Всего</span>
+      <span>Цена</span><span>Объём</span><span>Всего</span>
     </div>
     ${askRows.length
       ? askRows.map(rowMarkup).join("")
