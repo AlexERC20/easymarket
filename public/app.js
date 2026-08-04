@@ -4608,8 +4608,8 @@ function renderOrderbookPanel() {
 
   // Продажи идут вверх от спреда, покупки вниз — сторона читается местом.
   // Ближайшие к спреду уровни оставляем: они и есть то, по чему торгуют.
-  const asks = all.filter((row) => row.type === "ask").sort((a, b) => a.price - b.price).slice(0, 6);
-  const bids = all.filter((row) => row.type === "bid").sort((a, b) => b.price - a.price).slice(0, 6);
+  const asks = all.filter((row) => row.type === "ask").sort((a, b) => a.price - b.price).slice(0, 5);
+  const bids = all.filter((row) => row.type === "bid").sort((a, b) => b.price - a.price).slice(0, 5);
   const maxSize = Math.max(1, ...all.map((row) => Number(row.size) || 0));
   const depthFor = (row) => Math.round(((Number(row.size) || 0) / maxSize) * 1000) / 1000;
 
@@ -4659,7 +4659,7 @@ function renderOrderbookPanel() {
 
   list.innerHTML = `
     <div class="orderbook-cols">
-      <span>Цена</span><span>Объём</span><span>Всего</span>
+      <span>Цена</span><span>Объём</span><span class="ob-total-head">Всего</span>
     </div>
     ${askRows.length
       ? askRows.map(rowMarkup).join("")
@@ -4691,10 +4691,12 @@ function renderOrderbookTabs() {
     return;
   }
 
-  list.classList.toggle("hidden", tab !== "book");
-  form.classList.toggle("hidden", tab !== "form");
+  const trade = $("orderbookTrade");
+  if (trade) trade.classList.toggle("hidden", tab === "mine");
   mine.classList.toggle("hidden", tab !== "mine");
-  if (hint) hint.classList.toggle("hidden", tab !== "book");
+  if (hint) hint.classList.toggle("hidden", tab === "mine");
+  void list;
+  void form;
 
   for (const button of document.querySelectorAll("[data-book-tab]")) {
     button.classList.toggle("active", button.dataset.bookTab === tab);
@@ -10684,7 +10686,6 @@ $("orderbookList")?.addEventListener("click", (event) => {
   triggerHaptic("selection");
   state.orderbook.formPrice = row.dataset.bookPrice;
   state.orderbook.orderSide = row.dataset.bookAction === "SELL" ? "SELL" : "BUY";
-  state.orderbook.tab = "form";
   renderOrderbookPanel();
   $("limitOrderAmountInput")?.focus();
 });

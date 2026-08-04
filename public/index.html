@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260804-01" />
+    <link rel="stylesheet" href="/styles.css?v=20260804-02" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260711-03" />
     <link rel="stylesheet" href="/kyivstoner-motion.css?v=20260714-02" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -794,11 +794,11 @@
             <button id="orderbookYesBtn" class="active" type="button">YES / UP</button>
             <button id="orderbookNoBtn" type="button">NO / DOWN</button>
           </div>
-          <div id="orderbookTabs" class="orderbook-tabs" role="tablist" aria-label="Стакан, заявка и свои заявки">
-            <button id="orderbookTabBook" class="active" type="button" data-book-tab="book">Стакан</button>
-            <button id="orderbookTabForm" type="button" data-book-tab="form">Заявка</button>
-            <button id="orderbookTabMine" type="button" data-book-tab="mine">Мои<b id="orderbookMineCount"></b></button>
+          <div id="orderbookTabs" class="orderbook-tabs" role="tablist" aria-label="Торговля и свои заявки">
+            <button id="orderbookTabBook" class="active" type="button" data-book-tab="book">Торговля</button>
+            <button id="orderbookTabMine" type="button" data-book-tab="mine">Мои заявки<b id="orderbookMineCount"></b></button>
           </div>
+          <div id="orderbookTrade" class="orderbook-trade">
           <form id="limitOrderForm" class="limit-order-form">
             <div class="limit-order-mode-toggle" role="tablist" aria-label="Тип лимитной заявки">
               <button id="limitOrderBuyBtn" class="active" type="button">Buy</button>
@@ -815,8 +815,9 @@
             <button id="limitOrderSubmitBtn" type="submit">Limit Buy</button>
           </form>
           <div id="orderbookList" class="orderbook-list"></div>
-          <div id="myLimitOrders" class="my-limit-orders"></div>
-          <p id="orderbookHint" class="orderbook-hint">Нажми на цену, чтобы подставить её в заявку.</p>
+          </div>
+          <p id="orderbookHint" class="orderbook-hint">Нажми на цену в стакане — она подставится в заявку.</p>
+          <div id="myLimitOrders" class="my-limit-orders hidden"></div>
         </div>
         <form id="marketChatForm" class="market-chat-form">
           <input id="marketChatInput" type="text" maxlength="240" placeholder="Написать сообщение..." autocomplete="off" />
@@ -882,6 +883,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260804-01" type="module"></script>
+    <script src="/app.js?v=20260804-02" type="module"></script>
   </body>
 </html>
