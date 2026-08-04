@@ -4660,8 +4660,7 @@ function renderOrderbookPanel() {
     const mine = myPrices.has(formatCents(row.price)) ? " mine" : "";
     return `
       <button class="orderbook-row ${row.type}${mine}" type="button"
-        data-book-price="${formatCents(row.price)}"
-        data-book-action="${row.type === "ask" ? "BUY" : "SELL"}"
+        data-book-price="${outcomePriceToCentsInput(row.price)}"
         style="--depth:${depthFor(row)}">
         <b>${formatCents(row.price)}</b>
         <span class="ob-size">${Math.round(row.size).toLocaleString("ru-RU")}</span>
@@ -10694,7 +10693,6 @@ $("orderbookList")?.addEventListener("click", (event) => {
   }
   triggerHaptic("selection");
   state.orderbook.formPrice = row.dataset.bookPrice;
-  state.orderbook.orderSide = row.dataset.bookAction === "SELL" ? "SELL" : "BUY";
   renderOrderbookPanel();
   $("limitOrderAmountInput")?.focus();
 });
