@@ -187,7 +187,10 @@ export const config = {
   usdtDepositScanMs: parseNumber(process.env.USDT_DEPOSIT_SCAN_MS, 20_000, 5_000),
   usdtDepositIntentMinutes: parseNumber(process.env.USDT_DEPOSIT_INTENT_MINUTES, 60, 5),
   usdtDepositConfirmations: parseNumber(process.env.USDT_DEPOSIT_CONFIRMATIONS, 6, 1),
-  usdtDepositMaxBlockRange: parseNumber(process.env.USDT_DEPOSIT_MAX_BLOCK_RANGE, 300, 10),
+  // Восстановление после разрыва идёт этими шагами: при 300 блоках догон
+  // отставания в полмиллиона занимает сутки. getTransferLogs при отказе ноды
+  // делит диапазон пополам, поэтому крупный шаг деградирует мягко.
+  usdtDepositMaxBlockRange: parseNumber(process.env.USDT_DEPOSIT_MAX_BLOCK_RANGE, 2_000, 10),
   usdtDepositInitialLookbackBlocks: parseNumber(process.env.USDT_DEPOSIT_INITIAL_LOOKBACK_BLOCKS, 2_400, 300),
   usdtDepositBackfillBlocks: parseNumber(process.env.USDT_DEPOSIT_BACKFILL_BLOCKS, 6_000, 300),
   usdtDepositBackfillMs: parseNumber(process.env.USDT_DEPOSIT_BACKFILL_MS, 300_000, 60_000),
