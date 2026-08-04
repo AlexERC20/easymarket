@@ -1349,6 +1349,16 @@ function detectPrunedLowerBound(error) {
   return lowerHeight ? Number(lowerHeight[1]) : null;
 }
 
+// Some nodes refuse old blocks outright rather than naming a boundary: "Archive
+// requests require a personal token". There is no number to jump to, so the
+// cursor has to resume near the head and the abandoned range gets reported.
+function refusesArchiveHistory(error) {
+  const message = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
+  return message.includes("archive")
+    || message.includes("missing trie node")
+    || message.includes("state not available");
+}
+
 function canUseExplorerScan(network) {
   return Boolean(network.explorerApiKey)
     && Boolean(network.explorerApiUrl)
@@ -1490,7 +1500,11 @@ async function scanNetwork(network) {
     // The history we are asking for is gone from the node. Step over it rather
     // than wedging here; the gap is reported so it can be recovered through the
     // explorer, which looks up by address and needs no archive access.
-    const prunedFrom = detectPrunedLowerBound(error);
+    const archiveRefused = refusesArchiveHistory(error);
+    const prunedFrom = detectPrunedLowerBound(error)
+      ?? (archiveRefused
+        ? Math.max(0, safeToBlock - Math.round(config.usdtDepositInitialLookbackBlocks))
+        : null);
     if (!prunedFrom || prunedFrom <= fromBlock) {
       throw error;
     }
