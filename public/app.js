@@ -1795,6 +1795,88 @@ function getMyChartBet(market) {
   };
 }
 
+// Пульс рынка: телефон стучит в такт цене, пока у человека открыта позиция.
+// Движение в его сторону — короткий светлый тик, против — глухая двойная
+// отбивка, последние секунды — частое сердцебиение. Порог срабатывания
+// сжимается к экспирации по тому же закону, что и чувствительность самой
+// ставки: тот же доллар BTC ближе к расчёту решает больше.
+const PULSE_SETTING_KEY = "marketPulseEnabled";
+let pulseMarketId = null;
+let pulseLastPrice = null;
+let pulseLastAt = 0;
+
+function isMarketPulseEnabled() {
+  try {
+    return window.localStorage?.getItem(PULSE_SETTING_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function setMarketPulseEnabled(enabled) {
+  try {
+    window.localStorage?.setItem(PULSE_SETTING_KEY, enabled ? "1" : "0");
+  } catch {
+    // Приватный режим — настройка проживёт до перезагрузки, это не повод падать.
+  }
+}
+
+function updateMarketPulse(market, openPrice, currentPrice) {
+  if (!isMarketPulseEnabled() || document.visibilityState !== "visible") {
+    return;
+  }
+  const bet = getMyChartBet(market);
+  if (!bet || !Number.isFinite(currentPrice) || currentPrice <= 0) {
+    pulseMarketId = null;
+    return;
+  }
+
+  const secondsLeft = (new Date(market.end_time).getTime() - Date.now()) / 1000;
+  if (!(secondsLeft > 0) || secondsLeft > 900) {
+    return;
+  }
+
+  // Новый рынок: запоминаем точку отсчёта молча.
+  if (pulseMarketId !== market.id) {
+    pulseMarketId = market.id;
+    pulseLastPrice = currentPrice;
+    pulseLastAt = Date.now();
+    return;
+  }
+
+  const now = Date.now();
+  const finale = secondsLeft <= 10;
+  const minGap = finale ? 620 : Math.max(1200, Math.min(4000, secondsLeft * 12));
+  if (now - pulseLastAt < minGap) {
+    return;
+  }
+
+  // Шаг сжимается как корень из оставшегося времени — так же, как растёт
+  // чувствительность цены у экспирации.
+  const step = Math.max(2, currentPrice * 0.00008 * Math.sqrt(Math.max(1, secondsLeft) / 60));
+  const moved = currentPrice - (pulseLastPrice ?? currentPrice);
+  if (!finale && Math.abs(moved) < step) {
+    return;
+  }
+
+  pulseLastPrice = currentPrice;
+  pulseLastAt = now;
+
+  if (finale) {
+    triggerHaptic("light");
+    return;
+  }
+
+  // На чьей стороне сейчас цена относительно страйка.
+  const winning = bet.side === "YES" ? currentPrice >= openPrice : currentPrice <= openPrice;
+  const towardsMe = bet.side === "YES" ? moved > 0 : moved < 0;
+  if (towardsMe) {
+    triggerHaptic(winning ? "medium" : "light");
+  } else {
+    triggerHaptic(winning ? "light" : "warning");
+  }
+}
+
 // Искра пересечения таргет-линии: цена пробивает цель — главный драматический
 // момент ставки, он должен ощущаться (вспышка + волна по линии + хаптика).
 let chartCrossFx = null;
@@ -1944,6 +2026,7 @@ function drawMarketChartFrame(ts) {
   }
   if (!worldCup && Number.isFinite(openPrice) && openPrice > 0) {
     detectTargetCross(market, openPrice);
+    updateMarketPulse(market, openPrice, currentPrice);
   }
 
   const sourcePoints = getSortedChartPoints(market);
@@ -3212,6 +3295,7 @@ function renderTaskRewards() {
   if ($("dailyPresenceTaskReward")) $("dailyPresenceTaskReward").textContent = formatFire(dailyPresence);
   renderSoundToggle();
   renderAquariumToggle();
+  renderMarketPulseToggle();
   renderTaskSettings();
   renderTaskButtonStates();
   renderShareFriendTask();
@@ -3221,6 +3305,14 @@ function renderSoundToggle() {
   const button = $("motionSoundToggleBtn");
   if (!button) return;
   const enabled = isMotionSoundEnabled();
+  button.classList.toggle("active", enabled);
+  button.setAttribute("aria-pressed", enabled ? "true" : "false");
+}
+
+function renderMarketPulseToggle() {
+  const button = $("marketPulseToggleBtn");
+  if (!button) return;
+  const enabled = isMarketPulseEnabled();
   button.classList.toggle("active", enabled);
   button.setAttribute("aria-pressed", enabled ? "true" : "false");
 }
@@ -8897,6 +8989,7 @@ $("settingsBtn")?.addEventListener("click", () => {
   closeTopMoreMenu();
   renderSoundToggle();
   renderAquariumToggle();
+  renderMarketPulseToggle();
   renderShareWinsToggle();
   openSheet($("settingsSheet"));
 });
@@ -10449,6 +10542,15 @@ $("motionSoundToggleBtn")?.addEventListener("click", async () => {
   const enabled = await setMotionSoundEnabled(!isMotionSoundEnabled());
   renderSoundToggle();
   showToast(enabled ? "Звук включен." : "Звук выключен.");
+});
+
+$("marketPulseToggleBtn")?.addEventListener("click", () => {
+  const enabled = !isMarketPulseEnabled();
+  setMarketPulseEnabled(enabled);
+  renderMarketPulseToggle();
+  // Включили — сразу даём почувствовать, как это ощущается.
+  triggerHaptic(enabled ? "medium" : "selection");
+  showToast(enabled ? "Пульс рынка включён." : "Пульс рынка выключен.");
 });
 
 $("aquariumToggleBtn")?.addEventListener("click", () => {
