@@ -6773,88 +6773,206 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   filter: grayscale(0.45);
 }
 
-.orderbook-list {
+.orderbook-tabs {
   display: grid;
-  gap: 6px;
+  grid-auto-flow: column;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
 }
 
-.orderbook-head,
-.orderbook-row {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
+.orderbook-tabs button {
+  display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  padding: 8px 6px;
+  cursor: pointer;
+}
+
+.orderbook-tabs button.active {
+  background: rgba(10, 14, 22, 0.82);
+  color: var(--text);
+}
+
+.orderbook-tabs button:focus-visible {
+  outline: 2px solid var(--accent, #4cd3c2);
+  outline-offset: 1px;
+}
+
+.orderbook-tabs button b {
+  font-size: 10px;
+  font-weight: 900;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(76, 211, 194, 0.2);
+  color: #4cd3c2;
+}
+
+.orderbook-tabs button b:empty {
+  display: none;
+}
+
+/* Ладдер: продажи сверху, спред посередине, покупки снизу. Сторона читается
+   местом, а не подписью, поэтому колонка с ярлыком больше не нужна. */
+.orderbook-list {
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+
+.orderbook-cols {
+  display: grid;
+  grid-template-columns: 1fr 4.6em 4.6em;
+  gap: 8px;
+  padding: 0 9px 6px;
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.orderbook-cols span:not(:first-child) {
+  text-align: right;
 }
 
 .orderbook-row {
   position: relative;
-  overflow: hidden;
-  border-radius: 12px;
-  background: rgba(10, 14, 22, 0.72);
-  padding: 9px 11px;
+  display: grid;
+  grid-template-columns: 1fr 4.6em 4.6em;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 0;
+  width: 100%;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: left;
+  cursor: pointer;
 }
 
-/* Living depth bar: scaleX tracks the row's share of the book (GPU-composited,
-   no width/reflow). --depth is a 0..1 factor set per render. */
+/* Полоса глубины крепится к колонке цены и растёт наружу, поэтому перекос
+   стакана виден силуэтом, без чтения чисел. */
 .orderbook-row::before {
   content: "";
   position: absolute;
-  inset: 0;
-  transform-origin: left center;
-  transform: scaleX(var(--depth, 0));
-  border-radius: inherit;
-  opacity: 0.9;
-  transition: transform 480ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  top: 1px;
+  bottom: 1px;
+  right: 0;
+  width: calc(var(--depth, 0) * 100%);
+  border-radius: 4px;
+  transition: width 420ms cubic-bezier(0.22, 0.61, 0.36, 1);
   pointer-events: none;
 }
 
-.orderbook-row.bid::before {
-  background: linear-gradient(90deg, rgba(46, 204, 113, 0.26), rgba(46, 204, 113, 0.04));
+.orderbook-row.bid::before { background: rgba(46, 204, 113, 0.16); }
+.orderbook-row.ask::before { background: rgba(231, 76, 60, 0.16); }
+
+.orderbook-row > * { position: relative; z-index: 1; }
+
+.orderbook-row b {
+  font-weight: 800;
+  letter-spacing: -0.01em;
 }
 
-.orderbook-row.ask::before {
-  background: linear-gradient(90deg, rgba(231, 76, 60, 0.26), rgba(231, 76, 60, 0.04));
-}
+.orderbook-row.bid b { color: var(--yes); }
+.orderbook-row.ask b { color: var(--no); }
 
-.orderbook-row.real {
-  border: 1px solid rgba(76, 211, 194, 0.22);
-  box-shadow: inset 0 0 0 1px rgba(46, 204, 113, 0.06), 0 0 18px rgba(76, 211, 194, 0.08);
-}
-
-.orderbook-row.real::after {
-  content: "";
-  position: absolute;
-  inset: 1px;
-  border-radius: inherit;
-  border: 1px solid rgba(76, 211, 194, 0.18);
-  pointer-events: none;
-}
-
-.orderbook-row > * {
-  position: relative;
-  z-index: 1;
-}
-
-.orderbook-row.bid b {
-  color: var(--yes);
-}
-
-.orderbook-row.ask b {
-  color: var(--no);
-}
-
-.orderbook-row span,
-.orderbook-row small,
-.orderbook-head small,
-.orderbook-head span {
-  color: var(--muted);
+.orderbook-row .ob-size,
+.orderbook-row .ob-total {
+  text-align: right;
   font-size: 12px;
+  font-weight: 750;
+  color: var(--text);
+}
+
+.orderbook-row .ob-total { color: var(--muted); }
+
+.orderbook-row:hover,
+.orderbook-row:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  outline: none;
+}
+
+.orderbook-row:focus-visible { box-shadow: inset 0 0 0 1px rgba(76, 211, 194, 0.5); }
+
+/* Своя заявка на уровне: одной точки достаточно, рамка со свечением спорила
+   с цветом стороны и перегружала строку. */
+.orderbook-row.mine b::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #4cd3c2;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.orderbook-spread {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 5px 0;
+  padding: 7px 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.orderbook-spread b {
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.orderbook-spread small {
+  font-size: 11px;
   font-weight: 850;
+  color: var(--muted);
+}
+
+.orderbook-empty {
+  padding: 10px 9px;
+  font-size: 12px;
+  font-weight: 750;
+  color: var(--muted);
+}
+
+.orderbook-hint {
+  margin: 2px 0 0;
+  font-size: 11px;
+  font-weight: 750;
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orderbook-row::before { transition: none; }
 }
 
 .my-limit-orders {
   display: grid;
   gap: 6px;
+}
+
+.my-limit-orders.hidden,
+.limit-order-form.hidden,
+.orderbook-list.hidden,
+.orderbook-hint.hidden {
+  display: none;
 }
 
 .limit-orders-toggle {

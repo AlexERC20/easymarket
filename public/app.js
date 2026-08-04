@@ -194,6 +194,7 @@ const state = {
   feedPanel: "positions",
   orderbookSide: "YES",
   orderbook: {
+    tab: "book",
     marketId: null,
     currency: "USDT",
     bookType: "USDT_CASH",
@@ -4503,29 +4504,19 @@ function renderMyLimitOrders() {
   const orders = (state.orderbook.myOrders || [])
     .filter((order) => normalizeCurrency(order.currency) === state.currency);
   if (!orders.length) {
-    container.innerHTML = `
-      <button class="limit-orders-toggle" type="button" data-toggle-limit-orders>
-        <span>Мои лимитки</span>
-        <b>0</b>
-      </button>
-    `;
+    container.innerHTML = '<p class="orderbook-empty">Открытых заявок нет. Поставь цену в стакане.</p>';
     return;
   }
 
   container.innerHTML = `
-    <button class="limit-orders-toggle ${state.orderbook.myOrdersOpen ? "open" : ""}" type="button" data-toggle-limit-orders>
-      <span>Мои лимитки</span>
-      <b>${orders.length}</b>
-      <small>${state.orderbook.myOrdersOpen ? "Свернуть" : "Показать"}</small>
-    </button>
-    ${state.orderbook.myOrdersOpen ? orders.map((order) => `
+    ${orders.map((order) => `
         <div class="my-limit-order">
           <span class="lo-side ${order.order_side === "SELL" ? "sell" : "buy"}" title="${escapeHtml(marketSideLabel(getDisplayMarket(), order.side))}">${order.order_side === "SELL" ? "Sell" : "Buy"} ${escapeHtml(marketButtonSideLabel(getDisplayMarket(), order.side))}</span>
           <b>${formatCents(order.limit_price)}</b>
           <small>${formatCurrencyAmount(order.remaining_reserved, order.currency)}</small>
           <button type="button" data-cancel-limit-order="${order.id}" ${state.orderbook.cancelPendingId === order.id ? "disabled" : ""}>Cancel</button>
         </div>
-      `).join("") : ""}
+      `).join("")}
   `;
 }
 
@@ -4595,7 +4586,12 @@ function renderOrderbookPanel() {
     noBookButton.classList.toggle("active", state.orderbookSide === "NO");
   }
 
-  if (!showBook || !market) {
+  if (!showBook) {
+    return;
+  }
+
+  renderOrderbookTabs();
+  if (!market) {
     return;
   }
 
@@ -4608,57 +4604,106 @@ function renderOrderbookPanel() {
 
   const syntheticRows = market.trading_mode === "CLOB" ? [] : buildSyntheticOrderbook(market, side);
   const realRows = getRealOrderbookRows(side);
-  const rows = [...realRows, ...syntheticRows].sort((a, b) => b.price - a.price).slice(0, 8);
-  const maxSize = Math.max(1, ...rows.map((row) => Number(row.size) || 0));
-  const headPrice = formatCents(getOutcomePrice(market, side));
-  // Depth as a 0..1 scaleX factor so the bar animates on the compositor (no reflow).
-  const depthFor = (row) => Math.round(((Number(row.size) || 0) / maxSize) * 1000) / 1000;
-  const existingRows = list.querySelectorAll(".orderbook-row");
+  const all = [...realRows, ...syntheticRows];
 
-  // Same side and row structure already present: update values in place so the
-  // depth bars glide via their CSS transition instead of being recreated (which
-  // would kill the animation and reset the scroll).
-  const bookKey = `${market.id}:${side}:${state.currency}:${realRows.length}`;
-  if (list.dataset.bookSide === bookKey && existingRows.length === rows.length) {
-    const headEl = list.querySelector(".orderbook-head b");
-    if (headEl) headEl.textContent = headPrice;
-    const statusEl = list.querySelector(".orderbook-head small");
-    if (statusEl) statusEl.textContent = state.orderbook.loading ? "loading" : `${realRows.length} limits`;
-    rows.forEach((row, index) => {
-      const rowEl = existingRows[index];
-      rowEl.className = `orderbook-row ${row.type} ${row.real ? "real" : ""}`.trim();
-      rowEl.style.setProperty("--depth", String(depthFor(row)));
-      const priceEl = rowEl.querySelector("b");
-      const sizeEl = rowEl.querySelector("small");
-      const labelEl = rowEl.querySelector("span");
-      if (priceEl) priceEl.textContent = formatCents(row.price);
-      if (labelEl) labelEl.textContent = row.real
-        ? (row.order_side === "SELL" ? "Ask" : "Bid")
-        : (row.type === "bid" ? "Bid" : "Ask");
-      if (sizeEl) sizeEl.textContent = row.real
-        ? `${row.size.toLocaleString("ru-RU")} / ${row.orders_count}`
-        : row.size.toLocaleString("ru-RU");
+  // Продажи идут вверх от спреда, покупки вниз — сторона читается местом.
+  // Ближайшие к спреду уровни оставляем: они и есть то, по чему торгуют.
+  const asks = all.filter((row) => row.type === "ask").sort((a, b) => a.price - b.price).slice(0, 6);
+  const bids = all.filter((row) => row.type === "bid").sort((a, b) => b.price - a.price).slice(0, 6);
+  const maxSize = Math.max(1, ...all.map((row) => Number(row.size) || 0));
+  const depthFor = (row) => Math.round(((Number(row.size) || 0) / maxSize) * 1000) / 1000;
+
+  const myPrices = new Set(
+    (state.orderbook.myOrders || [])
+      .filter((order) => normalizeCurrency(order.currency) === state.currency
+        && String(order.side).toUpperCase() === side)
+      .map((order) => formatCents(Number(order.limit_price || 0))),
+  );
+
+  // Накопительный объём: сколько наберётся, если съесть стакан до этого уровня.
+  const withTotals = (list) => {
+    let running = 0;
+    return list.map((row) => {
+      running += Number(row.size) || 0;
+      return { ...row, total: running };
     });
-    renderMyLimitOrders();
+  };
+  const askRows = withTotals(asks).reverse();
+  const bidRows = withTotals(bids);
+
+  const bestAsk = asks[0]?.price ?? null;
+  const bestBid = bids[0]?.price ?? null;
+  const mid = bestAsk !== null && bestBid !== null
+    ? (bestAsk + bestBid) / 2
+    : getOutcomePrice(market, side);
+  const spreadCents = bestAsk !== null && bestBid !== null
+    ? Math.max(0, (bestAsk - bestBid) * 100)
+    : null;
+  const spreadShare = spreadCents !== null && mid > 0
+    ? Math.round((spreadCents / (mid * 100)) * 100)
+    : null;
+
+  const rowMarkup = (row) => {
+    const mine = myPrices.has(formatCents(row.price)) ? " mine" : "";
+    return `
+      <button class="orderbook-row ${row.type}${mine}" type="button"
+        data-book-price="${formatCents(row.price)}"
+        data-book-action="${row.type === "ask" ? "BUY" : "SELL"}"
+        style="--depth:${depthFor(row)}">
+        <b>${formatCents(row.price)}</b>
+        <span class="ob-size">${Math.round(row.size).toLocaleString("ru-RU")}</span>
+        <span class="ob-total">${Math.round(row.total).toLocaleString("ru-RU")}</span>
+      </button>
+    `;
+  };
+
+  list.innerHTML = `
+    <div class="orderbook-cols">
+      <span>Цена</span><span>Объём</span><span>Всего</span>
+    </div>
+    ${askRows.length
+      ? askRows.map(rowMarkup).join("")
+      : '<p class="orderbook-empty">Продавцов пока нет</p>'}
+    <div class="orderbook-spread">
+      <b>${formatCents(mid)}</b>
+      <small>${spreadCents === null
+        ? (state.orderbook.loading ? "загружаю" : "нет двух сторон")
+        : `спред ${spreadCents.toFixed(1)}¢${spreadShare !== null ? ` · ${spreadShare}%` : ""}`}</small>
+    </div>
+    ${bidRows.length
+      ? bidRows.map(rowMarkup).join("")
+      : '<p class="orderbook-empty">Покупателей пока нет</p>'}
+  `;
+  list.dataset.bookSide = `${market.id}:${side}:${state.currency}`;
+  renderMyLimitOrders();
+  renderOrderbookTabs();
+}
+
+// Вкладки внутри стакана: сам стакан, форма заявки и свои заявки. Форма больше
+// не занимает место над ценами, а свои заявки получают отдельный экран.
+function renderOrderbookTabs() {
+  const tab = state.orderbook.tab || "book";
+  const list = $("orderbookList");
+  const form = $("limitOrderForm");
+  const mine = $("myLimitOrders");
+  const hint = $("orderbookHint");
+  if (!list || !form || !mine) {
     return;
   }
 
-  list.innerHTML = `
-    <div class="orderbook-head">
-      <span title="${escapeHtml(marketSideLabel(market, side))}">${escapeHtml(marketButtonSideLabel(market, side))} book</span>
-      <b>${headPrice}</b>
-      <small>${state.orderbook.loading ? "loading" : `${realRows.length} limits`}</small>
-    </div>
-    ${rows.map((row) => `
-      <div class="orderbook-row ${row.type} ${row.real ? "real" : ""}" style="--depth:${depthFor(row)}">
-        <span>${row.real ? (row.order_side === "SELL" ? "Ask" : "Bid") : (row.type === "bid" ? "Bid" : "Ask")}</span>
-        <b>${formatCents(row.price)}</b>
-        <small>${row.real ? `${row.size.toLocaleString("ru-RU")} / ${row.orders_count}` : row.size.toLocaleString("ru-RU")}</small>
-      </div>
-    `).join("")}
-  `;
-  list.dataset.bookSide = bookKey;
-  renderMyLimitOrders();
+  list.classList.toggle("hidden", tab !== "book");
+  form.classList.toggle("hidden", tab !== "form");
+  mine.classList.toggle("hidden", tab !== "mine");
+  if (hint) hint.classList.toggle("hidden", tab !== "book");
+
+  for (const button of document.querySelectorAll("[data-book-tab]")) {
+    button.classList.toggle("active", button.dataset.bookTab === tab);
+  }
+
+  const count = (state.orderbook.myOrders || [])
+    .filter((order) => normalizeCurrency(order.currency) === state.currency).length;
+  const badge = $("orderbookMineCount");
+  if (badge) badge.textContent = count > 0 ? String(count) : "";
 }
 
 function mergeWorldCupChartPoint(market) {
@@ -10619,6 +10664,29 @@ $("orderbookNoBtn")?.addEventListener("click", () => {
   state.orderbookSide = "NO";
   state.orderbook.formPrice = "";
   renderOrderbookPanel();
+});
+
+for (const button of document.querySelectorAll("[data-book-tab]")) {
+  button.addEventListener("click", () => {
+    triggerHaptic("selection");
+    state.orderbook.tab = button.dataset.bookTab;
+    renderOrderbookPanel();
+  });
+}
+
+// Клик по уровню подставляет его цену в заявку и переключает на форму: цена
+// приходит из стакана, поэтому её не надо набирать руками и промахиваться.
+$("orderbookList")?.addEventListener("click", (event) => {
+  const row = event.target?.closest?.("[data-book-price]");
+  if (!row) {
+    return;
+  }
+  triggerHaptic("selection");
+  state.orderbook.formPrice = row.dataset.bookPrice;
+  state.orderbook.orderSide = row.dataset.bookAction === "SELL" ? "SELL" : "BUY";
+  state.orderbook.tab = "form";
+  renderOrderbookPanel();
+  $("limitOrderAmountInput")?.focus();
 });
 
 $("limitOrderBuyBtn")?.addEventListener("click", () => {
