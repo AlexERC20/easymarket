@@ -1876,7 +1876,7 @@ function paintHolo() {
 // движение затухло, — постоянного rAF в фоне не остаётся.
 function stepHolo() {
   holoFrame = null;
-  const ease = 0.075;
+  const ease = 0.052;
   holoShown.x += (holoTilt.x - holoShown.x) * ease;
   holoShown.y += (holoTilt.y - holoShown.y) * ease;
   paintHolo();
