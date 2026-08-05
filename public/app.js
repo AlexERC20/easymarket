@@ -9063,6 +9063,14 @@ document.querySelectorAll(".outcome-button").forEach((button) => {
 document.querySelectorAll(".amount-button").forEach((button) => {
   button.addEventListener("click", () => {
     button.blur();
+    // В круге те же кнопки ставят в банк: жест один и тот же, отдельный ряд
+    // кнопок под рулетку был лишним.
+    if (roulette.active) {
+      roulette.amount = Number(button.dataset.amount) || 50;
+      renderRouletteAmounts();
+      void placeRouletteBet();
+      return;
+    }
     state.selectedAmount = Number(button.dataset.amount);
     renderTradeTicket();
     requestMarketBuy(getDisplayMarket(), state.selectedSide, state.selectedAmount);
@@ -11352,6 +11360,7 @@ function getMarketCarouselIndex(markets) {
 }
 
 function stepMarketCarousel(direction, { soft = false } = {}) {
+  closeRoulette();
   const markets = getMarketCarouselEntries();
   if (markets.length <= 1) {
     return;
@@ -11658,6 +11667,28 @@ function rouletteSegmentColor(userId, isMe) {
   };
 }
 
+// Аватар грузим один раз на игрока: без кеша каждый кадр создавал бы новый
+// Image и сеть захлебнулась бы на первой же секунде.
+const rouletteAvatars = new Map();
+
+function getRouletteAvatar(username) {
+  const url = getTelegramUserAvatarUrl(username);
+  if (!url) {
+    return null;
+  }
+  const cached = rouletteAvatars.get(url);
+  if (cached !== undefined) {
+    return cached?.complete && cached.naturalWidth > 0 ? cached : null;
+  }
+  const image = new Image();
+  image.crossOrigin = "anonymous";
+  image.referrerPolicy = "no-referrer";
+  image.onerror = () => rouletteAvatars.set(url, null);
+  image.src = url;
+  rouletteAvatars.set(url, image);
+  return null;
+}
+
 function rouletteInitial(name) {
   const trimmed = String(name || "").trim();
   return trimmed ? trimmed[0].toUpperCase() : "?";
@@ -11801,7 +11832,7 @@ function drawRouletteFrame(timestamp) {
 
   const cx = width / 2;
   const cy = height / 2;
-  const radius = Math.min(width, height) * 0.42;
+  const radius = Math.min(width, height) * 0.45;
   const round = roulette.round;
   const segments = round?.segments || [];
   const rotation = roulette.angle * Math.PI * 2;
@@ -11846,20 +11877,44 @@ function drawRouletteFrame(timestamp) {
 
     // Подпись рисуем только если сектор достаточно широкий, иначе имена
     // наложатся друг на друга и превратятся в кашу.
-    if (segment.share > 0.07) {
+    if (segment.share > 0.045) {
       const mid = (from + to) / 2;
-      const tx = cx + Math.cos(mid) * radius * 0.78;
-      const ty = cy + Math.sin(mid) * radius * 0.78;
+      const tx = cx + Math.cos(mid) * radius * 0.74;
+      const ty = cy + Math.sin(mid) * radius * 0.74;
+      const face = Math.min(radius * 0.16, radius * segment.share * 2.2);
+      const avatar = getRouletteAvatar(segment.username);
+
       ctx.save();
-      ctx.translate(tx, ty);
-      ctx.rotate(mid + Math.PI / 2);
+      ctx.beginPath();
+      ctx.arc(tx, ty, face, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(8, 12, 20, 0.88)";
+      ctx.fill();
+      if (avatar) {
+        ctx.save();
+        ctx.clip();
+        ctx.drawImage(avatar, tx - face, ty - face, face * 2, face * 2);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = "rgba(226, 238, 255, 0.92)";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = `800 ${Math.round(face * 1.05)}px Inter, system-ui, sans-serif`;
+        ctx.fillText(rouletteInitial(segment.name), tx, ty + face * 0.04);
+      }
+      // Своя доля обведена тем же золотом, что и сектор, — по кольцу её видно
+      // сразу, не разбирая лиц.
+      ctx.lineWidth = (segment.is_me ? 2.6 : 1.4) * dpr;
+      ctx.strokeStyle = segment.is_me ? "#ffd68f" : "rgba(10, 16, 26, 0.75)";
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillStyle = "rgba(8, 12, 20, 0.9)";
-      ctx.font = `800 ${Math.round(radius * 0.1)}px Inter, system-ui, sans-serif`;
-      ctx.fillText(rouletteInitial(segment.name), 0, -radius * 0.06);
-      ctx.font = `700 ${Math.round(radius * 0.075)}px Inter, system-ui, sans-serif`;
-      ctx.fillText(`${Math.round(segment.share * 100)}%`, 0, radius * 0.06);
+      ctx.fillStyle = "rgba(10, 16, 26, 0.92)";
+      ctx.font = `800 ${Math.round(radius * 0.062)}px Inter, system-ui, sans-serif`;
+      ctx.fillText(`${Math.round(segment.share * 100)}%`, tx, ty + face + radius * 0.055);
       ctx.restore();
     }
   });
@@ -11884,18 +11939,28 @@ function drawRouletteFrame(timestamp) {
   roulette.raf = requestAnimationFrame(drawRouletteFrame);
 }
 
+const ROULETTE_AMOUNTS = [50, 100, 500, 2000];
+
+// Переписываем существующие кнопки ставок под звёзды. Обратно их вернёт
+// renderTradeTicket, когда рынок снова станет обычным.
+function renderRouletteAmounts() {
+  const open = roulette.round?.status === "betting";
+  document.querySelectorAll(".amount-button").forEach((button, index) => {
+    const amount = ROULETTE_AMOUNTS[index] ?? ROULETTE_AMOUNTS[0];
+    button.dataset.amount = String(amount);
+    button.dataset.label = `${amount} ★`;
+    button.dataset.win = "";
+    button.classList.toggle("active", amount === roulette.amount);
+    button.classList.remove("loading");
+    button.disabled = !open || roulette.busy || !state.user;
+    button.innerHTML = `<strong>${amount} ★</strong><small>в банк</small>`;
+  });
+}
+
 function renderRouletteBar() {
   const round = roulette.round;
-  const button = $("rouletteBetBtn");
-  const label = $("rouletteBetLabel");
   const hint = $("rouletteHint");
-  if (!button || !label) {
-    return;
-  }
-
-  const open = round?.status === "betting";
-  button.disabled = !open || roulette.busy;
-  label.textContent = open ? `Поставить ${roulette.amount} ★` : "Приём закрыт";
+  renderRouletteAmounts();
 
   if (hint && round) {
     const mine = round.segments.find((item) => item.is_me);
@@ -12021,23 +12086,8 @@ function closeRoulette() {
     cancelAnimationFrame(roulette.raf);
     roulette.raf = null;
   }
+  renderTradeTicket();
 }
-
-document.querySelectorAll("[data-roulette-amount]").forEach((button) => {
-  button.addEventListener("click", () => {
-    triggerHaptic("selection");
-    roulette.amount = Number(button.dataset.rouletteAmount) || 50;
-    document.querySelectorAll("[data-roulette-amount]").forEach((item) => {
-      item.classList.toggle("active", item === button);
-    });
-    renderRouletteBar();
-  });
-});
-
-$("rouletteBetBtn")?.addEventListener("click", () => {
-  triggerHaptic("light");
-  void placeRouletteBet();
-});
 
 // Честность проверяется руками: до раунда публикуется хеш зерна, после
 // раскрутки — само зерно. Кто угодно может пересчитать sha256 и убедиться,

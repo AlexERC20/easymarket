@@ -449,6 +449,7 @@ function serializeRound(round, segments, viewerId) {
       start: segment.start,
       end: segment.end,
       name: segment.first_name || segment.username || "Игрок",
+      username: segment.username,
       is_me: viewerId ? Number(segment.user_id) === Number(viewerId) : false,
     })),
     winner: round.winner_user_id
