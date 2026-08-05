@@ -11715,7 +11715,7 @@ function rouletteTargetAngle(round) {
   if (!Number.isFinite(final)) {
     return null;
   }
-  return ((-final % 1) + 1) % 1;
+  return ((final % 1) + 1) % 1;
 }
 
 function updateRouletteWheel(deltaSeconds) {
@@ -12064,8 +12064,8 @@ function drawRouletteFrame(timestamp) {
   segments.forEach((segment, index) => {
     // Нулевой угол у канваса смотрит вправо, а стрелка у нас сверху — отсюда
     // сдвиг на четверть оборота.
-    const from = ((segment.drawStart ?? segment.start) + roulette.angle) * Math.PI * 2 - Math.PI / 2;
-    const to = ((segment.drawEnd ?? segment.end) + roulette.angle) * Math.PI * 2 - Math.PI / 2;
+    const from = (segment.drawStart ?? segment.start) * Math.PI * 2 - Math.PI / 2;
+    const to = (segment.drawEnd ?? segment.end) * Math.PI * 2 - Math.PI / 2;
     const colors = rouletteSegmentColor(index, segments.length, segment.is_me);
     ctx.save();
     ctx.beginPath();
@@ -12128,15 +12128,56 @@ function drawRouletteFrame(timestamp) {
 
   // Стрелка сверху. Рисуется последней, чтобы всегда быть поверх секторов.
   ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(roulette.angle * Math.PI * 2);
+  const tipY = -radius * 0.58;
+  const baseY = -radius * 1.1;
+  const halfW = radius * 0.13;
+
+  // Мягкое свечение под стрелкой — тот же приём, что у верхнего уровня плашки.
+  const flicker = 0.72 + 0.28 * Math.sin(timestamp * 0.014);
+  const glowR = radius * 0.42;
+  ctx.save();
+  ctx.globalAlpha = 0.55 * flicker;
+  ctx.drawImage(getTickerGlowSprite(), -glowR, baseY - glowR * 0.4, glowR * 2, glowR * 2);
+  ctx.restore();
+
+  const body = ctx.createLinearGradient(0, baseY, 0, tipY);
+  body.addColorStop(0, "#fff3c4");
+  body.addColorStop(0.45, "#ffd166");
+  body.addColorStop(1, "#ff9d2f");
+
   ctx.beginPath();
-  ctx.moveTo(cx, cy - radius * 0.84);
-  ctx.lineTo(cx - radius * 0.09, cy - radius * 1.04);
-  ctx.lineTo(cx + radius * 0.09, cy - radius * 1.04);
+  ctx.moveTo(0, tipY);
+  ctx.lineTo(-halfW, baseY + radius * 0.14);
+  ctx.lineTo(-halfW * 0.46, baseY);
+  ctx.lineTo(halfW * 0.46, baseY);
+  ctx.lineTo(halfW, baseY + radius * 0.14);
   ctx.closePath();
+  ctx.fillStyle = body;
+  ctx.fill();
+  ctx.lineWidth = 1.6 * dpr;
+  ctx.strokeStyle = "rgba(12, 16, 24, 0.85)";
+  ctx.stroke();
+
+  // Блик по левой грани: даёт объём и оживает вместе с мерцанием.
+  ctx.beginPath();
+  ctx.moveTo(0, tipY);
+  ctx.lineTo(-halfW * 0.46, baseY);
+  ctx.lineTo(0, baseY);
+  ctx.closePath();
+  ctx.fillStyle = `rgba(255, 255, 255, ${(0.24 * flicker).toFixed(3)})`;
+  ctx.fill();
+  ctx.restore();
+
+  // Ось стрелки поверх центра.
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius * 0.075, 0, Math.PI * 2);
   ctx.fillStyle = "#ffd166";
   ctx.fill();
-  ctx.strokeStyle = "rgba(10, 14, 22, 0.8)";
-  ctx.lineWidth = 1.4 * dpr;
+  ctx.strokeStyle = "rgba(12, 16, 24, 0.85)";
+  ctx.lineWidth = 1.6 * dpr;
   ctx.stroke();
   ctx.restore();
 
