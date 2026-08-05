@@ -8,6 +8,75 @@ import { query, withTransaction, toNumber } from "../db.js";
 // чтобы звёзд в обращении становилось меньше, а не чтобы они переезжали на счёт
 // дома.
 
+// Схема живёт здесь, а не в общем блоке миграций, и применяется отдельным
+// вызовом со своей обработкой ошибок. В общем батче Postgres откатывает всё
+// разом при любой ошибке, а сам вызов стоит внутри стартового try, который
+// глотает исключения, — из-за этого таблицы могли молча не появиться.
+let rouletteSchemaReady = false;
+
+export async function ensureRouletteSchema() {
+  if (rouletteSchemaReady) {
+    return true;
+  }
+  try {
+    await query(`
+-- Рулетка. Валюта заложена сразу, хотя запускаемся только на звёздах:
+-- круги для бонусных долларов и USDT встанут той же таблицей.
+CREATE TABLE IF NOT EXISTS roulette_rounds (
+  id BIGSERIAL PRIMARY KEY,
+  currency TEXT NOT NULL DEFAULT 'STAR',
+  status TEXT NOT NULL DEFAULT 'betting',
+  -- Зерно фиксируем хешем при создании раунда и раскрываем при розыгрыше,
+  -- чтобы результат нельзя было подобрать задним числом.
+  seed TEXT,
+  seed_hash TEXT NOT NULL,
+  final_angle NUMERIC(12, 8),
+  spin_turns NUMERIC(10, 4),
+  spin_seconds NUMERIC(10, 4),
+  pot NUMERIC(20, 8) NOT NULL DEFAULT 0,
+  rake NUMERIC(20, 8) NOT NULL DEFAULT 0,
+  winner_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  winner_amount NUMERIC(20, 8) NOT NULL DEFAULT 0,
+  bets_close_at TIMESTAMPTZ NOT NULL,
+  spin_at TIMESTAMPTZ NOT NULL,
+  ends_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  settled_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_roulette_rounds_currency_status
+  ON roulette_rounds(currency, status, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_roulette_rounds_currency_settled
+  ON roulette_rounds(currency, settled_at DESC)
+  WHERE status = 'settled';
+
+CREATE TABLE IF NOT EXISTS roulette_bets (
+  id BIGSERIAL PRIMARY KEY,
+  round_id BIGINT NOT NULL REFERENCES roulette_rounds(id) ON DELETE CASCADE,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount NUMERIC(20, 8) NOT NULL,
+  refunded BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_roulette_bets_round
+  ON roulette_bets(round_id, id);
+
+CREATE INDEX IF NOT EXISTS idx_roulette_bets_user
+  ON roulette_bets(user_id, created_at DESC);
+    `);
+    rouletteSchemaReady = true;
+    return true;
+  } catch (error) {
+    console.error(
+      "[easymarket] roulette schema failed:",
+      error instanceof Error ? error.message : "unknown error",
+    );
+    return false;
+  }
+}
+
 export const ROULETTE_CURRENCIES = ["STAR", "BONUS", "USDT"];
 
 const MIN_BET = { STAR: 50, BONUS: 1, USDT: 1 };
@@ -332,6 +401,9 @@ async function advanceRound(client, currency) {
 }
 
 export async function rouletteTick() {
+  if (!(await ensureRouletteSchema())) {
+    return [];
+  }
   const results = [];
   for (const currency of getEnabledCurrencies()) {
     try {

@@ -89,7 +89,7 @@ import {
   markStarConversionRemindersSent,
 } from "./services/bonusEconomyService.js";
 import { getTreasurySnapshot } from "./services/treasuryService.js";
-import { getRouletteState, placeRouletteBet, rouletteTick } from "./services/rouletteService.js";
+import { ensureRouletteSchema, getRouletteState, placeRouletteBet, rouletteTick } from "./services/rouletteService.js";
 import { PriceUnavailableError, startBtcPriceStream } from "./services/priceService.js";
 import { runDatabaseCleanup, runStartupDatabaseRescue } from "./services/databaseCleanupService.js";
 import {
@@ -806,6 +806,7 @@ app.get("/api/special/kyivstoner", cachedJsonRoute("special/kyivstoner", 2_000, 
 // кеш ответов здесь не годится.
 app.get("/api/roulette/state", async (req, res) => {
   try {
+    await ensureRouletteSchema();
     const result = await getRouletteState({
       currency: req.query?.currency,
       telegram_id: req.query?.telegram_id,
@@ -2196,6 +2197,7 @@ async function startMarketEngine() {
 
   marketEngineStarted = true;
   startBtcPriceStream();
+  await ensureRouletteSchema();
   try {
     if (config.startupDatabaseRescueEnabled) {
       const rescueSummary = await runStartupDatabaseRescue();
