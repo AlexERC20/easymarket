@@ -1921,8 +1921,9 @@ function startLogoHologram() {
     document.addEventListener("pointerdown", ask, { once: true, passive: true });
   }
 
-  // Три секунды на то, чтобы хоть один источник ожил; иначе включаем волну.
-  window.setTimeout(startHoloAmbient, 3_000);
+  // Волна идёт сразу: если датчик оживёт, setHoloTilt её погасит. Так надпись
+  // не выглядит мёртвой первые секунды и сразу видно, что слой вообще рисуется.
+  startHoloAmbient();
 }
 
 // Пульс рынка: телефон стучит в такт цене, пока у человека открыта позиция.

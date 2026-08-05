@@ -1297,7 +1297,13 @@ h2 {
   background-position: var(--holo-pos) 0;
   -webkit-background-clip: text;
   background-clip: text;
+  /* Safari и iOS обязательно требуют -webkit-text-fill-color: одного
+     color: transparent мало, и слой не отрисовывается вовсе. */
   color: transparent;
+  -webkit-text-fill-color: transparent;
+  /* Тень родителя не должна просвечивать сквозь прозрачные буквы блика. */
+  text-shadow: none;
+  z-index: 1;
   opacity: var(--holo);
   pointer-events: none;
   /* Плавность нужна только чтобы блик не дёргался на шумном датчике; сам сдвиг
