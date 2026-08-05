@@ -9072,8 +9072,9 @@ document.querySelectorAll(".amount-button").forEach((button) => {
     // кнопок под рулетку был лишним.
     if (roulette.active) {
       roulette.amount = Number(button.dataset.amount) || 50;
+      showButtonPressed(button);
       renderRouletteAmounts();
-      void placeRouletteBet();
+      void placeRouletteBet(button);
       return;
     }
     state.selectedAmount = Number(button.dataset.amount);
@@ -12037,7 +12038,7 @@ async function loadRouletteState() {
   }
 }
 
-async function placeRouletteBet() {
+async function placeRouletteBet(sourceButton = null) {
   if (!state.user?.telegram_id || roulette.busy) {
     return;
   }
@@ -12054,7 +12055,12 @@ async function placeRouletteBet() {
     });
     roulette.round = data.round;
     triggerHaptic("success");
-    showToast(`Ставка ${roulette.amount} ★ принята.`);
+    playMotionSound("success");
+    triggerLightningFlash("success", getTierForAmount(roulette.amount, "STAR"));
+    if (sourceButton) {
+      flyRewardToBalance(sourceButton, "★");
+    }
+    triggerBalancePulse($("fireBalance"));
     void refreshAll().catch(() => undefined);
   } catch (error) {
     triggerHaptic("error");
