@@ -131,6 +131,7 @@ const DAILY_TASK_KEYS = [
   "daily_football_prediction",
   "daily_kyivstoner_bet",
   "daily_btc_5_predictions",
+  "daily_wheel_spins",
   "daily_win_1",
   "daily_win_streak_5",
   "daily_win_2_row",
@@ -2589,6 +2590,7 @@ function getClanTaskPoints(taskKey) {
     daily_football_prediction: 3,
     daily_kyivstoner_bet: 3,
     daily_btc_5_predictions: 8,
+    daily_wheel_spins: 8,
     daily_win_1: 5,
     daily_win_streak_5: 12,
   };
@@ -2616,6 +2618,7 @@ async function getDailyBonusRemaining(client, userId) {
           'task_daily_football_prediction',
           'task_daily_kyivstoner_bet',
           'task_daily_btc_5_predictions',
+          'task_daily_wheel_spins',
           'task_daily_win_1',
           'task_daily_win_streak_5',
           'task_daily_win_2_row',
@@ -5839,6 +5842,7 @@ const TASK_AMOUNTS = {
   daily_football_prediction: () => scaleTaskReward(50, "daily_football_prediction"),
   daily_kyivstoner_bet: () => scaleTaskReward(50, "daily_kyivstoner_bet"),
   daily_btc_5_predictions: () => scaleTaskReward(300, "daily_btc_5_predictions"),
+  daily_wheel_spins: () => scaleTaskReward(300, "daily_wheel_spins"),
   daily_win_1: () => scaleTaskReward(50, "daily_win_1"),
   daily_win_streak_5: () => scaleTaskReward(300, "daily_win_streak_5"),
   daily_win_2_row: () => scaleTaskReward(100, "daily_win_2_row"),
@@ -5857,6 +5861,7 @@ const CORE_DAILY_TASK_KEYS = new Set([
   "daily_football_prediction",
   "daily_kyivstoner_bet",
   "daily_btc_5_predictions",
+  "daily_wheel_spins",
   "daily_win_1",
   "daily_win_streak_5",
   // Сторис — каждый день: вирусная механика, награда сознательно маленькая
@@ -6049,6 +6054,16 @@ const DAILY_PROGRESS_TASKS = {
   },
   daily_btc_5_predictions: {
     unit: "BTC",
+    levels: [
+      { target: 1, amount: 50 },
+      { target: 5, amount: 300 },
+      { target: 15, amount: 600 },
+      { target: 30, amount: 1000 },
+      { target: 50, amount: 1500 },
+    ],
+  },
+  daily_wheel_spins: {
+    unit: "ставок",
     levels: [
       { target: 1, amount: 50 },
       { target: 5, amount: 300 },
@@ -6313,6 +6328,20 @@ async function getDailyTaskValue(client, userId, taskKey) {
         FROM trades
         WHERE user_id = $1
           AND action = 'BUY'
+          AND created_at >= date_trunc('day', now())
+      `,
+      [userId],
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  if (taskKey === "daily_wheel_spins") {
+    const result = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM roulette_bets
+        WHERE user_id = $1
+          AND refunded = FALSE
           AND created_at >= date_trunc('day', now())
       `,
       [userId],

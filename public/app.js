@@ -10088,6 +10088,7 @@ const CORE_DAILY_TASK_KEYS = [
   "daily_football_prediction",
   "daily_kyivstoner_bet",
   "daily_btc_5_predictions",
+  "daily_wheel_spins",
   "daily_win_1",
   "daily_win_streak_5",
   "daily_share_story",
@@ -10102,6 +10103,7 @@ const DAILY_TASK_META = {
   daily_football_prediction: { title: "Прогноз на спорт", desc: "1 прогноз на спортивное событие", icon: "trophy" },
   daily_kyivstoner_bet: { title: "Ставка на Киевстонера", desc: "1 прогноз в маркете Киевстонера", icon: "streak" },
   daily_btc_5_predictions: { title: "BTC-прогнозы", desc: "Лестница прогнозов по BTC", icon: "bars" },
+  daily_wheel_spins: { title: "Покрутить колесо", desc: "Лестница ставок в круге", icon: "bolt" },
   daily_win_1: { title: "Выиграй прогноз", desc: "Первая победа дня", icon: "trophy" },
   daily_win_streak_5: { title: "5 побед подряд", desc: "Серия из пяти побед", icon: "streak" },
   daily_win_2_row: { title: "2 победы подряд", desc: "Выиграй два раунда подряд", icon: "bolt" },
@@ -10139,6 +10141,7 @@ function getDailyTaskAmount(taskKey, fallback = 0) {
     daily_football_prediction: 25,
     daily_kyivstoner_bet: 25,
     daily_btc_5_predictions: 25,
+    daily_wheel_spins: 25,
     daily_win_1: 25,
     daily_win_streak_5: 50,
     daily_win_2_row: 50,
@@ -10237,6 +10240,7 @@ function getDailyTaskDisplayMeta(taskKey) {
       ? "1 ставка на Киевстонера"
       : `${targetText} ставок на Киевстонера`,
     daily_btc_5_predictions: target === 1 ? "1 BTC-прогноз" : `${targetText} BTC-прогнозов`,
+    daily_wheel_spins: target === 1 ? "1 ставка в круге" : `${targetText} ставок в круге`,
     daily_win_1: `${targetText} побед за день`,
     daily_win_streak_5: `${targetText} побед подряд`,
     daily_win_2_row: `${targetText} победы подряд`,
@@ -11772,6 +11776,21 @@ function updateRouletteWheel(deltaSeconds) {
 // Те же две плашки, что внизу графика: слева своя ставка, справа тикер
 // чужих. Геометрия, шрифт и уровни молний взяты из CHART_TICKER_TIER_SPEC,
 // чтобы низ круга читался так же, как низ графика.
+// Границы секторов подтягиваются к присланным плавно. Без этого каждая чужая
+// ставка мгновенно перекраивала круг, и он дёргался раз в секунду.
+function easeRouletteShares(segments, delta) {
+  const step = Math.min(1, Math.max(0, delta * 6));
+  segments.forEach((segment) => {
+    if (segment.drawStart === undefined) {
+      segment.drawStart = segment.start;
+      segment.drawEnd = segment.end;
+      return;
+    }
+    segment.drawStart += (segment.start - segment.drawStart) * step;
+    segment.drawEnd += (segment.end - segment.drawEnd) * step;
+  });
+}
+
 function drawRoulettePills(ctx, width, height, nowTs) {
   const round = roulette.round;
   if (!round) {
@@ -12021,6 +12040,7 @@ function drawRouletteFrame(timestamp) {
   const radius = Math.min(width, height) * 0.46;
   const round = roulette.round;
   const segments = round?.segments || [];
+  easeRouletteShares(segments, delta);
   const rotation = roulette.angle * Math.PI * 2;
 
   // Обод.
@@ -12044,8 +12064,8 @@ function drawRouletteFrame(timestamp) {
   segments.forEach((segment, index) => {
     // Нулевой угол у канваса смотрит вправо, а стрелка у нас сверху — отсюда
     // сдвиг на четверть оборота.
-    const from = (segment.start + roulette.angle) * Math.PI * 2 - Math.PI / 2;
-    const to = (segment.end + roulette.angle) * Math.PI * 2 - Math.PI / 2;
+    const from = ((segment.drawStart ?? segment.start) + roulette.angle) * Math.PI * 2 - Math.PI / 2;
+    const to = ((segment.drawEnd ?? segment.end) + roulette.angle) * Math.PI * 2 - Math.PI / 2;
     const colors = rouletteSegmentColor(index, segments.length, segment.is_me);
     ctx.save();
     ctx.beginPath();
@@ -12277,6 +12297,15 @@ async function loadRouletteState() {
         roulette.spinFrom = null;
       }
       const previousRound = roulette.round;
+      if (previousRound && previousRound.id === data.round.id) {
+        data.round.segments.forEach((segment) => {
+          const before = previousRound.segments.find((item) => item.user_id === segment.user_id);
+          if (before && before.drawStart !== undefined) {
+            segment.drawStart = before.drawStart;
+            segment.drawEnd = before.drawEnd;
+          }
+        });
+      }
       roulette.round = data.round;
       roulette.history = data.history || [];
       try {
