@@ -1820,6 +1820,8 @@ const roulette = {
   shownWinnerRoundId: 0,
   busy: false,
   selectionKey: null,
+  bubbleRoundId: 0,
+  bubbleSeen: new Map(),
 };
 
 let holoBox = null;
@@ -11986,6 +11988,56 @@ function renderRouletteAmounts() {
   });
 }
 
+// Пузыри ставок как на графике BTC, но своим спавнером: штатный привязан к
+// маркету по id, а у круга маркета нет. Классы и анимация те же самые.
+function spawnRouletteBubble(name, amount, mine) {
+  const container = $("tradeBubbles");
+  if (!container || prefersReducedMotion()) {
+    return;
+  }
+  const bubble = document.createElement("div");
+  bubble.className = `trade-bubble ${mine ? "yes" : "no"}`;
+  bubble.textContent = `${mine ? "ты" : name} +${Math.round(amount)} ★`;
+  const duration = 3900 + Math.random() * 1400;
+  const delay = Math.random() * 420;
+  const rise = -(86 + Math.random() * 84);
+  // Центр занят колесом, поэтому разводим их по краям — там и есть место.
+  const edge = Math.random() < 0.5 ? 2 + Math.random() * 14 : 74 + Math.random() * 14;
+  bubble.style.left = `${edge}%`;
+  bubble.style.bottom = `${18 + Math.random() * 72}px`;
+  bubble.style.animationDelay = `${delay}ms`;
+  bubble.style.setProperty("--bubble-duration", `${duration}ms`);
+  bubble.style.setProperty("--bubble-start-x", `${-8 + Math.random() * 16}px`);
+  bubble.style.setProperty("--bubble-mid-x", `${-14 + Math.random() * 28}px`);
+  bubble.style.setProperty("--bubble-end-x", `${-18 + Math.random() * 36}px`);
+  bubble.style.setProperty("--bubble-mid-y", `${rise * 0.56}px`);
+  bubble.style.setProperty("--bubble-end-y", `${rise}px`);
+  container.appendChild(bubble);
+  setTimeout(() => bubble.remove(), duration + delay + 500);
+}
+
+// Отдельных событий о ставках сервер не шлёт — он отдаёт доли по игрокам.
+// Разница между опросами и есть новые ставки, причём точная: доля игрока это
+// сумма всех его ставок.
+function emitRouletteBubbles(round) {
+  if (!round || round.id !== roulette.bubbleRoundId) {
+    roulette.bubbleRoundId = round?.id || 0;
+    roulette.bubbleSeen = new Map();
+    (round?.segments || []).forEach((segment) => {
+      roulette.bubbleSeen.set(segment.user_id, segment.amount);
+    });
+    return;
+  }
+  round.segments.forEach((segment) => {
+    const before = roulette.bubbleSeen.get(segment.user_id) || 0;
+    const added = segment.amount - before;
+    if (added > 0) {
+      roulette.bubbleSeen.set(segment.user_id, segment.amount);
+      spawnRouletteBubble(segment.name, added, segment.is_me);
+    }
+  });
+}
+
 function renderRouletteBar() {
   renderRouletteAmounts();
 }
@@ -12009,6 +12061,7 @@ async function loadRouletteState() {
       if (roulette.round && roulette.round.id !== data.round.id) {
         roulette.spinFrom = null;
       }
+      emitRouletteBubbles(data.round);
       roulette.round = data.round;
       roulette.history = data.history || [];
 
