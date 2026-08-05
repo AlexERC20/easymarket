@@ -1795,6 +1795,110 @@ function getMyChartBet(market) {
   };
 }
 
+// ВРЕМЕННО: табло датчика наклона. Нужно, чтобы отличить «датчик молчит» от
+// «эффект нарисовался, но слишком слабый» — прошлые попытки голограммы упали
+// именно потому, что причина была неизвестна. Удалить вместе с #tiltProbe.
+function startTiltProbe() {
+  const node = document.getElementById("tiltProbe");
+  if (!node) {
+    return;
+  }
+
+  const tg = window.Telegram?.WebApp;
+  const sensor = tg?.DeviceOrientation;
+  const probe = {
+    tgEvents: 0,
+    w3cEvents: 0,
+    gamma: null,
+    beta: null,
+    from: "—",
+    note: "",
+  };
+
+  // Счётчики важнее самих углов: если они стоят на нуле, источник мёртв, а если
+  // растут при нулевых значениях — датчик жив, но отдаёт плоско.
+  const render = () => {
+    const angle = (value) => (value === null ? "—" : value.toFixed(1).padStart(6));
+    node.textContent = [
+      `платформа: ${tg?.platform ?? "нет Telegram"} v${tg?.version ?? "—"}`,
+      `DeviceOrientation: ${sensor ? "есть" : "НЕТ"}`,
+      `событий: telegram=${probe.tgEvents} w3c=${probe.w3cEvents}`,
+      `gamma=${angle(probe.gamma)} beta=${angle(probe.beta)} (${probe.from})`,
+      probe.note,
+    ].filter(Boolean).join("\n");
+  };
+  render();
+
+  let frame = null;
+  const schedule = () => {
+    if (frame === null) {
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        render();
+      });
+    }
+  };
+
+  const record = (gamma, beta, from) => {
+    if (gamma === undefined && beta === undefined) {
+      return;
+    }
+    // Углы приходят то в радианах, то в градусах — приводим к градусам, иначе
+    // живой датчик выглядит как еле шевелящиеся нули.
+    const toDegrees = (value) => {
+      const raw = Number(value) || 0;
+      return Math.abs(raw) <= 3.2 ? raw * (180 / Math.PI) : raw;
+    };
+    probe.gamma = toDegrees(gamma);
+    probe.beta = toDegrees(beta);
+    probe.from = from;
+    schedule();
+  };
+
+  if (sensor && typeof sensor.start === "function") {
+    try {
+      tg.onEvent?.("deviceOrientationChanged", (payload) => {
+        probe.tgEvents += 1;
+        record(payload?.gamma ?? sensor.gamma, payload?.beta ?? sensor.beta, "telegram");
+      });
+      tg.onEvent?.("deviceOrientationFailed", (payload) => {
+        probe.note = `telegram отказал: ${payload?.error ?? "без причины"}`;
+        schedule();
+      });
+      sensor.start({ refresh_rate: 30, need_absolute: false });
+    } catch (error) {
+      probe.note = `start() бросил: ${error?.message ?? error}`;
+      schedule();
+    }
+  } else {
+    probe.note = "у клиента нет DeviceOrientation";
+  }
+
+  window.addEventListener("deviceorientation", (event) => {
+    probe.w3cEvents += 1;
+    record(event?.gamma ?? 0, event?.beta ?? 0, "w3c");
+  }, { passive: true });
+
+  // iOS вне Telegram отдаёт углы только после явного разрешения по жесту.
+  const askPermission = window.DeviceOrientationEvent?.requestPermission;
+  if (typeof askPermission === "function") {
+    const ask = () => {
+      askPermission.call(window.DeviceOrientationEvent)
+        .then((verdict) => {
+          probe.note = `разрешение: ${verdict}`;
+          schedule();
+        })
+        .catch((error) => {
+          probe.note = `разрешение отклонено: ${error?.message ?? error}`;
+          schedule();
+        });
+    };
+    document.addEventListener("pointerdown", ask, { once: true, passive: true });
+    probe.note = "коснись экрана, чтобы дать доступ к датчику";
+  }
+  render();
+}
+
 // Пульс рынка: телефон стучит в такт цене, пока у человека открыта позиция.
 // Движение в его сторону — короткий светлый тик, против — глухая двойная
 // отбивка, последние секунды — частое сердцебиение. Порог срабатывания
@@ -11444,6 +11548,11 @@ loadPublicConfig()
           void runSingleFlight("specialMarket", loadSpecialMarket).catch(() => undefined);
         }, 2_400);
         window.setTimeout(showReferralNudge, 150_000);
+        try {
+          startTiltProbe();
+        } catch {
+          // Отладочное табло не должно мешать входу в приложение.
+        }
       })
       .finally(hideLightningLoader);
   })

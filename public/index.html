@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260805-06" />
+    <link rel="stylesheet" href="/styles.css?v=20260805-07" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260711-03" />
     <link rel="stylesheet" href="/kyivstoner-motion.css?v=20260714-02" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -726,6 +726,9 @@
         <div class="chart-frame">
           <canvas id="marketChart" class="market-chart" aria-label="BTC price chart"></canvas>
           <div class="chart-brand-watermark" aria-hidden="true">EASYMARKET</div>
+          <!-- ВРЕМЕННО: проверка датчика наклона. Удалить вместе с .tilt-probe
+               и startTiltProbe(), когда станет ясно, живы ли углы. -->
+          <div id="tiltProbe" class="tilt-probe" aria-hidden="true">наклон: ждём…</div>
           <canvas id="aquariumCanvas" class="aquarium-layer" aria-hidden="true"></canvas>
           <div id="winOverlay" class="win-overlay hidden" aria-live="polite">
             <small>YOU WON</small>
@@ -891,6 +894,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260805-06" type="module"></script>
+    <script src="/app.js?v=20260805-07" type="module"></script>
   </body>
 </html>

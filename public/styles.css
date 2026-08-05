@@ -1276,6 +1276,25 @@ h2 {
   text-shadow: 0 0 22px rgba(128, 156, 194, 0.045);
 }
 
+/* ВРЕМЕННО: отладочное табло датчика наклона. Убирается вместе с #tiltProbe. */
+.tilt-probe {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 6;
+  max-width: calc(100% - 16px);
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(6, 10, 18, 0.82);
+  color: #7effce;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre;
+  pointer-events: none;
+  user-select: none;
+}
+
 .aquarium-layer {
   position: absolute;
   inset: 0;
