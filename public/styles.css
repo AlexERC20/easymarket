@@ -7637,13 +7637,40 @@ body.roulette-mode .chart-frame {
   aspect-ratio: 1 / 1;
   height: auto;
   min-height: 0;
-  max-height: min(74vw, 48vh);
+  max-height: min(85vw, 55vh);
 }
 
 /* .hidden объявлен намного выше и с той же специфичностью, поэтому display
    ниже его перебивал: подпись с проверкой честности висела на главной всегда,
    а прозрачный холст колеса лежал поверх графика и перехватывал касания. */
+.roulette-timer {
+  position: absolute;
+  font-size: 85%;
+  top: 50%;
+  left: 50%;
+  z-index: 4;
+  transform: translate(-50%, calc(-50% - 6px));
+  pointer-events: none;
+}
+
+.roulette-centre-note {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 4;
+  width: 46%;
+  transform: translate(-50%, 26px);
+  color: rgba(176, 196, 222, 0.9);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+}
+
 .roulette-wheel.hidden,
+.roulette-timer.hidden,
+.roulette-centre-note.hidden,
 .roulette-bar.hidden {
   display: none;
 }

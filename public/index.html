@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260806-08" />
+    <link rel="stylesheet" href="/styles.css?v=20260806-09" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260711-03" />
     <link rel="stylesheet" href="/kyivstoner-motion.css?v=20260714-02" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -741,6 +741,17 @@
           </div>
           <!-- Колесо встаёт на место графика: та же рамка, тот же размер. -->
           <canvas id="rouletteWheel" class="roulette-wheel hidden" aria-label="Колесо рулетки"></canvas>
+          <div id="rouletteTimer" class="countdown roulette-timer hidden" aria-live="polite">
+            <div>
+              <strong id="rouletteMinutes">--</strong>
+              <span>MINS</span>
+            </div>
+            <div>
+              <strong id="rouletteSeconds">--</strong>
+              <span>SECS</span>
+            </div>
+          </div>
+          <div id="rouletteCentreNote" class="roulette-centre-note hidden"></div>
           <div id="tradeBubbles" class="trade-bubbles" aria-hidden="true"></div>
           <button id="marketNavPrev" class="market-nav-arrow market-nav-prev" type="button" aria-label="Предыдущий рынок">&#8249;</button>
           <button id="marketNavNext" class="market-nav-arrow market-nav-next" type="button" aria-label="Следующий рынок">&#8250;</button>
@@ -908,6 +919,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260806-08" type="module"></script>
+    <script src="/app.js?v=20260806-09" type="module"></script>
   </body>
 </html>
