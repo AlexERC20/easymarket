@@ -11767,15 +11767,15 @@ function renderRouletteCentre() {
   }
 
   const status = round?.status;
-  const counting = status === "betting";
+  const counting = status === "betting" || status === "locked";
   timer.classList.toggle("hidden", !counting);
   note.classList.remove("hidden");
 
   note.textContent = round ? `банк ${Math.round(round.pot)} ★` : "";
 
   if (counting) {
-    const left = Math.max(0, new Date(round.bets_close_at).getTime() - rouletteNow());
-    seconds.textContent = String(Math.ceil(left / 1_000)).padStart(2, "0");
+    const left = Math.max(0, new Date(round.spin_at).getTime() - rouletteNow());
+    seconds.textContent = String(Math.min(59, Math.floor(left / 1_000))).padStart(2, "0");
   }
 
   if (!hint) {
