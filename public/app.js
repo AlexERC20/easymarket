@@ -11832,7 +11832,7 @@ function drawRouletteFrame(timestamp) {
 
   const cx = width / 2;
   const cy = height / 2;
-  const radius = Math.min(width, height) * 0.45;
+  const radius = Math.min(width, height) * 0.4;
   const round = roulette.round;
   const segments = round?.segments || [];
   const rotation = roulette.angle * Math.PI * 2;
@@ -11840,7 +11840,7 @@ function drawRouletteFrame(timestamp) {
   // Обод.
   ctx.save();
   ctx.beginPath();
-  ctx.arc(cx, cy, radius * 1.04, 0, Math.PI * 2);
+  ctx.arc(cx, cy, radius * 1.02, 0, Math.PI * 2);
   ctx.fillStyle = "rgba(12, 18, 30, 0.9)";
   ctx.fill();
   ctx.restore();
@@ -11881,7 +11881,7 @@ function drawRouletteFrame(timestamp) {
       const mid = (from + to) / 2;
       const tx = cx + Math.cos(mid) * radius * 0.74;
       const ty = cy + Math.sin(mid) * radius * 0.74;
-      const face = Math.min(radius * 0.16, radius * segment.share * 2.2);
+      const face = Math.min(radius * 0.14, radius * segment.share * 2.2);
       const avatar = getRouletteAvatar(segment.username);
 
       ctx.save();
@@ -11924,9 +11924,9 @@ function drawRouletteFrame(timestamp) {
   // Стрелка сверху. Рисуется последней, чтобы всегда быть поверх секторов.
   ctx.save();
   ctx.beginPath();
-  ctx.moveTo(cx, cy - radius * 1.16);
-  ctx.lineTo(cx - radius * 0.09, cy - radius * 0.96);
-  ctx.lineTo(cx + radius * 0.09, cy - radius * 0.96);
+  ctx.moveTo(cx, cy - radius * 0.98);
+  ctx.lineTo(cx - radius * 0.085, cy - radius * 1.2);
+  ctx.lineTo(cx + radius * 0.085, cy - radius * 1.2);
   ctx.closePath();
   ctx.fillStyle = "#ffd166";
   ctx.fill();

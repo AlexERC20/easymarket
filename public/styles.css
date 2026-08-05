@@ -7637,7 +7637,7 @@ body.roulette-mode .chart-frame {
   aspect-ratio: 1 / 1;
   height: auto;
   min-height: 0;
-  max-height: min(92vw, 62vh);
+  max-height: min(74vw, 48vh);
 }
 
 /* .hidden объявлен намного выше и с той же специфичностью, поэтому display
@@ -7659,6 +7659,7 @@ body.roulette-mode .chart-frame {
 
 /* В режиме круга график и всё, что относится к торговле, не нужны: цена,
    стороны, глубина и стакан к рулетке отношения не имеют. Чат остаётся. */
+body.roulette-mode .market-hero,
 body.roulette-mode .price-board,
 body.roulette-mode .outcome-grid,
 body.roulette-mode .market-depth,
