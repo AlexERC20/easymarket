@@ -12134,18 +12134,29 @@ function drawRouletteFrame(timestamp) {
   const baseY = -radius * 1.1;
   const halfW = radius * 0.13;
 
-  // Мягкое свечение под стрелкой — тот же приём, что у верхнего уровня плашки.
-  const flicker = 0.72 + 0.28 * Math.sin(timestamp * 0.014);
-  const glowR = radius * 0.42;
-  ctx.save();
-  ctx.globalAlpha = 0.55 * flicker;
-  ctx.drawImage(getTickerGlowSprite(), -glowR, baseY - glowR * 0.4, glowR * 2, glowR * 2);
-  ctx.restore();
+  // Хамелеон: спектр течёт вдоль стрелки и медленно проворачивается. Позиции
+  // остановок держим неподвижными, а сдвигаем оттенки — так переход выходит
+  // непрерывным, без шва в месте, где градиент замыкается.
+  const hue = (timestamp * 0.05) % 360;
+  const flicker = 0.78 + 0.22 * Math.sin(timestamp * 0.014);
+
+  // Свечение берёт текущий оттенок, иначе тёплый спрайт спорил бы с холодными
+  // фазами перелива.
+  const glowR = radius * 0.5;
+  const glow = ctx.createRadialGradient(0, baseY + radius * 0.16, 0, 0, baseY + radius * 0.16, glowR);
+  glow.addColorStop(0, `hsla(${hue}, 95%, 68%, ${(0.5 * flicker).toFixed(3)})`);
+  glow.addColorStop(1, "hsla(0, 0%, 0%, 0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(0, baseY + radius * 0.16, glowR, 0, Math.PI * 2);
+  ctx.fill();
 
   const body = ctx.createLinearGradient(0, baseY, 0, tipY);
-  body.addColorStop(0, "#fff3c4");
-  body.addColorStop(0.45, "#ffd166");
-  body.addColorStop(1, "#ff9d2f");
+  body.addColorStop(0, `hsl(${hue}, 92%, 72%)`);
+  body.addColorStop(0.28, `hsl(${(hue + 55) % 360}, 95%, 63%)`);
+  body.addColorStop(0.55, `hsl(${(hue + 130) % 360}, 92%, 60%)`);
+  body.addColorStop(0.8, `hsl(${(hue + 210) % 360}, 95%, 64%)`);
+  body.addColorStop(1, `hsl(${(hue + 290) % 360}, 96%, 70%)`);
 
   ctx.beginPath();
   ctx.moveTo(0, tipY);
@@ -12160,13 +12171,14 @@ function drawRouletteFrame(timestamp) {
   ctx.strokeStyle = "rgba(12, 16, 24, 0.85)";
   ctx.stroke();
 
-  // Блик по левой грани: даёт объём и оживает вместе с мерцанием.
+  // Белая грань поверх спектра: без неё перелив читается плоской заливкой, а
+  // с ней у стрелки появляется ребро и она выглядит объёмной.
   ctx.beginPath();
   ctx.moveTo(0, tipY);
   ctx.lineTo(-halfW * 0.46, baseY);
   ctx.lineTo(0, baseY);
   ctx.closePath();
-  ctx.fillStyle = `rgba(255, 255, 255, ${(0.24 * flicker).toFixed(3)})`;
+  ctx.fillStyle = `rgba(255, 255, 255, ${(0.3 * flicker).toFixed(3)})`;
   ctx.fill();
   ctx.restore();
 
