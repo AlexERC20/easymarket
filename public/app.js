@@ -12092,8 +12092,15 @@ function drawRouletteFrame(timestamp) {
   });
 
   drawRouletteCentre(ctx, cx, cy, radius, dpr);
-  drawRoulettePills(ctx, width, height, timestamp);
-  renderRouletteCentre();
+  // Плашки и подписи — надстройка над колесом. Их ошибка не должна уносить
+  // кадр: цикл перезапускает сам себя в конце, и если сюда прилетит
+  // исключение, следующего кадра просто не будет и круг замрёт навсегда.
+  try {
+    drawRoulettePills(ctx, width, height, timestamp);
+    renderRouletteCentre();
+  } catch {
+    // Колесо важнее подписей на нём.
+  }
 
   // Стрелка сверху. Рисуется последней, чтобы всегда быть поверх секторов.
   ctx.save();
@@ -12250,10 +12257,16 @@ async function loadRouletteState() {
       if (roulette.round && roulette.round.id !== data.round.id) {
         roulette.spinFrom = null;
       }
-      emitRouletteBubbles(data.round);
-      publishRouletteActivity(data.round);
+      const previousRound = roulette.round;
       roulette.round = data.round;
       roulette.history = data.history || [];
+      try {
+        emitRouletteBubbles(data.round);
+        publishRouletteActivity(data.round);
+      } catch {
+        // Ни лента, ни пузыри не должны мешать колесу крутиться.
+      }
+      void previousRound;
 
       const winner = data.round.winner;
       if (data.round.status === "settled" && winner && roulette.shownWinnerRoundId !== data.round.id) {
