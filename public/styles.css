@@ -7643,14 +7643,38 @@ body.roulette-mode .chart-frame {
 /* .hidden объявлен намного выше и с той же специфичностью, поэтому display
    ниже его перебивал: подпись с проверкой честности висела на главной всегда,
    а прозрачный холст колеса лежал поверх графика и перехватывал касания. */
+/* Оформление скопировано с таймера маркета — те же начертание, размер и
+   подпись, — но блок свой: механика у круга одна величина, а не минуты с
+   секундами, и завязывать её на чужую разметку смысла нет. */
 .roulette-timer {
   position: absolute;
-  font-size: 85%;
   top: 50%;
   left: 50%;
   z-index: 4;
-  transform: translate(-50%, calc(-50% - 6px));
+  text-align: center;
+  transform: translate(-50%, calc(-50% - 8px));
   pointer-events: none;
+}
+
+.roulette-timer strong,
+.roulette-timer span {
+  display: block;
+}
+
+.roulette-timer strong {
+  color: var(--no);
+  font-size: clamp(24px, 7.2vw, 37px);
+  font-weight: 950;
+  line-height: 0.96;
+  font-variant-numeric: tabular-nums;
+}
+
+.roulette-timer span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
 }
 
 .roulette-centre-note {

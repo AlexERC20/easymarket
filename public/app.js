@@ -11760,9 +11760,9 @@ function renderRouletteCentre() {
   const round = roulette.round;
   const timer = $("rouletteTimer");
   const note = $("rouletteCentreNote");
-  const minutes = $("rouletteMinutes");
   const seconds = $("rouletteSeconds");
-  if (!timer || !note || !minutes || !seconds) {
+  const hint = $("rouletteHint");
+  if (!timer || !note || !seconds) {
     return;
   }
 
@@ -11771,30 +11771,34 @@ function renderRouletteCentre() {
   timer.classList.toggle("hidden", !counting);
   note.classList.remove("hidden");
 
+  note.textContent = round ? `банк ${Math.round(round.pot)} ★` : "";
+
   if (counting) {
     const left = Math.max(0, new Date(round.bets_close_at).getTime() - rouletteNow());
-    const total = Math.ceil(left / 1_000);
-    minutes.textContent = String(Math.floor(total / 60)).padStart(2, "0");
-    seconds.textContent = String(total % 60).padStart(2, "0");
-    note.textContent = round.segments.length < 2
-      ? `банк ${Math.round(round.pot)} ★ · нужен второй игрок`
-      : `банк ${Math.round(round.pot)} ★`;
-    return;
+    seconds.textContent = String(Math.ceil(left / 1_000)).padStart(2, "0");
   }
 
+  if (!hint) {
+    return;
+  }
+  const mine = round?.segments.find((item) => item.is_me);
   if (status === "locked") {
-    note.textContent = "ставки закрыты";
+    hint.textContent = "Ставки закрыты, колесо разгоняется.";
   } else if (status === "spinning") {
-    note.textContent = "крутим";
+    hint.textContent = "Крутим. Стрелка сверху выберет победителя.";
   } else if (status === "void") {
-    note.textContent = "не собрались, ставки вернули";
-  } else if (round?.winner) {
+    hint.textContent = "Игроков не набралось — ставки вернули на баланс.";
+  } else if (status === "settled" && round.winner) {
     const winnerSegment = round.segments.find((item) => item.user_id === round.winner.user_id);
-    note.textContent = round.winner.is_me
-      ? `твой банк ${Math.round(round.winner.amount)} ★`
-      : `${winnerSegment?.name || "игрок"} забрал ${Math.round(round.winner.amount)} ★`;
+    hint.textContent = round.winner.is_me
+      ? `Твой банк — ${Math.round(round.winner.amount)} ★.`
+      : `${winnerSegment?.name || "Игрок"} забрал ${Math.round(round.winner.amount)} ★.`;
+  } else if (round && round.segments.length < 2) {
+    hint.textContent = "Нужен второй игрок — раунд стартует, когда кто-то ещё поставит.";
+  } else if (mine) {
+    hint.textContent = `Твоя доля ${Math.round(mine.share * 100)}% · шанс выиграть ровно столько же.`;
   } else {
-    note.textContent = "";
+    hint.textContent = "Победитель забирает весь банк за вычетом 10%. Минимум 50 ★.";
   }
 }
 
@@ -11942,9 +11946,9 @@ function drawRouletteFrame(timestamp) {
   // Стрелка сверху. Рисуется последней, чтобы всегда быть поверх секторов.
   ctx.save();
   ctx.beginPath();
-  ctx.moveTo(cx, cy - radius * 0.98);
-  ctx.lineTo(cx - radius * 0.085, cy - radius * 1.2);
-  ctx.lineTo(cx + radius * 0.085, cy - radius * 1.2);
+  ctx.moveTo(cx, cy - radius * 0.84);
+  ctx.lineTo(cx - radius * 0.09, cy - radius * 1.04);
+  ctx.lineTo(cx + radius * 0.09, cy - radius * 1.04);
   ctx.closePath();
   ctx.fillStyle = "#ffd166";
   ctx.fill();
@@ -11983,16 +11987,7 @@ function renderRouletteAmounts() {
 }
 
 function renderRouletteBar() {
-  const round = roulette.round;
-  const hint = $("rouletteHint");
   renderRouletteAmounts();
-
-  if (hint && round) {
-    const mine = round.segments.find((item) => item.is_me);
-    hint.textContent = mine
-      ? `Твоя доля ${Math.round(mine.share * 100)}% · шанс выиграть ровно столько же.`
-      : "Победитель забирает весь банк за вычетом 10%. Минимум 50 ★.";
-  }
 }
 
 async function loadRouletteState() {
