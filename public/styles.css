@@ -7640,6 +7640,14 @@ body.roulette-mode .chart-frame {
   max-height: min(92vw, 62vh);
 }
 
+/* .hidden объявлен намного выше и с той же специфичностью, поэтому display
+   ниже его перебивал: подпись с проверкой честности висела на главной всегда,
+   а прозрачный холст колеса лежал поверх графика и перехватывал касания. */
+.roulette-wheel.hidden,
+.roulette-bar.hidden {
+  display: none;
+}
+
 .roulette-wheel {
   position: absolute;
   inset: 0;
