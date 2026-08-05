@@ -1801,8 +1801,9 @@ function getMyChartBet(market) {
 // механизм куда проще: она режет готовую отрисовку, а не заливку по глифам.
 let holoFrame = null;
 let holoLayers = null;
-let holoTilt = { x: 0, y: 0 };
-let holoShown = { x: 0, y: 0 };
+const HOLO_NEUTRAL_PITCH = 70;
+let holoTilt = { x: 0, y: HOLO_NEUTRAL_PITCH };
+let holoShown = { x: 0, y: HOLO_NEUTRAL_PITCH };
 let holoBox = null;
 
 function clampNumber(value, min, max) {
@@ -1834,8 +1835,11 @@ function paintHolo() {
   // Наклон — это вектор, а не одна ось. Полоса идёт перпендикулярно ему и
   // съезжает в ту сторону, куда наклоняешь: вбок, вверх, по диагонали. Так
   // ведёт себя настоящая метка на документе — она не привязана к одной оси.
-  const dx = clampNumber(holoShown.x / 34, -1, 1);
-  const dy = clampNumber(holoShown.y / 40, -1, 1);
+  // У датчика ноль по вертикали — это телефон, лежащий плашмя экраном вверх.
+  // Держат его почти стоймя, но не совсем, поэтому нейтралью считаем наклон
+  // около семидесяти градусов: в руке блик стоит по центру, а не уезжает в край.
+  const dx = clampNumber(holoShown.x / 52, -1, 1);
+  const dy = clampNumber((holoShown.y - HOLO_NEUTRAL_PITCH) / 58, -1, 1);
   const reach = Math.min(1, Math.hypot(dx, dy));
   // Ноль градусов у CSS-градиента смотрит вверх и отсчитывается по часовой,
   // отсюда такой порядок аргументов.
@@ -1872,7 +1876,7 @@ function paintHolo() {
 // движение затухло, — постоянного rAF в фоне не остаётся.
 function stepHolo() {
   holoFrame = null;
-  const ease = 0.14;
+  const ease = 0.075;
   holoShown.x += (holoTilt.x - holoShown.x) * ease;
   holoShown.y += (holoTilt.y - holoShown.y) * ease;
   paintHolo();
