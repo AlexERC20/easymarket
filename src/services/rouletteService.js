@@ -476,12 +476,16 @@ export async function getRouletteState(input = {}) {
 
   const betsResult = await query(
     `
-      SELECT bets.user_id, bets.amount, users.username, users.first_name
+      SELECT bets.user_id,
+             SUM(bets.amount) AS amount,
+             users.username,
+             users.first_name
       FROM roulette_bets bets
       JOIN users ON users.id = bets.user_id
       WHERE bets.round_id = $1
         AND bets.refunded = FALSE
-      ORDER BY bets.id
+      GROUP BY bets.user_id, users.username, users.first_name
+      ORDER BY MIN(bets.id)
     `,
     [round.id],
   );
