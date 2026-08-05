@@ -1795,6 +1795,75 @@ function getMyChartBet(market) {
   };
 }
 
+// Голограмма на логотипе: радужный блик поверх центральной надписи, который
+// виден только под углом — как защитный элемент на документе. Наклон читаем
+// через собственный API Telegram: в iOS-Telegram обычные события
+// deviceorientation не приходят вовсе, работает только WebApp.DeviceOrientation.
+let holoRaf = null;
+let holoTilt = { x: 0, y: 0 };
+
+function applyHoloTilt() {
+  holoRaf = null;
+  const node = document.querySelector(".chart-brand-watermark");
+  if (!node) {
+    return;
+  }
+  // gamma — наклон вбок, он ведёт полосу поперёк надписи. beta добавляет
+  // немного, чтобы блик отзывался и на завал вперёд-назад.
+  const sweep = clampNumber(holoTilt.x / 42, -1, 1) * 0.5 + clampNumber(holoTilt.y / 70, -1, 1) * 0.16;
+  const lean = Math.min(1, Math.hypot(holoTilt.x / 34, holoTilt.y / 52));
+  node.style.setProperty("--holo-pos", `${(50 + sweep * 130).toFixed(1)}%`);
+  // Плоско лежащий телефон блика не даёт совсем — в этом весь смысл эффекта.
+  node.style.setProperty("--holo", (lean * lean * 0.62).toFixed(3));
+}
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, Number(value) || 0));
+}
+
+function startLogoHologram() {
+  if (prefersReducedMotion()) {
+    return;
+  }
+  const tg = window.Telegram?.WebApp;
+  const sensor = tg?.DeviceOrientation;
+  const supported = sensor && typeof sensor.start === "function"
+    && (typeof tg.isVersionAtLeast !== "function" || tg.isVersionAtLeast("8.0"));
+  if (!supported) {
+    return;
+  }
+
+  const onChange = () => {
+    holoTilt = {
+      x: Number(sensor.gamma || 0) * (180 / Math.PI),
+      y: Number(sensor.beta || 0) * (180 / Math.PI),
+    };
+    if (holoRaf === null) {
+      holoRaf = requestAnimationFrame(applyHoloTilt);
+    }
+  };
+
+  try {
+    tg.onEvent?.("deviceOrientationChanged", onChange);
+    // Чаще 30 Гц смысла нет: блик всё равно сглажен, а датчик греет батарею.
+    sensor.start({ refresh_rate: 30, need_absolute: false }, (started) => {
+      if (!started) {
+        tg.offEvent?.("deviceOrientationChanged", onChange);
+      }
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        sensor.start?.({ refresh_rate: 30, need_absolute: false });
+      } else {
+        sensor.stop?.();
+      }
+    });
+  } catch {
+    // Датчик — украшение: если клиент его не даёт, надпись просто остаётся
+    // обычной, и это ничего не ломает.
+  }
+}
+
 // Пульс рынка: телефон стучит в такт цене, пока у человека открыта позиция.
 // Движение в его сторону — короткий светлый тик, против — глухая двойная
 // отбивка, последние секунды — частое сердцебиение. Порог срабатывания
@@ -11444,6 +11513,7 @@ loadPublicConfig()
           void runSingleFlight("specialMarket", loadSpecialMarket).catch(() => undefined);
         }, 2_400);
         window.setTimeout(showReferralNudge, 150_000);
+        startLogoHologram();
       })
       .finally(hideLightningLoader);
   })

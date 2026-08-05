@@ -1274,6 +1274,42 @@ h2 {
   user-select: none;
   transform: translate(-50%, -50%);
   text-shadow: 0 0 22px rgba(128, 156, 194, 0.045);
+  /* Голографическая фольга: полоса радужного блика лежит поверх тех же букв и
+     проявляется только при наклоне телефона, как защитный элемент на документе.
+     Без датчика --holo остаётся нулём, и надпись выглядит ровно как раньше. */
+  --holo: 0;
+  --holo-pos: 50%;
+}
+
+.chart-brand-watermark::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    104deg,
+    transparent 34%,
+    rgba(120, 216, 255, 0.55) 43%,
+    rgba(186, 148, 255, 0.7) 50%,
+    rgba(126, 255, 206, 0.55) 57%,
+    transparent 66%
+  );
+  background-size: 320% 100%;
+  background-position: var(--holo-pos) 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  opacity: var(--holo);
+  pointer-events: none;
+  /* Плавность нужна только чтобы блик не дёргался на шумном датчике; сам сдвиг
+     полосы идёт покадрово, поэтому переход держим коротким. */
+  transition: opacity 220ms ease-out;
+  will-change: background-position, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chart-brand-watermark::after {
+    display: none;
+  }
 }
 
 .aquarium-layer {
