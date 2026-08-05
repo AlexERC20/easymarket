@@ -1823,6 +1823,7 @@ const roulette = {
   bubbleRoundId: 0,
   bubbleSeen: new Map(),
   bubbleSelfPending: 0,
+  activitySeenAt: new Map(),
 };
 
 let holoBox = null;
@@ -12185,6 +12186,7 @@ function emitRouletteBubbles(round) {
     roulette.bubbleRoundId = round?.id || 0;
     roulette.bubbleSeen = new Map();
     roulette.bubbleSelfPending = 0;
+    roulette.activitySeenAt = new Map();
     (round?.segments || []).forEach((segment) => {
       roulette.bubbleSeen.set(segment.user_id, segment.amount);
     });
@@ -12219,21 +12221,35 @@ function publishRouletteActivity(round) {
   if (!round) {
     return;
   }
-  const entries = [...round.segments]
-    .sort((a, b) => b.amount - a.amount)
-    .map((segment) => ({
-      id: `roulette:${round.id}:${segment.user_id}`,
+  const entries = round.segments.map((segment) => {
+    const id = `roulette:${round.id}:${segment.user_id}`;
+    // Время первой встречи запоминаем: если брать текущее, запись прыгала бы
+    // в начало ленты на каждом опросе и обгоняла бы рыночные сделки.
+    if (!roulette.activitySeenAt.has(id)) {
+      roulette.activitySeenAt.set(id, new Date().toISOString());
+    }
+    return {
+      id,
+      // Своей ставке проставляем telegram_id, иначе лента не узнаёт в ней тебя
+      // и подписывает как чужую.
+      telegram_id: segment.is_me ? state.user?.telegram_id ?? null : null,
       username: segment.username,
       first_name: segment.name,
-      telegram_id: null,
       action: "BUY",
       side: "YES",
       amount: segment.amount,
       currency: "STAR",
       market_id: null,
-      created_at: new Date().toISOString(),
-    }));
-  state.activity = entries;
+      created_at: roulette.activitySeenAt.get(id),
+    };
+  });
+
+  // Добавляем к ленте, а не заменяем её: ставки в круге — это ещё одна
+  // активность рядом со сделками на рынках, а не вместо них.
+  const others = (state.activity || []).filter((item) => !String(item.id || "").startsWith("roulette:"));
+  state.activity = [...entries, ...others]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 24);
   renderActivity();
 }
 
