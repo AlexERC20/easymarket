@@ -11955,6 +11955,7 @@ function renderRouletteCentre() {
     return;
   }
   const mine = round?.segments.find((item) => item.is_me);
+  $("rouletteInviteBtn")?.classList.toggle("hidden", !waiting);
   if (status === "locked") {
     hint.textContent = "Ставки закрыты, колесо разгоняется.";
   } else if (status === "spinning") {
@@ -12546,6 +12547,7 @@ function closeRoulette() {
   $("rouletteBar")?.classList.add("hidden");
   $("rouletteTimer")?.classList.add("hidden");
   $("rouletteCentreNote")?.classList.add("hidden");
+  $("rouletteInviteBtn")?.classList.add("hidden");
   if (roulette.pollTimer !== null) {
     window.clearInterval(roulette.pollTimer);
     roulette.pollTimer = null;
@@ -12560,6 +12562,23 @@ function closeRoulette() {
 // Честность проверяется руками: до раунда публикуется хеш зерна, после
 // раскрутки — само зерно. Кто угодно может пересчитать sha256 и убедиться,
 // что точку остановки не подбирали под результат.
+// Зовём соперника той же реферальной ссылкой, что и везде: приведённый
+// останется закреплён за тобой, а не просто зайдёт разово.
+$("rouletteInviteBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  const pot = Math.round(Number(roulette.round?.pot || 0));
+  const inviteUrl = buildTelegramMiniAppLaunchUrl(getLaunchRefValue() || "easymarket");
+  const text = pot > 0
+    ? `В EasyMarket висит банк ${pot} ★ и ждёт соперника. Крутанём?`
+    : "Погнали крутить колесо в EasyMarket — победитель забирает весь банк.";
+  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
+  if (window.Telegram?.WebApp?.openTelegramLink) {
+    window.Telegram.WebApp.openTelegramLink(shareUrl);
+    return;
+  }
+  window.open(shareUrl, "_blank", "noopener,noreferrer");
+});
+
 $("rouletteFairBtn")?.addEventListener("click", () => {
   const round = roulette.round;
   if (!round) {

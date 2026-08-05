@@ -7734,6 +7734,21 @@ body.roulette-mode .chart-brand-holo {
   text-align: center;
 }
 
+.roulette-invite {
+  padding: 13px 12px;
+  border: 1px solid rgba(255, 196, 84, 0.5);
+  border-radius: 14px;
+  background: rgba(255, 176, 52, 0.14);
+  color: #ffd08a;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.roulette-invite.hidden {
+  display: none;
+}
+
 .roulette-fair {
   align-self: center;
   padding: 4px 6px;
