@@ -806,7 +806,6 @@ app.get("/api/special/kyivstoner", cachedJsonRoute("special/kyivstoner", 2_000, 
 // кеш ответов здесь не годится.
 app.get("/api/roulette/state", async (req, res) => {
   try {
-    await ensureRouletteSchema();
     const result = await getRouletteState({
       currency: req.query?.currency,
       telegram_id: req.query?.telegram_id,

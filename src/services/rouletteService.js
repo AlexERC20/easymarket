@@ -13,6 +13,7 @@ import { query, withTransaction, toNumber } from "../db.js";
 // разом при любой ошибке, а сам вызов стоит внутри стартового try, который
 // глотает исключения, — из-за этого таблицы могли молча не появиться.
 let rouletteSchemaReady = false;
+let rouletteSchemaError = null;
 
 export async function ensureRouletteSchema() {
   if (rouletteSchemaReady) {
@@ -67,14 +68,17 @@ CREATE INDEX IF NOT EXISTS idx_roulette_bets_user
   ON roulette_bets(user_id, created_at DESC);
     `);
     rouletteSchemaReady = true;
+    rouletteSchemaError = null;
     return true;
   } catch (error) {
-    console.error(
-      "[easymarket] roulette schema failed:",
-      error instanceof Error ? error.message : "unknown error",
-    );
+    rouletteSchemaError = error instanceof Error ? error.message : "unknown error";
+    console.error("[easymarket] roulette schema failed:", rouletteSchemaError);
     return false;
   }
+}
+
+export function getRouletteSchemaError() {
+  return rouletteSchemaError;
 }
 
 export const ROULETTE_CURRENCIES = ["STAR", "BONUS", "USDT"];
@@ -460,6 +464,9 @@ function serializeRound(round, segments, viewerId) {
 }
 
 export async function getRouletteState(input = {}) {
+  if (!(await ensureRouletteSchema())) {
+    return { round: null, history: [], schema_error: rouletteSchemaError };
+  }
   const normalized = normalizeCurrency(input.currency);
   const viewerId = await resolveUserId(input.telegram_id);
   const roundResult = await query(
