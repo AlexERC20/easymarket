@@ -11770,6 +11770,7 @@ function renderRouletteCentre() {
 
   const status = round?.status;
   const counting = status === "betting" || status === "locked";
+  const waiting = status === "waiting";
   timer.classList.toggle("hidden", !counting);
   note.classList.remove("hidden");
 
@@ -11795,8 +11796,10 @@ function renderRouletteCentre() {
     hint.textContent = round.winner.is_me
       ? `Твой банк — ${Math.round(round.winner.amount)} ★.`
       : `${winnerSegment?.name || "Игрок"} забрал ${Math.round(round.winner.amount)} ★.`;
-  } else if (round && round.segments.length < 2) {
-    hint.textContent = "Нужен второй игрок — раунд стартует, когда кто-то ещё поставит.";
+  } else if (waiting) {
+    hint.textContent = round.segments.length
+      ? "Ждём второго игрока — минута пойдёт, как только он поставит."
+      : "Ставь первым — минута пойдёт, когда подключится второй игрок.";
   } else if (mine) {
     hint.textContent = `Твоя доля ${Math.round(mine.share * 100)}% · шанс выиграть ровно столько же.`;
   } else {
@@ -11968,7 +11971,8 @@ const ROULETTE_AMOUNTS = [50, 100, 500, 2000];
 // Переписываем существующие кнопки ставок под звёзды. Обратно их вернёт
 // renderTradeTicket, когда рынок снова станет обычным.
 function renderRouletteAmounts() {
-  const open = roulette.round?.status === "betting";
+  const status = roulette.round?.status;
+  const open = status === "betting" || status === "waiting";
   document.querySelectorAll(".amount-button").forEach((button, index) => {
     const amount = ROULETTE_AMOUNTS[index] ?? ROULETTE_AMOUNTS[0];
     const nextLabel = formatWholeCurrencyAmount(amount, "STAR");
@@ -11976,8 +11980,8 @@ function renderRouletteAmounts() {
     button.dataset.amount = String(amount);
     button.dataset.stakeTier = String(index + 1);
     button.classList.toggle("active", amount === roulette.amount);
-    button.classList.toggle("loading", roulette.busy && amount === roulette.amount);
-    button.disabled = !open || roulette.busy || !state.user;
+    button.classList.remove("loading");
+    button.disabled = !open || !state.user;
     // Переписываем разметку только когда подписи реально изменились — тот же
     // приём, что и у обычного тикета, иначе кнопки мерцают на каждом кадре.
     if (button.dataset.label !== nextLabel || button.dataset.win !== nextWin) {
@@ -12087,35 +12091,121 @@ async function loadRouletteState() {
 }
 
 async function placeRouletteBet(sourceButton = null) {
-  if (!state.user?.telegram_id || roulette.busy) {
+  if (!state.user?.telegram_id) {
     return;
   }
-  roulette.busy = true;
-  renderRouletteBar();
+  const round = roulette.round;
+  if (!round || (round.status !== "waiting" && round.status !== "betting")) {
+    triggerHaptic("error");
+    showToast("Приём ставок закрыт, ждём следующий раунд.");
+    return;
+  }
+  const amount = roulette.amount;
+  if (Number(state.balance || 0) < amount) {
+    triggerHaptic("error");
+    showToast("Не хватает звёзд.");
+    return;
+  }
+
+  // Рисуем результат сразу, не дожидаясь ответа. Сервер всё равно остаётся
+  // единственным судьёй: следующий опрос через секунду перезапишет доли своими,
+  // а при отказе мы откатываем ставку руками.
+  applyOptimisticRouletteBet(amount);
+  triggerHaptic("success");
+  playMotionSound("success");
+  triggerLightningFlash("success", getTierForAmount(amount, "STAR"));
+  if (sourceButton) {
+    flyRewardToBalance(sourceButton, "★");
+  }
+  triggerBalancePulse($("fireBalance"));
+
   try {
     const data = await api("/api/roulette/bet", {
       method: "POST",
       body: JSON.stringify({
         currency: "STAR",
         telegram_id: String(state.user.telegram_id),
-        amount: roulette.amount,
+        amount,
       }),
     });
-    roulette.round = data.round;
-    triggerHaptic("success");
-    playMotionSound("success");
-    triggerLightningFlash("success", getTierForAmount(roulette.amount, "STAR"));
-    if (sourceButton) {
-      flyRewardToBalance(sourceButton, "★");
+    if (Number.isFinite(Number(data.balance))) {
+      state.balance = Number(data.balance);
+      renderMe();
     }
-    triggerBalancePulse($("fireBalance"));
-    void refreshAll().catch(() => undefined);
+    // Второй игрок только что запустил минуту — покажем часы, не дожидаясь
+    // следующего опроса.
+    if (data.armed && roulette.round && roulette.round.status === "waiting") {
+      roulette.round.status = "betting";
+      roulette.round.spin_at = data.armed;
+    }
   } catch (error) {
+    revertOptimisticRouletteBet(amount);
     triggerHaptic("error");
     showToast(error?.message || "Ставку не приняли.");
-  } finally {
-    roulette.busy = false;
-    renderRouletteBar();
+  }
+}
+
+// Локальная правка круга до ответа сервера: своя доля растёт, банк растёт,
+// баланс уменьшается. Всё это через секунду будет заменено данными сервера.
+function applyOptimisticRouletteBet(amount) {
+  const round = roulette.round;
+  if (!round) {
+    return;
+  }
+  const mine = round.segments.find((item) => item.is_me);
+  if (mine) {
+    mine.amount += amount;
+  } else {
+    round.segments.push({
+      user_id: -1,
+      amount,
+      share: 0,
+      start: 0,
+      end: 0,
+      name: state.user?.first_name || state.user?.username || "ты",
+      username: state.user?.username,
+      is_me: true,
+    });
+  }
+  round.pot += amount;
+  rebuildRouletteShares(round);
+  state.balance = Math.max(0, Number(state.balance || 0) - amount);
+  renderMe();
+  renderRouletteAmounts();
+}
+
+function revertOptimisticRouletteBet(amount) {
+  const round = roulette.round;
+  if (round) {
+    const mine = round.segments.find((item) => item.is_me);
+    if (mine) {
+      mine.amount = Math.max(0, mine.amount - amount);
+      if (mine.amount === 0) {
+        round.segments = round.segments.filter((item) => item !== mine);
+      }
+    }
+    round.pot = Math.max(0, round.pot - amount);
+    rebuildRouletteShares(round);
+  }
+  state.balance = Number(state.balance || 0) + amount;
+  renderMe();
+  renderRouletteAmounts();
+}
+
+// Доли пересчитываются тем же правилом, что и на сервере: доля равна доле в
+// банке, последний сектор дотягивается до единицы, чтобы у края не осталось
+// щели, в которую не попадает ни один игрок.
+function rebuildRouletteShares(round) {
+  const pot = round.segments.reduce((sum, item) => sum + item.amount, 0);
+  let cursor = 0;
+  round.segments.forEach((segment) => {
+    segment.share = pot > 0 ? segment.amount / pot : 0;
+    segment.start = cursor;
+    cursor += segment.share;
+    segment.end = cursor;
+  });
+  if (round.segments.length) {
+    round.segments[round.segments.length - 1].end = 1;
   }
 }
 

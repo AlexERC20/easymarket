@@ -38,9 +38,9 @@ CREATE TABLE IF NOT EXISTS roulette_rounds (
   rake NUMERIC(20, 8) NOT NULL DEFAULT 0,
   winner_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
   winner_amount NUMERIC(20, 8) NOT NULL DEFAULT 0,
-  bets_close_at TIMESTAMPTZ NOT NULL,
-  spin_at TIMESTAMPTZ NOT NULL,
-  ends_at TIMESTAMPTZ NOT NULL,
+  bets_close_at TIMESTAMPTZ,
+  spin_at TIMESTAMPTZ,
+  ends_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   settled_at TIMESTAMPTZ
 );
@@ -66,6 +66,12 @@ CREATE INDEX IF NOT EXISTS idx_roulette_bets_round
 
 CREATE INDEX IF NOT EXISTS idx_roulette_bets_user
   ON roulette_bets(user_id, created_at DESC);
+
+-- Таблица уже могла быть создана со временем «не пустым»: раньше отсчёт
+-- начинался вместе с раундом, теперь — только когда собрались двое.
+ALTER TABLE roulette_rounds ALTER COLUMN bets_close_at DROP NOT NULL;
+ALTER TABLE roulette_rounds ALTER COLUMN spin_at DROP NOT NULL;
+ALTER TABLE roulette_rounds ALTER COLUMN ends_at DROP NOT NULL;
     `);
     rouletteSchemaReady = true;
     rouletteSchemaError = null;
@@ -256,19 +262,15 @@ async function adjustBalance(client, currency, userId, amount, reason, source) {
 async function createRound(client, currency) {
   const seed = crypto.randomBytes(32).toString("hex");
   const seedHash = crypto.createHash("sha256").update(seed).digest("hex");
-  const start = nowMs();
-  const betsCloseAt = new Date(start + BET_MS);
-  const spinAt = new Date(start + BET_MS + LOCK_MS);
-  // ends_at пересчитается при раскрутке, когда станет известна её длительность.
-  const endsAt = new Date(start + BET_MS + LOCK_MS + 10_000);
-
+  // Часы стоят, пока не наберётся второй игрок: крутить минуту в пустоту не
+  // для кого, а первый вошедший иначе смотрел бы, как она истекает впустую.
   const result = await client.query(
     `
-      INSERT INTO roulette_rounds (currency, status, seed, seed_hash, bets_close_at, spin_at, ends_at)
-      VALUES ($1, 'betting', $2, $3, $4, $5, $6)
+      INSERT INTO roulette_rounds (currency, status, seed, seed_hash)
+      VALUES ($1, 'waiting', $2, $3)
       RETURNING *
     `,
-    [currency, seed, seedHash, betsCloseAt, spinAt, endsAt],
+    [currency, seed, seedHash],
   );
   return result.rows[0];
 }
@@ -301,40 +303,12 @@ async function advanceRound(client, currency) {
 
   if (round.status === "betting" && now >= new Date(round.bets_close_at).getTime()) {
     const bets = await loadBets(client, round.id);
-    const { segments, pot } = buildSegments(bets);
-    if (segments.length < MIN_PARTICIPANTS) {
-      // Одному играть не с кем: он выиграл бы собственные звёзды за вычетом
-      // комиссии, то есть просто заплатил бы за участие. Возвращаем и ждём.
-      for (const bet of bets) {
-        await adjustBalance(
-          client,
-          currency,
-          bet.user_id,
-          roundAmount(bet.amount),
-          "roulette_refund",
-          `roulette:${round.id}`,
-        );
-      }
-      await client.query(
-        "UPDATE roulette_bets SET refunded = TRUE WHERE round_id = $1",
-        [round.id],
-      );
-      await client.query(
-        `
-          UPDATE roulette_rounds
-          SET status = 'void', pot = 0, settled_at = now(), ends_at = now()
-          WHERE id = $1
-        `,
-        [round.id],
-      );
-      round = await getCurrentRoundRow(client, currency);
-    } else {
-      const updated = await client.query(
-        "UPDATE roulette_rounds SET status = 'locked', pot = $2::numeric WHERE id = $1 RETURNING *",
-        [round.id, pot],
-      );
-      round = updated.rows[0];
-    }
+    const { pot } = buildSegments(bets);
+    const updated = await client.query(
+      "UPDATE roulette_rounds SET status = 'locked', pot = $2::numeric WHERE id = $1 RETURNING *",
+      [round.id, pot],
+    );
+    round = updated.rows[0];
   }
 
   if (round.status === "locked" && now >= new Date(round.spin_at).getTime()) {
@@ -422,13 +396,13 @@ export async function rouletteTick() {
   return results;
 }
 
-function serializeRound(round, segments, viewerId) {
+function serializeRound(round, segments, viewerId, livePot = null) {
   const spinning = round.status === "spinning" || round.status === "settled";
   return {
     id: Number(round.id),
     currency: round.currency,
     status: round.status,
-    pot: roundAmount(round.pot),
+    pot: roundAmount(livePot === null ? round.pot : livePot),
     min_bet: getMinimumBet(round.currency),
     rake_percent: Math.round(HOUSE_RAKE * 100),
     // Хеш публикуем сразу, зерно — только когда колесо уже отпущено. До этого
@@ -488,7 +462,7 @@ export async function getRouletteState(input = {}) {
     `,
     [round.id],
   );
-  const { segments } = buildSegments(betsResult.rows);
+  const { segments, pot } = buildSegments(betsResult.rows);
 
   const historyResult = await query(
     `
@@ -505,7 +479,7 @@ export async function getRouletteState(input = {}) {
   );
 
   return {
-    round: serializeRound(round, segments, viewerId),
+    round: serializeRound(round, segments, viewerId, pot),
     history: historyResult.rows.map((row) => ({
       id: Number(row.id),
       pot: roundAmount(row.pot),
@@ -532,41 +506,93 @@ export async function placeRouletteBet(input) {
   }
 
   return withTransaction(async (client) => {
-    const round = await getCurrentRoundRow(client, currency);
-    if (!round || round.status !== "betting") {
-      return { ok: false, message: "Приём ставок закрыт, ждём следующий раунд." };
-    }
-    if (nowMs() >= new Date(round.bets_close_at).getTime()) {
+    const { balances, ledger } = balanceTableFor(currency);
+
+    // Вставка проходит, только если раунд всё ещё принимает ставки. Условие
+    // живёт в самом запросе, поэтому проверка и запись неразделимы и гонка с
+    // закрытием приёма невозможна без блокировки раунда.
+    const betResult = await client.query(
+      `
+        INSERT INTO roulette_bets (round_id, user_id, amount)
+        SELECT rounds.id, $2, $3::numeric
+        FROM roulette_rounds rounds
+        WHERE rounds.currency = $1
+          AND (
+            rounds.status = 'waiting'
+            OR (rounds.status = 'betting' AND now() < rounds.bets_close_at)
+          )
+        ORDER BY rounds.id DESC
+        LIMIT 1
+        RETURNING round_id
+      `,
+      [currency, userId, amount],
+    );
+    if (!betResult.rows[0]) {
       return { ok: false, message: "Приём ставок закрыт, ждём следующий раунд." };
     }
 
-    const { balances } = balanceTableFor(currency);
-    const balanceResult = await client.query(
-      `SELECT balance FROM ${balances} WHERE user_id = $1 FOR UPDATE`,
-      [userId],
+    // Списание одним условным запросом: проверка достатка и вычитание — это
+    // один шаг, а не чтение с последующей записью, поэтому лишний FOR UPDATE
+    // не нужен и параллельные ставки не мешают друг другу.
+    const debitResult = await client.query(
+      `
+        UPDATE ${balances}
+        SET balance = balance - $2::numeric,
+            updated_at = now()
+        WHERE user_id = $1
+          AND balance >= $2::numeric
+        RETURNING balance
+      `,
+      [userId, amount],
     );
-    const balance = roundAmount(balanceResult.rows[0]?.balance);
-    if (balance < amount) {
+    if (!debitResult.rows[0]) {
+      throw Object.assign(new Error("insufficient_balance"), { rouletteInsufficient: true });
+    }
+
+    await client.query(
+      `INSERT INTO ${ledger} (user_id, amount, reason, source) VALUES ($1, $2::numeric, $3, $4)`,
+      [userId, -amount, "roulette_bet", `roulette:${betResult.rows[0].round_id}`],
+    );
+
+    // Второй игрок запускает минуту. Условие по статусу в самом UPDATE делает
+    // запуск однократным: если двое поставили одновременно, отсчёт заведёт
+    // только один из них.
+    const roundId = Number(betResult.rows[0].round_id);
+    const playersResult = await client.query(
+      "SELECT COUNT(DISTINCT user_id)::int AS players FROM roulette_bets WHERE round_id = $1 AND refunded = FALSE",
+      [roundId],
+    );
+    let armed = null;
+    if (Number(playersResult.rows[0]?.players || 0) >= MIN_PARTICIPANTS) {
+      const armResult = await client.query(
+        `
+          UPDATE roulette_rounds
+          SET status = 'betting',
+              bets_close_at = now() + ($2::int * interval '1 millisecond'),
+              spin_at = now() + (($2::int + $3::int) * interval '1 millisecond'),
+              ends_at = now() + (($2::int + $3::int + 10000) * interval '1 millisecond')
+          WHERE id = $1
+            AND status = 'waiting'
+          RETURNING spin_at
+        `,
+        [roundId, BET_MS, LOCK_MS],
+      );
+      armed = armResult.rows[0]?.spin_at || null;
+    }
+
+    // Банк здесь не трогаем: пересчитать его на чтении дешевле, чем на каждой
+    // ставке брать блокировку на общую строку и снова всех выстраивать.
+    return {
+      armed,
+      ok: true,
+      round_id: Number(betResult.rows[0].round_id),
+      amount,
+      balance: roundAmount(debitResult.rows[0].balance),
+    };
+  }).catch((error) => {
+    if (error?.rouletteInsufficient) {
       return { ok: false, message: "Не хватает баланса." };
     }
-
-    await adjustBalance(client, currency, userId, -amount, "roulette_bet", `roulette:${round.id}`);
-    await client.query(
-      "INSERT INTO roulette_bets (round_id, user_id, amount) VALUES ($1, $2, $3::numeric)",
-      [round.id, userId, amount],
-    );
-
-    const bets = await loadBets(client, round.id);
-    const { segments, pot } = buildSegments(bets);
-    await client.query(
-      "UPDATE roulette_rounds SET pot = $2::numeric WHERE id = $1",
-      [round.id, pot],
-    );
-
-    return {
-      ok: true,
-      round: serializeRound({ ...round, pot }, segments, userId),
-      balance: roundAmount(balance - amount),
-    };
+    throw error;
   });
 }
