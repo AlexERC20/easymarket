@@ -1799,8 +1799,8 @@ function getMyChartBet(market) {
 // виден только под углом — как защитный элемент на документе. Наклон читаем
 // через собственный API Telegram: в iOS-Telegram обычные события
 // deviceorientation не приходят вовсе, работает только WebApp.DeviceOrientation.
+let holoRaf = null;
 let holoTilt = { x: 0, y: 0 };
-let holoSource = "none";
 
 function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, Number(value) || 0));
@@ -1814,53 +1814,31 @@ function holoToDegrees(value) {
   return Math.abs(raw) <= 3.2 ? raw * (180 / Math.PI) : raw;
 }
 
-function setHoloTilt(x, y, source) {
-  holoSource = source;
-  holoTilt = { x: holoToDegrees(x), y: holoToDegrees(y) };
-}
-
-// Блик рисуется прямо на канвасе графика: два захода через CSS background-clip
-// на iOS не отрисовались вовсе, а канвас ведёт себя одинаково везде. Заодно
-// пропал отдельный таймер — кадры и так идут.
-function drawLogoHologram(ctx, width, height, dpr) {
-  const text = "EASYMARKET";
-  const fontSize = Math.max(22, Math.min(31, width * 0.074));
-  ctx.save();
-  ctx.font = `950 ${fontSize}px Inter, system-ui, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  const cx = width / 2;
-  const cy = height / 2;
-
-  // Базовая надпись — та же, что была в разметке.
-  ctx.fillStyle = "rgba(153, 170, 194, 0.075)";
-  ctx.fillText(text, cx, cy);
-
-  const lean = Math.min(1, Math.hypot(holoTilt.x / 34, holoTilt.y / 52));
-  const strength = holoSource === "none"
-    ? 0.1 + Math.abs(Math.sin(Date.now() / 1400)) * 0.16
-    : lean * lean * 0.62;
-  if (strength <= 0.005) {
-    ctx.restore();
+function applyHoloTilt() {
+  holoRaf = null;
+  const node = document.querySelector(".chart-brand-watermark");
+  if (!node) {
     return;
   }
+  const sweep = clampNumber(holoTilt.x / 42, -1, 1);
+  const lean = Math.min(1, Math.hypot(holoTilt.x / 34, holoTilt.y / 52));
+  // Две цветные копии разъезжаются в стороны при наклоне — тот самый перелив,
+  // но размер, положение и начертание надписи остаются нетронутыми.
+  const glow = lean * lean * 0.5;
+  node.style.setProperty("--holo", glow.toFixed(3));
+  node.style.setProperty("--holo-shift", `${(sweep * 2.4).toFixed(2)}px`);
+  node.style.setProperty("--holo-blur", `${(2 + lean * 5).toFixed(1)}px`);
+  // Заодно уводим и сам цвет буквы: холоднее в одну сторону, теплее в другую.
+  const r = Math.round(153 + sweep * 42);
+  const b = Math.round(194 - sweep * 30);
+  node.style.setProperty("--holo-rgb", `${r}, 170, ${b}`);
+}
 
-  const sweep = holoSource === "none"
-    ? Math.sin(Date.now() / 1400)
-    : clampNumber(holoTilt.x / 42, -1, 1) + clampNumber(holoTilt.y / 90, -1, 1) * 0.3;
-  const halfWidth = ctx.measureText(text).width / 2;
-  const band = halfWidth * 1.15;
-  const centre = cx + sweep * halfWidth * 1.1;
-  const gradient = ctx.createLinearGradient(centre - band, cy - fontSize, centre + band, cy + fontSize);
-  gradient.addColorStop(0, "rgba(120, 216, 255, 0)");
-  gradient.addColorStop(0.32, `rgba(120, 216, 255, ${(strength * 0.9).toFixed(3)})`);
-  gradient.addColorStop(0.5, `rgba(186, 148, 255, ${strength.toFixed(3)})`);
-  gradient.addColorStop(0.68, `rgba(126, 255, 206, ${(strength * 0.9).toFixed(3)})`);
-  gradient.addColorStop(1, "rgba(126, 255, 206, 0)");
-  ctx.fillStyle = gradient;
-  ctx.fillText(text, cx, cy);
-  ctx.restore();
-  void dpr;
+function setHoloTilt(x, y) {
+  holoTilt = { x: holoToDegrees(x), y: holoToDegrees(y) };
+  if (holoRaf === null) {
+    holoRaf = requestAnimationFrame(applyHoloTilt);
+  }
 }
 
 function startLogoHologram() {
@@ -1885,7 +1863,7 @@ function startLogoHologram() {
       if (gamma === undefined && beta === undefined) {
         return;
       }
-      setHoloTilt(gamma, beta, "telegram");
+      setHoloTilt(gamma, beta);
     };
     try {
       tg.onEvent?.("deviceOrientationChanged", onChange);
@@ -1909,7 +1887,7 @@ function startLogoHologram() {
     if (event?.gamma === null && event?.beta === null) {
       return;
     }
-    setHoloTilt(event?.gamma ?? 0, event?.beta ?? 0, "w3c");
+    setHoloTilt(event?.gamma ?? 0, event?.beta ?? 0);
   };
   window.addEventListener("deviceorientation", onWindowOrientation, { passive: true });
 
@@ -2159,7 +2137,6 @@ function drawMarketChartFrame(ts) {
     updateMarketPulse(market, openPrice, currentPrice);
   }
 
-  drawLogoHologram(ctx, width, height, dpr);
 
   const sourcePoints = getSortedChartPoints(market);
   const endTime = new Date(market.end_time).getTime();
