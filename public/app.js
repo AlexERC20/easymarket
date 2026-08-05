@@ -1799,10 +1799,8 @@ function getMyChartBet(market) {
 // виден только под углом — как защитный элемент на документе. Наклон читаем
 // через собственный API Telegram: в iOS-Telegram обычные события
 // deviceorientation не приходят вовсе, работает только WebApp.DeviceOrientation.
-let holoRaf = null;
 let holoTilt = { x: 0, y: 0 };
 let holoSource = "none";
-let holoAmbientTimer = null;
 
 function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, Number(value) || 0));
@@ -1816,52 +1814,53 @@ function holoToDegrees(value) {
   return Math.abs(raw) <= 3.2 ? raw * (180 / Math.PI) : raw;
 }
 
-function applyHoloTilt() {
-  holoRaf = null;
-  const node = document.querySelector(".chart-brand-watermark");
-  if (!node) {
-    return;
-  }
-  const sweep = clampNumber(holoTilt.x / 42, -1, 1) * 0.5
-    + clampNumber(holoTilt.y / 70, -1, 1) * 0.16;
-  const lean = Math.min(1, Math.hypot(holoTilt.x / 34, holoTilt.y / 52));
-  node.style.setProperty("--holo-pos", `${(50 + sweep * 130).toFixed(1)}%`);
-  node.style.setProperty("--holo", (lean * lean * 0.62).toFixed(3));
-}
-
 function setHoloTilt(x, y, source) {
   holoSource = source;
-  if (holoAmbientTimer !== null) {
-    window.clearInterval(holoAmbientTimer);
-    holoAmbientTimer = null;
-  }
   holoTilt = { x: holoToDegrees(x), y: holoToDegrees(y) };
-  if (holoRaf === null) {
-    holoRaf = requestAnimationFrame(applyHoloTilt);
-  }
 }
 
-// Если наклона не даёт ни один источник, блик всё равно должен существовать —
-// иначе элемент выглядит просто сломанным. Медленная волна раз в несколько
-// секунд, заметно слабее, чем от реального наклона.
-function startHoloAmbient() {
-  if (holoAmbientTimer !== null || holoSource !== "none") {
+// Блик рисуется прямо на канвасе графика: два захода через CSS background-clip
+// на iOS не отрисовались вовсе, а канвас ведёт себя одинаково везде. Заодно
+// пропал отдельный таймер — кадры и так идут.
+function drawLogoHologram(ctx, width, height, dpr) {
+  const text = "EASYMARKET";
+  const fontSize = Math.max(22, Math.min(31, width * 0.074));
+  ctx.save();
+  ctx.font = `950 ${fontSize}px Inter, system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const cx = width / 2;
+  const cy = height / 2;
+
+  // Базовая надпись — та же, что была в разметке.
+  ctx.fillStyle = "rgba(153, 170, 194, 0.075)";
+  ctx.fillText(text, cx, cy);
+
+  const lean = Math.min(1, Math.hypot(holoTilt.x / 34, holoTilt.y / 52));
+  const strength = holoSource === "none"
+    ? 0.1 + Math.abs(Math.sin(Date.now() / 1400)) * 0.16
+    : lean * lean * 0.62;
+  if (strength <= 0.005) {
+    ctx.restore();
     return;
   }
-  const node = document.querySelector(".chart-brand-watermark");
-  if (!node) {
-    return;
-  }
-  let phase = 0;
-  holoAmbientTimer = window.setInterval(() => {
-    if (document.visibilityState !== "visible") {
-      return;
-    }
-    phase += 0.06;
-    const wave = Math.sin(phase);
-    node.style.setProperty("--holo-pos", `${(50 + wave * 120).toFixed(1)}%`);
-    node.style.setProperty("--holo", (0.1 + Math.abs(wave) * 0.16).toFixed(3));
-  }, 90);
+
+  const sweep = holoSource === "none"
+    ? Math.sin(Date.now() / 1400)
+    : clampNumber(holoTilt.x / 42, -1, 1) + clampNumber(holoTilt.y / 90, -1, 1) * 0.3;
+  const halfWidth = ctx.measureText(text).width / 2;
+  const band = halfWidth * 1.15;
+  const centre = cx + sweep * halfWidth * 1.1;
+  const gradient = ctx.createLinearGradient(centre - band, cy - fontSize, centre + band, cy + fontSize);
+  gradient.addColorStop(0, "rgba(120, 216, 255, 0)");
+  gradient.addColorStop(0.32, `rgba(120, 216, 255, ${(strength * 0.9).toFixed(3)})`);
+  gradient.addColorStop(0.5, `rgba(186, 148, 255, ${strength.toFixed(3)})`);
+  gradient.addColorStop(0.68, `rgba(126, 255, 206, ${(strength * 0.9).toFixed(3)})`);
+  gradient.addColorStop(1, "rgba(126, 255, 206, 0)");
+  ctx.fillStyle = gradient;
+  ctx.fillText(text, cx, cy);
+  ctx.restore();
+  void dpr;
 }
 
 function startLogoHologram() {
@@ -1871,7 +1870,10 @@ function startLogoHologram() {
 
   const tg = window.Telegram?.WebApp;
   const sensor = tg?.DeviceOrientation;
-  const canUseTelegramSensor = sensor && typeof sensor.start === "function"
+  // На десктопе наклонять нечем, а запуск сенсора там — лишний повод для
+  // исключения или системного попапа. Спрашиваем только у телефонов.
+  const mobileClient = !tg?.platform || /^(ios|android)/i.test(String(tg.platform));
+  const canUseTelegramSensor = mobileClient && sensor && typeof sensor.start === "function"
     && (typeof tg.isVersionAtLeast !== "function" || tg.isVersionAtLeast("8.0"));
 
   if (canUseTelegramSensor) {
@@ -1921,9 +1923,6 @@ function startLogoHologram() {
     document.addEventListener("pointerdown", ask, { once: true, passive: true });
   }
 
-  // Волна идёт сразу: если датчик оживёт, setHoloTilt её погасит. Так надпись
-  // не выглядит мёртвой первые секунды и сразу видно, что слой вообще рисуется.
-  startHoloAmbient();
 }
 
 // Пульс рынка: телефон стучит в такт цене, пока у человека открыта позиция.
@@ -2159,6 +2158,8 @@ function drawMarketChartFrame(ts) {
     detectTargetCross(market, openPrice);
     updateMarketPulse(market, openPrice, currentPrice);
   }
+
+  drawLogoHologram(ctx, width, height, dpr);
 
   const sourcePoints = getSortedChartPoints(market);
   const endTime = new Date(market.end_time).getTime();
@@ -11575,7 +11576,11 @@ loadPublicConfig()
           void runSingleFlight("specialMarket", loadSpecialMarket).catch(() => undefined);
         }, 2_400);
         window.setTimeout(showReferralNudge, 150_000);
-        startLogoHologram();
+        try {
+          startLogoHologram();
+        } catch {
+          // Голограмма — украшение и не должна мешать входу в приложение.
+        }
       })
       .finally(hideLightningLoader);
   })

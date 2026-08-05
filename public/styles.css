@@ -1258,64 +1258,6 @@ h2 {
   height: 100%;
 }
 
-.chart-brand-watermark {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 0;
-  color: rgba(153, 170, 194, 0.075);
-  font-size: clamp(22px, 7.4vw, 31px);
-  font-weight: 950;
-  line-height: 1;
-  letter-spacing: 0;
-  text-transform: uppercase;
-  white-space: nowrap;
-  pointer-events: none;
-  user-select: none;
-  transform: translate(-50%, -50%);
-  text-shadow: 0 0 22px rgba(128, 156, 194, 0.045);
-  /* Голографическая фольга: полоса радужного блика лежит поверх тех же букв и
-     проявляется только при наклоне телефона, как защитный элемент на документе.
-     Без датчика --holo остаётся нулём, и надпись выглядит ровно как раньше. */
-  --holo: 0;
-  --holo-pos: 50%;
-}
-
-.chart-brand-watermark::after {
-  content: attr(data-text);
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    104deg,
-    transparent 22%,
-    rgba(120, 216, 255, 0.85) 36%,
-    rgba(186, 148, 255, 1) 50%,
-    rgba(126, 255, 206, 0.85) 64%,
-    transparent 78%
-  );
-  background-size: 260% 100%;
-  background-position: var(--holo-pos) 0;
-  -webkit-background-clip: text;
-  background-clip: text;
-  /* Safari и iOS обязательно требуют -webkit-text-fill-color: одного
-     color: transparent мало, и слой не отрисовывается вовсе. */
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  /* Тень родителя не должна просвечивать сквозь прозрачные буквы блика. */
-  text-shadow: none;
-  z-index: 1;
-  opacity: var(--holo);
-  pointer-events: none;
-  /* Плавность нужна только чтобы блик не дёргался на шумном датчике; сам сдвиг
-     полосы идёт покадрово, поэтому переход держим коротким. */
-  transition: opacity 220ms ease-out;
-  will-change: background-position, opacity;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .chart-brand-watermark::after {
-    display: none;
-  }
 }
 
 .aquarium-layer {
