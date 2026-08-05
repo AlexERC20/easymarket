@@ -1056,7 +1056,7 @@ async function findIntentForDepositEvent(client, network, event) {
         AND deposit_amount = $2::numeric
         AND created_at <= ($3::timestamptz + ($5::int * interval '1 minute'))
       ORDER BY
-        CASE WHEN network = $4 THEN 0 ELSE 1 END,
+        CASE WHEN network = $4::text THEN 0 ELSE 1 END,
         created_at ASC
       LIMIT 1
       FOR UPDATE
