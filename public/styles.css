@@ -7637,7 +7637,7 @@ body.roulette-mode .chart-frame {
   aspect-ratio: 1 / 1;
   height: auto;
   min-height: 0;
-  max-height: min(85vw, 55vh);
+  max-height: min(74vw, 48vh);
 }
 
 /* .hidden объявлен намного выше и с той же специфичностью, поэтому display
@@ -7694,8 +7694,7 @@ body.roulette-mode .round-history-strip,
 body.roulette-mode .market-chart,
 body.roulette-mode .aquarium-layer,
 body.roulette-mode .ticket-head,
-body.roulette-mode #marketPanelBookBtn,
-body.roulette-mode .countdown {
+body.roulette-mode #marketPanelBookBtn {
   display: none !important;
 }
 
@@ -7707,7 +7706,8 @@ body.roulette-mode .chart-brand-holo {
 .roulette-bar {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  margin-top: 16px;
 }
 
 .roulette-hint {

@@ -11777,7 +11777,7 @@ function renderRouletteCentre() {
     minutes.textContent = String(Math.floor(total / 60)).padStart(2, "0");
     seconds.textContent = String(total % 60).padStart(2, "0");
     note.textContent = round.segments.length < 2
-      ? "нужен второй игрок"
+      ? `банк ${Math.round(round.pot)} ★ · нужен второй игрок`
       : `банк ${Math.round(round.pot)} ★`;
     return;
   }
