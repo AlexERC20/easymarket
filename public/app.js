@@ -11779,7 +11779,10 @@ function drawRoulettePills(ctx, width, height, nowTs) {
   const fontPx = Math.max(11, width * 0.024);
   const padX = Math.max(8, width * 0.018);
   const pillH = Math.max(22, height * 0.105);
-  const pillY = height - pillH - Math.max(16, height * 0.02);
+  // На графике плашки держат выше нижней кромки, потому что там она уходит в
+  // альфа-фейд шва карточки и текст в нём теряется. У круга низ свободен, и
+  // опущенные в затенение плашки сидят аккуратнее.
+  const pillY = height - pillH - Math.max(2, height * 0.004);
   const radius = Math.max(8, height * 0.05);
   ctx.save();
   ctx.font = `${fontPx}px Inter, system-ui, sans-serif`;
