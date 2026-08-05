@@ -11797,6 +11797,19 @@ function renderRouletteCentre() {
   }
 }
 
+// Слепок выбранного рынка. Переключений в приложении больше двадцати и они
+// разбросаны, поэтому круг сам замечает смену выбора и уходит, вместо того
+// чтобы его закрывали в каждом из этих мест.
+function rouletteSelectionKey() {
+  return [
+    state.selectedBtcMarketId,
+    state.selectedWorldCupMarketId,
+    state.selectedTopMarketId,
+    state.selectedSportsMarketId,
+    state.selectedSpecialMarketId,
+  ].join("|");
+}
+
 function tickRouletteHaptics(previousAngle) {
   const round = roulette.round;
   if (!round || (round.status !== "spinning" && round.status !== "locked")) {
