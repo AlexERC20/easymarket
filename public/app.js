@@ -1805,6 +1805,7 @@ const HOLO_NEUTRAL_PITCH = 70;
 let holoTilt = { x: 0, y: HOLO_NEUTRAL_PITCH };
 let holoShown = { x: 0, y: HOLO_NEUTRAL_PITCH };
 let holoBox = null;
+let holoAxis = { x: 1, y: 0 };
 
 function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, Number(value) || 0));
@@ -1840,11 +1841,27 @@ function paintHolo() {
   // около семидесяти градусов: в руке блик стоит по центру, а не уезжает в край.
   const dx = clampNumber(holoShown.x / 52, -1, 1);
   const dy = clampNumber((holoShown.y - HOLO_NEUTRAL_PITCH) / 58, -1, 1);
-  const reach = Math.min(1, Math.hypot(dx, dy));
+  // Ось полосы держим отдельно и поворачиваем медленно. Считать её напрямую от
+  // текущего наклона нельзя: у самой нейтрали направление разворачивается
+  // скачком, а длина вектора проходит ноль изломом — вместе это и давало рывок
+  // ровно в центре.
+  const reach = Math.hypot(dx, dy);
+  if (reach > 0.2) {
+    const turn = 0.05;
+    holoAxis.x += (dx / reach - holoAxis.x) * turn;
+    holoAxis.y += (dy / reach - holoAxis.y) * turn;
+    const length = Math.hypot(holoAxis.x, holoAxis.y) || 1;
+    holoAxis.x /= length;
+    holoAxis.y /= length;
+  }
+
+  // Проекция на эту ось знаковая: через центр она проходит гладко, меняя знак,
+  // а не отскакивая от нуля. Полоса идёт через слово с ровной скоростью.
+  const travel = clampNumber(dx * holoAxis.x + dy * holoAxis.y, -1, 1);
   // Ноль градусов у CSS-градиента смотрит вверх и отсчитывается по часовой,
   // отсюда такой порядок аргументов.
-  const angle = (Math.atan2(dx, -dy) * 180) / Math.PI;
-  const strength = clampNumber(0.16 + reach * 0.7, 0, 0.86);
+  const angle = (Math.atan2(holoAxis.x, -holoAxis.y) * 180) / Math.PI;
+  const strength = clampNumber(0.096 + Math.abs(travel) * 0.42, 0, 0.516);
 
   // Длина оси градиента зависит от угла: поперёк слова это вся его ширина, а
   // сверху вниз — всего высота строки. Без пересчёта полоса при вертикальном
@@ -1859,7 +1876,7 @@ function paintHolo() {
     // Слои расходятся по фазе: край полосы у каждого цвета свой, поэтому на
     // границе они не совпадают и дают радужную кайму вместо ровной заливки.
     const phase = (index - (holoLayers.length - 1) / 2) * 8.5;
-    const centre = 50 + reach * 66 + phase;
+    const centre = 50 + travel * 66 + phase;
     const half = halfBand;
     const mask = `linear-gradient(${angle.toFixed(1)}deg,`
       + ` transparent ${(centre - half).toFixed(1)}%,`
