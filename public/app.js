@@ -11663,15 +11663,37 @@ function rouletteNow() {
   return Date.now() + roulette.clockSkewMs;
 }
 
-function rouletteSegmentColor(userId, isMe) {
+// Готовая палитра вместо цвета из id: у соседних id оттенки выходили близкими,
+// а у отличающихся ровно на 360 — совпадали полностью. Здесь цвета разведены
+// заведомо и берутся по месту игрока в раунде, которое закреплено за ним
+// первой ставкой и до конца раунда не меняется.
+const ROULETTE_PALETTE = [
+  [86, 190, 255],
+  [255, 118, 132],
+  [126, 224, 168],
+  [188, 142, 255],
+  [255, 176, 92],
+  [104, 226, 226],
+  [244, 128, 208],
+  [162, 208, 92],
+  [130, 154, 255],
+  [255, 214, 110],
+];
+
+function rouletteSegmentColor(index, total, isMe) {
   if (isMe) {
-    return { fill: "rgba(255, 186, 64, 0.92)", edge: "#ffd68f" };
+    return { fill: "rgba(255, 186, 64, 0.94)", edge: "#ffd68f" };
   }
-  // Цвет выводим из id, чтобы у игрока он не прыгал между раундами.
-  const hue = (Number(userId) * 47) % 360;
+  let slot = index % ROULETTE_PALETTE.length;
+  // Первый и последний секторы соприкасаются на круге: если палитра сошлась по
+  // кольцу, сдвигаем последний, иначе стык выглядел бы одним сектором.
+  if (index === total - 1 && total > 1 && slot === 0) {
+    slot = 1;
+  }
+  const [r, g, b] = ROULETTE_PALETTE[slot];
   return {
-    fill: `hsla(${hue}, 62%, 54%, 0.88)`,
-    edge: `hsla(${hue}, 72%, 72%, 1)`,
+    fill: `rgba(${r}, ${g}, ${b}, 0.9)`,
+    edge: `rgba(${r}, ${g}, ${b}, 1)`,
   };
 }
 
@@ -11889,12 +11911,12 @@ function drawRouletteFrame(timestamp) {
     ctx.restore();
   }
 
-  segments.forEach((segment) => {
+  segments.forEach((segment, index) => {
     // Нулевой угол у канваса смотрит вправо, а стрелка у нас сверху — отсюда
     // сдвиг на четверть оборота.
     const from = (segment.start + roulette.angle) * Math.PI * 2 - Math.PI / 2;
     const to = (segment.end + roulette.angle) * Math.PI * 2 - Math.PI / 2;
-    const colors = rouletteSegmentColor(segment.user_id, segment.is_me);
+    const colors = rouletteSegmentColor(index, segments.length, segment.is_me);
     const won = round?.status === "settled" && round.winner?.user_id === segment.user_id;
 
     ctx.save();
