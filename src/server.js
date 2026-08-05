@@ -812,12 +812,7 @@ app.get("/api/roulette/state", async (req, res) => {
     });
     res.status(200).json({ ok: true, ...result });
   } catch (error) {
-    // ВРЕМЕННО: текст ошибки наружу, пока ищем, почему не встаёт схема.
-    res.status(500).json({
-      ok: false,
-      message: "roulette_state_failed",
-      detail: error instanceof Error ? error.message : String(error),
-    });
+    sendApiError(res, error);
   }
 });
 

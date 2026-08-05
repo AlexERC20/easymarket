@@ -166,7 +166,6 @@ export function buildSegments(betRows) {
       amount,
       username: row.username || null,
       first_name: row.first_name || null,
-      photo_url: row.photo_url || null,
     });
   });
 
@@ -217,7 +216,7 @@ async function resolveUserId(telegramId, client = null) {
 async function loadBets(client, roundId) {
   const result = await client.query(
     `
-      SELECT bets.user_id, bets.amount, users.username, users.first_name, users.photo_url
+      SELECT bets.user_id, bets.amount, users.username, users.first_name
       FROM roulette_bets bets
       JOIN users ON users.id = bets.user_id
       WHERE bets.round_id = $1
@@ -450,7 +449,6 @@ function serializeRound(round, segments, viewerId) {
       start: segment.start,
       end: segment.end,
       name: segment.first_name || segment.username || "Игрок",
-      photo_url: segment.photo_url,
       is_me: viewerId ? Number(segment.user_id) === Number(viewerId) : false,
     })),
     winner: round.winner_user_id
@@ -480,7 +478,7 @@ export async function getRouletteState(input = {}) {
 
   const betsResult = await query(
     `
-      SELECT bets.user_id, bets.amount, users.username, users.first_name, users.photo_url
+      SELECT bets.user_id, bets.amount, users.username, users.first_name
       FROM roulette_bets bets
       JOIN users ON users.id = bets.user_id
       WHERE bets.round_id = $1
@@ -494,7 +492,7 @@ export async function getRouletteState(input = {}) {
   const historyResult = await query(
     `
       SELECT rounds.id, rounds.pot, rounds.winner_amount, rounds.settled_at,
-             users.username, users.first_name, users.photo_url
+             users.username, users.first_name
       FROM roulette_rounds rounds
       LEFT JOIN users ON users.id = rounds.winner_user_id
       WHERE rounds.currency = $1
@@ -512,7 +510,6 @@ export async function getRouletteState(input = {}) {
       pot: roundAmount(row.pot),
       amount: roundAmount(row.winner_amount),
       name: row.first_name || row.username || "Игрок",
-      photo_url: row.photo_url,
     })),
   };
 }
