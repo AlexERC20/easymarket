@@ -7656,8 +7656,7 @@ body.roulette-mode .chart-frame {
   pointer-events: none;
 }
 
-.roulette-timer strong,
-.roulette-timer span {
+.roulette-timer strong {
   display: block;
 }
 
@@ -7669,13 +7668,6 @@ body.roulette-mode .chart-frame {
   font-variant-numeric: tabular-nums;
 }
 
-.roulette-timer span {
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 950;
-  letter-spacing: 0.04em;
-}
 
 .roulette-centre-note {
   position: absolute;
