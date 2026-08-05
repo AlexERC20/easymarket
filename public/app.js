@@ -11752,9 +11752,10 @@ function updateRouletteWheel(deltaSeconds) {
     if (roulette.spinFrom === null) {
       roulette.spinFrom = roulette.angle;
     }
-    // Множитель раскрутки приходит с сервера вместе с зерном: полных оборотов
-    // каждый раз разное число, поэтому два прогона не выглядят одинаково.
-    const turns = Math.max(1, Number(round.spin_turns) || 8);
+    // Оборотов должно быть целое число: дробная часть уехала бы в конечный
+    // угол и колесо остановилось бы мимо победителя. Округляем и здесь — в
+    // старых раундах в базе лежат дробные значения.
+    const turns = Math.max(1, Math.round(Number(round.spin_turns) || 8));
     const distance = turns + (((target - roulette.spinFrom) % 1) + 1) % 1;
     const eased = 1 - (1 - progress) ** 3;
     roulette.angle = roulette.spinFrom + distance * eased;
