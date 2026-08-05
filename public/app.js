@@ -1857,11 +1857,11 @@ function startLogoHologram() {
 
   const tg = window.Telegram?.WebApp;
   const sensor = tg?.DeviceOrientation;
-  // На десктопе наклонять нечем, а лишний запрос сенсора там — повод для
-  // исключения или системного попапа.
-  const mobileClient = !tg?.platform || /^(ios|android)/i.test(String(tg.platform));
+  // Клиент на маке датчик тоже отдаёт, а вот в tdesktop и вебе наклонять нечем,
+  // и лишний запрос там — повод для исключения или системного попапа.
+  const tiltableClient = !tg?.platform || /^(ios|android|macos)/i.test(String(tg.platform));
 
-  if (mobileClient && sensor && typeof sensor.start === "function") {
+  if (tiltableClient && sensor && typeof sensor.start === "function") {
     try {
       // Углы приходят либо в теле события, либо остаются на самом объекте —
       // клиенты ведут себя по-разному, поэтому читаем оба варианта.
