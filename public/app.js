@@ -1819,6 +1819,7 @@ const roulette = {
   pollTimer: null,
   shownWinnerRoundId: 0,
   busy: false,
+  selectionKey: null,
 };
 
 let holoBox = null;
@@ -6082,6 +6083,10 @@ function renderLossRefundOffers() {
 }
 
 function renderTradeTicket() {
+  if (roulette.active) {
+    renderRouletteAmounts();
+    return;
+  }
   const side = state.selectedSide;
   const price = getSelectedPrice();
   const market = getDisplayMarket();
@@ -11815,10 +11820,28 @@ function drawRouletteCentre(ctx, cx, cy, radius, dpr) {
   ctx.restore();
 }
 
+// Слепок выбранного рынка. Переключений в приложении много и они разбросаны,
+// поэтому вместо того чтобы закрывать круг в каждом из них, он сам замечает,
+// что выбор сменился, и уходит. Один пропущенный путь раньше оставлял колесо
+// нарисованным поверх графика.
+function rouletteSelectionKey() {
+  return [
+    state.selectedBtcMarketId,
+    state.selectedWorldCupMarketId,
+    state.selectedTopMarketId,
+    state.selectedSportsMarketId,
+    state.selectedSpecialMarketId,
+  ].join("|");
+}
+
 function drawRouletteFrame(timestamp) {
   roulette.raf = null;
   const canvas = $("rouletteWheel");
   if (!roulette.active || !canvas) {
+    return;
+  }
+  if (roulette.selectionKey !== null && rouletteSelectionKey() !== roulette.selectionKey) {
+    closeRoulette();
     return;
   }
 
@@ -11945,15 +11968,26 @@ const ROULETTE_AMOUNTS = [50, 100, 500, 2000];
 // renderTradeTicket, когда рынок снова станет обычным.
 function renderRouletteAmounts() {
   const open = roulette.round?.status === "betting";
+  const pot = Number(roulette.round?.pot || 0);
   document.querySelectorAll(".amount-button").forEach((button, index) => {
     const amount = ROULETTE_AMOUNTS[index] ?? ROULETTE_AMOUNTS[0];
+    const nextLabel = formatWholeCurrencyAmount(amount, "STAR");
+    const nextWin = formatWholeCurrencyAmount(Math.round((pot + amount) * 0.9), "STAR");
     button.dataset.amount = String(amount);
-    button.dataset.label = `${amount} ★`;
-    button.dataset.win = "";
+    button.dataset.stakeTier = String(index + 1);
     button.classList.toggle("active", amount === roulette.amount);
-    button.classList.remove("loading");
+    button.classList.toggle("loading", roulette.busy && amount === roulette.amount);
     button.disabled = !open || roulette.busy || !state.user;
-    button.innerHTML = `<strong>${amount} ★</strong><small>в банк</small>`;
+    // Переписываем разметку только когда подписи реально изменились — тот же
+    // приём, что и у обычного тикета, иначе кнопки мерцают на каждом кадре.
+    if (button.dataset.label !== nextLabel || button.dataset.win !== nextWin) {
+      button.dataset.label = nextLabel;
+      button.dataset.win = nextWin;
+      button.innerHTML = `
+        <strong>${nextLabel}</strong>
+        <small>банк <b>${nextWin}</b></small>
+      `;
+    }
   });
 }
 
@@ -12044,6 +12078,7 @@ function openRoulette() {
   }
   roulette.active = true;
   roulette.lastFrameAt = 0;
+  roulette.selectionKey = rouletteSelectionKey();
   document.body.classList.add("roulette-mode");
   $("rouletteWheel")?.classList.remove("hidden");
   $("rouletteBar")?.classList.remove("hidden");
@@ -12075,6 +12110,7 @@ function closeRoulette() {
     return;
   }
   roulette.active = false;
+  roulette.selectionKey = null;
   document.body.classList.remove("roulette-mode");
   $("rouletteWheel")?.classList.add("hidden");
   $("rouletteBar")?.classList.add("hidden");
