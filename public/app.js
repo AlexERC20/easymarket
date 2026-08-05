@@ -1795,114 +1795,6 @@ function getMyChartBet(market) {
   };
 }
 
-// Голограмма на логотипе: радужный блик поверх центральной надписи, который
-// виден только под углом — как защитный элемент на документе. Наклон читаем
-// через собственный API Telegram: в iOS-Telegram обычные события
-// deviceorientation не приходят вовсе, работает только WebApp.DeviceOrientation.
-let holoRaf = null;
-let holoTilt = { x: 0, y: 0 };
-
-function clampNumber(value, min, max) {
-  return Math.min(max, Math.max(min, Number(value) || 0));
-}
-
-// Датчики отдают углы то в радианах, то в градусах, и клиенты в этом расходятся.
-// Определяем по величине: осмысленный наклон в радианах никогда не выйдет за
-// пределы полутора, а в градусах легко даёт десятки.
-function holoToDegrees(value) {
-  const raw = Number(value) || 0;
-  return Math.abs(raw) <= 3.2 ? raw * (180 / Math.PI) : raw;
-}
-
-function applyHoloTilt() {
-  holoRaf = null;
-  const node = document.querySelector(".chart-brand-watermark");
-  if (!node) {
-    return;
-  }
-  const sweep = clampNumber(holoTilt.x / 42, -1, 1);
-  const lean = Math.min(1, Math.hypot(holoTilt.x / 34, holoTilt.y / 52));
-  // Две цветные копии разъезжаются в стороны при наклоне — тот самый перелив,
-  // но размер, положение и начертание надписи остаются нетронутыми.
-  const glow = lean * lean * 0.5;
-  node.style.setProperty("--holo", glow.toFixed(3));
-  node.style.setProperty("--holo-shift", `${(sweep * 2.4).toFixed(2)}px`);
-  node.style.setProperty("--holo-blur", `${(2 + lean * 5).toFixed(1)}px`);
-  // Заодно уводим и сам цвет буквы: холоднее в одну сторону, теплее в другую.
-  const r = Math.round(153 + sweep * 42);
-  const b = Math.round(194 - sweep * 30);
-  node.style.setProperty("--holo-rgb", `${r}, 170, ${b}`);
-}
-
-function setHoloTilt(x, y) {
-  holoTilt = { x: holoToDegrees(x), y: holoToDegrees(y) };
-  if (holoRaf === null) {
-    holoRaf = requestAnimationFrame(applyHoloTilt);
-  }
-}
-
-function startLogoHologram() {
-  if (prefersReducedMotion()) {
-    return;
-  }
-
-  const tg = window.Telegram?.WebApp;
-  const sensor = tg?.DeviceOrientation;
-  // На десктопе наклонять нечем, а запуск сенсора там — лишний повод для
-  // исключения или системного попапа. Спрашиваем только у телефонов.
-  const mobileClient = !tg?.platform || /^(ios|android)/i.test(String(tg.platform));
-  const canUseTelegramSensor = mobileClient && sensor && typeof sensor.start === "function"
-    && (typeof tg.isVersionAtLeast !== "function" || tg.isVersionAtLeast("8.0"));
-
-  if (canUseTelegramSensor) {
-    // Углы приходят либо в теле события, либо остаются на самом объекте —
-    // клиенты ведут себя по-разному, поэтому читаем оба варианта.
-    const onChange = (payload) => {
-      const gamma = payload?.gamma ?? sensor.gamma;
-      const beta = payload?.beta ?? sensor.beta;
-      if (gamma === undefined && beta === undefined) {
-        return;
-      }
-      setHoloTilt(gamma, beta);
-    };
-    try {
-      tg.onEvent?.("deviceOrientationChanged", onChange);
-      sensor.start({ refresh_rate: 30, need_absolute: false });
-      document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") {
-          sensor.start?.({ refresh_rate: 30, need_absolute: false });
-        } else {
-          sensor.stop?.();
-        }
-      });
-    } catch {
-      // Разрешение не дали или клиент соврал о поддержке — ниже подхватят
-      // запасные источники.
-    }
-  }
-
-  // Запасной путь для обычного браузера. В iOS-Telegram эти события не
-  // приходят, но вне его и на Android они работают.
-  const onWindowOrientation = (event) => {
-    if (event?.gamma === null && event?.beta === null) {
-      return;
-    }
-    setHoloTilt(event?.gamma ?? 0, event?.beta ?? 0);
-  };
-  window.addEventListener("deviceorientation", onWindowOrientation, { passive: true });
-
-  // iOS вне Telegram требует спросить разрешение, и только по жесту.
-  const RequestPermission = window.DeviceOrientationEvent?.requestPermission;
-  if (typeof RequestPermission === "function") {
-    const ask = () => {
-      document.removeEventListener("pointerdown", ask);
-      RequestPermission.call(window.DeviceOrientationEvent).catch(() => undefined);
-    };
-    document.addEventListener("pointerdown", ask, { once: true, passive: true });
-  }
-
-}
-
 // Пульс рынка: телефон стучит в такт цене, пока у человека открыта позиция.
 // Движение в его сторону — короткий светлый тик, против — глухая двойная
 // отбивка, последние секунды — частое сердцебиение. Порог срабатывания
@@ -2136,7 +2028,6 @@ function drawMarketChartFrame(ts) {
     detectTargetCross(market, openPrice);
     updateMarketPulse(market, openPrice, currentPrice);
   }
-
 
   const sourcePoints = getSortedChartPoints(market);
   const endTime = new Date(market.end_time).getTime();
@@ -11553,11 +11444,6 @@ loadPublicConfig()
           void runSingleFlight("specialMarket", loadSpecialMarket).catch(() => undefined);
         }, 2_400);
         window.setTimeout(showReferralNudge, 150_000);
-        try {
-          startLogoHologram();
-        } catch {
-          // Голограмма — украшение и не должна мешать входу в приложение.
-        }
       })
       .finally(hideLightningLoader);
   })
