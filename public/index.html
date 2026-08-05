@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260805-14" />
+    <link rel="stylesheet" href="/styles.css?v=20260806-01" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260711-03" />
     <link rel="stylesheet" href="/kyivstoner-motion.css?v=20260714-02" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -739,6 +739,8 @@
             <small>YOU WON</small>
             <strong id="winOverlayAmount">+0</strong>
           </div>
+          <!-- Колесо встаёт на место графика: та же рамка, тот же размер. -->
+          <canvas id="rouletteWheel" class="roulette-wheel hidden" aria-label="Колесо рулетки"></canvas>
           <div id="tradeBubbles" class="trade-bubbles" aria-hidden="true"></div>
           <button id="marketNavPrev" class="market-nav-arrow market-nav-prev" type="button" aria-label="Предыдущий рынок">&#8249;</button>
           <button id="marketNavNext" class="market-nav-arrow market-nav-next" type="button" aria-label="Следующий рынок">&#8250;</button>
@@ -792,6 +794,22 @@
           <button class="amount-button" data-amount="10" type="button"><strong>$10</strong><small>win <b>$20</b></small></button>
           <button class="amount-button" data-amount="25" type="button"><strong>$25</strong><small>win <b>$50</b></small></button>
           <button class="amount-button" data-amount="100" type="button"><strong>$100</strong><small>win <b>$200</b></small></button>
+        </div>
+
+        <!-- Ставочная панель рулетки. Живёт в той же карточке, что и обычные
+             суммы, и подменяет их, когда открыт круг. -->
+        <div id="rouletteBar" class="roulette-bar hidden">
+          <div class="roulette-amounts">
+            <button class="roulette-amount active" data-roulette-amount="50" type="button">50</button>
+            <button class="roulette-amount" data-roulette-amount="100" type="button">100</button>
+            <button class="roulette-amount" data-roulette-amount="500" type="button">500</button>
+            <button class="roulette-amount" data-roulette-amount="2000" type="button">2000</button>
+          </div>
+          <button id="rouletteBetBtn" class="roulette-bet-button" type="button">
+            <span id="rouletteBetLabel">Поставить 50 ★</span>
+          </button>
+          <p id="rouletteHint" class="roulette-hint">Победитель забирает весь банк за вычетом 10%. Минимум 50 ★.</p>
+          <button id="rouletteFairBtn" class="roulette-fair" type="button">Проверить честность раунда</button>
         </div>
       </section>
 
@@ -899,6 +917,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260805-14" type="module"></script>
+    <script src="/app.js?v=20260806-01" type="module"></script>
   </body>
 </html>

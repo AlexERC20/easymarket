@@ -89,6 +89,7 @@ import {
   markStarConversionRemindersSent,
 } from "./services/bonusEconomyService.js";
 import { getTreasurySnapshot } from "./services/treasuryService.js";
+import { getRouletteState, placeRouletteBet, rouletteTick } from "./services/rouletteService.js";
 import { PriceUnavailableError, startBtcPriceStream } from "./services/priceService.js";
 import { runDatabaseCleanup, runStartupDatabaseRescue } from "./services/databaseCleanupService.js";
 import {
@@ -800,6 +801,33 @@ app.get("/api/special/kyivstoner", cachedJsonRoute("special/kyivstoner", 2_000, 
   const result = await getKyivstonerMarket();
   return { ok: true, ...result };
 }));
+
+// Состояние круга меняется каждую секунду и зависит от зрителя, поэтому общий
+// кеш ответов здесь не годится.
+app.get("/api/roulette/state", async (req, res) => {
+  try {
+    const result = await getRouletteState({
+      currency: req.query?.currency,
+      telegram_id: req.query?.telegram_id,
+    });
+    res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/roulette/bet", async (req, res) => {
+  try {
+    const result = await placeRouletteBet({
+      currency: req.body?.currency,
+      telegram_id: req.body?.telegram_id,
+      amount: req.body?.amount,
+    });
+    res.status(result.ok ? 200 : 400).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
 
 app.get("/api/btc/markets", cachedJsonRoute("btc/markets", 2_000, async () => {
   const markets = await getBtcMarkets();
@@ -2192,6 +2220,11 @@ async function startMarketEngine() {
   setInterval(() => {
     void priceTick();
   }, config.pricePollMs);
+
+  void rouletteTick();
+  setInterval(() => {
+    void rouletteTick();
+  }, 1_000);
 
   if (config.usdtDepositScanEnabled) {
     void usdtDepositTick();

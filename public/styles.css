@@ -7630,3 +7630,101 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
     animation: taskClaimGlow 900ms ease both !important;
   }
 }
+
+/* ==== Рулетка ==== */
+
+.roulette-wheel {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* В режиме круга график и всё, что относится к торговле, не нужны: цена,
+   стороны, глубина и стакан к рулетке отношения не имеют. Чат остаётся. */
+body.roulette-mode .price-board,
+body.roulette-mode .outcome-grid,
+body.roulette-mode .market-depth,
+body.roulette-mode .round-history-strip,
+body.roulette-mode .market-chart,
+body.roulette-mode .aquarium-layer,
+body.roulette-mode .amount-grid,
+body.roulette-mode .ticket-head,
+body.roulette-mode #marketPanelBookBtn,
+body.roulette-mode .countdown {
+  display: none !important;
+}
+
+body.roulette-mode .chart-brand-watermark,
+body.roulette-mode .chart-brand-holo {
+  opacity: 0;
+}
+
+.roulette-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.roulette-amounts {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.roulette-amount {
+  padding: 12px 4px;
+  border: 1px solid rgba(148, 172, 205, 0.22);
+  border-radius: 12px;
+  background: rgba(20, 28, 42, 0.55);
+  color: #cfe0f5;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.roulette-amount.active {
+  border-color: rgba(255, 196, 84, 0.75);
+  background: rgba(255, 176, 52, 0.16);
+  color: #ffd08a;
+}
+
+.roulette-bet-button {
+  padding: 15px 12px;
+  border: 0;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ffb42e, #ff7a2f);
+  color: #17130a;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.roulette-bet-button[disabled] {
+  background: rgba(120, 134, 158, 0.28);
+  color: rgba(226, 236, 250, 0.5);
+  cursor: default;
+}
+
+.roulette-hint {
+  margin: 0;
+  color: rgba(176, 192, 214, 0.75);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.roulette-fair {
+  align-self: center;
+  padding: 4px 6px;
+  border: 0;
+  background: none;
+  color: rgba(150, 200, 255, 0.72);
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+}

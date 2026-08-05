@@ -1804,6 +1804,23 @@ let holoLayers = null;
 const HOLO_NEUTRAL_PITCH = 70;
 let holoTilt = { x: 0, y: HOLO_NEUTRAL_PITCH };
 let holoShown = { x: 0, y: HOLO_NEUTRAL_PITCH };
+const roulette = {
+  active: false,
+  round: null,
+  history: [],
+  amount: 50,
+  // Разница часов клиента и сервера. Без неё таймер и момент раскрутки
+  // разъезжаются у тех, у кого время на телефоне сбито.
+  clockSkewMs: 0,
+  angle: 0,
+  spinFrom: null,
+  lastFrameAt: 0,
+  raf: null,
+  pollTimer: null,
+  shownWinnerRoundId: 0,
+  busy: false,
+};
+
 let holoBox = null;
 let holoAxis = { x: 1, y: 0 };
 
@@ -7268,6 +7285,7 @@ function animateMarketSwitch(mode = "slide") {
 }
 
 function selectBtcMarket(marketId) {
+  closeRoulette();
   const id = Number(marketId);
   const market = state.btcMarkets.find((item) => item.id === id);
   if (!market) {
@@ -7301,6 +7319,7 @@ function setWorldCupSheetOpen(open) {
 }
 
 function selectWorldCupMarket(marketId) {
+  closeRoulette();
   const id = Number(marketId);
   const market = state.worldCupMarkets.find((item) => item.id === id);
   if (!market) {
@@ -7334,6 +7353,7 @@ function setTopMarketsSheetOpen(open) {
 }
 
 function selectTopMarket(marketId) {
+  closeRoulette();
   const id = Number(marketId);
   const market = state.topMarkets.find((item) => item.id === id);
   if (!market) {
@@ -7367,6 +7387,7 @@ function setSportsMarketsSheetOpen(open) {
 }
 
 function selectSportsMarket(marketId) {
+  closeRoulette();
   const id = Number(marketId);
   const market = state.sportsMarkets.find((item) => item.id === id);
   if (!market) return;
@@ -7390,6 +7411,7 @@ function selectSportsMarket(marketId) {
 }
 
 function selectSpecialMarket(marketId) {
+  closeRoulette();
   const id = Number(marketId);
   const market = state.specialMarkets.find((item) => item.id === id);
   if (!market) return;
@@ -9080,15 +9102,7 @@ $("kyivstonerMarketBtn")?.addEventListener("click", async () => {
   void playKyivstonerMotion(button, {
     onImpact: () => playMotionSound("success"),
   });
-  try {
-    const market = state.specialMarkets[0]
-      || await runSingleFlight("specialMarket", loadSpecialMarket);
-    if (market?.id) {
-      selectSpecialMarket(market.id);
-    }
-  } catch {
-    showToast("Рынок Киевстонера пока не загрузился.");
-  }
+  openRoulette();
 });
 
 $("topMoreBtn")?.addEventListener("click", (event) => {
@@ -11619,3 +11633,444 @@ loadPublicConfig()
     $("authCard").classList.remove("hidden");
     showToast(error.message || "Не удалось создать пользователя.");
   });
+
+// ==== Рулетка ====
+// Колесо на банк: доля сектора равна доле в банке, стрелка сверху выбирает
+// победителя. Результат целиком считает сервер и присылает точку остановки —
+// здесь только проигрывается уже принятое решение, подкрутить с клиента нечего.
+
+const ROULETTE_POLL_MS = 1_000;
+
+
+function rouletteNow() {
+  return Date.now() + roulette.clockSkewMs;
+}
+
+function rouletteSegmentColor(userId, isMe) {
+  if (isMe) {
+    return { fill: "rgba(255, 186, 64, 0.92)", edge: "#ffd68f" };
+  }
+  // Цвет выводим из id, чтобы у игрока он не прыгал между раундами.
+  const hue = (Number(userId) * 47) % 360;
+  return {
+    fill: `hsla(${hue}, 62%, 54%, 0.88)`,
+    edge: `hsla(${hue}, 72%, 72%, 1)`,
+  };
+}
+
+function rouletteInitial(name) {
+  const trimmed = String(name || "").trim();
+  return trimmed ? trimmed[0].toUpperCase() : "?";
+}
+
+// Точка остановки, которую прислал сервер, — это доля круга под стрелкой.
+// Поворот колеса ей обратен: сектор нужно подвести к стрелке, а не наоборот.
+function rouletteTargetAngle(round) {
+  const final = Number(round?.final_angle);
+  if (!Number.isFinite(final)) {
+    return null;
+  }
+  return ((-final % 1) + 1) % 1;
+}
+
+function updateRouletteWheel(deltaSeconds) {
+  const round = roulette.round;
+  if (!round) {
+    return;
+  }
+  const status = round.status;
+
+  if (status === "betting") {
+    // Пока никто не поставил, круг стоит. Первая ставка трогает его с места, и
+    // дальше он идёт тем медленнее, чем меньше народу — так видно, что раунд жив.
+    const players = round.segments.length;
+    if (players > 0) {
+      roulette.angle += deltaSeconds * (0.03 + Math.min(players, 8) * 0.006);
+    }
+    roulette.spinFrom = null;
+    return;
+  }
+
+  if (status === "locked") {
+    // Пять секунд разгона: приём уже закрыт, колесо набирает ход.
+    const spinAt = new Date(round.spin_at).getTime();
+    const left = Math.max(0, spinAt - rouletteNow()) / 1_000;
+    const ramp = 1 - Math.min(1, left / 5);
+    roulette.angle += deltaSeconds * (0.08 + ramp * 1.6);
+    roulette.spinFrom = null;
+    return;
+  }
+
+  const target = rouletteTargetAngle(round);
+  if (target === null) {
+    return;
+  }
+
+  if (status === "spinning") {
+    const spinAt = new Date(round.spin_at).getTime();
+    const seconds = Math.max(1, Number(round.spin_seconds) || 8);
+    const progress = Math.min(1, Math.max(0, (rouletteNow() - spinAt) / (seconds * 1_000)));
+    if (roulette.spinFrom === null) {
+      roulette.spinFrom = roulette.angle;
+    }
+    // Множитель раскрутки приходит с сервера вместе с зерном: полных оборотов
+    // каждый раз разное число, поэтому два прогона не выглядят одинаково.
+    const turns = Math.max(1, Number(round.spin_turns) || 8);
+    const distance = turns + (((target - roulette.spinFrom) % 1) + 1) % 1;
+    const eased = 1 - (1 - progress) ** 3;
+    roulette.angle = roulette.spinFrom + distance * eased;
+    return;
+  }
+
+  // Раунд сыгран: стоим ровно на точке остановки.
+  roulette.angle = Math.floor(roulette.angle) + target;
+  roulette.spinFrom = null;
+}
+
+function drawRouletteCentre(ctx, cx, cy, radius, dpr) {
+  const round = roulette.round;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius * 0.58, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(9, 14, 24, 0.94)";
+  ctx.fill();
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.strokeStyle = "rgba(148, 176, 214, 0.25)";
+  ctx.stroke();
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  const status = round?.status;
+  let big = "--";
+  let small = "";
+
+  if (!round) {
+    big = "…";
+    small = "загружаем круг";
+  } else if (status === "betting") {
+    const left = Math.max(0, new Date(round.bets_close_at).getTime() - rouletteNow());
+    const seconds = Math.ceil(left / 1_000);
+    big = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    small = round.segments.length < 2 ? "нужен второй игрок" : "приём ставок";
+  } else if (status === "locked") {
+    big = "СТОП";
+    small = "ставки закрыты";
+  } else if (status === "spinning") {
+    big = "…";
+    small = "крутим";
+  } else if (status === "void") {
+    big = "—";
+    small = "не собрались, ставки вернули";
+  } else if (round.winner) {
+    const winnerSegment = round.segments.find((item) => item.user_id === round.winner.user_id);
+    big = `${Math.round(round.winner.amount)} ★`;
+    small = round.winner.is_me ? "твой банк!" : `забрал ${winnerSegment?.name || "игрок"}`;
+  }
+
+  ctx.fillStyle = "#f2f7ff";
+  ctx.font = `800 ${Math.round(radius * 0.26)}px Inter, system-ui, sans-serif`;
+  ctx.fillText(big, cx, cy - radius * 0.06);
+
+  ctx.fillStyle = "rgba(168, 188, 214, 0.85)";
+  ctx.font = `600 ${Math.round(radius * 0.11)}px Inter, system-ui, sans-serif`;
+  ctx.fillText(small, cx, cy + radius * 0.18);
+
+  if (round && round.pot > 0) {
+    ctx.fillStyle = "rgba(255, 206, 122, 0.95)";
+    ctx.font = `800 ${Math.round(radius * 0.13)}px Inter, system-ui, sans-serif`;
+    ctx.fillText(`банк ${Math.round(round.pot)} ★`, cx, cy + radius * 0.36);
+  }
+  ctx.restore();
+}
+
+function drawRouletteFrame(timestamp) {
+  roulette.raf = null;
+  const canvas = $("rouletteWheel");
+  if (!roulette.active || !canvas) {
+    return;
+  }
+
+  const delta = roulette.lastFrameAt ? Math.min(0.1, (timestamp - roulette.lastFrameAt) / 1_000) : 0;
+  roulette.lastFrameAt = timestamp;
+  updateRouletteWheel(delta);
+
+  const { dpr, width, height } = resizeCanvas(canvas);
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, width, height);
+
+  const cx = width / 2;
+  const cy = height / 2;
+  const radius = Math.min(width, height) * 0.42;
+  const round = roulette.round;
+  const segments = round?.segments || [];
+  const rotation = roulette.angle * Math.PI * 2;
+
+  // Обод.
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius * 1.04, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(12, 18, 30, 0.9)";
+  ctx.fill();
+  ctx.restore();
+
+  if (!segments.length) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.lineWidth = radius * 0.42;
+    ctx.strokeStyle = "rgba(120, 142, 176, 0.16)";
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  segments.forEach((segment) => {
+    // Нулевой угол у канваса смотрит вправо, а стрелка у нас сверху — отсюда
+    // сдвиг на четверть оборота.
+    const from = (segment.start + roulette.angle) * Math.PI * 2 - Math.PI / 2;
+    const to = (segment.end + roulette.angle) * Math.PI * 2 - Math.PI / 2;
+    const colors = rouletteSegmentColor(segment.user_id, segment.is_me);
+    const won = round?.status === "settled" && round.winner?.user_id === segment.user_id;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, radius, from, to);
+    ctx.closePath();
+    ctx.fillStyle = won ? "rgba(126, 255, 186, 0.95)" : colors.fill;
+    ctx.fill();
+    ctx.lineWidth = 1.2 * dpr;
+    ctx.strokeStyle = "rgba(8, 12, 20, 0.75)";
+    ctx.stroke();
+    ctx.restore();
+
+    // Подпись рисуем только если сектор достаточно широкий, иначе имена
+    // наложатся друг на друга и превратятся в кашу.
+    if (segment.share > 0.07) {
+      const mid = (from + to) / 2;
+      const tx = cx + Math.cos(mid) * radius * 0.78;
+      const ty = cy + Math.sin(mid) * radius * 0.78;
+      ctx.save();
+      ctx.translate(tx, ty);
+      ctx.rotate(mid + Math.PI / 2);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "rgba(8, 12, 20, 0.9)";
+      ctx.font = `800 ${Math.round(radius * 0.1)}px Inter, system-ui, sans-serif`;
+      ctx.fillText(rouletteInitial(segment.name), 0, -radius * 0.06);
+      ctx.font = `700 ${Math.round(radius * 0.075)}px Inter, system-ui, sans-serif`;
+      ctx.fillText(`${Math.round(segment.share * 100)}%`, 0, radius * 0.06);
+      ctx.restore();
+    }
+  });
+
+  drawRouletteCentre(ctx, cx, cy, radius, dpr);
+
+  // Стрелка сверху. Рисуется последней, чтобы всегда быть поверх секторов.
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - radius * 1.16);
+  ctx.lineTo(cx - radius * 0.09, cy - radius * 0.96);
+  ctx.lineTo(cx + radius * 0.09, cy - radius * 0.96);
+  ctx.closePath();
+  ctx.fillStyle = "#ffd166";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(10, 14, 22, 0.8)";
+  ctx.lineWidth = 1.4 * dpr;
+  ctx.stroke();
+  ctx.restore();
+
+  void rotation;
+  roulette.raf = requestAnimationFrame(drawRouletteFrame);
+}
+
+function renderRouletteBar() {
+  const round = roulette.round;
+  const button = $("rouletteBetBtn");
+  const label = $("rouletteBetLabel");
+  const hint = $("rouletteHint");
+  if (!button || !label) {
+    return;
+  }
+
+  const open = round?.status === "betting";
+  button.disabled = !open || roulette.busy;
+  label.textContent = open ? `Поставить ${roulette.amount} ★` : "Приём закрыт";
+
+  if (hint && round) {
+    const mine = round.segments.find((item) => item.is_me);
+    hint.textContent = mine
+      ? `Твоя доля ${Math.round(mine.share * 100)}% · шанс выиграть ровно столько же.`
+      : "Победитель забирает весь банк за вычетом 10%. Минимум 50 ★.";
+  }
+}
+
+async function loadRouletteState() {
+  if (!roulette.active) {
+    return;
+  }
+  try {
+    const params = new URLSearchParams({ currency: "STAR" });
+    if (state.user?.telegram_id) {
+      params.set("telegram_id", String(state.user.telegram_id));
+    }
+    const data = await api(`/api/roulette/state?${params.toString()}`);
+    if (!roulette.active) {
+      return;
+    }
+    if (data.round) {
+      roulette.clockSkewMs = new Date(data.round.server_time).getTime() - Date.now();
+      // Новый раунд — сбрасываем разгон, иначе колесо доигрывало бы прошлый.
+      if (roulette.round && roulette.round.id !== data.round.id) {
+        roulette.spinFrom = null;
+      }
+      roulette.round = data.round;
+      roulette.history = data.history || [];
+
+      const winner = data.round.winner;
+      if (data.round.status === "settled" && winner && roulette.shownWinnerRoundId !== data.round.id) {
+        roulette.shownWinnerRoundId = data.round.id;
+        if (winner.is_me) {
+          triggerHaptic("success");
+          showWinOverlay(`+${Math.round(winner.amount)} ★`, winner.amount, 4);
+          void refreshAll().catch(() => undefined);
+        } else {
+          void refreshAll().catch(() => undefined);
+        }
+      }
+    }
+    renderRouletteBar();
+  } catch {
+    // Раунд идёт на сервере и без нас: пропущенный опрос догонится следующим.
+  }
+}
+
+async function placeRouletteBet() {
+  if (!state.user?.telegram_id || roulette.busy) {
+    return;
+  }
+  roulette.busy = true;
+  renderRouletteBar();
+  try {
+    const data = await api("/api/roulette/bet", {
+      method: "POST",
+      body: JSON.stringify({
+        currency: "STAR",
+        telegram_id: String(state.user.telegram_id),
+        amount: roulette.amount,
+      }),
+    });
+    roulette.round = data.round;
+    triggerHaptic("success");
+    showToast(`Ставка ${roulette.amount} ★ принята.`);
+    void refreshAll().catch(() => undefined);
+  } catch (error) {
+    triggerHaptic("error");
+    showToast(error?.message || "Ставку не приняли.");
+  } finally {
+    roulette.busy = false;
+    renderRouletteBar();
+  }
+}
+
+function openRoulette() {
+  if (roulette.active) {
+    return;
+  }
+  roulette.active = true;
+  roulette.lastFrameAt = 0;
+  document.body.classList.add("roulette-mode");
+  $("rouletteWheel")?.classList.remove("hidden");
+  $("rouletteBar")?.classList.remove("hidden");
+  const title = $("marketTitle");
+  if (title) {
+    title.textContent = "Колесо · банк на звёзды";
+  }
+  const status = $("marketStatus");
+  if (status) {
+    status.textContent = "LIVE";
+  }
+  const window_ = $("marketWindow");
+  if (window_) {
+    window_.textContent = "Раунд минуту · победитель забирает банк";
+  }
+
+  void loadRouletteState();
+  roulette.pollTimer = window.setInterval(() => {
+    void loadRouletteState();
+  }, ROULETTE_POLL_MS);
+  if (roulette.raf === null) {
+    roulette.raf = requestAnimationFrame(drawRouletteFrame);
+  }
+  renderRouletteBar();
+}
+
+function closeRoulette() {
+  if (!roulette.active) {
+    return;
+  }
+  roulette.active = false;
+  document.body.classList.remove("roulette-mode");
+  $("rouletteWheel")?.classList.add("hidden");
+  $("rouletteBar")?.classList.add("hidden");
+  if (roulette.pollTimer !== null) {
+    window.clearInterval(roulette.pollTimer);
+    roulette.pollTimer = null;
+  }
+  if (roulette.raf !== null) {
+    cancelAnimationFrame(roulette.raf);
+    roulette.raf = null;
+  }
+}
+
+document.querySelectorAll("[data-roulette-amount]").forEach((button) => {
+  button.addEventListener("click", () => {
+    triggerHaptic("selection");
+    roulette.amount = Number(button.dataset.rouletteAmount) || 50;
+    document.querySelectorAll("[data-roulette-amount]").forEach((item) => {
+      item.classList.toggle("active", item === button);
+    });
+    renderRouletteBar();
+  });
+});
+
+$("rouletteBetBtn")?.addEventListener("click", () => {
+  triggerHaptic("light");
+  void placeRouletteBet();
+});
+
+// Честность проверяется руками: до раунда публикуется хеш зерна, после
+// раскрутки — само зерно. Кто угодно может пересчитать sha256 и убедиться,
+// что точку остановки не подбирали под результат.
+$("rouletteFairBtn")?.addEventListener("click", () => {
+  const round = roulette.round;
+  if (!round) {
+    return;
+  }
+  const lines = [
+    `Раунд #${round.id}`,
+    `Хеш зерна: ${round.seed_hash}`,
+    round.seed ? `Зерно: ${round.seed}` : "Зерно откроется при раскрутке.",
+    round.final_angle !== null ? `Точка остановки: ${round.final_angle}` : "",
+    "Проверка: sha256(зерно) должен совпасть с хешем.",
+  ].filter(Boolean);
+  showToast(lines.join("\n"));
+});
+
+// Уходя со страницы, гасим и опрос, и кадры — раунд идёт на сервере, а
+// крутить колесо в фоне незачем.
+document.addEventListener("visibilitychange", () => {
+  if (!roulette.active) {
+    return;
+  }
+  if (document.visibilityState === "visible") {
+    roulette.lastFrameAt = 0;
+    void loadRouletteState();
+    if (roulette.raf === null) {
+      roulette.raf = requestAnimationFrame(drawRouletteFrame);
+    }
+  } else if (roulette.raf !== null) {
+    cancelAnimationFrame(roulette.raf);
+    roulette.raf = null;
+  }
+});
