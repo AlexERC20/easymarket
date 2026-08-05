@@ -1294,7 +1294,9 @@ h2 {
 @supports ((-webkit-mask-image: linear-gradient(#000, #000)) or (mask-image: linear-gradient(#000, #000))) {
   .chart-brand-holo {
     color: rgba(var(--holo-rgb), var(--holo, 0));
-    text-shadow: 0 0 18px rgba(var(--holo-rgb), calc(var(--holo, 0) * 0.45));
+    /* Никакого свечения: размытая тень выходит за контур буквы, и полоса
+       становится видна в просветах между ними. Красим только сам глиф. */
+    text-shadow: none;
     /* Слои складываются как свет, а не перекрывают друг друга — иначе верхний
        цвет просто закрасил бы остальные и спектра не получилось бы. */
     mix-blend-mode: screen;

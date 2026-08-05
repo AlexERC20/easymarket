@@ -1803,6 +1803,7 @@ let holoFrame = null;
 let holoLayers = null;
 let holoTilt = { x: 0, y: 0 };
 let holoShown = { x: 0, y: 0 };
+let holoBox = null;
 
 function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, Number(value) || 0));
@@ -1823,20 +1824,39 @@ function paintHolo() {
   if (!holoLayers.length) {
     return;
   }
+  if (!holoBox) {
+    // Меряем один раз: читать размеры каждый кадр — это принудительный пересчёт
+    // раскладки по тридцать раз в секунду.
+    const rect = holoLayers[0].getBoundingClientRect();
+    holoBox = { width: rect.width || 200, height: rect.height || 30 };
+  }
 
-  const sweep = clampNumber(holoShown.x / 36, -1, 1);
-  const lean = Math.min(1, Math.hypot(holoShown.x / 28, holoShown.y / 44));
-  const strength = clampNumber(0.16 + lean * 0.7, 0, 0.86);
-  // Наклон вперёд-назад заваливает полосу, и она идёт по буквам не строго
-  // поперёк — от этого блик читается как объёмный, а не как ползунок.
-  const angle = 104 + clampNumber(holoShown.y / 46, -1, 1) * 24;
+  // Наклон — это вектор, а не одна ось. Полоса идёт перпендикулярно ему и
+  // съезжает в ту сторону, куда наклоняешь: вбок, вверх, по диагонали. Так
+  // ведёт себя настоящая метка на документе — она не привязана к одной оси.
+  const dx = clampNumber(holoShown.x / 34, -1, 1);
+  const dy = clampNumber(holoShown.y / 40, -1, 1);
+  const reach = Math.min(1, Math.hypot(dx, dy));
+  // Ноль градусов у CSS-градиента смотрит вверх и отсчитывается по часовой,
+  // отсюда такой порядок аргументов.
+  const angle = (Math.atan2(dx, -dy) * 180) / Math.PI;
+  const strength = clampNumber(0.16 + reach * 0.7, 0, 0.86);
+
+  // Длина оси градиента зависит от угла: поперёк слова это вся его ширина, а
+  // сверху вниз — всего высота строки. Без пересчёта полоса при вертикальном
+  // наклоне выродилась бы в мигающую щель, поэтому задаём её толщину в
+  // пикселях и переводим в проценты уже под текущий угол.
+  const radians = (angle * Math.PI) / 180;
+  const axis = Math.abs(holoBox.width * Math.sin(radians))
+    + Math.abs(holoBox.height * Math.cos(radians));
+  const halfBand = clampNumber((46 / Math.max(axis, 1)) * 100, 11, 46);
 
   holoLayers.forEach((layer, index) => {
     // Слои расходятся по фазе: край полосы у каждого цвета свой, поэтому на
     // границе они не совпадают и дают радужную кайму вместо ровной заливки.
     const phase = (index - (holoLayers.length - 1) / 2) * 8.5;
-    const centre = 50 + sweep * 66 + phase;
-    const half = 19;
+    const centre = 50 + reach * 66 + phase;
+    const half = halfBand;
     const mask = `linear-gradient(${angle.toFixed(1)}deg,`
       + ` transparent ${(centre - half).toFixed(1)}%,`
       + ` #000 ${centre.toFixed(1)}%,`
@@ -1900,6 +1920,10 @@ function startLogoHologram() {
       // Клиент соврал о поддержке — ниже подхватит обычное событие окна.
     }
   }
+
+  window.addEventListener("resize", () => {
+    holoBox = null;
+  }, { passive: true });
 
   window.addEventListener("deviceorientation", (event) => {
     if (event?.gamma === null && event?.beta === null) {
