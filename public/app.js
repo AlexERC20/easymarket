@@ -1795,108 +1795,100 @@ function getMyChartBet(market) {
   };
 }
 
-// ВРЕМЕННО: табло датчика наклона. Нужно, чтобы отличить «датчик молчит» от
-// «эффект нарисовался, но слишком слабый» — прошлые попытки голограммы упали
-// именно потому, что причина была неизвестна. Удалить вместе с #tiltProbe.
-function startTiltProbe() {
-  const node = document.getElementById("tiltProbe");
+// Блик по наклону. Логотип остаётся нетронутым DOM-узлом, а поверх него лежит
+// его же копия, из которой маской показана узкая полоса — она и едет по буквам.
+// Через background-clip: text это уже не получилось трижды, а маска по элементу
+// механизм куда проще: она режет готовую отрисовку, а не заливку по глифам.
+let holoFrame = null;
+let holoTilt = { x: 0, y: 0, live: false };
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, Number(value) || 0));
+}
+
+// Датчики отдают углы то в радианах, то в градусах, и клиенты в этом расходятся.
+// Осмысленный наклон в радианах не выйдет за полтора, а в градусах легко даёт
+// десятки — по величине и различаем.
+function holoToDegrees(value) {
+  const raw = Number(value) || 0;
+  return Math.abs(raw) <= 3.2 ? raw * (180 / Math.PI) : raw;
+}
+
+function applyHoloTilt() {
+  holoFrame = null;
+  const node = document.getElementById("chartBrandHolo");
   if (!node) {
+    return;
+  }
+
+  const sweep = clampNumber(holoTilt.x / 38, -1, 1);
+  const lean = Math.min(1, Math.hypot(holoTilt.x / 30, holoTilt.y / 46));
+  // Намеренно заметно: прошлые заходы были настолько деликатными, что эффект
+  // невозможно было отличить от его отсутствия. Тускнеть будем потом.
+  const strength = clampNumber(0.12 + lean * 0.5, 0, 0.62);
+
+  // Полоса шириной около трети надписи ездит от края до края вместе с наклоном.
+  const centre = 50 + sweep * 62;
+  const half = 17;
+  const mask = `linear-gradient(105deg, transparent ${(centre - half).toFixed(1)}%,`
+    + ` #000 ${centre.toFixed(1)}%, transparent ${(centre + half).toFixed(1)}%)`;
+  node.style.setProperty("--holo", strength.toFixed(3));
+  node.style.webkitMaskImage = mask;
+  node.style.maskImage = mask;
+
+  const probe = document.getElementById("tiltProbe");
+  if (probe) {
+    probe.textContent = `наклон ${holoTilt.x.toFixed(0)} / ${holoTilt.y.toFixed(0)}`
+      + `  блик ${strength.toFixed(2)}  полоса ${centre.toFixed(0)}%`;
+  }
+}
+
+function setHoloTilt(x, y) {
+  holoTilt = { x: holoToDegrees(x), y: holoToDegrees(y), live: true };
+  if (holoFrame === null) {
+    holoFrame = requestAnimationFrame(applyHoloTilt);
+  }
+}
+
+function startLogoHologram() {
+  if (prefersReducedMotion()) {
     return;
   }
 
   const tg = window.Telegram?.WebApp;
   const sensor = tg?.DeviceOrientation;
-  const probe = {
-    tgEvents: 0,
-    w3cEvents: 0,
-    gamma: null,
-    beta: null,
-    from: "—",
-    note: "",
-  };
+  // На десктопе наклонять нечем, а лишний запрос сенсора там — повод для
+  // исключения или системного попапа.
+  const mobileClient = !tg?.platform || /^(ios|android)/i.test(String(tg.platform));
 
-  // Счётчики важнее самих углов: если они стоят на нуле, источник мёртв, а если
-  // растут при нулевых значениях — датчик жив, но отдаёт плоско.
-  const render = () => {
-    const angle = (value) => (value === null ? "—" : value.toFixed(1).padStart(6));
-    node.textContent = [
-      `платформа: ${tg?.platform ?? "нет Telegram"} v${tg?.version ?? "—"}`,
-      `DeviceOrientation: ${sensor ? "есть" : "НЕТ"}`,
-      `событий: telegram=${probe.tgEvents} w3c=${probe.w3cEvents}`,
-      `gamma=${angle(probe.gamma)} beta=${angle(probe.beta)} (${probe.from})`,
-      probe.note,
-    ].filter(Boolean).join("\n");
-  };
-  render();
-
-  let frame = null;
-  const schedule = () => {
-    if (frame === null) {
-      frame = requestAnimationFrame(() => {
-        frame = null;
-        render();
-      });
-    }
-  };
-
-  const record = (gamma, beta, from) => {
-    if (gamma === undefined && beta === undefined) {
-      return;
-    }
-    // Углы приходят то в радианах, то в градусах — приводим к градусам, иначе
-    // живой датчик выглядит как еле шевелящиеся нули.
-    const toDegrees = (value) => {
-      const raw = Number(value) || 0;
-      return Math.abs(raw) <= 3.2 ? raw * (180 / Math.PI) : raw;
-    };
-    probe.gamma = toDegrees(gamma);
-    probe.beta = toDegrees(beta);
-    probe.from = from;
-    schedule();
-  };
-
-  if (sensor && typeof sensor.start === "function") {
+  if (mobileClient && sensor && typeof sensor.start === "function") {
     try {
+      // Углы приходят либо в теле события, либо остаются на самом объекте —
+      // клиенты ведут себя по-разному, поэтому читаем оба варианта.
       tg.onEvent?.("deviceOrientationChanged", (payload) => {
-        probe.tgEvents += 1;
-        record(payload?.gamma ?? sensor.gamma, payload?.beta ?? sensor.beta, "telegram");
-      });
-      tg.onEvent?.("deviceOrientationFailed", (payload) => {
-        probe.note = `telegram отказал: ${payload?.error ?? "без причины"}`;
-        schedule();
+        setHoloTilt(payload?.gamma ?? sensor.gamma, payload?.beta ?? sensor.beta);
       });
       sensor.start({ refresh_rate: 30, need_absolute: false });
-    } catch (error) {
-      probe.note = `start() бросил: ${error?.message ?? error}`;
-      schedule();
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          sensor.start?.({ refresh_rate: 30, need_absolute: false });
+        } else {
+          sensor.stop?.();
+        }
+      });
+    } catch {
+      // Клиент соврал о поддержке — ниже подхватит обычное событие окна.
     }
-  } else {
-    probe.note = "у клиента нет DeviceOrientation";
   }
 
   window.addEventListener("deviceorientation", (event) => {
-    probe.w3cEvents += 1;
-    record(event?.gamma ?? 0, event?.beta ?? 0, "w3c");
+    if (event?.gamma === null && event?.beta === null) {
+      return;
+    }
+    setHoloTilt(event?.gamma ?? 0, event?.beta ?? 0);
   }, { passive: true });
 
-  // iOS вне Telegram отдаёт углы только после явного разрешения по жесту.
-  const askPermission = window.DeviceOrientationEvent?.requestPermission;
-  if (typeof askPermission === "function") {
-    const ask = () => {
-      askPermission.call(window.DeviceOrientationEvent)
-        .then((verdict) => {
-          probe.note = `разрешение: ${verdict}`;
-          schedule();
-        })
-        .catch((error) => {
-          probe.note = `разрешение отклонено: ${error?.message ?? error}`;
-          schedule();
-        });
-    };
-    document.addEventListener("pointerdown", ask, { once: true, passive: true });
-    probe.note = "коснись экрана, чтобы дать доступ к датчику";
-  }
-  render();
+  applyHoloTilt();
 }
 
 // Пульс рынка: телефон стучит в такт цене, пока у человека открыта позиция.
@@ -11549,7 +11541,7 @@ loadPublicConfig()
         }, 2_400);
         window.setTimeout(showReferralNudge, 150_000);
         try {
-          startTiltProbe();
+          startLogoHologram();
         } catch {
           // Отладочное табло не должно мешать входу в приложение.
         }

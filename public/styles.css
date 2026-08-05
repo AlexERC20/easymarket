@@ -1258,7 +1258,8 @@ h2 {
   height: 100%;
 }
 
-.chart-brand-watermark {
+.chart-brand-watermark,
+.chart-brand-holo {
   position: absolute;
   top: 50%;
   left: 50%;
@@ -1276,6 +1277,20 @@ h2 {
   text-shadow: 0 0 22px rgba(128, 156, 194, 0.045);
 }
 
+.chart-brand-holo {
+  /* Без поддержки маски видна была бы вся яркая надпись целиком, поэтому по
+     умолчанию копия прозрачная и оживает только внутри @supports ниже. */
+  color: transparent;
+  text-shadow: none;
+}
+
+@supports ((-webkit-mask-image: linear-gradient(#000, #000)) or (mask-image: linear-gradient(#000, #000))) {
+  .chart-brand-holo {
+    color: rgba(150, 232, 255, var(--holo, 0));
+    text-shadow: 0 0 14px rgba(120, 216, 255, calc(var(--holo, 0) * 0.55));
+  }
+}
+
 /* ВРЕМЕННО: отладочное табло датчика наклона. Убирается вместе с #tiltProbe. */
 .tilt-probe {
   position: absolute;
@@ -1283,7 +1298,7 @@ h2 {
   left: 8px;
   z-index: 6;
   max-width: calc(100% - 16px);
-  padding: 6px 8px;
+  padding: 4px 7px;
   border-radius: 8px;
   background: rgba(6, 10, 18, 0.82);
   color: #7effce;
