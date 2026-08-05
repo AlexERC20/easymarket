@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260805-09" />
+    <link rel="stylesheet" href="/styles.css?v=20260805-10" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260711-03" />
     <link rel="stylesheet" href="/kyivstoner-motion.css?v=20260714-02" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -726,12 +726,14 @@
         <div class="chart-frame">
           <canvas id="marketChart" class="market-chart" aria-label="BTC price chart"></canvas>
           <div class="chart-brand-watermark" aria-hidden="true">EASYMARKET</div>
-          <!-- Блик — отдельная копия ровно поверх логотипа. Сам логотип выше
-               не редактируется, поэтому съехать или сменить размер не может. -->
-          <div id="chartBrandHolo" class="chart-brand-holo" aria-hidden="true">EASYMARKET</div>
-          <!-- ВРЕМЕННО: проверка датчика наклона. Удалить вместе с .tilt-probe
-               и showTiltProbe(), когда блик подтвердится. -->
-          <div id="tiltProbe" class="tilt-probe" aria-hidden="true">наклон: ждём…</div>
+          <!-- Блик — копии логотипа ровно поверх него. Сам логотип выше не
+               редактируется, поэтому съехать или сменить размер не может.
+               Слоёв несколько: каждый своего цвета и со своим сдвигом полосы,
+               вместе они дают расщепление в спектр, как на защитной метке. -->
+          <div class="chart-brand-holo holo-a" aria-hidden="true">EASYMARKET</div>
+          <div class="chart-brand-holo holo-b" aria-hidden="true">EASYMARKET</div>
+          <div class="chart-brand-holo holo-c" aria-hidden="true">EASYMARKET</div>
+          <div class="chart-brand-holo holo-d" aria-hidden="true">EASYMARKET</div>
           <canvas id="aquariumCanvas" class="aquarium-layer" aria-hidden="true"></canvas>
           <div id="winOverlay" class="win-overlay hidden" aria-live="polite">
             <small>YOU WON</small>
@@ -897,6 +899,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260805-09" type="module"></script>
+    <script src="/app.js?v=20260805-10" type="module"></script>
   </body>
 </html>

@@ -1800,7 +1800,9 @@ function getMyChartBet(market) {
 // Через background-clip: text это уже не получилось трижды, а маска по элементу
 // механизм куда проще: она режет готовую отрисовку, а не заливку по глифам.
 let holoFrame = null;
-let holoTilt = { x: 0, y: 0, live: false };
+let holoLayers = null;
+let holoTilt = { x: 0, y: 0 };
+let holoShown = { x: 0, y: 0 };
 
 function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, Number(value) || 0));
@@ -1814,39 +1816,56 @@ function holoToDegrees(value) {
   return Math.abs(raw) <= 3.2 ? raw * (180 / Math.PI) : raw;
 }
 
-function applyHoloTilt() {
-  holoFrame = null;
-  const node = document.getElementById("chartBrandHolo");
-  if (!node) {
+function paintHolo() {
+  if (!holoLayers) {
+    holoLayers = Array.from(document.querySelectorAll(".chart-brand-holo"));
+  }
+  if (!holoLayers.length) {
     return;
   }
 
-  const sweep = clampNumber(holoTilt.x / 38, -1, 1);
-  const lean = Math.min(1, Math.hypot(holoTilt.x / 30, holoTilt.y / 46));
-  // Намеренно заметно: прошлые заходы были настолько деликатными, что эффект
-  // невозможно было отличить от его отсутствия. Тускнеть будем потом.
-  const strength = clampNumber(0.12 + lean * 0.5, 0, 0.62);
+  const sweep = clampNumber(holoShown.x / 36, -1, 1);
+  const lean = Math.min(1, Math.hypot(holoShown.x / 28, holoShown.y / 44));
+  const strength = clampNumber(0.16 + lean * 0.7, 0, 0.86);
+  // Наклон вперёд-назад заваливает полосу, и она идёт по буквам не строго
+  // поперёк — от этого блик читается как объёмный, а не как ползунок.
+  const angle = 104 + clampNumber(holoShown.y / 46, -1, 1) * 24;
 
-  // Полоса шириной около трети надписи ездит от края до края вместе с наклоном.
-  const centre = 50 + sweep * 62;
-  const half = 17;
-  const mask = `linear-gradient(105deg, transparent ${(centre - half).toFixed(1)}%,`
-    + ` #000 ${centre.toFixed(1)}%, transparent ${(centre + half).toFixed(1)}%)`;
-  node.style.setProperty("--holo", strength.toFixed(3));
-  node.style.webkitMaskImage = mask;
-  node.style.maskImage = mask;
+  holoLayers.forEach((layer, index) => {
+    // Слои расходятся по фазе: край полосы у каждого цвета свой, поэтому на
+    // границе они не совпадают и дают радужную кайму вместо ровной заливки.
+    const phase = (index - (holoLayers.length - 1) / 2) * 8.5;
+    const centre = 50 + sweep * 66 + phase;
+    const half = 19;
+    const mask = `linear-gradient(${angle.toFixed(1)}deg,`
+      + ` transparent ${(centre - half).toFixed(1)}%,`
+      + ` #000 ${centre.toFixed(1)}%,`
+      + ` transparent ${(centre + half).toFixed(1)}%)`;
+    layer.style.setProperty("--holo", strength.toFixed(3));
+    layer.style.webkitMaskImage = mask;
+    layer.style.maskImage = mask;
+  });
+}
 
-  const probe = document.getElementById("tiltProbe");
-  if (probe) {
-    probe.textContent = `наклон ${holoTilt.x.toFixed(0)} / ${holoTilt.y.toFixed(0)}`
-      + `  блик ${strength.toFixed(2)}  полоса ${centre.toFixed(0)}%`;
+// Датчик отдаёт углы рывками по 30 раз в секунду, и если рисовать их как есть,
+// полоса дёргается. Догоняем цель плавно и останавливаем цикл, как только
+// движение затухло, — постоянного rAF в фоне не остаётся.
+function stepHolo() {
+  holoFrame = null;
+  const ease = 0.14;
+  holoShown.x += (holoTilt.x - holoShown.x) * ease;
+  holoShown.y += (holoTilt.y - holoShown.y) * ease;
+  paintHolo();
+  const settled = Math.abs(holoTilt.x - holoShown.x) + Math.abs(holoTilt.y - holoShown.y) < 0.08;
+  if (!settled) {
+    holoFrame = requestAnimationFrame(stepHolo);
   }
 }
 
 function setHoloTilt(x, y) {
-  holoTilt = { x: holoToDegrees(x), y: holoToDegrees(y), live: true };
+  holoTilt = { x: holoToDegrees(x), y: holoToDegrees(y) };
   if (holoFrame === null) {
-    holoFrame = requestAnimationFrame(applyHoloTilt);
+    holoFrame = requestAnimationFrame(stepHolo);
   }
 }
 
@@ -1857,9 +1876,10 @@ function startLogoHologram() {
 
   const tg = window.Telegram?.WebApp;
   const sensor = tg?.DeviceOrientation;
-  // Клиент на маке датчик тоже отдаёт, а вот в tdesktop и вебе наклонять нечем,
-  // и лишний запрос там — повод для исключения или системного попапа.
-  const tiltableClient = !tg?.platform || /^(ios|android|macos)/i.test(String(tg.platform));
+  // Только телефоны. На macOS запрос датчика ломал открытие мини-аппа целиком,
+  // хотя JS-исключения не было — значит спотыкается сам клиент, и лезть туда
+  // ради украшения нельзя.
+  const tiltableClient = !tg?.platform || /^(ios|android)/i.test(String(tg.platform));
 
   if (tiltableClient && sensor && typeof sensor.start === "function") {
     try {
@@ -1888,7 +1908,7 @@ function startLogoHologram() {
     setHoloTilt(event?.gamma ?? 0, event?.beta ?? 0);
   }, { passive: true });
 
-  applyHoloTilt();
+  paintHolo();
 }
 
 // Пульс рынка: телефон стучит в такт цене, пока у человека открыта позиция.

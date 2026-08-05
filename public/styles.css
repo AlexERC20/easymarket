@@ -1278,36 +1278,27 @@ h2 {
 }
 
 .chart-brand-holo {
-  /* Без поддержки маски видна была бы вся яркая надпись целиком, поэтому по
+  /* Без поддержки маски была бы видна вся яркая надпись целиком, поэтому по
      умолчанию копия прозрачная и оживает только внутри @supports ниже. */
   color: transparent;
   text-shadow: none;
 }
 
+/* Расщепление на спектр: у каждого слоя свой цвет, а полосы разъезжаются по
+   фазе — так же, как дифракционная метка на банкноте разбивает свет. */
+.holo-a { --holo-rgb: 96, 226, 255; }
+.holo-b { --holo-rgb: 138, 152, 255; }
+.holo-c { --holo-rgb: 214, 132, 255; }
+.holo-d { --holo-rgb: 255, 208, 132; }
+
 @supports ((-webkit-mask-image: linear-gradient(#000, #000)) or (mask-image: linear-gradient(#000, #000))) {
   .chart-brand-holo {
-    color: rgba(150, 232, 255, var(--holo, 0));
-    text-shadow: 0 0 14px rgba(120, 216, 255, calc(var(--holo, 0) * 0.55));
+    color: rgba(var(--holo-rgb), var(--holo, 0));
+    text-shadow: 0 0 18px rgba(var(--holo-rgb), calc(var(--holo, 0) * 0.45));
+    /* Слои складываются как свет, а не перекрывают друг друга — иначе верхний
+       цвет просто закрасил бы остальные и спектра не получилось бы. */
+    mix-blend-mode: screen;
   }
-}
-
-/* ВРЕМЕННО: отладочное табло датчика наклона. Убирается вместе с #tiltProbe. */
-.tilt-probe {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 6;
-  max-width: calc(100% - 16px);
-  padding: 4px 7px;
-  border-radius: 8px;
-  background: rgba(6, 10, 18, 0.82);
-  color: #7effce;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  line-height: 1.45;
-  white-space: pre;
-  pointer-events: none;
-  user-select: none;
 }
 
 .aquarium-layer {
