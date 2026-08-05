@@ -1801,6 +1801,20 @@ function getMyChartBet(market) {
 // deviceorientation не приходят вовсе, работает только WebApp.DeviceOrientation.
 let holoRaf = null;
 let holoTilt = { x: 0, y: 0 };
+let holoSource = "none";
+let holoAmbientTimer = null;
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, Number(value) || 0));
+}
+
+// Датчики отдают углы то в радианах, то в градусах, и клиенты в этом расходятся.
+// Определяем по величине: осмысленный наклон в радианах никогда не выйдет за
+// пределы полутора, а в градусах легко даёт десятки.
+function holoToDegrees(value) {
+  const raw = Number(value) || 0;
+  return Math.abs(raw) <= 3.2 ? raw * (180 / Math.PI) : raw;
+}
 
 function applyHoloTilt() {
   holoRaf = null;
@@ -1808,60 +1822,107 @@ function applyHoloTilt() {
   if (!node) {
     return;
   }
-  // gamma — наклон вбок, он ведёт полосу поперёк надписи. beta добавляет
-  // немного, чтобы блик отзывался и на завал вперёд-назад.
-  const sweep = clampNumber(holoTilt.x / 42, -1, 1) * 0.5 + clampNumber(holoTilt.y / 70, -1, 1) * 0.16;
+  const sweep = clampNumber(holoTilt.x / 42, -1, 1) * 0.5
+    + clampNumber(holoTilt.y / 70, -1, 1) * 0.16;
   const lean = Math.min(1, Math.hypot(holoTilt.x / 34, holoTilt.y / 52));
   node.style.setProperty("--holo-pos", `${(50 + sweep * 130).toFixed(1)}%`);
-  // Плоско лежащий телефон блика не даёт совсем — в этом весь смысл эффекта.
   node.style.setProperty("--holo", (lean * lean * 0.62).toFixed(3));
 }
 
-function clampNumber(value, min, max) {
-  return Math.min(max, Math.max(min, Number(value) || 0));
+function setHoloTilt(x, y, source) {
+  holoSource = source;
+  if (holoAmbientTimer !== null) {
+    window.clearInterval(holoAmbientTimer);
+    holoAmbientTimer = null;
+  }
+  holoTilt = { x: holoToDegrees(x), y: holoToDegrees(y) };
+  if (holoRaf === null) {
+    holoRaf = requestAnimationFrame(applyHoloTilt);
+  }
+}
+
+// Если наклона не даёт ни один источник, блик всё равно должен существовать —
+// иначе элемент выглядит просто сломанным. Медленная волна раз в несколько
+// секунд, заметно слабее, чем от реального наклона.
+function startHoloAmbient() {
+  if (holoAmbientTimer !== null || holoSource !== "none") {
+    return;
+  }
+  const node = document.querySelector(".chart-brand-watermark");
+  if (!node) {
+    return;
+  }
+  let phase = 0;
+  holoAmbientTimer = window.setInterval(() => {
+    if (document.visibilityState !== "visible") {
+      return;
+    }
+    phase += 0.06;
+    const wave = Math.sin(phase);
+    node.style.setProperty("--holo-pos", `${(50 + wave * 120).toFixed(1)}%`);
+    node.style.setProperty("--holo", (0.1 + Math.abs(wave) * 0.16).toFixed(3));
+  }, 90);
 }
 
 function startLogoHologram() {
   if (prefersReducedMotion()) {
     return;
   }
+
   const tg = window.Telegram?.WebApp;
   const sensor = tg?.DeviceOrientation;
-  const supported = sensor && typeof sensor.start === "function"
+  const canUseTelegramSensor = sensor && typeof sensor.start === "function"
     && (typeof tg.isVersionAtLeast !== "function" || tg.isVersionAtLeast("8.0"));
-  if (!supported) {
-    return;
-  }
 
-  const onChange = () => {
-    holoTilt = {
-      x: Number(sensor.gamma || 0) * (180 / Math.PI),
-      y: Number(sensor.beta || 0) * (180 / Math.PI),
+  if (canUseTelegramSensor) {
+    // Углы приходят либо в теле события, либо остаются на самом объекте —
+    // клиенты ведут себя по-разному, поэтому читаем оба варианта.
+    const onChange = (payload) => {
+      const gamma = payload?.gamma ?? sensor.gamma;
+      const beta = payload?.beta ?? sensor.beta;
+      if (gamma === undefined && beta === undefined) {
+        return;
+      }
+      setHoloTilt(gamma, beta, "telegram");
     };
-    if (holoRaf === null) {
-      holoRaf = requestAnimationFrame(applyHoloTilt);
+    try {
+      tg.onEvent?.("deviceOrientationChanged", onChange);
+      sensor.start({ refresh_rate: 30, need_absolute: false });
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          sensor.start?.({ refresh_rate: 30, need_absolute: false });
+        } else {
+          sensor.stop?.();
+        }
+      });
+    } catch {
+      // Разрешение не дали или клиент соврал о поддержке — ниже подхватят
+      // запасные источники.
     }
-  };
-
-  try {
-    tg.onEvent?.("deviceOrientationChanged", onChange);
-    // Чаще 30 Гц смысла нет: блик всё равно сглажен, а датчик греет батарею.
-    sensor.start({ refresh_rate: 30, need_absolute: false }, (started) => {
-      if (!started) {
-        tg.offEvent?.("deviceOrientationChanged", onChange);
-      }
-    });
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") {
-        sensor.start?.({ refresh_rate: 30, need_absolute: false });
-      } else {
-        sensor.stop?.();
-      }
-    });
-  } catch {
-    // Датчик — украшение: если клиент его не даёт, надпись просто остаётся
-    // обычной, и это ничего не ломает.
   }
+
+  // Запасной путь для обычного браузера. В iOS-Telegram эти события не
+  // приходят, но вне его и на Android они работают.
+  const onWindowOrientation = (event) => {
+    if (event?.gamma === null && event?.beta === null) {
+      return;
+    }
+    setHoloTilt(event?.gamma ?? 0, event?.beta ?? 0, "w3c");
+  };
+  window.addEventListener("deviceorientation", onWindowOrientation, { passive: true });
+
+  // iOS вне Telegram требует спросить разрешение, и только по жесту.
+  const RequestPermission = window.DeviceOrientationEvent?.requestPermission;
+  if (typeof RequestPermission === "function") {
+    const ask = () => {
+      document.removeEventListener("pointerdown", ask);
+      RequestPermission.call(window.DeviceOrientationEvent).catch(() => undefined);
+    };
+    document.addEventListener("pointerdown", ask, { once: true, passive: true });
+  }
+
+  // Три секунды на то, чтобы хоть один источник ожил; иначе включаем волну.
+  window.setTimeout(startHoloAmbient, 3_000);
 }
 
 // Пульс рынка: телефон стучит в такт цене, пока у человека открыта позиция.

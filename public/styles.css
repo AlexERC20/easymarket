@@ -1287,13 +1287,13 @@ h2 {
   inset: 0;
   background: linear-gradient(
     104deg,
-    transparent 34%,
-    rgba(120, 216, 255, 0.55) 43%,
-    rgba(186, 148, 255, 0.7) 50%,
-    rgba(126, 255, 206, 0.55) 57%,
-    transparent 66%
+    transparent 22%,
+    rgba(120, 216, 255, 0.85) 36%,
+    rgba(186, 148, 255, 1) 50%,
+    rgba(126, 255, 206, 0.85) 64%,
+    transparent 78%
   );
-  background-size: 320% 100%;
+  background-size: 260% 100%;
   background-position: var(--holo-pos) 0;
   -webkit-background-clip: text;
   background-clip: text;
