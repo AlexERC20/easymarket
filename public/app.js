@@ -1822,6 +1822,7 @@ const roulette = {
   selectionKey: null,
   bubbleRoundId: 0,
   bubbleSeen: new Map(),
+  bubbleSelfPending: 0,
 };
 
 let holoBox = null;
@@ -12018,7 +12019,7 @@ function renderRouletteAmounts() {
 // маркету по id, а у круга маркета нет. Классы и анимация те же самые.
 function spawnRouletteBubble(name, amount, mine) {
   const container = $("tradeBubbles");
-  if (!container || prefersReducedMotion()) {
+  if (!container) {
     return;
   }
   const bubble = document.createElement("div");
@@ -12030,7 +12031,7 @@ function spawnRouletteBubble(name, amount, mine) {
   // Центр занят колесом, поэтому разводим их по краям — там и есть место.
   const edge = Math.random() < 0.5 ? 2 + Math.random() * 14 : 74 + Math.random() * 14;
   bubble.style.left = `${edge}%`;
-  bubble.style.bottom = `${18 + Math.random() * 72}px`;
+  bubble.style.bottom = `${20 + Math.random() * 46}%`;
   bubble.style.animationDelay = `${delay}ms`;
   bubble.style.setProperty("--bubble-duration", `${duration}ms`);
   bubble.style.setProperty("--bubble-start-x", `${-8 + Math.random() * 16}px`);
@@ -12049,6 +12050,7 @@ function emitRouletteBubbles(round) {
   if (!round || round.id !== roulette.bubbleRoundId) {
     roulette.bubbleRoundId = round?.id || 0;
     roulette.bubbleSeen = new Map();
+    roulette.bubbleSelfPending = 0;
     (round?.segments || []).forEach((segment) => {
       roulette.bubbleSeen.set(segment.user_id, segment.amount);
     });
@@ -12057,10 +12059,21 @@ function emitRouletteBubbles(round) {
   round.segments.forEach((segment) => {
     const before = roulette.bubbleSeen.get(segment.user_id) || 0;
     const added = segment.amount - before;
-    if (added > 0) {
-      roulette.bubbleSeen.set(segment.user_id, segment.amount);
-      spawnRouletteBubble(segment.name, added, segment.is_me);
+    if (added <= 0) {
+      return;
     }
+    roulette.bubbleSeen.set(segment.user_id, segment.amount);
+    if (segment.is_me) {
+      // Своё уже показали при нажатии — гасим ровно столько, сколько показали.
+      const shown = Math.min(added, roulette.bubbleSelfPending);
+      roulette.bubbleSelfPending -= shown;
+      if (added - shown <= 0) {
+        return;
+      }
+      spawnRouletteBubble(segment.name, added - shown, true);
+      return;
+    }
+    spawnRouletteBubble(segment.name, added, false);
   });
 }
 
@@ -12191,6 +12204,8 @@ function applyOptimisticRouletteBet(amount) {
   }
   round.pot += amount;
   rebuildRouletteShares(round);
+  roulette.bubbleSelfPending += amount;
+  spawnRouletteBubble("ты", amount, true);
   state.balance = Math.max(0, Number(state.balance || 0) - amount);
   renderMe();
   renderRouletteAmounts();
@@ -12209,6 +12224,7 @@ function revertOptimisticRouletteBet(amount) {
     round.pot = Math.max(0, round.pot - amount);
     rebuildRouletteShares(round);
   }
+  roulette.bubbleSelfPending = Math.max(0, roulette.bubbleSelfPending - amount);
   state.balance = Number(state.balance || 0) + amount;
   renderMe();
   renderRouletteAmounts();
