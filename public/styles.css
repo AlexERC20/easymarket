@@ -7662,7 +7662,7 @@ body.roulette-mode .chart-frame {
 
 .roulette-timer strong {
   color: var(--no);
-  font-size: clamp(24px, 7.2vw, 37px);
+  font-size: clamp(28px, 8.4vw, 43px);
   font-weight: 950;
   line-height: 0.96;
   font-variant-numeric: tabular-nums;

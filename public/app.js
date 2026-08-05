@@ -12170,17 +12170,6 @@ function drawRouletteFrame(timestamp) {
   ctx.fill();
   ctx.restore();
 
-  // Ось стрелки поверх центра.
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius * 0.075, 0, Math.PI * 2);
-  ctx.fillStyle = "#ffd166";
-  ctx.fill();
-  ctx.strokeStyle = "rgba(12, 16, 24, 0.85)";
-  ctx.lineWidth = 1.6 * dpr;
-  ctx.stroke();
-  ctx.restore();
-
   void rotation;
   roulette.raf = requestAnimationFrame(drawRouletteFrame);
 }
