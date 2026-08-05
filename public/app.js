@@ -11919,14 +11919,12 @@ function drawRouletteFrame(timestamp) {
     const from = (segment.start + roulette.angle) * Math.PI * 2 - Math.PI / 2;
     const to = (segment.end + roulette.angle) * Math.PI * 2 - Math.PI / 2;
     const colors = rouletteSegmentColor(index, segments.length, segment.is_me);
-    const won = round?.status === "settled" && round.winner?.user_id === segment.user_id;
-
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, radius, from, to);
     ctx.closePath();
-    ctx.fillStyle = won ? "rgba(126, 255, 186, 0.95)" : colors.fill;
+    ctx.fillStyle = colors.fill;
     ctx.fill();
     ctx.lineWidth = 1.2 * dpr;
     ctx.strokeStyle = "rgba(8, 12, 20, 0.75)";
