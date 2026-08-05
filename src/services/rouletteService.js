@@ -303,12 +303,35 @@ async function advanceRound(client, currency) {
 
   if (round.status === "betting" && now >= new Date(round.bets_close_at).getTime()) {
     const bets = await loadBets(client, round.id);
-    const { pot } = buildSegments(bets);
-    const updated = await client.query(
-      "UPDATE roulette_rounds SET status = 'locked', pot = $2::numeric WHERE id = $1 RETURNING *",
-      [round.id, pot],
-    );
-    round = updated.rows[0];
+    const { segments, pot } = buildSegments(bets);
+    if (segments.length < MIN_PARTICIPANTS) {
+      // Отсчёт запускает только второй игрок, так что сюда попасть неоткуда.
+      // Страховка всё равно нужна: без неё одиночка крутит колесо сам с собой
+      // и платит комиссию ни за что — ровно это и случилось с раундом, который
+      // был в полёте, когда правила менялись.
+      for (const bet of bets) {
+        await adjustBalance(
+          client,
+          currency,
+          bet.user_id,
+          roundAmount(bet.amount),
+          "roulette_refund",
+          `roulette:${round.id}`,
+        );
+      }
+      await client.query("UPDATE roulette_bets SET refunded = TRUE WHERE round_id = $1", [round.id]);
+      await client.query(
+        "UPDATE roulette_rounds SET status = 'void', pot = 0, settled_at = now(), ends_at = now() WHERE id = $1",
+        [round.id],
+      );
+      round = await getCurrentRoundRow(client, currency);
+    } else {
+      const updated = await client.query(
+        "UPDATE roulette_rounds SET status = 'locked', pot = $2::numeric WHERE id = $1 RETURNING *",
+        [round.id, pot],
+      );
+      round = updated.rows[0];
+    }
   }
 
   if (round.status === "locked" && now >= new Date(round.spin_at).getTime()) {
