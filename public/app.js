@@ -11768,6 +11768,129 @@ function updateRouletteWheel(deltaSeconds) {
   roulette.spinFrom = null;
 }
 
+// Те же две плашки, что внизу графика: слева своя ставка, справа тикер
+// чужих. Геометрия, шрифт и уровни молний взяты из CHART_TICKER_TIER_SPEC,
+// чтобы низ круга читался так же, как низ графика.
+function drawRoulettePills(ctx, width, height, nowTs) {
+  const round = roulette.round;
+  if (!round) {
+    return;
+  }
+  const fontPx = Math.max(11, width * 0.024);
+  const padX = Math.max(8, width * 0.018);
+  const pillH = Math.max(22, height * 0.105);
+  const pillY = height - pillH - Math.max(16, height * 0.02);
+  const radius = Math.max(8, height * 0.05);
+  ctx.save();
+  ctx.font = `${fontPx}px Inter, system-ui, sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+
+  let myPillEnd = width * 0.04;
+  const mine = round.segments.find((item) => item.is_me);
+  if (mine) {
+    const seg1 = "Твоя ставка ";
+    const seg2 = `${Math.round(mine.amount)} ★`;
+    const seg3 = `  ${Math.round(mine.share * 100)}%`;
+    const w1 = ctx.measureText(seg1).width;
+    const w2 = ctx.measureText(seg2).width;
+    const w3 = ctx.measureText(seg3).width;
+    const pillW = w1 + w2 + w3 + padX * 2;
+    const pillX = width * 0.04;
+    ctx.fillStyle = "rgba(13, 19, 30, 0.88)";
+    ctx.beginPath();
+    roundedRectPath(ctx, pillX, pillY, pillW, pillH, radius);
+    ctx.fill();
+    const wash = ctx.createLinearGradient(pillX, 0, pillX + pillW * 0.64, 0);
+    wash.addColorStop(0, "rgba(255, 186, 64, 0.2)");
+    wash.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = wash;
+    ctx.fill();
+    const midY = pillY + pillH / 2;
+    let tx = pillX + padX;
+    ctx.fillStyle = "rgba(141, 152, 170, 0.95)";
+    ctx.fillText(seg1, tx, midY);
+    tx += w1;
+    ctx.fillStyle = "#ffd68f";
+    ctx.fillText(seg2, tx, midY);
+    tx += w2;
+    ctx.fillStyle = "rgba(243, 246, 251, 0.96)";
+    ctx.fillText(seg3, tx, midY);
+    myPillEnd = pillX + pillW;
+  }
+
+  // Тикер крутит чужие ставки по одной, как на графике.
+  const others = round.segments.filter((item) => !item.is_me);
+  if (!others.length) {
+    ctx.restore();
+    return;
+  }
+  const slot = Math.floor(nowTs / CHART_TICKER_SLOT_MS);
+  const entry = others[slot % Math.min(others.length, CHART_TICKER_MAX_ENTRIES)];
+  const phase = (nowTs % CHART_TICKER_SLOT_MS) / CHART_TICKER_SLOT_MS;
+  const alpha = Math.min(1, phase / 0.09, (1 - phase) / 0.09);
+  if (!entry || alpha <= 0.01) {
+    ctx.restore();
+    return;
+  }
+
+  const spec = CHART_TICKER_TIER_SPEC[getTierForAmount(entry.amount, "STAR")] || null;
+  const rawName = String(entry.name || "Игрок");
+  const name = rawName.length > 12 ? `${rawName.slice(0, 11)}…` : rawName;
+  const seg1 = `${name} `;
+  const seg2 = `ставит ${Math.round(entry.amount)} ★`;
+  const w1 = ctx.measureText(seg1).width;
+  const w2 = ctx.measureText(seg2).width;
+  const boltW = spec ? pillH * spec.bolt : 0;
+  const pillW = boltW + w1 + w2 + padX * 2;
+  const pillX = width * 0.96 - pillW;
+  // Не наезжаем на свою плашку слева — как и на графике.
+  if (pillX < myPillEnd + Math.max(6, width * 0.012)) {
+    ctx.restore();
+    return;
+  }
+
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = "rgba(13, 19, 30, 0.88)";
+  ctx.beginPath();
+  roundedRectPath(ctx, pillX, pillY, pillW, pillH, radius);
+  ctx.fill();
+  if (spec) {
+    const wash = ctx.createLinearGradient(pillX, 0, pillX + pillW * 0.64, 0);
+    wash.addColorStop(0, spec.wash);
+    wash.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = wash;
+    ctx.fill();
+  }
+  const midY = pillY + pillH / 2;
+  let tx = pillX + padX;
+  if (spec) {
+    const flicker = (1 - spec.flick) + spec.flick * Math.sin(nowTs * 0.018);
+    const bs = pillH * spec.bolt * 0.5;
+    const bx = tx + boltW * 0.4;
+    ctx.save();
+    ctx.globalAlpha = alpha * flicker;
+    ctx.fillStyle = spec.boltColor;
+    ctx.beginPath();
+    ctx.moveTo(bx + bs * 0.55, midY - bs);
+    ctx.lineTo(bx - bs * 0.35, midY + bs * 0.1);
+    ctx.lineTo(bx + bs * 0.15, midY + bs * 0.1);
+    ctx.lineTo(bx - bs * 0.15, midY + bs);
+    ctx.lineTo(bx + bs * 0.75, midY - bs * 0.2);
+    ctx.lineTo(bx + bs * 0.25, midY - bs * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    tx += boltW;
+  }
+  ctx.fillStyle = spec ? spec.name : "rgba(141, 152, 170, 0.95)";
+  ctx.fillText(seg1, tx, midY);
+  tx += w1;
+  ctx.fillStyle = "#ffd68f";
+  ctx.fillText(seg2, tx, midY);
+  ctx.restore();
+}
+
 function drawRouletteCentre(ctx, cx, cy, radius, dpr) {
   ctx.save();
   ctx.beginPath();
@@ -11969,6 +12092,7 @@ function drawRouletteFrame(timestamp) {
   });
 
   drawRouletteCentre(ctx, cx, cy, radius, dpr);
+  drawRoulettePills(ctx, width, height, timestamp);
   renderRouletteCentre();
 
   // Стрелка сверху. Рисуется последней, чтобы всегда быть поверх секторов.
@@ -12077,6 +12201,32 @@ function emitRouletteBubbles(round) {
   });
 }
 
+// Ставки в круге — такая же активность, как сделки на рынке, и должны быть
+// видны всем в общей ленте. Лента читает state.activity, поэтому кладём туда
+// тот же состав: id стабильный, иначе лента считала бы каждую запись новой и
+// переигрывала анимацию прихода на каждом опросе.
+function publishRouletteActivity(round) {
+  if (!round) {
+    return;
+  }
+  const entries = [...round.segments]
+    .sort((a, b) => b.amount - a.amount)
+    .map((segment) => ({
+      id: `roulette:${round.id}:${segment.user_id}`,
+      username: segment.username,
+      first_name: segment.name,
+      telegram_id: null,
+      action: "BUY",
+      side: "YES",
+      amount: segment.amount,
+      currency: "STAR",
+      market_id: null,
+      created_at: new Date().toISOString(),
+    }));
+  state.activity = entries;
+  renderActivity();
+}
+
 function renderRouletteBar() {
   renderRouletteAmounts();
 }
@@ -12101,6 +12251,7 @@ async function loadRouletteState() {
         roulette.spinFrom = null;
       }
       emitRouletteBubbles(data.round);
+      publishRouletteActivity(data.round);
       roulette.round = data.round;
       roulette.history = data.history || [];
 
