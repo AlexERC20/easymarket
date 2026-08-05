@@ -151,8 +151,8 @@ export function buildSpin(seed) {
     // Множитель раскрутки: сколько ПОЛНЫХ оборотов пройдёт колесо. Целое число
     // здесь обязательно. Дробное смещало точку остановки на свою дробную часть,
     // и колесо вставало в стороне от победителя, которого посчитал сервер.
-    turns: 7 + Math.floor(deriveFromSeed(seed, "turns") * 7),
-    spinSeconds: roundAmount(6.5 + deriveFromSeed(seed, "duration") * 3),
+    turns: 18 + Math.floor(deriveFromSeed(seed, "turns") * 15),
+    spinSeconds: roundAmount(10 + deriveFromSeed(seed, "duration") * 4),
   };
 }
 

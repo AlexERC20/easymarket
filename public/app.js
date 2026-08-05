@@ -11758,7 +11758,7 @@ function updateRouletteWheel(deltaSeconds) {
     // старых раундах в базе лежат дробные значения.
     const turns = Math.max(1, Math.round(Number(round.spin_turns) || 8));
     const distance = turns + (((target - roulette.spinFrom) % 1) + 1) % 1;
-    const eased = 1 - (1 - progress) ** 3;
+    const eased = 1 - (1 - progress) ** 5;
     roulette.angle = roulette.spinFrom + distance * eased;
     return;
   }
