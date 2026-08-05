@@ -11819,8 +11819,9 @@ function renderRouletteCentre() {
       ? `Твой банк — ${Math.round(round.winner.amount)} ★.`
       : `${winnerSegment?.name || "Игрок"} забрал ${Math.round(round.winner.amount)} ★.`;
   } else if (waiting) {
-    hint.textContent = round.segments.length
-      ? "Ждём второго игрока — минута пойдёт, как только он поставит."
+    const pot = Math.round(round.pot);
+    hint.textContent = pot > 0
+      ? `Банк ${pot} ★ ждёт соперника. Зайди — и он может достаться тебе.`
       : "Ставь первым — минута пойдёт, когда подключится второй игрок.";
   } else if (mine) {
     hint.textContent = `Твоя доля ${Math.round(mine.share * 100)}% · шанс выиграть ровно столько же.`;
