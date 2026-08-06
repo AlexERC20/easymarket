@@ -1580,3 +1580,35 @@ export async function scanUsdtDeposits() {
     results,
   };
 }
+
+// Список висящих заявок на пополнение. Только чтение: когда скан отваливается,
+// единственный способ понять, кого зацепило, — посмотреть, у кого заявка так и
+// осталась в ожидании. Отдельного инструмента для этого не было.
+export async function listPendingDepositIntents(input = {}) {
+  const hours = Math.max(1, Math.min(720, Number(input.max_age_hours) || 96));
+  const limit = Math.max(1, Math.min(100, Number(input.limit) || 30));
+  const result = await query(
+    `
+      SELECT
+        intents.id,
+        intents.network,
+        intents.status,
+        intents.requested_amount,
+        intents.deposit_amount,
+        intents.to_address,
+        intents.tx_hash,
+        intents.created_at,
+        users.telegram_id,
+        users.username,
+        users.first_name
+      FROM usdt_deposit_intents intents
+      JOIN users ON users.id = intents.user_id
+      WHERE intents.status = 'pending'
+        AND intents.created_at >= now() - ($1::int * interval '1 hour')
+      ORDER BY intents.created_at DESC
+      LIMIT $2::int
+    `,
+    [hours, limit],
+  );
+  return { ok: true, intents: result.rows };
+}

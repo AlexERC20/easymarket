@@ -100,6 +100,7 @@ import {
   creditPendingDepositIntentManually,
   dismissDepositEvent,
   auditUserDeposits,
+  listPendingDepositIntents,
   getDepositReviewQueue,
   getPublicUsdtDepositNetworks,
   getUserDepositIntent,
@@ -1572,6 +1573,17 @@ app.get("/api/bridge/deposits/audit", requireBridgeSecret, async (req, res) => {
     res.status(200).json(await auditUserDeposits({
       telegram_id: req.query.telegram_id ?? req.query.telegramId,
       username: req.query.username,
+    }));
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/deposits/pending", requireBridgeSecret, async (req, res) => {
+  try {
+    res.status(200).json(await listPendingDepositIntents({
+      max_age_hours: req.query.max_age_hours,
+      limit: req.query.limit,
     }));
   } catch (error) {
     sendApiError(res, error);
