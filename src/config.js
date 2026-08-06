@@ -212,6 +212,22 @@ export const config = {
       || ""
   ).trim(),
   evmScanPageSize: parseNumber(process.env.EVM_SCAN_PAGE_SIZE || process.env.BSCSCAN_PAGE_SIZE, 200, 1),
+  // Ключи разведены по сетям: бесплатный Etherscan V2 отдаёт только Ethereum,
+  // а для BSC нужен либо платный тариф, либо собственный ключ BscScan. Пока
+  // они были общими, поставить второй ключ было нельзя, не сломав первую сеть.
+  usdtBscExplorerApiUrl: (
+    process.env.USDT_BSC_SCAN_API_URL
+      || process.env.BSCSCAN_API_URL
+      || ""
+  ).trim(),
+  usdtBscExplorerApiKey: (
+    process.env.USDT_BSC_SCAN_API_KEY
+      || process.env.BSCSCAN_API_KEY
+      || process.env.BSC_SCAN_API_KEY
+      || ""
+  ).trim(),
+  usdtEthExplorerApiUrl: (process.env.USDT_ETH_SCAN_API_URL || "").trim(),
+  usdtEthExplorerApiKey: (process.env.USDT_ETH_SCAN_API_KEY || "").trim(),
   usdtBscExplorerChainId: (
     process.env.USDT_BSC_EXPLORER_CHAIN_ID
       || process.env.BSCSCAN_CHAIN_ID
