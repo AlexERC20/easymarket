@@ -1823,6 +1823,7 @@ const roulette = {
   bubbleRoundId: 0,
   bubbleSeen: new Map(),
   bubbleSelfPending: 0,
+  speed: 0,
   activitySeenAt: new Map(),
 };
 
@@ -12031,6 +12032,7 @@ function drawRouletteFrame(timestamp) {
   const previousAngle = roulette.angle;
   updateRouletteWheel(delta);
   tickRouletteHaptics(previousAngle);
+  roulette.speed = delta > 0 ? Math.abs(roulette.angle - previousAngle) / delta : 0;
 
   const { dpr, width, height } = resizeCanvas(canvas);
   const ctx = canvas.getContext("2d");
@@ -12061,6 +12063,21 @@ function drawRouletteFrame(timestamp) {
     ctx.stroke();
     ctx.restore();
   }
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(148, 176, 214, 0.28)";
+  ctx.lineWidth = Math.max(1, dpr);
+  for (let tick = 0; tick < 60; tick += 1) {
+    const a = (tick / 60) * Math.PI * 2 - Math.PI / 2;
+    const long = tick % 5 === 0;
+    const r1 = radius * (long ? 1.03 : 1.05);
+    const r2 = radius * 1.09;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.stroke();
+  }
+  ctx.restore();
 
   segments.forEach((segment, index) => {
     // Нулевой угол у канваса смотрит вправо, а стрелка у нас сверху — отсюда
@@ -12116,6 +12133,25 @@ function drawRouletteFrame(timestamp) {
     }
   });
 
+  const pointerAt = ((roulette.angle % 1) + 1) % 1;
+  const under = segments.find((segment) => {
+    const from = segment.drawStart ?? segment.start;
+    const to = segment.drawEnd ?? segment.end;
+    return pointerAt >= from && pointerAt < to;
+  });
+  if (under) {
+    const from = (under.drawStart ?? under.start) * Math.PI * 2 - Math.PI / 2;
+    const to = (under.drawEnd ?? under.end) * Math.PI * 2 - Math.PI / 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, radius, from, to);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
+    ctx.fill();
+    ctx.restore();
+  }
+
   drawRouletteCentre(ctx, cx, cy, radius, dpr);
   // Плашки и подписи — надстройка над колесом. Их ошибка не должна уносить
   // кадр: цикл перезапускает сам себя в конце, и если сюда прилетит
@@ -12134,6 +12170,21 @@ function drawRouletteFrame(timestamp) {
   const tipY = -radius * 0.58;
   const baseY = -radius * 1.1;
   const halfW = radius * 0.13;
+
+  const trail = Math.min(0.34, roulette.speed * 0.055);
+  if (trail > 0.004) {
+    const tail = ctx.createLinearGradient(0, baseY, 0, -radius * 0.2);
+    tail.addColorStop(0, `hsla(${(timestamp * 0.05) % 360}, 95%, 70%, 0.32)`);
+    tail.addColorStop(1, "hsla(0, 0%, 100%, 0)");
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.92, -Math.PI / 2 - trail * Math.PI * 2, -Math.PI / 2);
+    ctx.lineWidth = radius * 0.2;
+    ctx.strokeStyle = tail;
+    ctx.lineCap = "round";
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // Хамелеон: спектр течёт вдоль стрелки и медленно проворачивается. Позиции
   // остановок держим неподвижными, а сдвигаем оттенки — так переход выходит
