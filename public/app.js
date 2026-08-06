@@ -12749,7 +12749,11 @@ function closeRoulette() {
 $("rouletteInviteBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   const pot = Math.round(Number(roulette.round?.pot || 0));
-  const inviteUrl = buildTelegramMiniAppLaunchUrl(getLaunchRefValue() || "easymarket");
+  // Реф должен быть СВОЙ. getLaunchRefValue отдаёт того, кто привёл тебя, —
+  // с ним приведённый закреплялся бы за чужим человеком.
+  const inviteUrl = state.user?.telegram_id
+    ? buildInviteUrl(state.user.telegram_id)
+    : buildTelegramMiniAppLaunchUrl("easymarket");
   const text = pot > 0
     ? `В EasyMarket висит банк ${pot} ★ и ждёт соперника. Крутанём?`
     : "Погнали крутить колесо в EasyMarket — победитель забирает весь банк.";
