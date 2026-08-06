@@ -1469,6 +1469,19 @@ async function scanNetwork(network) {
     };
   }
 
+  // Если сеть настроена на эксплорер, он и есть её путь. Молчаливый откат на
+  // RPC только вредил: у бесплатных нод то архив закрыт, то пачка запросов
+  // ограничена, и настоящая причина отказа эксплорера терялась под их ошибкой.
+  if (canUseExplorerScan(network)) {
+    return {
+      network: network.key,
+      scanned: 0,
+      source: "explorer",
+      error: "explorer_scan_failed",
+      explorer,
+    };
+  }
+
   const provider = getProvider(network);
   let latestBlock;
   try {
