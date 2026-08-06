@@ -1570,6 +1570,12 @@ export async function scanUsdtDeposits() {
         // a hosted log-less deploy - so a scanner that failed every run looked
         // exactly like one that was idle.
         detail: error instanceof Error ? error.message : String(error),
+        // Сообщения мало: «could not determine data type of parameter $4» не
+        // говорит, какой из запросов упал, и место приходится искать перебором.
+        // Кадры стека называют функцию сразу.
+        at: error instanceof Error && error.stack
+          ? error.stack.split("\n").slice(1, 5).map((line) => line.trim())
+          : null,
       });
     }
   }
