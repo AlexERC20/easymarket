@@ -1079,6 +1079,13 @@ async function findIntentForDepositEvent(client, network, event) {
         AND status = 'pending'
         AND deposit_amount BETWEEN ($2::numeric - $6::numeric) AND ($2::numeric + $6::numeric)
         AND created_at <= ($3::timestamptz + ($5::int * interval '1 minute'))
+      ORDER BY
+        -- $4 передавался в параметрах, но в запросе не упоминался: у такого
+        -- параметра нет никакого контекста, и Postgres валил весь скан с
+        -- «could not determine data type». Заодно приоритет сети здесь тот же,
+        -- что и в точном совпадении выше.
+        CASE WHEN network = $4::text THEN 0 ELSE 1 END,
+        created_at ASC
       LIMIT 2
       FOR UPDATE
     `,
