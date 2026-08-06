@@ -11644,6 +11644,11 @@ loadPublicConfig()
         }, 2_400);
         window.setTimeout(showReferralNudge, 150_000);
         try {
+          startMiniWheel();
+        } catch {
+          // Иконка не должна мешать входу в приложение.
+        }
+        try {
           startLogoHologram();
         } catch {
           // Отладочное табло не должно мешать входу в приложение.
@@ -12551,6 +12556,132 @@ function rebuildRouletteShares(round) {
   if (round.segments.length) {
     round.segments[round.segments.length - 1].end = 1;
   }
+}
+
+// Живой круг в шапке: видно с любого экрана, что раунд идёт, — это и тащит
+// людей внутрь. Своего опроса почти не стоит: пока рулетка открыта, берём её
+// же данные, а в фоне обновляемся редко.
+const miniWheel = { round: null, raf: null, angle: 0, lastAt: 0, poll: null };
+
+function miniWheelRound() {
+  return roulette.active ? roulette.round : miniWheel.round;
+}
+
+function drawMiniWheel(timestamp) {
+  miniWheel.raf = null;
+  const canvas = $("kyivstonerWheel");
+  if (!canvas) {
+    return;
+  }
+  const round = miniWheelRound();
+  const { dpr, width, height } = resizeCanvas(canvas);
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, width, height);
+  const cx = width / 2;
+  const cy = height / 2;
+  const radius = Math.min(width, height) * 0.46;
+
+  const delta = miniWheel.lastAt ? Math.min(0.1, (timestamp - miniWheel.lastAt) / 1_000) : 0;
+  miniWheel.lastAt = timestamp;
+
+  const status = round?.status;
+  // Пока открыт сам круг, стрелка в шапке идёт с ним в такт. В фоне крутим
+  // ровно и только на раскрутке — чтобы иконка жила, но не грела телефон.
+  if (roulette.active) {
+    miniWheel.angle = roulette.angle;
+  } else if (status === "spinning" || status === "locked") {
+    miniWheel.angle += delta * (status === "spinning" ? 2.2 : 0.5);
+  } else if (round?.segments?.length) {
+    miniWheel.angle += delta * 0.08;
+  }
+
+  const segments = round?.segments || [];
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(14, 20, 32, 0.95)";
+  ctx.fill();
+  ctx.restore();
+
+  if (!segments.length) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 0.82, 0, Math.PI * 2);
+    ctx.lineWidth = radius * 0.3;
+    ctx.strokeStyle = "rgba(130, 152, 186, 0.28)";
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  segments.forEach((segment, index) => {
+    const from = segment.start * Math.PI * 2 - Math.PI / 2;
+    const to = segment.end * Math.PI * 2 - Math.PI / 2;
+    const colors = rouletteSegmentColor(index, segments.length, segment.is_me);
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, radius, from, to);
+    ctx.closePath();
+    ctx.fillStyle = colors.fill;
+    ctx.fill();
+    ctx.restore();
+  });
+
+  // Стрелка теми же цветами, что и большая, чтобы связь читалась сразу.
+  const hue = (timestamp * 0.05) % 360;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(miniWheel.angle * Math.PI * 2);
+  ctx.beginPath();
+  ctx.moveTo(0, -radius * 0.34);
+  ctx.lineTo(-radius * 0.17, -radius * 1.02);
+  ctx.lineTo(radius * 0.17, -radius * 1.02);
+  ctx.closePath();
+  ctx.fillStyle = `hsl(${hue}, 95%, 66%)`;
+  ctx.fill();
+  ctx.lineWidth = Math.max(1, dpr);
+  ctx.strokeStyle = "rgba(10, 14, 22, 0.85)";
+  ctx.stroke();
+  ctx.restore();
+
+  const moving = roulette.active || status === "spinning" || status === "locked" || segments.length > 0;
+  if (moving) {
+    miniWheel.raf = requestAnimationFrame(drawMiniWheel);
+  }
+}
+
+function kickMiniWheel() {
+  if (miniWheel.raf === null) {
+    miniWheel.lastAt = 0;
+    miniWheel.raf = requestAnimationFrame(drawMiniWheel);
+  }
+}
+
+async function pollMiniWheel() {
+  if (roulette.active || document.visibilityState !== "visible") {
+    return;
+  }
+  try {
+    const params = new URLSearchParams({ currency: "STAR" });
+    if (state.user?.telegram_id) {
+      params.set("telegram_id", String(state.user.telegram_id));
+    }
+    const data = await api(`/api/roulette/state?${params.toString()}`);
+    miniWheel.round = data.round || null;
+    kickMiniWheel();
+  } catch {
+    // Иконка — не критичный экран, пропущенный опрос догонится следующим.
+  }
+}
+
+function startMiniWheel() {
+  void pollMiniWheel();
+  kickMiniWheel();
+  // Раз в шесть секунд достаточно: состав раунда меняется медленнее, чем
+  // крутится стрелка, а лишний опрос в фоне греет телефон.
+  miniWheel.poll = window.setInterval(() => {
+    void pollMiniWheel();
+  }, 6_000);
 }
 
 function openRoulette() {

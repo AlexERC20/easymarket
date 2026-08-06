@@ -7684,6 +7684,13 @@ body.roulette-mode .chart-frame {
   pointer-events: none;
 }
 
+.icon-wheel {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
 .roulette-wheel.hidden,
 .roulette-timer.hidden,
 .roulette-centre-note.hidden,
