@@ -1827,6 +1827,7 @@ const roulette = {
   activitySeenAt: new Map(),
 };
 
+const referralWatch = { greeted: false, last: null, today: 0, dayKey: "" };
 let holoBox = null;
 let holoAxis = { x: 1, y: 0 };
 
@@ -3637,6 +3638,7 @@ function renderTaskStats() {
   const referralTotal = Number(referralStats.total_referrals || 0);
   const referralStarTotal = Number(referralStats.star_total || 0);
   const referralUsdtTotal = Number(referralStats.usdt_total || 0);
+  const referralToday = referralWatch.today || 0;
   const referralStarProfit = Number(referralStats.star_profit_share || 0);
   const referralUsdtProfit = Number(referralStats.usdt_profit_share || 0);
   // Деньги в одну подпись: пустые валюты не показываем, чтобы не плодить нули.
@@ -4033,6 +4035,7 @@ async function upsertMe() {
   state.positions = data.positions || [];
   state.marketStats = data.market_stats || [];
   state.referralStats = data.referral_stats || null;
+  noteReferralEarnings();
   state.dailyTasks = data.daily_tasks || {};
   state.lossRefundOffers = data.loss_refund_offers || [];
   applyAquariumEntitlements(data);
@@ -4371,6 +4374,7 @@ async function loadMe() {
   state.recentTrades = data.recent_trades || [];
   state.marketStats = data.market_stats || [];
   state.referralStats = data.referral_stats || null;
+  noteReferralEarnings();
   state.dailyTasks = data.daily_tasks || {};
   state.lossRefundOffers = data.loss_refund_offers || [];
   applyAquariumEntitlements(data);
@@ -12370,6 +12374,78 @@ function publishRouletteActivity(round) {
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 24);
   renderActivity();
+}
+
+// Доход с приведённых виден только если о нём напомнить. Схемы менять не
+// пришлось: суммы приходят накопительными, а разницу с прошлого визита
+// держим локально — этого хватает и для приветствия, и для живого прилёта.
+const REFERRAL_SEEN_KEY = "em_referral_seen_v1";
+
+function readReferralSeen() {
+  try {
+    return Number(window.localStorage?.getItem(REFERRAL_SEEN_KEY) || "") || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeReferralSeen(total) {
+  try {
+    window.localStorage?.setItem(REFERRAL_SEEN_KEY, String(total));
+  } catch {
+    // Приватный режим — обойдёмся без истории, просто не покажем разницу.
+  }
+}
+
+function noteReferralEarnings() {
+  const stats = state.referralStats;
+  if (!stats) {
+    return;
+  }
+  // Считаем в звёздах и долларах вместе: человеку важен факт, что друзья
+  // принесли, а не в какой валюте.
+  const total = Math.round((Number(stats.star_total || 0) + Number(stats.usdt_total || 0) * 100) * 100) / 100;
+
+  if (!referralWatch.greeted) {
+    referralWatch.greeted = true;
+    const seen = readReferralSeen();
+    const gained = total - seen;
+    if (seen > 0 && gained > 0) {
+      showToast(`Пока тебя не было, друзья принесли ${Math.round(gained)} ★.`);
+      triggerHaptic("success");
+    }
+    referralWatch.last = total;
+    writeReferralSeen(total);
+    return;
+  }
+
+  // Живой прилёт: приведённый сыграл прямо сейчас. Тот же жест, что и при
+  // своей ставке, — звезда летит к балансу.
+  if (referralWatch.last !== null && total > referralWatch.last) {
+    const gained = total - referralWatch.last;
+    triggerHaptic("light");
+    const source = $("fireBalance");
+    if (source) {
+      flyRewardToBalance(source, "★");
+    }
+    triggerBalancePulse($("fireBalance"));
+    bumpReferralToday(gained);
+    showToast(`Друг сыграл — тебе капнуло ${Math.round(gained)} ★.`);
+  }
+  referralWatch.last = total;
+  writeReferralSeen(total);
+}
+
+// Накопление за сегодня: обнуляется со сменой суток, чтобы цифра отвечала на
+// вопрос «сколько принесли сегодня», а не «сколько всего за всё время» —
+// вторая никого не мотивирует.
+function bumpReferralToday(gained) {
+  const dayKey = new Date().toISOString().slice(0, 10);
+  if (referralWatch.dayKey !== dayKey) {
+    referralWatch.dayKey = dayKey;
+    referralWatch.today = 0;
+  }
+  referralWatch.today += gained;
 }
 
 function renderRouletteBar() {
