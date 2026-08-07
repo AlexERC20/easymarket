@@ -310,6 +310,13 @@ export async function createUsdtDepositIntent(input) {
 
   const mappedIntent = mapDepositIntent(intent);
   void sendAdminDepositIntentNotification(user, mappedIntent);
+  // Будим сканер прямо сейчас: человек уже отправляет перевод, и ждать общего
+  // расписания незачем. Второй проход через полминуты ловит то, что не успело
+  // попасть в блок к первому.
+  void scanUsdtDeposits().catch(() => undefined);
+  setTimeout(() => {
+    void scanUsdtDeposits().catch(() => undefined);
+  }, 30_000);
 
   return {
     user,
@@ -1498,7 +1505,20 @@ async function scanNetwork(network) {
   }
 
   const previousBlock = await getScannerState(network);
-  const effectivePreviousBlock = previousBlock || Math.max(0, safeToBlock - Math.round(config.usdtDepositInitialLookbackBlocks));
+  const lookback = Math.round(config.usdtDepositInitialLookbackBlocks);
+  // Больше суток отставания догонять бессмысленно: заявка живёт час, и всё
+  // старое в неё всё равно не попадёт, а ползти пришлось бы десятки прогонов.
+  const maxLag = Math.max(lookback, Math.round(config.usdtDepositMaxCatchupBlocks));
+  const stale = previousBlock && safeToBlock - previousBlock > maxLag;
+  if (stale) {
+    console.warn("[EasyMarket] deposit scanner too far behind, skipping ahead", {
+      network: network.key,
+      behind: safeToBlock - previousBlock,
+    });
+  }
+  const effectivePreviousBlock = (!previousBlock || stale)
+    ? Math.max(0, safeToBlock - lookback)
+    : previousBlock;
   const fromBlock = effectivePreviousBlock + 1;
   const toBlock = Math.min(safeToBlock, effectivePreviousBlock + Math.round(config.usdtDepositMaxBlockRange));
   if (fromBlock > toBlock) {

@@ -192,6 +192,9 @@ export const config = {
   // делит диапазон пополам, поэтому крупный шаг деградирует мягко.
   usdtDepositMaxBlockRange: parseNumber(process.env.USDT_DEPOSIT_MAX_BLOCK_RANGE, 2_000, 10),
   usdtDepositInitialLookbackBlocks: parseNumber(process.env.USDT_DEPOSIT_INITIAL_LOOKBACK_BLOCKS, 2_400, 300),
+  // Порог, после которого сканер не догоняет, а прыгает к голове цепочки.
+  // 30 000 блоков BSC — это примерно сутки.
+  usdtDepositMaxCatchupBlocks: parseNumber(process.env.USDT_DEPOSIT_MAX_CATCHUP_BLOCKS, 30_000, 2_000),
   usdtDepositBackfillBlocks: parseNumber(process.env.USDT_DEPOSIT_BACKFILL_BLOCKS, 6_000, 300),
   usdtDepositBackfillMs: parseNumber(process.env.USDT_DEPOSIT_BACKFILL_MS, 300_000, 60_000),
   usdtDepositMatchGraceMinutes: parseNumber(process.env.USDT_DEPOSIT_MATCH_GRACE_MINUTES, 10, 0),
