@@ -129,7 +129,14 @@ function getProvider(network) {
   if (cached) {
     return cached;
   }
-  const provider = new JsonRpcProvider(network.rpcUrl);
+  // ethers по умолчанию склеивает запросы в пачки, а бесплатные ноды их режут:
+  // drpc отвечал «Batch of more than 3 requests are not allowed on free plan» и
+  // ронял весь скан BSC. Шлём по одному — при паре пополнений в неделю разница
+  // в скорости незаметна, зато ни один лимит пачки нас больше не касается.
+  const provider = new JsonRpcProvider(network.rpcUrl, undefined, {
+    batchMaxCount: 1,
+    staticNetwork: true,
+  });
   providerCache.set(network.key, provider);
   return provider;
 }
@@ -1472,16 +1479,6 @@ async function scanNetwork(network) {
   // Если сеть настроена на эксплорер, он и есть её путь. Молчаливый откат на
   // RPC только вредил: у бесплатных нод то архив закрыт, то пачка запросов
   // ограничена, и настоящая причина отказа эксплорера терялась под их ошибкой.
-  if (canUseExplorerScan(network)) {
-    return {
-      network: network.key,
-      scanned: 0,
-      source: "explorer",
-      error: "explorer_scan_failed",
-      explorer,
-    };
-  }
-
   const provider = getProvider(network);
   let latestBlock;
   try {
