@@ -23,7 +23,7 @@ import {
   setAquariumRuntimeAllowed,
   setAquariumShakeFeeder,
 } from "./aquarium.js?v=20260712-01";
-import { getActiveSceneKey, setActiveScene, setShakeSceneListener } from "./shake-scenes.js?v=20260712-01";
+import { getActiveSceneKey, setActiveScene, setShakeSceneListener, stopActiveSceneLoop, wakeActiveScene } from "./shake-scenes.js?v=20260712-01";
 import "./basketball-scene.js?v=20260712-03"; // регистрирует сцену «Легенда 24»
 import { playKyivstonerMotion, preloadKyivstonerMotion } from "./kyivstoner-motion.js?v=20260714-01";
 import { playFootballWow } from "./football-wow.js?v=20260716-01";
@@ -2165,6 +2165,20 @@ function watchChartVisibility() {
     chartOffScreen = !visible;
     if (visible) {
       renderMarketChart();
+      try {
+        wakeActiveScene();
+      } catch {
+        // Сцена оживёт сама на следующем событии.
+      }
+      return;
+    }
+    // Аквариум лежит поверх графика и о видимости не знает: его цикл общий со
+    // сценами и крутится, пока в нём есть рыбы. За экраном это чистая трата,
+    // а на iOS к нему добавляется ещё и страховочный таймер на 120 мс.
+    try {
+      stopActiveSceneLoop();
+    } catch {
+      // Не критично: без остановки просто останется как было.
     }
   }, { rootMargin: "80px" });
   chartVisibilityObserver.observe(frame);
