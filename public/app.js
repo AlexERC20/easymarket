@@ -2149,6 +2149,27 @@ function drawTargetCrossFx(ctx, latest, openY, width) {
   ctx.fill();
 }
 
+let chartOffScreen = false;
+let chartVisibilityObserver = null;
+
+function watchChartVisibility() {
+  if (chartVisibilityObserver || typeof IntersectionObserver !== "function") {
+    return;
+  }
+  const frame = document.querySelector(".chart-frame");
+  if (!frame) {
+    return;
+  }
+  chartVisibilityObserver = new IntersectionObserver((entries) => {
+    const visible = entries.some((entry) => entry.isIntersecting);
+    chartOffScreen = !visible;
+    if (visible) {
+      renderMarketChart();
+    }
+  }, { rootMargin: "80px" });
+  chartVisibilityObserver.observe(frame);
+}
+
 function drawMarketChartFrame(ts) {
   const canvas = $("marketChart");
   const market = getDisplayMarket();
@@ -2165,6 +2186,13 @@ function drawMarketChartFrame(ts) {
 
   // Pause the loop while a sheet covers the chart; it resumes on sheet close.
   if (isBlockingSheetOpen()) {
+    state.chartRaf = null;
+    return;
+  }
+
+  // И когда график просто уехал за пределы экрана: пролистал к чату — рисовать
+  // некому. Цикл поднимет наблюдатель, как только рамка снова покажется.
+  if (chartOffScreen) {
     state.chartRaf = null;
     return;
   }
@@ -11539,11 +11567,14 @@ try {
   // клиенты без события activated
 }
 
+// Раз в секунду, а не четыре: отсчёт показывает целые секунды, а каждый вызов
+// лезет в DOM за .countdown и .chart-frame и переключает на них классы. Три из
+// четырёх вызовов были чистой тратой.
 setInterval(() => {
   if (!isAppInBackground() && !isBlockingSheetOpen()) {
     updateTimer();
   }
-}, 250);
+}, 1_000);
 // Активные минуты для лестницы присутствия: видимая вкладка + недавнее касание.
 window.addEventListener("pointerdown", () => {
   state.presence.lastInteractionAt = Date.now();
@@ -11647,6 +11678,11 @@ loadPublicConfig()
           void runSingleFlight("specialMarket", loadSpecialMarket).catch(() => undefined);
         }, 2_400);
         window.setTimeout(showReferralNudge, 150_000);
+        try {
+          watchChartVisibility();
+        } catch {
+          // Наблюдатель — оптимизация, без него просто рисуем как раньше.
+        }
         try {
           startMiniWheel();
         } catch {
