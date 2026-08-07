@@ -215,10 +215,14 @@ export const config = {
   // Ключи разведены по сетям: бесплатный Etherscan V2 отдаёт только Ethereum,
   // а для BSC нужен либо платный тариф, либо собственный ключ BscScan. Пока
   // они были общими, поставить второй ключ было нельзя, не сломав первую сеть.
+  // Классический адрес BscScan, а не общий V2: на бесплатном тарифе Etherscan
+  // V2 отвечает «Free API access is not supported for this chain» для сети 56,
+  // а этот эндпоинт такого ограничения не имеет. Лишний параметр chainid он
+  // просто игнорирует, поэтому запрос менять не пришлось.
   usdtBscExplorerApiUrl: (
     process.env.USDT_BSC_SCAN_API_URL
       || process.env.BSCSCAN_API_URL
-      || ""
+      || "https://api.bscscan.com/api"
   ).trim(),
   usdtBscExplorerApiKey: (
     process.env.USDT_BSC_SCAN_API_KEY
