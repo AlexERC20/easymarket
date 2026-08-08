@@ -132,6 +132,7 @@ const DAILY_TASK_KEYS = [
   "daily_kyivstoner_bet",
   "daily_btc_5_predictions",
   "daily_wheel_spins",
+  "daily_referral_earnings",
   "daily_win_1",
   "daily_win_streak_5",
   "daily_win_2_row",
@@ -2591,6 +2592,7 @@ function getClanTaskPoints(taskKey) {
     daily_kyivstoner_bet: 3,
     daily_btc_5_predictions: 8,
     daily_wheel_spins: 8,
+    daily_referral_earnings: 10,
     daily_win_1: 5,
     daily_win_streak_5: 12,
   };
@@ -2619,6 +2621,7 @@ async function getDailyBonusRemaining(client, userId) {
           'task_daily_kyivstoner_bet',
           'task_daily_btc_5_predictions',
           'task_daily_wheel_spins',
+          'task_daily_referral_earnings',
           'task_daily_win_1',
           'task_daily_win_streak_5',
           'task_daily_win_2_row',
@@ -5843,6 +5846,7 @@ const TASK_AMOUNTS = {
   daily_kyivstoner_bet: () => scaleTaskReward(50, "daily_kyivstoner_bet"),
   daily_btc_5_predictions: () => scaleTaskReward(300, "daily_btc_5_predictions"),
   daily_wheel_spins: () => scaleTaskReward(300, "daily_wheel_spins"),
+  daily_referral_earnings: () => scaleTaskReward(400, "daily_referral_earnings"),
   daily_win_1: () => scaleTaskReward(50, "daily_win_1"),
   daily_win_streak_5: () => scaleTaskReward(300, "daily_win_streak_5"),
   daily_win_2_row: () => scaleTaskReward(100, "daily_win_2_row"),
@@ -5862,6 +5866,7 @@ const CORE_DAILY_TASK_KEYS = new Set([
   "daily_kyivstoner_bet",
   "daily_btc_5_predictions",
   "daily_wheel_spins",
+  "daily_referral_earnings",
   "daily_win_1",
   "daily_win_streak_5",
   // Сторис — каждый день: вирусная механика, награда сознательно маленькая
@@ -6060,6 +6065,19 @@ const DAILY_PROGRESS_TASKS = {
       { target: 15, amount: 600 },
       { target: 30, amount: 1000 },
       { target: 50, amount: 1500 },
+    ],
+  },
+  daily_referral_earnings: {
+    // Считаем в долларах комиссии, а не в числе игр: игру можно накрутить
+    // бонусными и звёздами, которые мы сами напечатали, а комиссию — нельзя,
+    // под ней обязан лежать депозит.
+    unit: "$ с рефералов",
+    levels: [
+      { target: 1, amount: 100 },
+      { target: 3, amount: 250 },
+      { target: 10, amount: 600 },
+      { target: 25, amount: 1200 },
+      { target: 60, amount: 2500 },
     ],
   },
   daily_wheel_spins: {
@@ -6329,6 +6347,24 @@ async function getDailyTaskValue(client, userId, taskKey) {
         WHERE user_id = $1
           AND action = 'BUY'
           AND created_at >= date_trunc('day', now())
+      `,
+      [userId],
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  if (taskKey === "daily_referral_earnings") {
+    const result = await client.query(
+      `
+        SELECT COALESCE(SUM(distributions.referral_fee), 0)::float8 AS count
+        FROM profit_fee_distributions distributions
+        JOIN users referred ON referred.id = distributions.user_id
+        JOIN users referrer ON referrer.id = distributions.referrer_user_id
+        WHERE distributions.referrer_user_id = $1
+          AND distributions.currency = 'USDT'
+          AND distributions.referral_fee > 0
+          AND referred.referred_by_telegram_id = referrer.telegram_id
+          AND distributions.created_at >= date_trunc('day', now())
       `,
       [userId],
     );
