@@ -10132,8 +10132,6 @@ const CORE_DAILY_TASK_KEYS = [
   "daily_bet",
   "daily_topup_stars",
   "daily_topup_usdt",
-  "daily_football_prediction",
-  "daily_kyivstoner_bet",
   "daily_btc_5_predictions",
   "daily_wheel_spins",
   "daily_referral_earnings",
