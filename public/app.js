@@ -1342,7 +1342,7 @@ async function claimShakeFeedLevels(sourceElement = null) {
     const credited = Number(result?.credited || 0);
     if (credited > 0) {
       playTaskRewardAnimation(sourceElement);
-      showToast(`+$${credited} на бонусный счёт. Рыбки сыты!`);
+      showToast(`+$${credited} начислено на баланс. Рыбки сыты!`);
       void runSingleFlight("me", loadMe).catch(() => undefined);
     } else {
       showToast("Пока нечего забирать — тряси ещё.");
@@ -1421,7 +1421,7 @@ async function claimDepositBonusLevels(sourceElement = null) {
     const credited = Number(result?.credited || 0);
     if (credited > 0) {
       playTaskRewardAnimation(sourceElement);
-      showToast(`+$${credited} на бонусный счёт.`);
+      showToast(`+$${credited} начислено на баланс.`);
       void runSingleFlight("me", loadMe).catch(() => undefined);
     } else {
       showToast("Пока нечего забирать — пополни ещё.");
@@ -6107,7 +6107,7 @@ function renderLossRefundOffers() {
   const text = isDeposit
     ? `Пополни от ${depositMin} — и вернём 20% проигранной ставки на баланс.`
     : isReferral
-      ? "Позови друга. После его первой ставки вернем сумму на бонусный баланс."
+      ? "Позови друга. После его первой ставки вернем сумму на баланс."
       : `Нужно пополнить ${formatFire(cost)} новых звезд. Старые звезды не списываем.`;
   const action = isDeposit
     ? `<button class="loss-refund-action" data-loss-refund-deposit="${offer.id}" type="button">Пополнить</button>`
@@ -10040,11 +10040,11 @@ async function shareInvite({ awardShareTask = false, sourceElement = null } = {}
   }
 
   const inviteUrl = buildInviteUrl(state.user.telegram_id);
-  const text = "Залетай в EasyMarket. Мне дадут бонус размером с твоё пополнение: половину сразу, половину после твоей ставки. Ещё я получу 1% с твоих побед.";
+  const text = "Залетай в EasyMarket. Мне начислят на баланс сумму твоего пополнения: половину сразу, половину после твоей ставки. Ещё я получу 1% с твоих побед.";
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
-    showToast(awardShareTask ? "Ссылка для друзей готова." : "Бонус равен пополнению друга, плюс 1% с побед.");
+    showToast(awardShareTask ? "Ссылка для друзей готова." : "Начисление равно пополнению друга, плюс 1% с побед.");
     return;
   }
 
@@ -10063,7 +10063,7 @@ async function shareInvite({ awardShareTask = false, sourceElement = null } = {}
   }
 
   window.open(shareUrl, "_blank", "noopener,noreferrer");
-  showToast(awardShareTask ? "Ссылка для друзей готова." : "Бонус равен пополнению друга, плюс 1% с побед.");
+  showToast(awardShareTask ? "Ссылка для друзей готова." : "Начисление равно пополнению друга, плюс 1% с побед.");
 }
 
 async function submitMarketComment() {
