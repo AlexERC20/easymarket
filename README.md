@@ -94,6 +94,7 @@ PUBLIC_WEB_URL=https://easymarket-rcuj.onrender.com
 PUBLIC_AV_BOT_URL=https://t.me/voit_help_bot?start=buy_stars
 PUBLIC_MINI_APP_URL=https://t.me/voit_help_bot?startapp=easymarket
 REFERRAL_BET_BONUS_FIRE=500
+REFERRAL_DEPOSIT_BONUS_USDT=30
 TASK_SHARE_FIRE=100
 TASK_SUBSCRIBE_REWARD_FIRE=150
 TASK_PRIVATE_CHAT_FIRE=15000
@@ -142,7 +143,7 @@ The daily `Lightning Charge` streak accelerates the tier rate: days 1-7 use `x1`
 
 Conversions are paid only from `bonus_unlock_reserve`. By default, one percentage point of the 7% profit fee funds this reserve; bonus-funded fee portions are burned as bonus and never counted as real project, referral, clan, or reserve income. The AV admin bot can change total/referral/clan/reserve percentages with four values such as `7 1 1 1`.
 
-Referral profit share and the clan bank are also funded only from the cash-backed part of a winner's fee. Signup/first-bet referral rewards remain promotional bonus USDT. Clan market-result points require real USDT participation and are calculated once from the user's net result across both sides. The monthly clan prize is the actually funded bank, not a fixed promise. Migration `reset_clan_reward_fund_backed_v1` resets old clan accruals with compensating ledger entries instead of deleting history.
+Referral profit share and the clan bank are also funded only from the cash-backed part of a winner's fee. Each confirmed referred-user deposit creates a promotional bonus-USDT cycle: half is credited immediately and half after the referred user has an actually filled real-USDT buy. A withdrawal before that qualifying buy revokes the immediate half and cancels the pending half. `REFERRAL_BET_BONUS_USDT` remains a deployment-compatible fallback for `REFERRAL_DEPOSIT_BONUS_USDT`. Clan market-result points require real USDT participation and are calculated once from the user's net result across both sides. The monthly clan prize is the actually funded bank, not a fixed promise. Migration `reset_clan_reward_fund_backed_v1` resets old clan accruals with compensating ledger entries instead of deleting history.
 
 ## Render
 

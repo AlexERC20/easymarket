@@ -132,6 +132,7 @@ const DAILY_TASK_KEYS = [
   "daily_kyivstoner_bet",
   "daily_btc_5_predictions",
   "daily_wheel_spins",
+  "daily_referral_deposits",
   "daily_referral_earnings",
   "daily_win_1",
   "daily_win_streak_5",
@@ -2592,6 +2593,7 @@ function getClanTaskPoints(taskKey) {
     daily_kyivstoner_bet: 3,
     daily_btc_5_predictions: 8,
     daily_wheel_spins: 8,
+    daily_referral_deposits: 15,
     daily_referral_earnings: 10,
     daily_win_1: 5,
     daily_win_streak_5: 12,
@@ -2621,6 +2623,7 @@ async function getDailyBonusRemaining(client, userId) {
           'task_daily_kyivstoner_bet',
           'task_daily_btc_5_predictions',
           'task_daily_wheel_spins',
+          'task_daily_referral_deposits',
           'task_daily_referral_earnings',
           'task_daily_win_1',
           'task_daily_win_streak_5',
@@ -3910,6 +3913,342 @@ async function adjustUsdtBonusBalance(client, userId, amount, reason, source) {
   );
 }
 
+export function splitReferralDepositReward(value = config.referralDepositBonusUsdt) {
+  const total = roundMoney(Math.max(0, Number(value || 0)));
+  const immediate = roundMoney(total / 2);
+  return {
+    total,
+    immediate,
+    pending: roundMoney(total - immediate),
+  };
+}
+
+async function creditReferralDepositBonus(client, input) {
+  let remaining = roundMoney(input.amount);
+  if (remaining <= 0) {
+    return { credited: 0, debt_offset: 0 };
+  }
+
+  const debtsResult = await client.query(
+    `
+      SELECT id, clawback_outstanding
+      FROM usdt_referral_deposit_rewards
+      WHERE inviter_user_id = $1::bigint
+        AND status = 'revoked'
+        AND clawback_outstanding > 0
+      ORDER BY revoked_at ASC NULLS LAST, id ASC
+      FOR UPDATE
+    `,
+    [input.inviterUserId],
+  );
+  let debtOffset = 0;
+  for (const debt of debtsResult.rows) {
+    if (remaining <= 0) {
+      break;
+    }
+    const offset = roundMoney(Math.min(remaining, toNumber(debt.clawback_outstanding)));
+    if (offset <= 0) {
+      continue;
+    }
+    await client.query(
+      `
+        UPDATE usdt_referral_deposit_rewards
+        SET clawback_outstanding = GREATEST(0, clawback_outstanding - $2::numeric),
+            updated_at = now()
+        WHERE id = $1::bigint
+      `,
+      [debt.id, offset],
+    );
+    debtOffset = roundMoney(debtOffset + offset);
+    remaining = roundMoney(remaining - offset);
+  }
+
+  if (remaining > 0) {
+    await client.query(
+      `
+        INSERT INTO usdt_bonus_balances (user_id, balance, updated_at)
+        VALUES ($1::bigint, 0, now())
+        ON CONFLICT (user_id) DO NOTHING
+      `,
+      [input.inviterUserId],
+    );
+    await adjustUsdtBonusBalance(
+      client,
+      input.inviterUserId,
+      remaining,
+      input.reason,
+      input.source,
+    );
+  }
+
+  return { credited: remaining, debt_offset: debtOffset };
+}
+
+async function revokeReferralDepositRewardRow(client, reward, input = {}) {
+  if (!reward || reward.status === "revoked") {
+    return null;
+  }
+  const earnedAmount = roundMoney(
+    toNumber(reward.immediate_credited)
+      + toNumber(reward.immediate_debt_offset)
+      + toNumber(reward.pending_credited)
+      + toNumber(reward.pending_debt_offset),
+  );
+  const balanceResult = await client.query(
+    "SELECT balance FROM usdt_bonus_balances WHERE user_id = $1::bigint FOR UPDATE",
+    [reward.inviter_user_id],
+  );
+  const available = Math.max(0, toNumber(balanceResult.rows[0]?.balance));
+  const recovered = roundMoney(Math.min(available, earnedAmount));
+  const outstanding = roundMoney(Math.max(0, earnedAmount - recovered));
+
+  if (recovered > 0) {
+    await adjustUsdtBonusBalance(
+      client,
+      reward.inviter_user_id,
+      -recovered,
+      "referral_deposit_bonus_revoke",
+      input.source || `referral_deposit:${reward.deposit_intent_id}:revoke`,
+    );
+  }
+
+  const result = await client.query(
+    `
+      UPDATE usdt_referral_deposit_rewards
+      SET status = 'revoked',
+          withdrawal_request_id = COALESCE($2::bigint, withdrawal_request_id),
+          clawback_recovered = clawback_recovered + $3::numeric,
+          clawback_outstanding = clawback_outstanding + $4::numeric,
+          revoked_at = now(),
+          updated_at = now()
+      WHERE id = $1::bigint
+      RETURNING *
+    `,
+    [reward.id, input.withdrawalRequestId || null, recovered, outstanding],
+  );
+  return {
+    reward: result.rows[0],
+    recovered,
+    outstanding,
+  };
+}
+
+export async function awardReferralDepositReward(client, input = {}) {
+  const depositIntentId = Number(input.depositIntentId ?? input.deposit_intent_id);
+  if (!Number.isSafeInteger(depositIntentId) || depositIntentId <= 0) {
+    return null;
+  }
+  const split = splitReferralDepositReward();
+  if (split.total <= 0) {
+    return null;
+  }
+
+  const intentResult = await client.query(
+    `
+      SELECT *
+      FROM usdt_deposit_intents
+      WHERE id = $1::bigint
+        AND status = 'credited'
+        AND COALESCE(credited_amount, 0) > 0
+      FOR UPDATE
+    `,
+    [depositIntentId],
+  );
+  const intent = intentResult.rows[0];
+  if (!intent) {
+    return null;
+  }
+  const referredResult = await client.query(
+    "SELECT * FROM users WHERE id = $1::bigint LIMIT 1",
+    [intent.user_id],
+  );
+  const referred = referredResult.rows[0];
+  const inviterTelegramId = String(referred?.referred_by_telegram_id || "").trim();
+  if (!referred || !inviterTelegramId || inviterTelegramId === String(referred.telegram_id)) {
+    return null;
+  }
+  const inviterResult = await client.query(
+    "SELECT * FROM users WHERE telegram_id = $1 LIMIT 1",
+    [inviterTelegramId],
+  );
+  const inviter = inviterResult.rows[0];
+  if (!inviter) {
+    return null;
+  }
+
+  const inserted = await client.query(
+    `
+      INSERT INTO usdt_referral_deposit_rewards (
+        deposit_intent_id,
+        inviter_user_id,
+        referred_user_id,
+        deposit_amount,
+        total_reward,
+        immediate_amount,
+        pending_amount,
+        source
+      )
+      VALUES ($1::bigint, $2::bigint, $3::bigint, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8)
+      ON CONFLICT (deposit_intent_id) DO NOTHING
+      RETURNING *
+    `,
+    [
+      intent.id,
+      inviter.id,
+      referred.id,
+      roundMoney(intent.credited_amount),
+      split.total,
+      split.immediate,
+      split.pending,
+      input.source || `deposit_intent:${intent.id}`,
+    ],
+  );
+  const reward = inserted.rows[0];
+  if (!reward) {
+    return null;
+  }
+
+  const immediate = await creditReferralDepositBonus(client, {
+    inviterUserId: inviter.id,
+    amount: split.immediate,
+    reason: "referral_deposit_bonus_usdt",
+    source: `referral_deposit:${intent.id}:immediate`,
+  });
+  const updated = await client.query(
+    `
+      UPDATE usdt_referral_deposit_rewards
+      SET immediate_credited = $2::numeric,
+          immediate_debt_offset = $3::numeric,
+          updated_at = now()
+      WHERE id = $1::bigint
+      RETURNING *
+    `,
+    [reward.id, immediate.credited, immediate.debt_offset],
+  );
+  return updated.rows[0];
+}
+
+export async function unlockReferralDepositRewardAfterCashBet(client, input = {}) {
+  const referredUserId = Number(input.referredUserId ?? input.referred_user_id);
+  const eventKey = String(input.eventKey ?? input.event_key ?? "").trim();
+  if (!Number.isSafeInteger(referredUserId) || referredUserId <= 0 || !eventKey) {
+    return null;
+  }
+
+  const rewardResult = await client.query(
+    `
+      SELECT *
+      FROM usdt_referral_deposit_rewards
+      WHERE referred_user_id = $1::bigint
+        AND status = 'pending_bet'
+      ORDER BY created_at ASC, id ASC
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [referredUserId],
+  );
+  const reward = rewardResult.rows[0];
+  if (!reward) {
+    return null;
+  }
+
+  const eventResult = await client.query(
+    `
+      INSERT INTO usdt_referral_cash_bet_events (
+        event_key, referred_user_id, reward_id, market_id, trade_id
+      )
+      VALUES ($1, $2::bigint, $3::bigint, $4::bigint, $5::bigint)
+      ON CONFLICT (event_key) DO NOTHING
+      RETURNING *
+    `,
+    [eventKey, referredUserId, reward.id, input.marketId || null, input.tradeId || null],
+  );
+  if (!eventResult.rows[0]) {
+    return null;
+  }
+
+  const pending = await creditReferralDepositBonus(client, {
+    inviterUserId: reward.inviter_user_id,
+    amount: reward.pending_amount,
+    reason: "referral_deposit_bet_bonus_usdt",
+    source: `referral_deposit:${reward.deposit_intent_id}:bet:${eventKey}`,
+  });
+  const updated = await client.query(
+    `
+      UPDATE usdt_referral_deposit_rewards
+      SET status = 'unlocked',
+          pending_credited = $2::numeric,
+          pending_debt_offset = $3::numeric,
+          qualifying_event_key = $4,
+          qualifying_market_id = $5::bigint,
+          qualifying_trade_id = $6::bigint,
+          unlocked_at = now(),
+          updated_at = now()
+      WHERE id = $1::bigint
+      RETURNING *
+    `,
+    [reward.id, pending.credited, pending.debt_offset, eventKey, input.marketId || null, input.tradeId || null],
+  );
+  return updated.rows[0];
+}
+
+export async function revokePendingReferralDepositRewardsForWithdrawal(client, input = {}) {
+  const referredUserId = Number(input.referredUserId ?? input.referred_user_id);
+  let uncoveredWithdrawal = roundMoney(input.amount);
+  if (!Number.isSafeInteger(referredUserId) || referredUserId <= 0 || uncoveredWithdrawal <= 0) {
+    return { revoked: 0, recovered: 0, outstanding: 0 };
+  }
+  const rewardsResult = await client.query(
+    `
+      SELECT *
+      FROM usdt_referral_deposit_rewards
+      WHERE referred_user_id = $1::bigint
+        AND status = 'pending_bet'
+      ORDER BY created_at DESC, id DESC
+      FOR UPDATE
+    `,
+    [referredUserId],
+  );
+  let revoked = 0;
+  let recovered = 0;
+  let outstanding = 0;
+  for (const reward of rewardsResult.rows) {
+    if (uncoveredWithdrawal <= 0) {
+      break;
+    }
+    const result = await revokeReferralDepositRewardRow(client, reward, {
+      withdrawalRequestId: input.withdrawalRequestId,
+      source: `referral_deposit:${reward.deposit_intent_id}:withdrawal:${input.withdrawalRequestId}`,
+    });
+    if (result) {
+      revoked += 1;
+      recovered = roundMoney(recovered + result.recovered);
+      outstanding = roundMoney(outstanding + result.outstanding);
+    }
+    uncoveredWithdrawal = roundMoney(uncoveredWithdrawal - toNumber(reward.deposit_amount));
+  }
+  return { revoked, recovered, outstanding };
+}
+
+export async function revokeReferralDepositRewardForIntent(client, input = {}) {
+  const depositIntentId = Number(input.depositIntentId ?? input.deposit_intent_id);
+  if (!Number.isSafeInteger(depositIntentId) || depositIntentId <= 0) {
+    return null;
+  }
+  const rewardResult = await client.query(
+    `
+      SELECT *
+      FROM usdt_referral_deposit_rewards
+      WHERE deposit_intent_id = $1::bigint
+      FOR UPDATE
+    `,
+    [depositIntentId],
+  );
+  return revokeReferralDepositRewardRow(client, rewardResult.rows[0], {
+    source: input.source || `referral_deposit:${depositIntentId}:deposit_revert`,
+  });
+}
+
 async function getLockedCurrencyBalance(client, userId, currency) {
   if (normalizeCurrency(currency) !== "USDT") {
     const result = await client.query(
@@ -4329,11 +4668,24 @@ async function getUserReferralStats(userId, telegramId) {
         WHERE referred_by_telegram_id = $2
       ),
       activated AS (
-        SELECT COUNT(DISTINCT referred_user_id)::int AS total
-        FROM fire_referral_bonuses bonuses
-        JOIN users referred ON referred.id = bonuses.referred_user_id
-        WHERE bonuses.inviter_user_id = $1
-          AND referred.referred_by_telegram_id = $2
+        SELECT COUNT(DISTINCT referred.id)::int AS total
+        FROM users referred
+        WHERE referred.referred_by_telegram_id = $2
+          AND (
+            EXISTS (
+              SELECT 1
+              FROM fire_referral_bonuses bonuses
+              WHERE bonuses.inviter_user_id = $1
+                AND bonuses.referred_user_id = referred.id
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM usdt_referral_deposit_rewards rewards
+              WHERE rewards.inviter_user_id = $1
+                AND rewards.referred_user_id = referred.id
+                AND rewards.status <> 'revoked'
+            )
+          )
       ),
       star_rewards AS (
         SELECT COALESCE(SUM(ledger.amount), 0) AS first_bet_bonus
@@ -4364,6 +4716,25 @@ async function getUserReferralStats(userId, telegramId) {
           AND ledger.reason = 'referral_bet_bonus_usdt'
           AND referred.referred_by_telegram_id = $2
       ),
+      usdt_deposit_rewards AS (
+        SELECT
+          COUNT(*) FILTER (WHERE rewards.status <> 'revoked')::int AS deposits_count,
+          COALESCE(SUM(rewards.deposit_amount) FILTER (WHERE rewards.status <> 'revoked'), 0) AS deposits_total
+        FROM usdt_referral_deposit_rewards rewards
+        JOIN users referred ON referred.id = rewards.referred_user_id
+        WHERE rewards.inviter_user_id = $1
+          AND referred.referred_by_telegram_id = $2
+      ),
+      usdt_deposit_bonus_ledger AS (
+        SELECT COALESCE(SUM(ledger.amount), 0) AS deposit_bonus
+        FROM usdt_bonus_ledger ledger
+        WHERE ledger.user_id = $1
+          AND ledger.reason IN (
+            'referral_deposit_bonus_usdt',
+            'referral_deposit_bet_bonus_usdt',
+            'referral_deposit_bonus_revoke'
+          )
+      ),
       usdt_profit_rewards AS (
         SELECT COALESCE(SUM(distributions.referral_fee), 0) AS profit_share
         FROM profit_fee_distributions distributions
@@ -4379,8 +4750,12 @@ async function getUserReferralStats(userId, telegramId) {
         star_rewards.first_bet_bonus AS star_first_bet_bonus,
         star_profit_rewards.profit_share AS star_profit_share,
         usdt_bonus_rewards.first_bet_bonus AS usdt_first_bet_bonus,
+        usdt_deposit_bonus_ledger.deposit_bonus AS usdt_deposit_bonus,
+        usdt_deposit_rewards.deposits_count AS referral_deposits_count,
+        usdt_deposit_rewards.deposits_total AS referral_deposits_total,
         usdt_profit_rewards.profit_share AS usdt_profit_share
-      FROM invited, activated, star_rewards, star_profit_rewards, usdt_bonus_rewards, usdt_profit_rewards
+      FROM invited, activated, star_rewards, star_profit_rewards, usdt_bonus_rewards,
+        usdt_deposit_rewards, usdt_deposit_bonus_ledger, usdt_profit_rewards
     `,
     [userId, String(telegramId || "")],
   );
@@ -4388,6 +4763,7 @@ async function getUserReferralStats(userId, telegramId) {
   const starFirstBetBonus = toNumber(row.star_first_bet_bonus);
   const starProfitShare = toNumber(row.star_profit_share);
   const usdtFirstBetBonus = toNumber(row.usdt_first_bet_bonus);
+  const usdtDepositBonus = toNumber(row.usdt_deposit_bonus);
   const usdtProfitShare = toNumber(row.usdt_profit_share);
   return {
     total_referrals: Number(row.total_referrals || 0),
@@ -4396,8 +4772,11 @@ async function getUserReferralStats(userId, telegramId) {
     star_profit_share: starProfitShare,
     star_total: Math.round((starFirstBetBonus + starProfitShare) * 100) / 100,
     usdt_first_bet_bonus: usdtFirstBetBonus,
+    usdt_deposit_bonus: usdtDepositBonus,
+    referral_deposits_count: Number(row.referral_deposits_count || 0),
+    referral_deposits_total: toNumber(row.referral_deposits_total),
     usdt_profit_share: usdtProfitShare,
-    usdt_total: Math.round((usdtFirstBetBonus + usdtProfitShare) * 100) / 100,
+    usdt_total: Math.round((usdtFirstBetBonus + usdtDepositBonus + usdtProfitShare) * 100) / 100,
   };
 }
 
@@ -5846,6 +6225,7 @@ const TASK_AMOUNTS = {
   daily_kyivstoner_bet: () => scaleTaskReward(50, "daily_kyivstoner_bet"),
   daily_btc_5_predictions: () => scaleTaskReward(300, "daily_btc_5_predictions"),
   daily_wheel_spins: () => scaleTaskReward(300, "daily_wheel_spins"),
+  daily_referral_deposits: () => scaleTaskReward(600, "daily_referral_deposits"),
   daily_referral_earnings: () => scaleTaskReward(400, "daily_referral_earnings"),
   daily_win_1: () => scaleTaskReward(50, "daily_win_1"),
   daily_win_streak_5: () => scaleTaskReward(300, "daily_win_streak_5"),
@@ -5866,6 +6246,7 @@ const CORE_DAILY_TASK_KEYS = new Set([
   "daily_kyivstoner_bet",
   "daily_btc_5_predictions",
   "daily_wheel_spins",
+  "daily_referral_deposits",
   "daily_referral_earnings",
   "daily_win_1",
   "daily_win_streak_5",
@@ -6078,6 +6459,16 @@ const DAILY_PROGRESS_TASKS = {
       { target: 10, amount: 600 },
       { target: 25, amount: 1200 },
       { target: 60, amount: 2500 },
+    ],
+  },
+  daily_referral_deposits: {
+    unit: "USDT",
+    levels: [
+      { target: 18, amount: 600 },
+      { target: 50, amount: 1400 },
+      { target: 150, amount: 3200 },
+      { target: 500, amount: 7000 },
+      { target: 1500, amount: 15000 },
     ],
   },
   daily_wheel_spins: {
@@ -6369,6 +6760,20 @@ async function getDailyTaskValue(client, userId, taskKey) {
       [userId],
     );
     return Number(result.rows[0]?.count || 0);
+  }
+
+  if (taskKey === "daily_referral_deposits") {
+    const result = await client.query(
+      `
+        SELECT COALESCE(SUM(deposit_amount), 0)::float8 AS total
+        FROM usdt_referral_deposit_rewards
+        WHERE inviter_user_id = $1::bigint
+          AND status IN ('pending_bet', 'unlocked')
+          AND created_at >= date_trunc('day', now())
+      `,
+      [userId],
+    );
+    return Math.max(0, Number(result.rows[0]?.total || 0));
   }
 
   if (taskKey === "daily_wheel_spins") {
@@ -9387,9 +9792,8 @@ export async function getSportsMarkets() {
 
 async function awardReferralBetBonus(client, buyerUser, marketId) {
   const bonusAmount = Math.round(Number(config.referralBetBonusFire || 0));
-  const usdtBonusAmount = Math.round(Number(config.referralBetBonusUsdt || 0) * 100) / 100;
   const inviterTelegramId = String(buyerUser.referred_by_telegram_id || "").trim();
-  if ((bonusAmount <= 0 && usdtBonusAmount <= 0) || !inviterTelegramId || inviterTelegramId === String(buyerUser.telegram_id)) {
+  if (bonusAmount <= 0 || !inviterTelegramId || inviterTelegramId === String(buyerUser.telegram_id)) {
     return null;
   }
 
@@ -9441,43 +9845,13 @@ async function awardReferralBetBonus(client, buyerUser, marketId) {
       cap_reached: false,
     };
 
-  let usdtBonus = null;
-  if (usdtBonusAmount > 0) {
-    const usdtBonusResult = await client.query(
-      `
-        INSERT INTO usdt_referral_bonuses (
-          inviter_user_id,
-          referred_user_id,
-          market_id,
-          amount
-        )
-        VALUES ($1, $2, $3, $4::numeric)
-        ON CONFLICT DO NOTHING
-        RETURNING *
-      `,
-      [inviter.id, buyerUser.id, marketId, usdtBonusAmount],
-    );
-    if (usdtBonusResult.rows[0]) {
-      await adjustUsdtBonusBalance(
-        client,
-        inviter.id,
-        usdtBonusAmount,
-        "referral_bet_bonus_usdt",
-        `referral:${buyerUser.telegram_id}:market:${marketId}`,
-      );
-      usdtBonus = {
-        amount: usdtBonusAmount,
-      };
-    }
-  }
-
   const lossRefund = await claimReferralLossRefundIfAny(client, inviter.id, buyerUser.id);
 
   return {
     inviter: mapUser(inviter),
     referred: mapUser(buyerUser),
     amount: bonus.awarded,
-    usdt_bonus: usdtBonus,
+    usdt_bonus: null,
     loss_refund: lossRefund,
     daily_remaining: bonus.daily_remaining,
     cap_reached: bonus.cap_reached,
@@ -11076,6 +11450,14 @@ async function recordRestingBuyOrderFill(client, input) {
     counterpartyUserId: input.counterpartyUserId,
     liquidityRole: input.liquidityRole || "MAKER",
   });
+  if (normalizeClobBookType(order.book_type) === BOOK_TYPE_USDT_CASH) {
+    await unlockReferralDepositRewardAfterCashBet(client, {
+      referredUserId: order.user_id,
+      eventKey: `clob_limit_buy:${order.id}`,
+      marketId: order.market_id,
+      tradeId: trade.id,
+    });
+  }
   await recordClobTradeFee(client, {
     marketId: order.market_id,
     userId: order.user_id,
@@ -11586,6 +11968,14 @@ async function executeClobMarketBuy(client, input) {
       input.side === "NO" ? grossTotal : 0,
     ],
   );
+  const referralDepositBonus = funding.bookType === BOOK_TYPE_USDT_CASH
+    ? await unlockReferralDepositRewardAfterCashBet(client, {
+      referredUserId: input.user.id,
+      eventKey: `clob_market_buy:${takerTrades[0].id}`,
+      marketId: input.market.id,
+      tradeId: takerTrades[0].id,
+    })
+    : null;
   let referralBonus = null;
   for (const userId of participantUserIds) {
     const awarded = await awardReferralBetBonusByUserId(client, userId, input.market.id);
@@ -11622,6 +12012,7 @@ async function executeClobMarketBuy(client, input) {
       average_price: grossTotal / sharesTotal,
     },
     referral_bonus: referralBonus,
+    referral_deposit_bonus: referralDepositBonus,
     market: mapMarket({
       ...input.market,
       current_price: context.fair.btc.price,
@@ -12746,6 +13137,14 @@ export async function buyOutcome(input) {
       [user.id, marketId, side, amount, fee, quote.executionPrice, shares, currency],
     );
 
+    const referralDepositBonus = currency === "USDT" && Number(debit.cash_spent || 0) > 0
+      ? await unlockReferralDepositRewardAfterCashBet(client, {
+        referredUserId: user.id,
+        eventKey: `legacy_buy:${tradeResult.rows[0].id}`,
+        marketId,
+        tradeId: tradeResult.rows[0].id,
+      })
+      : null;
     const referralBonus = await awardReferralBetBonus(client, user, marketId);
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
 
@@ -12759,6 +13158,7 @@ export async function buyOutcome(input) {
       position: mapPosition(positionResult.rows[0]),
       trade: mapTrade(tradeResult.rows[0]),
       referral_bonus: referralBonus,
+      referral_deposit_bonus: referralDepositBonus,
       market: mapMarket({
         ...market,
         yes_price: nextYesPrice,

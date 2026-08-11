@@ -267,6 +267,7 @@ const state = {
     referral_bonus_fire: 500,
     referral_signup_bonus_usdt: 5,
     referral_bet_bonus_usdt: 30,
+    referral_deposit_bonus_usdt: 30,
     task_share_fire: 30,
     task_subscribe_fire: 75,
     task_private_chat_fire: 2250,
@@ -3511,7 +3512,13 @@ function renderTaskRewards() {
   const share = Math.round(Number(state.publicConfig.task_share_fire || 30));
   const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 75));
   const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 2250));
-  const refUsdt = Math.round(Number(state.publicConfig.referral_bet_bonus_usdt || 30));
+  const refUsdt = Math.round(Number(
+    state.publicConfig.referral_deposit_bonus_usdt
+      ?? state.publicConfig.referral_bet_bonus_usdt
+      ?? 30,
+  ));
+  const refImmediate = Math.round((refUsdt / 2) * 100) / 100;
+  const refPending = Math.round((refUsdt - refImmediate) * 100) / 100;
   const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 3));
   if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
   if ($("channelTaskReward")) $("channelTaskReward").textContent = formatFire(sub);
@@ -3519,6 +3526,9 @@ function renderTaskRewards() {
   if ($("chatTaskReward")) $("chatTaskReward").textContent = formatFire(sub);
   if ($("privateChatTaskReward")) $("privateChatTaskReward").textContent = formatFire(privateChat);
   if ($("refTaskUsdtReward")) $("refTaskUsdtReward").textContent = formatFire(refUsdt);
+  if ($("referralNudgeCopy")) {
+    $("referralNudgeCopy").textContent = `$${formatFire(refImmediate)} за пополнение + $${formatFire(refPending)} после ставки и 1% с побед.`;
+  }
   if ($("dailyPresenceTaskReward")) $("dailyPresenceTaskReward").textContent = formatFire(dailyPresence);
   renderSoundToggle();
   renderAquariumToggle();
@@ -3704,7 +3714,7 @@ function renderTaskStats() {
           <strong>Рефералы</strong>
           <span>пока никого</span>
         </div>
-        <small>Пригласи друга: тебе $30 после его первой ставки и 1% с каждой его победы.</small>
+        <small>Пригласи друга: половина бонуса придёт после его пополнения, вторая — после ставки на реальные. Плюс 1% с побед.</small>
       </div>
     `
     : `
@@ -10042,13 +10052,19 @@ async function shareInvite({ awardShareTask = false, sourceElement = null } = {}
     return;
   }
 
-  const usdtBonus = Math.round(Number(state.publicConfig.referral_bet_bonus_usdt || 30));
+  const usdtBonus = Math.round(Number(
+    state.publicConfig.referral_deposit_bonus_usdt
+      ?? state.publicConfig.referral_bet_bonus_usdt
+      ?? 30,
+  ));
+  const immediateBonus = Math.round((usdtBonus / 2) * 100) / 100;
+  const pendingBonus = Math.round((usdtBonus - immediateBonus) * 100) / 100;
   const inviteUrl = buildInviteUrl(state.user.telegram_id);
-  const text = `Залетай в EasyMarket. После первой ставки мне дадут ${formatFire(usdtBonus)} USDT и 1% с твоих побед.`;
+  const text = `Залетай в EasyMarket. За твоё пополнение мне дадут ${formatFire(immediateBonus)} USDT, ещё ${formatFire(pendingBonus)} после ставки и 1% с твоих побед.`;
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
-    showToast(awardShareTask ? "Ссылка для друзей готова." : `+${formatFire(usdtBonus)} USDT и 1% с побед друга.`);
+    showToast(awardShareTask ? "Ссылка для друзей готова." : `До ${formatFire(usdtBonus)} USDT и 1% с побед друга.`);
     return;
   }
 
@@ -10134,6 +10150,7 @@ const CORE_DAILY_TASK_KEYS = [
   "daily_topup_usdt",
   "daily_btc_5_predictions",
   "daily_wheel_spins",
+  "daily_referral_deposits",
   "daily_referral_earnings",
   "daily_win_1",
   "daily_win_streak_5",
@@ -10150,6 +10167,7 @@ const DAILY_TASK_META = {
   daily_kyivstoner_bet: { title: "Ставка на Киевстонера", desc: "1 прогноз в маркете Киевстонера", icon: "streak" },
   daily_btc_5_predictions: { title: "BTC-прогнозы", desc: "Лестница прогнозов по BTC", icon: "bars" },
   daily_wheel_spins: { title: "Покрутить колесо", desc: "Лестница ставок в круге", icon: "bolt" },
+  daily_referral_deposits: { title: "Пополнения друзей", desc: "Приводи тех, кто пополняет USDT", icon: "dollar" },
   daily_referral_earnings: { title: "Твои игроки", desc: "Приводи тех, кто играет на реальные", icon: "share" },
   daily_win_1: { title: "Выиграй прогноз", desc: "Первая победа дня", icon: "trophy" },
   daily_win_streak_5: { title: "5 побед подряд", desc: "Серия из пяти побед", icon: "streak" },
@@ -10189,6 +10207,7 @@ function getDailyTaskAmount(taskKey, fallback = 0) {
     daily_kyivstoner_bet: 25,
     daily_btc_5_predictions: 25,
     daily_wheel_spins: 25,
+    daily_referral_deposits: 600,
     daily_referral_earnings: 25,
     daily_win_1: 25,
     daily_win_streak_5: 50,
@@ -10289,6 +10308,7 @@ function getDailyTaskDisplayMeta(taskKey) {
       : `${targetText} ставок на Киевстонера`,
     daily_btc_5_predictions: target === 1 ? "1 BTC-прогноз" : `${targetText} BTC-прогнозов`,
     daily_wheel_spins: target === 1 ? "1 ставка в круге" : `${targetText} ставок в круге`,
+    daily_referral_deposits: `Друзья пополнили $${targetText}`,
     daily_referral_earnings: `$${targetText} комиссии с рефералов`,
     daily_win_1: `${targetText} побед за день`,
     daily_win_streak_5: `${targetText} побед подряд`,

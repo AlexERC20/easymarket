@@ -2,7 +2,11 @@ import { randomBytes } from "node:crypto";
 
 import { config } from "../config.js";
 import { query, toNumber, withTransaction } from "../db.js";
-import { getUserByTelegramId, upsertUser } from "./marketService.js";
+import {
+  getUserByTelegramId,
+  revokePendingReferralDepositRewardsForWithdrawal,
+  upsertUser,
+} from "./marketService.js";
 
 const NETWORK_LABELS = {
   BSC: "BEP20",
@@ -240,6 +244,11 @@ export async function createUsdtWithdrawalRequest(input) {
       `,
       [user.id, amount, fee, payout, network, toAddress, adminToken],
     );
+    const referralClawback = await revokePendingReferralDepositRewardsForWithdrawal(client, {
+      referredUserId: user.id,
+      withdrawalRequestId: requestResult.rows[0].id,
+      amount,
+    });
     const updatedBalanceResult = await client.query(
       "SELECT balance FROM usdt_balances WHERE user_id = $1",
       [user.id],
@@ -263,6 +272,7 @@ export async function createUsdtWithdrawalRequest(input) {
       cash_balance: cashBalance,
       bonus_balance: bonusBalance,
       balance: cashBalance + bonusBalance,
+      referral_clawback: referralClawback,
     };
   });
 

@@ -1194,8 +1194,13 @@ export async function getEconomyIntegrityAudit(database = { query }) {
     ), promo_referrals AS (
       SELECT COALESCE(SUM(amount), 0) AS amount
       FROM usdt_bonus_ledger, epoch
-      WHERE reason IN ('referral_signup_bonus_usdt', 'referral_bet_bonus_usdt')
-        AND amount > 0
+      WHERE reason IN (
+        'referral_signup_bonus_usdt',
+        'referral_bet_bonus_usdt',
+        'referral_deposit_bonus_usdt',
+        'referral_deposit_bet_bonus_usdt',
+        'referral_deposit_bonus_revoke'
+      )
         AND created_at >= epoch.started_at
     )
     SELECT

@@ -10,7 +10,13 @@ import { randomInt } from "node:crypto";
 
 import { config } from "../config.js";
 import { query, toNumber, withTransaction } from "../db.js";
-import { claimDepositLossRefundOffers, getUserByTelegramId, upsertUser } from "./marketService.js";
+import {
+  awardReferralDepositReward,
+  claimDepositLossRefundOffers,
+  getUserByTelegramId,
+  revokeReferralDepositRewardForIntent,
+  upsertUser,
+} from "./marketService.js";
 
 const TRANSFER_TOPIC = id("Transfer(address,address,uint256)");
 const TRANSFER_IFACE = new Interface([
@@ -702,6 +708,10 @@ export async function creditDepositEventToIntent(input = {}) {
       `,
       [event.id, intent.id],
     );
+    await awardReferralDepositReward(client, {
+      depositIntentId: intent.id,
+      source: `review_event:${event.id}`,
+    });
     await claimDepositLossRefundOffers(client, intent.user_id);
     const balanceResult = await client.query(
       "SELECT balance FROM usdt_balances WHERE user_id = $1",
@@ -853,6 +863,10 @@ export async function creditPendingDepositIntentManually(input) {
       );
     }
 
+    await awardReferralDepositReward(client, {
+      depositIntentId: intent.id,
+      source: `manual_approve:intent:${intent.id}`,
+    });
     await claimDepositLossRefundOffers(client, user.id);
     const balanceResult = await client.query(
       "SELECT balance FROM usdt_balances WHERE user_id = $1",
@@ -946,6 +960,10 @@ export async function revertManualDepositCredit(input) {
       `,
       [intent.id],
     );
+    await revokeReferralDepositRewardForIntent(client, {
+      depositIntentId: intent.id,
+      source: `manual_revert:intent:${intent.id}`,
+    });
     const finalBalance = await client.query(
       "SELECT balance FROM usdt_balances WHERE user_id = $1",
       [user.id],
@@ -1190,6 +1208,10 @@ async function matchDepositEvent(client, network, event) {
     `,
     [network.key, event.tx_hash, event.log_index, intent.id],
   );
+  await awardReferralDepositReward(client, {
+    depositIntentId: intent.id,
+    source: `${network.key}:${event.tx_hash}:${event.log_index}`,
+  });
   await claimDepositLossRefundOffers(client, intent.user_id);
   console.log("[EasyMarket] USDT deposit credited", {
     intent_id: intent.id,

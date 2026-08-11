@@ -334,6 +334,56 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_usdt_withdrawal_requests_status_created
       ON usdt_withdrawal_requests(status, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS usdt_referral_deposit_rewards (
+      id BIGSERIAL PRIMARY KEY,
+      deposit_intent_id BIGINT UNIQUE NOT NULL,
+      inviter_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      referred_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      deposit_amount NUMERIC(20, 8) NOT NULL,
+      total_reward NUMERIC(20, 8) NOT NULL,
+      immediate_amount NUMERIC(20, 8) NOT NULL,
+      pending_amount NUMERIC(20, 8) NOT NULL,
+      immediate_credited NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      immediate_debt_offset NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      pending_credited NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      pending_debt_offset NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      clawback_recovered NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      clawback_outstanding NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending_bet',
+      qualifying_event_key TEXT UNIQUE,
+      qualifying_market_id BIGINT,
+      qualifying_trade_id BIGINT,
+      withdrawal_request_id BIGINT REFERENCES usdt_withdrawal_requests(id) ON DELETE SET NULL,
+      source TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      unlocked_at TIMESTAMPTZ,
+      revoked_at TIMESTAMPTZ,
+      CHECK (status IN ('pending_bet', 'unlocked', 'revoked'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_referral_deposit_rewards_referred_status
+      ON usdt_referral_deposit_rewards(referred_user_id, status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_referral_deposit_rewards_inviter_status
+      ON usdt_referral_deposit_rewards(inviter_user_id, status, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_referral_deposit_rewards_debt
+      ON usdt_referral_deposit_rewards(inviter_user_id, created_at)
+      WHERE clawback_outstanding > 0;
+
+    CREATE TABLE IF NOT EXISTS usdt_referral_cash_bet_events (
+      event_key TEXT PRIMARY KEY,
+      referred_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reward_id BIGINT REFERENCES usdt_referral_deposit_rewards(id) ON DELETE SET NULL,
+      market_id BIGINT,
+      trade_id BIGINT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_usdt_referral_cash_bet_events_user_created
+      ON usdt_referral_cash_bet_events(referred_user_id, created_at DESC);
+
     INSERT INTO usdt_balances (user_id, balance, updated_at)
     SELECT id, 0, now()
     FROM users
