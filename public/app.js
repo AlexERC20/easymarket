@@ -266,8 +266,6 @@ const state = {
     mini_app_url: "https://t.me/voit_help_bot?startapp=easymarket",
     referral_bonus_fire: 500,
     referral_signup_bonus_usdt: 5,
-    referral_bet_bonus_usdt: 30,
-    referral_deposit_bonus_usdt: 30,
     task_share_fire: 30,
     task_subscribe_fire: 75,
     task_private_chat_fire: 2250,
@@ -3512,23 +3510,12 @@ function renderTaskRewards() {
   const share = Math.round(Number(state.publicConfig.task_share_fire || 30));
   const sub = Math.round(Number(state.publicConfig.task_subscribe_fire || 75));
   const privateChat = Math.round(Number(state.publicConfig.task_private_chat_fire || 2250));
-  const refUsdt = Math.round(Number(
-    state.publicConfig.referral_deposit_bonus_usdt
-      ?? state.publicConfig.referral_bet_bonus_usdt
-      ?? 30,
-  ));
-  const refImmediate = Math.round((refUsdt / 2) * 100) / 100;
-  const refPending = Math.round((refUsdt - refImmediate) * 100) / 100;
   const dailyPresence = Math.round(Number(state.publicConfig.task_daily_presence_fire || 3));
   if ($("shareTaskReward")) $("shareTaskReward").textContent = formatFire(share);
   if ($("channelTaskReward")) $("channelTaskReward").textContent = formatFire(sub);
   if ($("botStartTaskReward")) $("botStartTaskReward").textContent = formatFire(sub);
   if ($("chatTaskReward")) $("chatTaskReward").textContent = formatFire(sub);
   if ($("privateChatTaskReward")) $("privateChatTaskReward").textContent = formatFire(privateChat);
-  if ($("refTaskUsdtReward")) $("refTaskUsdtReward").textContent = formatFire(refUsdt);
-  if ($("referralNudgeCopy")) {
-    $("referralNudgeCopy").textContent = `$${formatFire(refImmediate)} за пополнение + $${formatFire(refPending)} после ставки и 1% с побед.`;
-  }
   if ($("dailyPresenceTaskReward")) $("dailyPresenceTaskReward").textContent = formatFire(dailyPresence);
   renderSoundToggle();
   renderAquariumToggle();
@@ -10052,19 +10039,12 @@ async function shareInvite({ awardShareTask = false, sourceElement = null } = {}
     return;
   }
 
-  const usdtBonus = Math.round(Number(
-    state.publicConfig.referral_deposit_bonus_usdt
-      ?? state.publicConfig.referral_bet_bonus_usdt
-      ?? 30,
-  ));
-  const immediateBonus = Math.round((usdtBonus / 2) * 100) / 100;
-  const pendingBonus = Math.round((usdtBonus - immediateBonus) * 100) / 100;
   const inviteUrl = buildInviteUrl(state.user.telegram_id);
-  const text = `Залетай в EasyMarket. За твоё пополнение мне дадут ${formatFire(immediateBonus)} USDT, ещё ${formatFire(pendingBonus)} после ставки и 1% с твоих побед.`;
+  const text = "Залетай в EasyMarket. Мне дадут бонус размером с твоё пополнение: половину сразу, половину после твоей ставки. Ещё я получу 1% с твоих побед.";
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
-    showToast(awardShareTask ? "Ссылка для друзей готова." : `До ${formatFire(usdtBonus)} USDT и 1% с побед друга.`);
+    showToast(awardShareTask ? "Ссылка для друзей готова." : "Бонус равен пополнению друга, плюс 1% с побед.");
     return;
   }
 
@@ -10083,7 +10063,7 @@ async function shareInvite({ awardShareTask = false, sourceElement = null } = {}
   }
 
   window.open(shareUrl, "_blank", "noopener,noreferrer");
-  showToast(awardShareTask ? "Ссылка для друзей готова." : `+${formatFire(usdtBonus)} USDT и 1% с побед друга.`);
+  showToast(awardShareTask ? "Ссылка для друзей готова." : "Бонус равен пополнению друга, плюс 1% с побед.");
 }
 
 async function submitMarketComment() {

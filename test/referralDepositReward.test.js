@@ -9,10 +9,10 @@ import {
 } from "../src/services/marketService.js";
 
 test("referral deposit reward is split into two cent-safe halves", () => {
-  assert.deepEqual(splitReferralDepositReward(30), {
-    total: 30,
-    immediate: 15,
-    pending: 15,
+  assert.deepEqual(splitReferralDepositReward(100), {
+    total: 100,
+    immediate: 50,
+    pending: 50,
   });
   assert.deepEqual(splitReferralDepositReward(30.01), {
     total: 30.01,
@@ -21,7 +21,7 @@ test("referral deposit reward is split into two cent-safe halves", () => {
   });
 });
 
-test("referral deposit reward clamps invalid negative configuration", () => {
+test("referral deposit reward clamps an invalid negative deposit", () => {
   assert.deepEqual(splitReferralDepositReward(-10), {
     total: 0,
     immediate: 0,
@@ -31,6 +31,7 @@ test("referral deposit reward clamps invalid negative configuration", () => {
 
 test("confirmed deposit credits only the immediate half and is idempotent", async () => {
   const bonusLedger = [];
+  const rewardRows = [];
   let rewardInserted = false;
   const client = {
     async query(sql, params = []) {
@@ -46,6 +47,12 @@ test("confirmed deposit credits only the immediate half and is idempotent", asyn
       if (sql.includes("INSERT INTO usdt_referral_deposit_rewards")) {
         if (rewardInserted) return { rows: [] };
         rewardInserted = true;
+        rewardRows.push({
+          deposit: params[3],
+          total: params[4],
+          immediate: params[5],
+          pending: params[6],
+        });
         return { rows: [{ id: 9, deposit_intent_id: 77, inviter_user_id: 1, referred_user_id: 2 }] };
       }
       if (sql.includes("SELECT id, clawback_outstanding")) {
@@ -65,10 +72,11 @@ test("confirmed deposit credits only the immediate half and is idempotent", asyn
   const first = await awardReferralDepositReward(client, { depositIntentId: 77 });
   const duplicate = await awardReferralDepositReward(client, { depositIntentId: 77 });
 
-  assert.equal(first.immediate_credited, 15);
+  assert.equal(first.immediate_credited, 9);
   assert.equal(duplicate, null);
+  assert.deepEqual(rewardRows, [{ deposit: 18, total: 18, immediate: 9, pending: 9 }]);
   assert.deepEqual(bonusLedger, [{
-    amount: 15,
+    amount: 9,
     reason: "referral_deposit_bonus_usdt",
     source: "referral_deposit:77:immediate",
   }]);
@@ -80,7 +88,7 @@ test("a later referral reward first repays outstanding clawback debt", async () 
   const client = {
     async query(sql, params = []) {
       if (sql.includes("FROM usdt_deposit_intents")) {
-        return { rows: [{ id: 78, user_id: 2, credited_amount: "18" }] };
+        return { rows: [{ id: 78, user_id: 2, credited_amount: "30" }] };
       }
       if (sql.includes("SELECT * FROM users WHERE id")) {
         return { rows: [{ id: 2, telegram_id: "200", referred_by_telegram_id: "100" }] };
@@ -125,7 +133,7 @@ test("one executed cash-bet event unlocks one pending half only once", async () 
     deposit_intent_id: 77,
     inviter_user_id: 1,
     referred_user_id: 2,
-    pending_amount: "15",
+    pending_amount: "9",
     status: "pending_bet",
   };
   const client = {
@@ -158,7 +166,7 @@ test("one executed cash-bet event unlocks one pending half only once", async () 
 
   assert.equal(first.status, "unlocked");
   assert.equal(duplicate, null);
-  assert.deepEqual(bonusLedger, [{ amount: 15, reason: "referral_deposit_bet_bonus_usdt" }]);
+  assert.deepEqual(bonusLedger, [{ amount: 9, reason: "referral_deposit_bet_bonus_usdt" }]);
 });
 
 test("withdrawal revokes a pending cycle without making inviter balance negative", async () => {
@@ -169,7 +177,7 @@ test("withdrawal revokes a pending cycle without making inviter balance negative
     inviter_user_id: 1,
     referred_user_id: 2,
     deposit_amount: "18",
-    immediate_credited: "15",
+    immediate_credited: "9",
     immediate_debt_offset: "0",
     pending_credited: "0",
     pending_debt_offset: "0",
@@ -200,6 +208,6 @@ test("withdrawal revokes a pending cycle without making inviter balance negative
     amount: 18,
   });
 
-  assert.deepEqual(result, { revoked: 1, recovered: 4, outstanding: 11 });
+  assert.deepEqual(result, { revoked: 1, recovered: 4, outstanding: 5 });
   assert.deepEqual(bonusLedger, [{ amount: -4, reason: "referral_deposit_bonus_revoke" }]);
 });

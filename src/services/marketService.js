@@ -3913,7 +3913,7 @@ async function adjustUsdtBonusBalance(client, userId, amount, reason, source) {
   );
 }
 
-export function splitReferralDepositReward(value = config.referralDepositBonusUsdt) {
+export function splitReferralDepositReward(value) {
   const total = roundMoney(Math.max(0, Number(value || 0)));
   const immediate = roundMoney(total / 2);
   return {
@@ -4038,10 +4038,6 @@ export async function awardReferralDepositReward(client, input = {}) {
   if (!Number.isSafeInteger(depositIntentId) || depositIntentId <= 0) {
     return null;
   }
-  const split = splitReferralDepositReward();
-  if (split.total <= 0) {
-    return null;
-  }
 
   const intentResult = await client.query(
     `
@@ -4056,6 +4052,10 @@ export async function awardReferralDepositReward(client, input = {}) {
   );
   const intent = intentResult.rows[0];
   if (!intent) {
+    return null;
+  }
+  const split = splitReferralDepositReward(intent.credited_amount);
+  if (split.total <= 0) {
     return null;
   }
   const referredResult = await client.query(

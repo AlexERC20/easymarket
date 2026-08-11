@@ -419,8 +419,6 @@ app.get("/api/public/config", async (_req, res) => {
     usdt_withdrawal_fee: config.usdtWithdrawalFee,
     usdt_withdrawal_minimum: config.usdtWithdrawalMinimum,
     referral_signup_bonus_usdt: config.referralSignupBonusUsdt,
-    referral_bet_bonus_usdt: config.referralBetBonusUsdt,
-    referral_deposit_bonus_usdt: config.referralDepositBonusUsdt,
     av_channel_url: config.publicAvChannelUrl,
     av_chat_url: config.publicAvChatUrl,
     private_chat_url: config.publicPrivateChatUrl,

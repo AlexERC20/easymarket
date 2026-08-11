@@ -122,12 +122,6 @@ export const config = {
   cleanupMarketTradeFeesDays: parseNumber(process.env.CLEANUP_MARKET_TRADE_FEES_DAYS, 180, 30),
   referralBetBonusFire: parseNumber(process.env.REFERRAL_BET_BONUS_FIRE, 500, 0),
   referralSignupBonusUsdt: parseNumber(process.env.REFERRAL_SIGNUP_BONUS_USDT, 5, 0),
-  referralBetBonusUsdt: parseNumber(process.env.REFERRAL_BET_BONUS_USDT, 30, 0),
-  referralDepositBonusUsdt: parseNumber(
-    process.env.REFERRAL_DEPOSIT_BONUS_USDT ?? process.env.REFERRAL_BET_BONUS_USDT,
-    30,
-    0,
-  ),
   taskShareFire: parseNumber(process.env.TASK_SHARE_FIRE, 100, 0),
   taskSubscribeFire: parseNumber(process.env.TASK_SUBSCRIBE_REWARD_FIRE, 75, 0),
   taskPrivateChatFire: parseNumber(process.env.TASK_PRIVATE_CHAT_FIRE, 15_000, 0),
