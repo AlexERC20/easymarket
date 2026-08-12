@@ -403,6 +403,11 @@ const getNetResolvedPayout = (grossPayout, spent, currency = state.currency) => 
 };
 // Мотивация через потерю: звёзды показываем как замороженные доллары,
 // а для включивших — прогресс потолка, который растёт с депозитом.
+const getStarConversionTopupRequired = (conversion) => Math.max(
+  getUsdtDepositMinimum(),
+  Number(conversion?.deposit_topup_required || 0),
+);
+
 const getStarConversionWalletText = (conversion) => {
   if (conversion.eligible) {
     const converted = Number(conversion.converted_total || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
@@ -416,7 +421,9 @@ const getStarConversionWalletText = (conversion) => {
   }
   const frozenUsdt = Number(conversion.available_from_stars || 0);
   if (frozenUsdt >= 1) {
-    return `💫 ${formatFire(conversion.star_balance || 0)}⭐ — это до $${Math.floor(frozenUsdt)} · заморожено, пока нет депозита от ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`;
+    const topup = formatCurrencyAmount(getStarConversionTopupRequired(conversion), "USDT");
+    const verb = Number(conversion.deposit_total || 0) > 0 ? "пополни ещё" : "пополни от";
+    return `💫 ${formatFire(conversion.star_balance || 0)}⭐ — это до $${Math.floor(frozenUsdt)} · заморожено, ${verb} ${topup}`;
   }
   return `Конвертация звёзд в USDT включится после пополнения от ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`;
 };
@@ -3002,7 +3009,7 @@ function maybeShowStarConversionNudge(newWins) {
   }
   const message = conversion.deposit_qualified && !conversion.cash_play_qualified
     ? "💫 Эта победа могла капнуть в USDT — осталась ставка основными USDT"
-    : `💫 Эта победа могла капнуть в USDT — конвертация включается депозитом от ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`;
+    : `💫 Эта победа могла капнуть в USDT — для запуска пополни от ${formatCurrencyAmount(getStarConversionTopupRequired(conversion), "USDT")}`;
   setTimeout(() => showToast(message), 4500);
 }
 

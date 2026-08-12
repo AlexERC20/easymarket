@@ -144,6 +144,11 @@ export const config = {
     1,
   ),
   starUsdtConversionRateBps: parseNumber(process.env.STAR_USDT_CONVERSION_RATE_BPS, 5, 0),
+  starUsdtConversionDepositShareBps: parseNumber(
+    process.env.STAR_USDT_CONVERSION_DEPOSIT_SHARE_BPS,
+    1_000,
+    0,
+  ),
   starUsdtConversionLifetimeCapBps: parseNumber(
     process.env.STAR_USDT_CONVERSION_LIFETIME_CAP_BPS,
     500,

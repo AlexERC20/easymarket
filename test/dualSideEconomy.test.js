@@ -13,7 +13,11 @@ import {
   getTimeAdjustedPayoutMultiplier,
   splitUsdtSpend,
 } from "../src/services/marketService.js";
-import { buildUnlockStatus } from "../src/services/bonusEconomyService.js";
+import {
+  buildStarConversionStatus,
+  buildUnlockStatus,
+  getStarConversionDepositRequirement,
+} from "../src/services/bonusEconomyService.js";
 import { normalizeUsdtDepositAmount } from "../src/services/usdtDepositService.js";
 import { calculateUsdtWithdrawalAmounts } from "../src/services/usdtWithdrawalService.js";
 import { isAccountSnapshotCurrent } from "../public/account-state.js";
@@ -445,6 +449,42 @@ test("bonus conversion needs both a deposit and real USDT play", () => {
   });
   assert.equal(qualified.eligible, true);
   assert.equal(qualified.rate_bps, 50);
+});
+
+test("star conversion deposit follows 10% of frozen value with an 18 USDT floor", () => {
+  assert.equal(getStarConversionDepositRequirement(100_000), 18);
+  assert.equal(getStarConversionDepositRequirement(180_000), 18);
+  assert.equal(getStarConversionDepositRequirement(180_001), 18.01);
+  assert.equal(getStarConversionDepositRequirement(1_000_000), 100);
+
+  const belowDynamicThreshold = buildStarConversionStatus({
+    depositTotal: 50,
+    starBalance: 1_000_000,
+    cashPlayQualified: true,
+  });
+  assert.equal(belowDynamicThreshold.deposit_required, 100);
+  assert.equal(belowDynamicThreshold.deposit_shortfall, 50);
+  assert.equal(belowDynamicThreshold.deposit_topup_required, 50);
+  assert.equal(belowDynamicThreshold.deposit_qualified, false);
+  assert.equal(belowDynamicThreshold.eligible, false);
+
+  const minimumTopup = buildStarConversionStatus({
+    depositTotal: 10,
+    starBalance: 100_000,
+    cashPlayQualified: true,
+  });
+  assert.equal(minimumTopup.deposit_required, 18);
+  assert.equal(minimumTopup.deposit_shortfall, 8);
+  assert.equal(minimumTopup.deposit_topup_required, 18);
+
+  const qualified = buildStarConversionStatus({
+    depositTotal: 100,
+    starBalance: 1_000_000,
+    cashPlayQualified: true,
+  });
+  assert.equal(qualified.deposit_qualified, true);
+  assert.equal(qualified.deposit_shortfall, 0);
+  assert.equal(qualified.eligible, true);
 });
 
 test("promo USDT ladder advances by distinct cash-backed markets", () => {

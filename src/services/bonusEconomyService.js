@@ -3,10 +3,10 @@ import { query, toNumber } from "../db.js";
 
 const BONUS_UNLOCK_LIFETIME_CAP_BPS = 2_500;
 
-// Порог депозита с учётом допуска сопоставления: биржа может занизить сумму на
-// копейки, и из-за них человек не должен терять включённую конвертацию.
-function getDepositQualifyMinimum() {
-  const minimum = Math.max(0, Number(config.usdtDepositMinimum || 18));
+// Биржа может занизить перевод на копейки, поэтому проверка сохраняет тот же
+// небольшой допуск, который используется при сопоставлении депозитов.
+function getDepositQualifyMinimum(requiredDeposit) {
+  const minimum = Math.max(0, Number(requiredDeposit || 0));
   const tolerance = Math.max(0, Number(config.usdtDepositMatchTolerance || 0));
   return Math.round((minimum - tolerance) * 100) / 100;
 }
@@ -26,6 +26,36 @@ export function getLightningStreakMultiplier(streakDays) {
 
 function roundAmount(value) {
   return Math.max(0, Math.round(Number(value || 0) * 100_000_000) / 100_000_000);
+}
+
+function roundMoneyUp(value) {
+  return Math.max(0, Math.ceil((Number(value || 0) - 1e-9) * 100) / 100);
+}
+
+export function getStarConversionDepositRequirement(starBalance) {
+  const safeStarBalance = roundAmount(starBalance);
+  const starsPerUsdt = Math.max(1, Number(config.starUsdtConversionStarsPerUsdt || 1_000));
+  const depositShareBps = Math.max(
+    0,
+    Math.round(Number(config.starUsdtConversionDepositShareBps || 0)),
+  );
+  const frozenUsdt = safeStarBalance / starsPerUsdt;
+  const minimum = Math.max(0, Number(config.usdtDepositMinimum || 18));
+  return roundMoneyUp(Math.max(minimum, frozenUsdt * (depositShareBps / 10_000)));
+}
+
+function getStarConversionDepositGate(starBalance, depositTotal) {
+  const safeDepositTotal = roundAmount(depositTotal);
+  const required = getStarConversionDepositRequirement(starBalance);
+  const qualified = safeDepositTotal >= getDepositQualifyMinimum(required);
+  const shortfall = qualified ? 0 : roundMoneyUp(Math.max(0, required - safeDepositTotal));
+  const topupMinimum = Math.max(0, Number(config.usdtDepositMinimum || 18));
+  return {
+    qualified,
+    required,
+    shortfall,
+    topup_required: qualified ? 0 : roundMoneyUp(Math.max(topupMinimum, shortfall)),
+  };
 }
 
 // Для сальдо, которое законно бывает отрицательным (занёс минус вывел).
@@ -109,13 +139,17 @@ export function buildStarConversionStatus({
   );
   const lifetimeCap = roundAmount(safeDepositTotal * (lifetimeCapBps / 10_000));
   const starsPerUsdt = Math.max(1, Number(config.starUsdtConversionStarsPerUsdt || 1_000));
+  const depositGate = getStarConversionDepositGate(safeStarBalance, safeDepositTotal);
 
   return {
-    eligible: safeDepositTotal >= getDepositQualifyMinimum()
+    eligible: depositGate.qualified
       && Boolean(cashPlayQualified)
       && safeStarBalance >= 1
       && effectiveRateBps > 0,
-    deposit_qualified: safeDepositTotal >= getDepositQualifyMinimum(),
+    deposit_qualified: depositGate.qualified,
+    deposit_required: depositGate.required,
+    deposit_shortfall: depositGate.shortfall,
+    deposit_topup_required: depositGate.topup_required,
     cash_play_qualified: Boolean(cashPlayQualified),
     deposit_total: safeDepositTotal,
     base_rate_bps: baseRateBps,
@@ -564,6 +598,7 @@ export async function getStarConversionReminderTargets(input = {}) {
     .map((row) => {
       const starBalance = Math.max(0, Math.floor(toNumber(row.star_balance)));
       const depositTotal = roundAmount(row.deposit_total);
+      const depositGate = getStarConversionDepositGate(starBalance, depositTotal);
       return {
         telegram_id: row.telegram_id,
         username: row.username,
@@ -571,7 +606,10 @@ export async function getStarConversionReminderTargets(input = {}) {
         star_balance: starBalance,
         frozen_usdt: roundAmount(starBalance / starsPerUsdt),
         deposit_total: depositTotal,
-        deposit_qualified: depositTotal >= getDepositQualifyMinimum(),
+        deposit_qualified: depositGate.qualified,
+        deposit_required: depositGate.required,
+        deposit_shortfall: depositGate.shortfall,
+        deposit_topup_required: depositGate.topup_required,
         cash_play_qualified: row.cash_play_qualified === true,
       };
     })
@@ -907,13 +945,22 @@ export async function convertStarsAfterResolvedMarket(client, input) {
               AND amount < 0
               AND reason IN ('buy_yes_usdt', 'buy_no_usdt')
           )
-        ) AS cash_play_qualified
+        ) AS cash_play_qualified,
+        COALESCE((
+          SELECT balance
+          FROM fire_balances
+          WHERE user_id = $1
+        ), 0) AS star_balance
     `,
     [userId],
   );
   const eligibility = eligibilityResult.rows[0] || {};
   const depositTotal = roundAmount(eligibility.deposit_total);
-  if (depositTotal < getDepositQualifyMinimum() || eligibility.cash_play_qualified !== true) {
+  const initialDepositGate = getStarConversionDepositGate(
+    eligibility.star_balance,
+    depositTotal,
+  );
+  if (!initialDepositGate.qualified || eligibility.cash_play_qualified !== true) {
     return null;
   }
 
@@ -944,6 +991,9 @@ export async function convertStarsAfterResolvedMarket(client, input) {
 
   const reserveBalance = roundAmount(reserveResult.rows[0]?.balance);
   const starBalance = Math.max(0, Math.floor(toNumber(fireResult.rows[0]?.balance)));
+  if (!getStarConversionDepositGate(starBalance, depositTotal).qualified) {
+    return null;
+  }
   const convertedTotal = roundAmount(convertedResult.rows[0]?.total);
   const lifetimeCap = roundAmount(depositTotal * (lifetimeCapBps / 10_000));
   const remainingCap = roundAmount(Math.max(0, lifetimeCap - convertedTotal));

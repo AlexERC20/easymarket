@@ -102,6 +102,7 @@ TASK_DAILY_BET_FIRE=50
 TASK_DAILY_CAP_FIRE=5000
 TASK_REWARD_SCALE=0.3
 TASK_EASY_REWARD_SCALE=0.1
+STAR_USDT_CONVERSION_DEPOSIT_SHARE_BPS=1000
 USDT_DEPOSIT_MINIMUM=18
 USDT_WITHDRAWAL_FEE=3
 USDT_WITHDRAWAL_MINIMUM=18
@@ -137,6 +138,8 @@ EasyMarket keeps withdrawable and promotional USDT separate:
 - Users without a confirmed on-chain deposit have legacy cash, pending withdrawals, and active exposure reclassified to bonus once by migration `reclassify_unfunded_usdt_v1`.
 
 After a confirmed deposit, real cash is spent before bonus. Profitable settled real-money play can gradually convert bonus into withdrawable USDT. The default tiers are 0.25% after 15 USDT deposited, 0.50% after 50, 0.75% after 200, and 1% after 500. The lifetime conversion cap is 25% of confirmed deposits.
+
+Star-to-USDT conversion requires net confirmed deposits equal to at least 10% of the currently frozen star value, with an 18 USDT minimum, plus at least one cash-backed USDT prediction. `STAR_USDT_CONVERSION_DEPOSIT_SHARE_BPS` controls the deposit share and defaults to `1000` (10%). The required amount is rounded up to cents.
 
 The daily `Lightning Charge` streak accelerates the tier rate: days 1-7 use `x1`, days 8-21 use `x1.5`, and day 22 onward uses `x2`. The streak must be checked in for the current UTC day. The multiplier changes only conversion speed; every conversion is still capped by the funded reserve, bonus balance, and lifetime deposit cap.
 
