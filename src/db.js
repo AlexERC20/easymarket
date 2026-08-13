@@ -322,6 +322,8 @@ export async function runMigrations() {
       ADD COLUMN IF NOT EXISTS fee_amount NUMERIC(20, 8) NOT NULL DEFAULT 0;
     ALTER TABLE usdt_withdrawal_requests
       ADD COLUMN IF NOT EXISTS payout_amount NUMERIC(20, 8) NOT NULL DEFAULT 0;
+    ALTER TABLE usdt_withdrawal_requests
+      ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
 
     UPDATE usdt_withdrawal_requests
     SET payout_amount = amount

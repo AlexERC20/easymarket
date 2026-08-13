@@ -109,6 +109,7 @@ import {
   scanUsdtDeposits,
 } from "./services/usdtDepositService.js";
 import {
+  cancelUsdtWithdrawalRequestByBridge,
   confirmUsdtWithdrawalRequest,
   confirmUsdtWithdrawalRequestByBridge,
   createUsdtWithdrawalRequest,
@@ -1172,6 +1173,24 @@ app.post("/api/bridge/withdrawals/:requestId/confirm", requireBridgeSecret, asyn
     res.status(200).json({
       ok: true,
       request,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/withdrawals/:requestId/cancel", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await cancelUsdtWithdrawalRequestByBridge({
+      requestId: req.params.requestId,
+      adminTelegramId: req.body?.admin_telegram_id ?? req.body?.adminTelegramId,
+      adminUsername: req.body?.admin_username ?? req.body?.adminUsername,
+    });
+    res.status(200).json({
+      ok: true,
+      request: result.request,
+      usdt_cash_balance: result.cash_balance,
+      refunded: result.refunded,
     });
   } catch (error) {
     sendApiError(res, error);

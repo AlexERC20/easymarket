@@ -86,6 +86,7 @@ function mapWithdrawal(row) {
     created_at: row.created_at,
     updated_at: row.updated_at,
     confirmed_at: row.confirmed_at,
+    cancelled_at: row.cancelled_at,
   };
 }
 
@@ -95,6 +96,10 @@ function adminConfirmUrl(requestId, token) {
 
 function adminConfirmCallbackData(requestId) {
   return `em_wd_confirm:${requestId}`;
+}
+
+function adminCancelCallbackData(requestId) {
+  return `em_wd_cancel:${requestId}`;
 }
 
 async function sendAdminWithdrawalNotification(request, adminToken) {
@@ -123,6 +128,10 @@ async function sendAdminWithdrawalNotification(request, adminToken) {
         {
           text: "✅ Подтвердить вывод",
           callback_data: adminConfirmCallbackData(request.id),
+        },
+        {
+          text: "❌ Отменить",
+          callback_data: adminCancelCallbackData(request.id),
         },
       ],
     ],
@@ -154,6 +163,24 @@ async function sendUserWithdrawalConfirmed(request) {
   }
 
   const text = `Вывод ${request.payout_amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT подтвержден. Комиссия: ${request.fee_amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT.`;
+  await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: request.telegram_id,
+      text,
+      disable_web_page_preview: true,
+    }),
+  }).catch(() => undefined);
+}
+
+async function sendUserWithdrawalCancelled(request) {
+  if (!config.telegramBotToken || !request.telegram_id) {
+    return;
+  }
+
+  const amount = request.amount.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+  const text = `Заявка на вывод ${amount} USDT отменена. Сумма возвращена на баланс.`;
   await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -507,4 +534,102 @@ export async function confirmUsdtWithdrawalRequestByBridge(input) {
 
   void sendUserWithdrawalConfirmed(request);
   return request;
+}
+
+export async function cancelPendingUsdtWithdrawal(client, input) {
+  const requestId = Number(input.requestId);
+  if (!Number.isSafeInteger(requestId) || requestId <= 0) {
+    throw new Error("withdrawal_not_found");
+  }
+
+  const requestResult = await client.query(
+    `
+      SELECT
+        requests.*,
+        users.telegram_id,
+        users.username,
+        users.first_name
+      FROM usdt_withdrawal_requests requests
+      JOIN users ON users.id = requests.user_id
+      WHERE requests.id = $1
+      FOR UPDATE OF requests
+    `,
+    [requestId],
+  );
+  const row = requestResult.rows[0];
+  if (!row) {
+    throw new Error("withdrawal_not_found");
+  }
+
+  if (row.status === "cancelled" || row.status === "canceled") {
+    const balanceResult = await client.query(
+      "SELECT balance FROM usdt_balances WHERE user_id = $1",
+      [row.user_id],
+    );
+    return {
+      request: mapWithdrawal(row),
+      cash_balance: toNumber(balanceResult.rows[0]?.balance),
+      refunded: false,
+    };
+  }
+  if (row.status !== "pending") {
+    throw new Error("withdrawal_not_pending");
+  }
+
+  const updateResult = await client.query(
+    `
+      UPDATE usdt_withdrawal_requests
+      SET status = 'cancelled',
+          admin_telegram_id = COALESCE($2, admin_telegram_id),
+          admin_username = COALESCE($3, admin_username),
+          updated_at = now(),
+          cancelled_at = now()
+      WHERE id = $1
+      RETURNING *
+    `,
+    [
+      requestId,
+      input.adminTelegramId ? String(input.adminTelegramId) : null,
+      input.adminUsername ? String(input.adminUsername) : null,
+    ],
+  );
+  await client.query(
+    `
+      UPDATE usdt_balances
+      SET balance = balance + $2::numeric,
+          updated_at = now()
+      WHERE user_id = $1
+    `,
+    [row.user_id, row.amount],
+  );
+  await client.query(
+    `
+      INSERT INTO usdt_ledger (user_id, amount, reason, source)
+      VALUES ($1, $2::numeric, 'usdt_withdrawal_cancelled', $3)
+    `,
+    [row.user_id, row.amount, `withdrawal:${requestId}:cancel`],
+  );
+  const balanceResult = await client.query(
+    "SELECT balance FROM usdt_balances WHERE user_id = $1",
+    [row.user_id],
+  );
+
+  return {
+    request: mapWithdrawal({
+      ...updateResult.rows[0],
+      telegram_id: row.telegram_id,
+      username: row.username,
+      first_name: row.first_name,
+    }),
+    cash_balance: toNumber(balanceResult.rows[0]?.balance),
+    refunded: true,
+  };
+}
+
+export async function cancelUsdtWithdrawalRequestByBridge(input) {
+  const result = await withTransaction((client) => cancelPendingUsdtWithdrawal(client, input));
+  if (result.refunded) {
+    void sendUserWithdrawalCancelled(result.request);
+  }
+  return result;
 }
