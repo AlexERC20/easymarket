@@ -260,6 +260,7 @@ const state = {
   pendingSellPositionId: null,
   sideSelectedMarketId: null,
   winOverlayTimer: null,
+  winOverlayKind: null,
   lastWin: null,
   publicConfig: {
     av_bot_url: "https://t.me/voit_help_bot?start=buy_stars",
@@ -3152,16 +3153,23 @@ function dropClanBankCoin() {
   window.setTimeout(() => coin.remove(), 950);
 }
 
-function showWinOverlay(label, value = 0, tier = 1) {
+function showWinOverlay(label, value = 0, tier = 1, options = {}) {
   const overlay = $("winOverlay");
+  const title = $("winOverlayTitle");
   const amount = $("winOverlayAmount");
   if (!overlay || !amount || !label) {
     return;
   }
+  const kind = options.kind === "referral" ? "referral" : "win";
   const safeTier = Math.max(1, Math.min(4, Number(tier || 1)));
   const epic = Math.abs(Number(value || 0)) >= 100 || safeTier >= 4;
   showWinCelebration({ tier: safeTier, epic });
+  if (title) {
+    title.textContent = options.title || (kind === "referral" ? "ДРУЗЬЯ ПРИНЕСЛИ" : "YOU WON");
+  }
   amount.textContent = label;
+  state.winOverlayKind = kind;
+  overlay.classList.toggle("referral", kind === "referral");
   overlay.classList.toggle("epic", epic);
   overlay.classList.remove("hidden");
   overlay.classList.remove("show");
@@ -3174,7 +3182,20 @@ function showWinOverlay(label, value = 0, tier = 1) {
     overlay.classList.remove("show");
     overlay.classList.add("hidden");
     state.winOverlayTimer = null;
+    state.winOverlayKind = null;
   }, epic ? 6600 : 4400);
+}
+
+function showReferralEarningsOverlay(gained) {
+  const amount = Math.max(0, Math.round(Number(gained || 0)));
+  if (amount <= 0) {
+    return;
+  }
+  triggerHaptic("success");
+  showWinOverlay(`+${formatFire(amount)} ★`, amount, getTierForAmount(amount, "STAR"), {
+    kind: "referral",
+    title: "ДРУЗЬЯ ПРИНЕСЛИ",
+  });
 }
 
 function setConnection(status, type = "") {
@@ -9291,7 +9312,7 @@ $("taskStatsList")?.addEventListener("click", (event) => {
 });
 $("shareCopyBtn")?.addEventListener("click", () => shareWinCopy());
 $("winOverlay")?.addEventListener("click", () => {
-  if (state.lastWin && isShareWinsEnabled()) {
+  if (state.winOverlayKind === "win" && state.lastWin && isShareWinsEnabled()) {
     openShareWinSheet();
   }
 });
@@ -12555,8 +12576,7 @@ function noteReferralEarnings() {
     const seen = readReferralSeen();
     const gained = total - seen;
     if (seen > 0 && gained > 0) {
-      showToast(`Пока тебя не было, друзья принесли ${Math.round(gained)} ★.`);
-      triggerHaptic("success");
+      showReferralEarningsOverlay(gained);
     }
     referralWatch.last = total;
     writeReferralSeen(total);
@@ -12567,14 +12587,13 @@ function noteReferralEarnings() {
   // своей ставке, — звезда летит к балансу.
   if (referralWatch.last !== null && total > referralWatch.last) {
     const gained = total - referralWatch.last;
-    triggerHaptic("light");
     const source = $("fireBalance");
     if (source) {
       flyRewardToBalance(source, "★");
     }
     triggerBalancePulse($("fireBalance"));
     bumpReferralToday(gained);
-    showToast(`Друг сыграл — тебе капнуло ${Math.round(gained)} ★.`);
+    showReferralEarningsOverlay(gained);
   }
   referralWatch.last = total;
   writeReferralSeen(total);

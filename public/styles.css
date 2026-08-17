@@ -1642,6 +1642,24 @@ h2 {
     0 0 48px rgba(53, 246, 255, 0.36);
 }
 
+.win-overlay.referral {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(53, 246, 255, 0.32), transparent 30%),
+    radial-gradient(circle at 50% 58%, rgba(165, 108, 255, 0.22), transparent 46%),
+    rgba(8, 13, 22, 0.86);
+}
+
+.win-overlay.referral small {
+  color: var(--cyan);
+}
+
+.win-overlay.referral strong {
+  text-shadow:
+    0 0 14px rgba(255, 255, 255, 0.52),
+    0 0 30px rgba(53, 246, 255, 0.62),
+    0 0 50px rgba(165, 108, 255, 0.4);
+}
+
 /* --- Win share card --- */
 /* --- Win share card (in-app) --- */
 .share-win-panel { padding: 12px 14px 18px; }
