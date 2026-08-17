@@ -281,3 +281,50 @@ export async function creditPromoPointsFromTelegramStars(client, input) {
 export async function creditTelegramStarsPromoPointPurchase(input) {
   return withTransaction((client) => creditPromoPointsFromTelegramStars(client, input));
 }
+
+export async function resetPromoPointPurchaseDayForUser(client, input) {
+  const telegramId = String(input.telegramId || "").trim();
+  if (!/^\d{1,24}$/.test(telegramId)) {
+    throw new Error("invalid_telegram_id");
+  }
+
+  const dayKey = String(input.dayKey || getDayKey()).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+    throw new Error("invalid_day_key");
+  }
+
+  const result = await client.query(
+    `
+      UPDATE promo_point_purchases purchases
+      SET day_key = purchases.day_key || ':reset:' || purchases.id::text
+      FROM users
+      WHERE purchases.user_id = users.id
+        AND users.telegram_id = $1
+        AND purchases.day_key = $2
+      RETURNING
+        purchases.id,
+        purchases.stars_spent,
+        purchases.points,
+        purchases.payment_source
+    `,
+    [telegramId, dayKey],
+  );
+  const purchase = result.rows[0] || null;
+  return {
+    ok: true,
+    telegram_id: telegramId,
+    day_key: dayKey,
+    reset: Boolean(purchase),
+    purchase: purchase
+      ? {
+          stars_spent: Number(purchase.stars_spent),
+          points: Number(purchase.points),
+          payment_source: purchase.payment_source,
+        }
+      : null,
+  };
+}
+
+export async function resetTelegramPromoPointPurchaseDay(input) {
+  return withTransaction((client) => resetPromoPointPurchaseDayForUser(client, input));
+}

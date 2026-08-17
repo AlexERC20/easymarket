@@ -84,6 +84,7 @@ import {
 import {
   creditTelegramStarsPromoPointPurchase,
   getPromoContestSnapshot,
+  resetTelegramPromoPointPurchaseDay,
 } from "./services/promoContestService.js";
 import {
   getBonusEconomyAudit,
@@ -2124,6 +2125,18 @@ app.post("/api/bridge/promo/points/credit", requireBridgeSecret, async (req, res
         already_credited: Boolean(purchase.already_credited),
       },
     });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/admin/promo/points/reset-day", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await resetTelegramPromoPointPurchaseDay({
+      telegramId: req.body?.telegram_id ?? req.body?.telegramId,
+      dayKey: req.body?.day_key ?? req.body?.dayKey,
+    });
+    res.status(200).json(result);
   } catch (error) {
     sendApiError(res, error);
   }

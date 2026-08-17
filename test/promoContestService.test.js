@@ -7,6 +7,7 @@ import {
   PROMO_STAR_HOLD_LEVELS,
   PROMO_USDT_DEPOSIT_LEVELS,
   PROMO_USDT_HOLD_LEVELS,
+  resetPromoPointPurchaseDayForUser,
 } from "../src/services/promoContestService.js";
 
 test("real USDT hold levels heavily outweigh star hold levels", () => {
@@ -151,4 +152,32 @@ test("a concurrent replay is recovered without aborting the transaction", async 
   assert.equal(result.already_credited, true);
   assert.equal(result.points, 250);
   assert.equal(calls.some((call) => call.sql.includes("ON CONFLICT DO NOTHING")), true);
+});
+
+test("admin reset archives the daily marker without deleting payment history", async () => {
+  const calls = [];
+  const client = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      return {
+        rows: [{
+          id: 7,
+          stars_spent: "250",
+          points: 25,
+          payment_source: "internal_balance",
+        }],
+      };
+    },
+  };
+
+  const result = await resetPromoPointPurchaseDayForUser(client, {
+    telegramId: "71041355",
+    dayKey: "2026-08-17",
+  });
+
+  assert.equal(result.reset, true);
+  assert.equal(result.purchase.points, 25);
+  assert.deepEqual(calls[0].params, ["71041355", "2026-08-17"]);
+  assert.match(calls[0].sql, /SET day_key = purchases\.day_key \|\| ':reset:'/);
+  assert.doesNotMatch(calls[0].sql, /DELETE FROM promo_point_purchases/);
 });
