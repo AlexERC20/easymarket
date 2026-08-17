@@ -213,9 +213,21 @@ async function sendAdminDepositIntentNotification(user, intent) {
 }
 
 export async function expirePendingDepositIntents() {
-  // Pending deposits must stay visible until the user cancels them or the scanner credits them.
-  // Expiring them automatically made real late transfers hard to match and confused users.
-  return 0;
+  const result = await query(
+    `
+      UPDATE usdt_deposit_intents
+      SET status = 'expired',
+          updated_at = now()
+      WHERE status = 'pending'
+        AND LEAST(expires_at, created_at + interval '1 hour') <= now()
+      RETURNING id
+    `,
+  );
+  const expired = result.rows.length;
+  if (expired > 0) {
+    console.log("[EasyMarket] expired stale USDT deposit intents", { count: expired });
+  }
+  return expired;
 }
 
 export async function createUsdtDepositIntent(input) {
@@ -1084,9 +1096,10 @@ async function findIntentForDepositEvent(client, network, event) {
       SELECT *
       FROM usdt_deposit_intents
       WHERE network = ANY($1::text[])
-        AND status = 'pending'
+        AND status IN ('pending', 'expired')
         AND deposit_amount = $2::numeric
         AND created_at <= ($3::timestamptz + ($5::int * interval '1 minute'))
+        AND expires_at >= $3::timestamptz
       ORDER BY
         CASE WHEN network = $4::text THEN 0 ELSE 1 END,
         created_at ASC
@@ -1108,9 +1121,10 @@ async function findIntentForDepositEvent(client, network, event) {
       SELECT *
       FROM usdt_deposit_intents
       WHERE network = ANY($1::text[])
-        AND status = 'pending'
+        AND status IN ('pending', 'expired')
         AND deposit_amount BETWEEN ($2::numeric - $6::numeric) AND ($2::numeric + $6::numeric)
         AND created_at <= ($3::timestamptz + ($5::int * interval '1 minute'))
+        AND expires_at >= $3::timestamptz
       ORDER BY
         -- $4 передавался в параметрах, но в запросе не упоминался: у такого
         -- параметра нет никакого контекста, и Postgres валил весь скан с
@@ -1650,6 +1664,7 @@ export async function scanUsdtDeposits() {
 // единственный способ понять, кого зацепило, — посмотреть, у кого заявка так и
 // осталась в ожидании. Отдельного инструмента для этого не было.
 export async function listPendingDepositIntents(input = {}) {
+  await expirePendingDepositIntents();
   const hours = Math.max(1, Math.min(720, Number(input.max_age_hours) || 96));
   const limit = Math.max(1, Math.min(100, Number(input.limit) || 30));
   const result = await query(

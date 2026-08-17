@@ -105,6 +105,7 @@ import {
   creditPendingDepositIntentManually,
   dismissDepositEvent,
   auditUserDeposits,
+  expirePendingDepositIntents,
   listPendingDepositIntents,
   getDepositReviewQueue,
   getPublicUsdtDepositNetworks,
@@ -151,6 +152,7 @@ let marketEngineBusy = false;
 let priceEngineBusy = false;
 let usdtDepositScannerBusy = false;
 let usdtDepositScannerStartedAt = 0;
+let usdtDepositExpiryBusy = false;
 let databaseCleanupBusy = false;
 let clanRewardDistributionBusy = false;
 
@@ -2243,6 +2245,24 @@ async function usdtDepositTick() {
   }
 }
 
+async function usdtDepositExpiryTick() {
+  if (usdtDepositExpiryBusy) {
+    return;
+  }
+
+  usdtDepositExpiryBusy = true;
+  try {
+    await expirePendingDepositIntents();
+  } catch (error) {
+    console.warn(
+      "[easymarket] USDT deposit expiry failed:",
+      error instanceof Error ? error.message : "unknown error",
+    );
+  } finally {
+    usdtDepositExpiryBusy = false;
+  }
+}
+
 async function databaseCleanupTick(reason = "scheduled") {
   if (databaseCleanupBusy || !config.databaseCleanupEnabled) {
     return null;
@@ -2301,6 +2321,7 @@ async function startMarketEngine() {
       console.log("[easymarket] startup database rescue finished", rescueSummary);
     }
     await runMigrations();
+    await usdtDepositExpiryTick();
     const worldCupResult = await finalizeWorldCupMarkets();
     console.log("[easymarket] World Cup markets finalized", worldCupResult);
     await resolveExpiredMarkets();
@@ -2331,6 +2352,10 @@ async function startMarketEngine() {
       void usdtDepositTick();
     }, config.usdtDepositScanMs);
   }
+
+  setInterval(() => {
+    void usdtDepositExpiryTick();
+  }, 60_000);
 
   if (config.databaseCleanupEnabled) {
     if (config.databaseCleanupRunOnStart) {

@@ -8092,6 +8092,9 @@ async function refreshDepositIntent() {
     }
     if (data.intent?.status === "expired") {
       stopDepositPolling();
+      state.topup.intent = null;
+      saveStoredUsdtIntent(null);
+      renderTopupSheet();
       triggerHaptic("warning");
       showToast("Заявка истекла. Создай новую.");
     }
