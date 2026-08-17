@@ -243,43 +243,39 @@ export async function creditPromoPointsFromTelegramStars(client, input) {
     throw new Error("promo_points_already_purchased_today");
   }
 
-  try {
-    const purchaseResult = await client.query(
-      `
-        INSERT INTO promo_point_purchases (
-          user_id,
-          day_key,
-          stars_spent,
-          points,
-          payment_source,
-          telegram_payment_charge_id
-        )
-        VALUES ($1::bigint, $2, $3::numeric, $4::integer, 'telegram_stars', $5)
-        RETURNING *
-      `,
-      [input.userId, dayKey, selected.stars, selected.points, paymentChargeId],
-    );
-
+  const purchaseResult = await client.query(
+    `
+      INSERT INTO promo_point_purchases (
+        user_id,
+        day_key,
+        stars_spent,
+        points,
+        payment_source,
+        telegram_payment_charge_id
+      )
+      VALUES ($1::bigint, $2, $3::numeric, $4::integer, 'telegram_stars', $5)
+      ON CONFLICT DO NOTHING
+      RETURNING *
+    `,
+    [input.userId, dayKey, selected.stars, selected.points, paymentChargeId],
+  );
+  if (purchaseResult.rows[0]) {
     return { ...purchaseResult.rows[0], already_credited: false };
-  } catch (error) {
-    if (error?.code !== "23505") {
-      throw error;
-    }
-
-    const racedPayment = await client.query(
-      `
-        SELECT *
-        FROM promo_point_purchases
-        WHERE telegram_payment_charge_id = $1
-        LIMIT 1
-      `,
-      [paymentChargeId],
-    );
-    if (racedPayment.rows[0]) {
-      return { ...racedPayment.rows[0], already_credited: true };
-    }
-    throw new Error("promo_points_already_purchased_today");
   }
+
+  const racedPayment = await client.query(
+    `
+      SELECT *
+      FROM promo_point_purchases
+      WHERE telegram_payment_charge_id = $1
+      LIMIT 1
+    `,
+    [paymentChargeId],
+  );
+  if (racedPayment.rows[0]) {
+    return { ...racedPayment.rows[0], already_credited: true };
+  }
+  throw new Error("promo_points_already_purchased_today");
 }
 
 export async function creditTelegramStarsPromoPointPurchase(input) {

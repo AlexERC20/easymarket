@@ -40,18 +40,24 @@ test("deposit milestone progress exposes only reached post-launch levels", () =>
   ]);
 });
 
-function createPurchaseClient({ existing = null, existingPayment = null } = {}) {
+function createPurchaseClient({ existing = null, existingPayment = null, racedPayment = null } = {}) {
   const calls = [];
+  let insertAttempted = false;
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params });
       if (sql.includes("WHERE telegram_payment_charge_id")) {
-        return { rows: existingPayment ? [existingPayment] : [] };
+        const payment = existingPayment || (insertAttempted ? racedPayment : null);
+        return { rows: payment ? [payment] : [] };
       }
       if (sql.includes("SELECT * FROM promo_point_purchases")) {
         return { rows: existing ? [existing] : [] };
       }
       if (sql.includes("INSERT INTO promo_point_purchases")) {
+        insertAttempted = true;
+        if (racedPayment) {
+          return { rows: [] };
+        }
         return {
           rows: [{
             id: 7,
@@ -122,4 +128,27 @@ test("replaying the same Telegram charge is idempotent", async () => {
   assert.equal(result.already_credited, true);
   assert.equal(result.points, 60);
   assert.equal(calls.some((call) => call.sql.includes("INSERT INTO promo_point_purchases")), false);
+});
+
+test("a concurrent replay is recovered without aborting the transaction", async () => {
+  const racedPayment = {
+    id: 8,
+    user_id: 11,
+    day_key: "2026-08-17",
+    stars_spent: "250",
+    points: 25,
+    payment_source: "telegram_stars",
+    telegram_payment_charge_id: "charge-race",
+  };
+  const { client, calls } = createPurchaseClient({ racedPayment });
+  const result = await creditPromoPointsFromTelegramStars(client, {
+    userId: 11,
+    stars: 250,
+    dayKey: "2026-08-17",
+    telegramPaymentChargeId: "charge-race",
+  });
+
+  assert.equal(result.already_credited, true);
+  assert.equal(result.points, 25);
+  assert.equal(calls.some((call) => call.sql.includes("ON CONFLICT DO NOTHING")), true);
 });
