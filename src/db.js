@@ -133,12 +133,24 @@ export async function runMigrations() {
       day_key TEXT NOT NULL,
       stars_spent NUMERIC(20, 8) NOT NULL CHECK (stars_spent > 0),
       points INTEGER NOT NULL CHECK (points > 0),
+      payment_source TEXT NOT NULL DEFAULT 'internal_balance',
+      telegram_payment_charge_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE(user_id, day_key)
     );
 
+    ALTER TABLE promo_point_purchases
+      ADD COLUMN IF NOT EXISTS payment_source TEXT NOT NULL DEFAULT 'internal_balance';
+
+    ALTER TABLE promo_point_purchases
+      ADD COLUMN IF NOT EXISTS telegram_payment_charge_id TEXT;
+
     CREATE INDEX IF NOT EXISTS idx_promo_point_purchases_day
       ON promo_point_purchases(day_key, created_at DESC);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_promo_point_purchases_telegram_charge
+      ON promo_point_purchases(telegram_payment_charge_id)
+      WHERE telegram_payment_charge_id IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS usdt_balances (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

@@ -82,7 +82,7 @@ import {
   upsertUser,
 } from "./services/marketService.js";
 import {
-  buyPromoPointsWithStars,
+  creditTelegramStarsPromoPointPurchase,
   getPromoContestSnapshot,
 } from "./services/promoContestService.js";
 import {
@@ -182,6 +182,8 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "legacy_position_settlement_only",
     "insufficient_fire",
     "invalid_promo_point_package",
+    "invalid_telegram_payment",
+    "promo_points_telegram_payment_required",
     "promo_points_already_purchased_today",
     "insufficient_usdt",
     "invalid_deposit_amount",
@@ -2093,15 +2095,24 @@ app.post("/api/bridge/promo/contest-snapshot", requireBridgeSecret, async (req, 
 });
 
 app.post("/api/bridge/promo/points/buy", requireBridgeSecret, async (req, res) => {
+  res.status(400).json({
+    ok: false,
+    message: "promo_points_telegram_payment_required",
+  });
+});
+
+app.post("/api/bridge/promo/points/credit", requireBridgeSecret, async (req, res) => {
   try {
     const user = await upsertUser({
       telegram_id: req.body?.telegram_id,
       username: req.body?.username,
       first_name: req.body?.first_name,
     });
-    const purchase = await buyPromoPointsWithStars({
+    const purchase = await creditTelegramStarsPromoPointPurchase({
       userId: user.id,
       stars: req.body?.stars,
+      dayKey: req.body?.day_key,
+      telegramPaymentChargeId: req.body?.telegram_payment_charge_id,
     });
     res.status(200).json({
       ok: true,
@@ -2109,8 +2120,9 @@ app.post("/api/bridge/promo/points/buy", requireBridgeSecret, async (req, res) =
         day_key: purchase.day_key,
         stars_spent: Number(purchase.stars_spent),
         points: Number(purchase.points),
+        payment_source: purchase.payment_source,
+        already_credited: Boolean(purchase.already_credited),
       },
-      balance: Number(purchase.balance),
     });
   } catch (error) {
     sendApiError(res, error);

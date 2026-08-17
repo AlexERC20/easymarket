@@ -91,6 +91,7 @@ function mapPointPurchase(row, dayKey) {
     purchased: Boolean(row),
     stars_spent: row ? toNumber(row.stars_spent) : 0,
     points: row ? Math.max(0, Number(row.points || 0)) : 0,
+    payment_source: row?.payment_source || null,
     options: PROMO_POINT_PACKAGES.map((option) => ({ ...option })),
   };
 }
@@ -208,19 +209,32 @@ export async function getPromoContestSnapshot(telegramIds) {
   }));
 }
 
-export async function purchasePromoPointsWithStars(client, input) {
+export async function creditPromoPointsFromTelegramStars(client, input) {
   const stars = Math.round(toNumber(input.stars));
   const selected = PROMO_POINT_PACKAGES.find((option) => option.stars === stars);
   if (!selected) {
     throw new Error("invalid_promo_point_package");
   }
 
+  const paymentChargeId = String(input.telegramPaymentChargeId || "").trim();
+  if (!paymentChargeId || paymentChargeId.length > 255) {
+    throw new Error("invalid_telegram_payment");
+  }
+
   const dayKey = input.dayKey || getDayKey();
-  const balanceResult = await client.query(
-    "SELECT balance FROM fire_balances WHERE user_id = $1::bigint FOR UPDATE",
-    [input.userId],
+  const existingPayment = await client.query(
+    `
+      SELECT *
+      FROM promo_point_purchases
+      WHERE telegram_payment_charge_id = $1
+      LIMIT 1
+    `,
+    [paymentChargeId],
   );
-  const balance = toNumber(balanceResult.rows[0]?.balance);
+  if (existingPayment.rows[0]) {
+    return { ...existingPayment.rows[0], already_credited: true };
+  }
+
   const existing = await client.query(
     "SELECT * FROM promo_point_purchases WHERE user_id = $1::bigint AND day_key = $2 LIMIT 1",
     [input.userId, dayKey],
@@ -228,41 +242,46 @@ export async function purchasePromoPointsWithStars(client, input) {
   if (existing.rows[0]) {
     throw new Error("promo_points_already_purchased_today");
   }
-  if (balance < selected.stars) {
-    throw new Error("insufficient_fire");
+
+  try {
+    const purchaseResult = await client.query(
+      `
+        INSERT INTO promo_point_purchases (
+          user_id,
+          day_key,
+          stars_spent,
+          points,
+          payment_source,
+          telegram_payment_charge_id
+        )
+        VALUES ($1::bigint, $2, $3::numeric, $4::integer, 'telegram_stars', $5)
+        RETURNING *
+      `,
+      [input.userId, dayKey, selected.stars, selected.points, paymentChargeId],
+    );
+
+    return { ...purchaseResult.rows[0], already_credited: false };
+  } catch (error) {
+    if (error?.code !== "23505") {
+      throw error;
+    }
+
+    const racedPayment = await client.query(
+      `
+        SELECT *
+        FROM promo_point_purchases
+        WHERE telegram_payment_charge_id = $1
+        LIMIT 1
+      `,
+      [paymentChargeId],
+    );
+    if (racedPayment.rows[0]) {
+      return { ...racedPayment.rows[0], already_credited: true };
+    }
+    throw new Error("promo_points_already_purchased_today");
   }
-
-  const purchaseResult = await client.query(
-    `
-      INSERT INTO promo_point_purchases (user_id, day_key, stars_spent, points)
-      VALUES ($1::bigint, $2, $3::numeric, $4::integer)
-      RETURNING *
-    `,
-    [input.userId, dayKey, selected.stars, selected.points],
-  );
-  await client.query(
-    `
-      UPDATE fire_balances
-      SET balance = balance - $2::numeric,
-          updated_at = now()
-      WHERE user_id = $1::bigint
-    `,
-    [input.userId, selected.stars],
-  );
-  await client.query(
-    `
-      INSERT INTO fire_ledger (user_id, amount, reason, source)
-      VALUES ($1::bigint, $2::numeric, 'promo_points_purchase', $3)
-    `,
-    [input.userId, -selected.stars, `promo_points:${dayKey}`],
-  );
-
-  return {
-    ...purchaseResult.rows[0],
-    balance: balance - selected.stars,
-  };
 }
 
-export async function buyPromoPointsWithStars(input) {
-  return withTransaction((client) => purchasePromoPointsWithStars(client, input));
+export async function creditTelegramStarsPromoPointPurchase(input) {
+  return withTransaction((client) => creditPromoPointsFromTelegramStars(client, input));
 }

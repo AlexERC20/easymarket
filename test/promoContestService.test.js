@@ -3,10 +3,10 @@ import test from "node:test";
 
 import {
   buildPromoLevelProgress,
+  creditPromoPointsFromTelegramStars,
   PROMO_STAR_HOLD_LEVELS,
   PROMO_USDT_DEPOSIT_LEVELS,
   PROMO_USDT_HOLD_LEVELS,
-  purchasePromoPointsWithStars,
 } from "../src/services/promoContestService.js";
 
 test("real USDT hold levels heavily outweigh star hold levels", () => {
@@ -40,13 +40,13 @@ test("deposit milestone progress exposes only reached post-launch levels", () =>
   ]);
 });
 
-function createPurchaseClient({ balance = 2_000, existing = null } = {}) {
+function createPurchaseClient({ existing = null, existingPayment = null } = {}) {
   const calls = [];
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params });
-      if (sql.includes("SELECT balance FROM fire_balances")) {
-        return { rows: [{ balance: String(balance) }] };
+      if (sql.includes("WHERE telegram_payment_charge_id")) {
+        return { rows: existingPayment ? [existingPayment] : [] };
       }
       if (sql.includes("SELECT * FROM promo_point_purchases")) {
         return { rows: existing ? [existing] : [] };
@@ -59,6 +59,8 @@ function createPurchaseClient({ balance = 2_000, existing = null } = {}) {
             day_key: params[1],
             stars_spent: String(params[2]),
             points: params[3],
+            payment_source: "telegram_stars",
+            telegram_payment_charge_id: params[4],
           }],
         };
       }
@@ -68,20 +70,20 @@ function createPurchaseClient({ balance = 2_000, existing = null } = {}) {
   return { client, calls };
 }
 
-test("point purchase atomically deducts stars and writes one ledger event", async () => {
+test("Telegram Stars purchase credits points without touching the internal balance", async () => {
   const { client, calls } = createPurchaseClient();
-  const result = await purchasePromoPointsWithStars(client, {
+  const result = await creditPromoPointsFromTelegramStars(client, {
     userId: 11,
     stars: 1_000,
     dayKey: "2026-08-17",
+    telegramPaymentChargeId: "charge-1",
   });
 
   assert.equal(result.points, 150);
-  assert.equal(result.balance, 1_000);
-  const balanceUpdate = calls.find((call) => call.sql.includes("UPDATE fire_balances"));
-  const ledgerInsert = calls.find((call) => call.sql.includes("INSERT INTO fire_ledger"));
-  assert.deepEqual(balanceUpdate?.params, [11, 1_000]);
-  assert.deepEqual(ledgerInsert?.params, [11, -1_000, "promo_points:2026-08-17"]);
+  assert.equal(result.payment_source, "telegram_stars");
+  assert.equal(result.telegram_payment_charge_id, "charge-1");
+  assert.equal(calls.some((call) => call.sql.includes("UPDATE fire_balances")), false);
+  assert.equal(calls.some((call) => call.sql.includes("INSERT INTO fire_ledger")), false);
 });
 
 test("a second point purchase on the same day is rejected", async () => {
@@ -89,23 +91,35 @@ test("a second point purchase on the same day is rejected", async () => {
     existing: { id: 7, day_key: "2026-08-17", stars_spent: "250", points: 25 },
   });
   await assert.rejects(
-    purchasePromoPointsWithStars(client, {
+    creditPromoPointsFromTelegramStars(client, {
       userId: 11,
       stars: 500,
       dayKey: "2026-08-17",
+      telegramPaymentChargeId: "charge-2",
     }),
     /promo_points_already_purchased_today/,
   );
 });
 
-test("point purchase cannot overdraw the star balance", async () => {
-  const { client } = createPurchaseClient({ balance: 249 });
-  await assert.rejects(
-    purchasePromoPointsWithStars(client, {
-      userId: 11,
-      stars: 250,
-      dayKey: "2026-08-17",
-    }),
-    /insufficient_fire/,
-  );
+test("replaying the same Telegram charge is idempotent", async () => {
+  const existingPayment = {
+    id: 7,
+    user_id: 11,
+    day_key: "2026-08-17",
+    stars_spent: "500",
+    points: 60,
+    payment_source: "telegram_stars",
+    telegram_payment_charge_id: "charge-existing",
+  };
+  const { client, calls } = createPurchaseClient({ existingPayment });
+  const result = await creditPromoPointsFromTelegramStars(client, {
+    userId: 11,
+    stars: 500,
+    dayKey: "2026-08-17",
+    telegramPaymentChargeId: "charge-existing",
+  });
+
+  assert.equal(result.already_credited, true);
+  assert.equal(result.points, 60);
+  assert.equal(calls.some((call) => call.sql.includes("INSERT INTO promo_point_purchases")), false);
 });
