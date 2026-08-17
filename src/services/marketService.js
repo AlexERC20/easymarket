@@ -25,6 +25,7 @@ import {
   calculateExecutionFee,
   calculateNextAmmAllocation,
 } from "./ammMath.js";
+import { getPromoContestStateForUser } from "./promoContestService.js";
 
 const MARKET_SYMBOL = "BTCUSDT";
 const WORLD_CUP_EVENT_SLUG = "world-cup-winner";
@@ -7332,6 +7333,7 @@ export async function getEngagementState(input) {
     presence,
     once,
     progress,
+    promo_contest: await getPromoContestStateForUser(user.id),
     streak: mapStreakState(streakResult.rows[0] || null),
   };
 }

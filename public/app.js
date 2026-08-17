@@ -10331,6 +10331,90 @@ function renderDailyTaskRow(taskKey, amount = getDailyTaskAmount(taskKey)) {
   `;
 }
 
+const PROMO_CONTEST_TASK_META = {
+  promo_hold_usdt: {
+    title: "Холд USDT",
+    desc: "Ежедневные очки за основной баланс",
+    icon: "dollar",
+  },
+  promo_hold_stars: {
+    title: "Баланс звёзд",
+    desc: "Ежедневные очки за звёзды",
+    icon: "bolt",
+  },
+  promo_deposit_count_usdt: {
+    title: "Пополнения USDT",
+    desc: "Уровни за новые успешные пополнения",
+    icon: "wallet",
+  },
+  promo_deposit_count_stars: {
+    title: "Пополнения звёзд",
+    desc: "Уровни за новые пополнения от 500",
+    icon: "streak",
+  },
+};
+
+function promoContestProgressMarkup(task) {
+  const value = Math.max(0, Number(task?.value || 0));
+  const target = Math.max(1, Number(task?.target || 1));
+  const unit = String(task?.unit || "").toUpperCase();
+  const percent = Math.max(0, Math.min(100, (value / target) * 100));
+  const suffix = unit === "USDT" ? " USDT" : unit === "STAR" ? " зв." : "";
+  const label = `${formatTaskProgressValue(Math.min(value, target), unit)}/${formatTaskProgressValue(target, unit)}${suffix}`;
+  return `
+    <span class="task-progress-mini" style="--progress:${percent}%">
+      <i></i>
+      <em>${escapeHtml(label)}</em>
+    </span>
+  `;
+}
+
+function renderPromoContestTaskRow(taskKey, task) {
+  const meta = PROMO_CONTEST_TASK_META[taskKey];
+  if (!meta || !task) return "";
+  const isHold = String(task.kind || "").startsWith("daily_hold");
+  const completed = Boolean(task.complete);
+  const achievedLevel = Math.max(0, Number(task.achieved_level || 0));
+  const levels = Math.max(1, Number(task.levels || 1));
+  const levelLabel = completed
+    ? `Все ${levels} уровней пройдены`
+    : `Уровень ${Math.min(levels, achievedLevel + 1)}/${levels}`;
+  const rewardPoints = isHold
+    ? Math.max(0, Number(task.points || task.next_points || 0))
+    : Math.max(0, Number(task.next_points || 0));
+  const rewardLabel = completed && !isHold
+    ? "Готово"
+    : `+${formatFire(rewardPoints)}${isHold ? "/день" : " оч."}`;
+
+  return `
+    <div class="task-item promo-contest-task${completed ? " task-claimed" : ""}">
+      <span class="task-ic" aria-hidden="true">${taskIconMarkup(meta)}</span>
+      <div class="task-body">
+        <strong>${escapeHtml(meta.title)}</strong>
+        <small>${escapeHtml(levelLabel)} · ${escapeHtml(meta.desc)}</small>
+        ${promoContestProgressMarkup(task)}
+      </div>
+      <div class="task-act">
+        <span class="promo-points-reward">${escapeHtml(rewardLabel)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderPromoContestTasks() {
+  const list = $("promoContestTaskList");
+  if (!list) return;
+  const tasks = state.engagement?.promo_contest?.tasks;
+  if (!tasks) {
+    setInnerHtmlIfChanged(list, '<p class="muted">Прогресс обновляется…</p>');
+    return;
+  }
+  const html = Object.keys(PROMO_CONTEST_TASK_META)
+    .map((taskKey) => renderPromoContestTaskRow(taskKey, tasks[taskKey]))
+    .join("");
+  setInnerHtmlIfChanged(list, html || '<p class="muted">Задания скоро появятся.</p>');
+}
+
 const taskEventsSent = new Set();
 
 // Событие прогресса дейлика: fire-and-forget, один раз за день на ключ.
@@ -10546,6 +10630,7 @@ function renderEngagement() {
       CORE_DAILY_TASK_KEYS.map((taskKey) => renderDailyTaskRow(taskKey)).join(""),
     );
   }
+  renderPromoContestTasks();
   const botStartButton = $("taskBotStartBtn");
   if (botStartButton && state.engagement?.once?.bot_start?.claimed) {
     botStartButton.textContent = "Готово";

@@ -118,6 +118,28 @@ export async function runMigrations() {
       ON fire_ledger(source, reason)
       WHERE source LIKE 'market:%';
 
+    CREATE TABLE IF NOT EXISTS promo_contest_config (
+      singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+      started_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    INSERT INTO promo_contest_config (singleton)
+    VALUES (TRUE)
+    ON CONFLICT (singleton) DO NOTHING;
+
+    CREATE TABLE IF NOT EXISTS promo_point_purchases (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      day_key TEXT NOT NULL,
+      stars_spent NUMERIC(20, 8) NOT NULL CHECK (stars_spent > 0),
+      points INTEGER NOT NULL CHECK (points > 0),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(user_id, day_key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_promo_point_purchases_day
+      ON promo_point_purchases(day_key, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS usdt_balances (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       balance NUMERIC(20, 8) NOT NULL DEFAULT 0,
