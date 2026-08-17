@@ -47,9 +47,9 @@ export const PROMO_STAR_DEPOSIT_LEVELS = Object.freeze([
 ]);
 
 export const PROMO_POINT_PACKAGES = Object.freeze([
-  { stars: 250, points: 25 },
-  { stars: 500, points: 60 },
-  { stars: 1_000, points: 150 },
+  { stars: 250, points: 250 },
+  { stars: 500, points: 600 },
+  { stars: 1_000, points: 1_500 },
 ]);
 
 function getDayKey(date = new Date()) {

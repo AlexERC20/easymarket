@@ -85,7 +85,7 @@ test("Telegram Stars purchase credits points without touching the internal balan
     telegramPaymentChargeId: "charge-1",
   });
 
-  assert.equal(result.points, 150);
+  assert.equal(result.points, 1_500);
   assert.equal(result.payment_source, "telegram_stars");
   assert.equal(result.telegram_payment_charge_id, "charge-1");
   assert.equal(calls.some((call) => call.sql.includes("UPDATE fire_balances")), false);
@@ -113,7 +113,7 @@ test("replaying the same Telegram charge is idempotent", async () => {
     user_id: 11,
     day_key: "2026-08-17",
     stars_spent: "500",
-    points: 60,
+    points: 600,
     payment_source: "telegram_stars",
     telegram_payment_charge_id: "charge-existing",
   };
@@ -126,7 +126,7 @@ test("replaying the same Telegram charge is idempotent", async () => {
   });
 
   assert.equal(result.already_credited, true);
-  assert.equal(result.points, 60);
+  assert.equal(result.points, 600);
   assert.equal(calls.some((call) => call.sql.includes("INSERT INTO promo_point_purchases")), false);
 });
 
@@ -136,7 +136,7 @@ test("a concurrent replay is recovered without aborting the transaction", async 
     user_id: 11,
     day_key: "2026-08-17",
     stars_spent: "250",
-    points: 25,
+    points: 250,
     payment_source: "telegram_stars",
     telegram_payment_charge_id: "charge-race",
   };
@@ -149,6 +149,6 @@ test("a concurrent replay is recovered without aborting the transaction", async 
   });
 
   assert.equal(result.already_credited, true);
-  assert.equal(result.points, 25);
+  assert.equal(result.points, 250);
   assert.equal(calls.some((call) => call.sql.includes("ON CONFLICT DO NOTHING")), true);
 });
