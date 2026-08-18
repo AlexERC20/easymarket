@@ -12952,8 +12952,10 @@ const STAR_ABUSE_RAPID_PAIR_MS = 1_000;
 const STAR_ABUSE_RAPID_PAIR_MIN = 10;
 const STAR_ABUSE_RAPID_PAIR_DENSITY = 0.03;
 // No measurable edge to scale off when flagged on speed alone, so this is a
-// flat deterrent rather than a self-tuning one.
-const STAR_ABUSE_SPEED_PENALTY_BPS = 1_000;
+// flat deterrent rather than a self-tuning one. Well above the normal 1%
+// trade fee is intentional - the density threshold to get flagged at all is
+// already far above what an ordinary player could hit by accident.
+const STAR_ABUSE_SPEED_PENALTY_BPS = 2_000;
 
 async function getStarAbuseStats(dbClient, userId) {
   const result = await dbClient.query(
