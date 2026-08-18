@@ -12956,6 +12956,12 @@ const STAR_ABUSE_RAPID_PAIR_DENSITY = 0.03;
 // trade fee is intentional - the density threshold to get flagged at all is
 // already far above what an ordinary player could hit by accident.
 const STAR_ABUSE_SPEED_PENALTY_BPS = 2_000;
+// A lifetime-cumulative measure never lets an account earn its way back -
+// with enough historical volume, diluting it back under threshold would
+// take more future trades than anyone would ever place. A rolling window
+// means someone who actually stops the behavior clears the flag once the
+// bad history ages out, instead of it being a de facto permanent mark.
+const STAR_ABUSE_WINDOW_DAYS = 30;
 
 async function getStarAbuseStats(dbClient, userId) {
   const result = await dbClient.query(
@@ -12965,9 +12971,11 @@ async function getStarAbuseStats(dbClient, userId) {
         COALESCE(SUM(spent) FILTER (WHERE status <> 'open'), 0) AS total_staked,
         COALESCE(SUM(pnl) FILTER (WHERE status <> 'open'), 0) AS net_pnl
       FROM positions
-      WHERE user_id = $1 AND currency = 'STAR'
+      WHERE user_id = $1
+        AND currency = 'STAR'
+        AND updated_at >= now() - ($2::int * interval '1 day')
     `,
-    [userId],
+    [userId, STAR_ABUSE_WINDOW_DAYS],
   );
   const row = result.rows[0] || {};
   const settledCount = Number(row.settled_count || 0);
@@ -12988,10 +12996,13 @@ async function getStarAbuseStats(dbClient, userId) {
           created_at,
           LAG(created_at) OVER (PARTITION BY market_id ORDER BY created_at) AS prev_created_at
         FROM trades
-        WHERE user_id = $1 AND currency = 'STAR' AND action = 'BUY'
+        WHERE user_id = $1
+          AND currency = 'STAR'
+          AND action = 'BUY'
+          AND created_at >= now() - ($3::int * interval '1 day')
       ) buys
     `,
-    [userId, STAR_ABUSE_RAPID_PAIR_MS],
+    [userId, STAR_ABUSE_RAPID_PAIR_MS, STAR_ABUSE_WINDOW_DAYS],
   );
   const totalBuys = Number(rapidResult.rows[0]?.total_buys || 0);
   const rapidPairs = Number(rapidResult.rows[0]?.rapid_pairs || 0);
@@ -13071,6 +13082,7 @@ export async function getStarAbuseDiagnostics(input = {}) {
       rapid_pair_ms: STAR_ABUSE_RAPID_PAIR_MS,
       rapid_pair_min: STAR_ABUSE_RAPID_PAIR_MIN,
       rapid_pair_density: STAR_ABUSE_RAPID_PAIR_DENSITY,
+      window_days: STAR_ABUSE_WINDOW_DAYS,
     },
     settled_count: stats.settledCount,
     total_staked: roundMoney(stats.totalStaked),
