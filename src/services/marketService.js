@@ -13304,6 +13304,45 @@ export async function issueTestStarStrike(input = {}) {
   };
 }
 
+// QA-only: clears an active strike immediately (banned_until = now()),
+// without requiring either payment leg - for cleaning up after testing.
+export async function clearTestStarStrike(input = {}) {
+  const telegramId = String(input.telegram_id || input.telegramId || "").trim();
+  const username = String(input.username || "").replace(/^@/, "").trim();
+  if (!telegramId && !username) {
+    throw new Error("telegram_id_or_username_required");
+  }
+  const userResult = await query(
+    `
+      SELECT id, telegram_id, username, first_name
+      FROM users
+      WHERE ($1::text <> '' AND telegram_id = $1::text)
+         OR ($2::text <> '' AND lower(username) = lower($2::text))
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `,
+    [telegramId, username],
+  );
+  const user = userResult.rows[0];
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+  await query(
+    `
+      UPDATE star_abuse_bans
+      SET banned_until = now(), balance_paid_at = now(), stars_paid_at = now(), updated_at = now()
+      WHERE user_id = $1
+    `,
+    [user.id],
+  );
+  return {
+    user: {
+      id: Number(user.id), telegram_id: user.telegram_id, username: user.username,
+    },
+    cleared: true,
+  };
+}
+
 // Diagnostic-only: exposes the exact same numbers/decision buyOutcome uses,
 // so abuse-detection tuning can be checked against a real account without
 // reconstructing it by hand from the ledger.
