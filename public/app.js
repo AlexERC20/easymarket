@@ -10715,10 +10715,9 @@ async function payStarStrikeWithBalance() {
   }
 }
 
-async function payStarStrikeWithStars() {
-  if (!state.user?.telegram_id) return;
-  const button = $("starStrikePayStarsBtn");
-  if (button) button.disabled = true;
+// Tries to consume an already-qualifying fresh top-up. Returns "ok" (done),
+// "topup_required" (caller should open a purchase), or "error" (shown already).
+async function attemptStarStrikePayStars() {
   try {
     const result = await api("/api/star-strike/pay-stars", {
       method: "POST",
@@ -10728,13 +10727,64 @@ async function payStarStrikeWithStars() {
       ? "Оплачено, идёт обратный отсчёт разблокировки"
       : "Оплата звёздами принята");
     await Promise.all([loadStarStrikeStatus(), loadMe()]);
+    return "ok";
   } catch (error) {
     if (error.message === "star_strike_stars_topup_required") {
-      showToast("Сначала купи столько звёзд у Telegram — это должна быть свежая покупка");
-    } else if (error.message === "insufficient_fire") {
-      showToast("Недостаточно звёзд на балансе");
+      return "topup_required";
+    }
+    showToast(error.message === "insufficient_fire" ? "Недостаточно звёзд на балансе" : "Не получилось списать");
+    return "error";
+  }
+}
+
+// Telegram Stars payments land via the bot's webhook + bridge sync, not
+// instantly - poll a few times instead of failing on the first check.
+async function retryStarStrikePayStarsAfterPurchase() {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, attempt < 2 ? 900 : 1500));
+    const outcome = await attemptStarStrikePayStars();
+    if (outcome === "ok") return;
+  }
+  showToast("Оплата ещё синхронизируется, нажми кнопку ещё раз через минуту");
+}
+
+async function launchStarStrikeStarsPurchase() {
+  const cost = Number(state.starStrike?.unban?.stars_cost || 1000);
+  try {
+    const result = await api("/api/stars/invoice", {
+      method: "POST",
+      body: JSON.stringify({ telegram_id: state.user.telegram_id, amount: cost }),
+    });
+    const invoiceUrl = result.invoice_url;
+    const tg = window.Telegram?.WebApp;
+    if (tg?.openInvoice) {
+      tg.openInvoice(invoiceUrl, (status) => {
+        if (status === "paid") {
+          showToast("Оплата прошла, подтверждаю списание...");
+          void retryStarStrikePayStarsAfterPurchase();
+        } else if (status === "cancelled") {
+          showToast("Покупка отменена.");
+        }
+      });
     } else {
-      showToast("Не получилось списать");
+      window.open(invoiceUrl, "_blank", "noopener,noreferrer");
+      showToast("После оплаты нажми кнопку ещё раз.");
+    }
+  } catch (error) {
+    showToast(error.message === "invoice_not_configured"
+      ? "Покупка звёзд ещё не настроена на сервере"
+      : "Не получилось открыть покупку");
+  }
+}
+
+async function payStarStrikeWithStars() {
+  if (!state.user?.telegram_id) return;
+  const button = $("starStrikePayStarsBtn");
+  if (button) button.disabled = true;
+  try {
+    const outcome = await attemptStarStrikePayStars();
+    if (outcome === "topup_required") {
+      await launchStarStrikeStarsPurchase();
     }
   } finally {
     if (button) button.disabled = false;
