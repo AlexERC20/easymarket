@@ -12922,8 +12922,10 @@ export async function matchOpenClobLimitOrders(limit = 60) {
 // Only STAR is throttled: it is the book with no gamma/tail-band protection
 // (see AMM book settings), so speed-based extraction has to be capped here
 // instead. A fast bot sweeping several price levels in one burst is the
-// pattern this guards against, not a human placing occasional bets.
-const STAR_BUY_COOLDOWN_MS = 2_000;
+// pattern this guards against, not a human placing occasional bets. Applied
+// to every STAR buyer (see buyOutcome), so it is kept short enough to sit
+// below normal human tap-to-tap timing.
+const STAR_BUY_COOLDOWN_MS = 750;
 // Below this many settled positions a win/loss streak is still just noise;
 // flagging on a small sample would punish an ordinary lucky player.
 const STAR_ABUSE_MIN_SETTLED = 30;
@@ -13142,27 +13144,33 @@ export async function buyOutcome(input) {
 
     let starAbusePenaltyFeeBps = 0;
     if (currency === "STAR") {
-      // Everything below only ever fires for an account already flagged by
-      // getStarAbuseThrottle - an ordinary player never sees a cooldown, a
-      // size cap, or a fee bump, no matter how fast they click.
+      // The cooldown protects OTHER players' access to liquidity, which has
+      // nothing to do with whether this particular account is profitable -
+      // a losing bot sweeping several price levels in under a second still
+      // starves everyone else of the same fill. So it applies to everyone,
+      // but short enough (sub-second) that a human tapping buy repeatedly
+      // never notices it; only back-to-back automated calls do.
+      const lastBuyResult = await client.query(
+        `
+          SELECT created_at
+          FROM trades
+          WHERE user_id = $1 AND market_id = $2 AND currency = 'STAR' AND action = 'BUY'
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+        [user.id, marketId],
+      );
+      const lastBuyAt = lastBuyResult.rows[0]?.created_at
+        ? new Date(lastBuyResult.rows[0].created_at).getTime()
+        : 0;
+      if (lastBuyAt && nowMs - lastBuyAt < STAR_BUY_COOLDOWN_MS) {
+        throw new Error("star_buy_cooldown");
+      }
+
+      // The size cap and penalty fee are the separate, profitability-gated
+      // layer: only an account with a measured persistent edge gets those.
       const abuseThrottle = await getStarAbuseThrottle(client, user.id);
       if (abuseThrottle) {
-        const lastBuyResult = await client.query(
-          `
-            SELECT created_at
-            FROM trades
-            WHERE user_id = $1 AND market_id = $2 AND currency = 'STAR' AND action = 'BUY'
-            ORDER BY created_at DESC
-            LIMIT 1
-          `,
-          [user.id, marketId],
-        );
-        const lastBuyAt = lastBuyResult.rows[0]?.created_at
-          ? new Date(lastBuyResult.rows[0].created_at).getTime()
-          : 0;
-        if (lastBuyAt && nowMs - lastBuyAt < STAR_BUY_COOLDOWN_MS) {
-          throw new Error("star_buy_cooldown");
-        }
         if (amount > abuseThrottle.cappedAmount) {
           throw new Error("star_buy_size_limited");
         }
