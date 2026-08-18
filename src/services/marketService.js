@@ -13051,8 +13051,9 @@ export async function getStarAbuseDiagnostics(input = {}) {
   if (!user) {
     throw new Error("user_not_found");
   }
+  const isHouseAccount = config.telegramAdminUserIds.includes(String(user.telegram_id ?? ""));
   const stats = await getStarAbuseStats({ query }, user.id);
-  const throttle = evaluateStarAbuseStats(stats);
+  const throttle = isHouseAccount ? null : evaluateStarAbuseStats(stats);
   return {
     user: {
       id: Number(user.id),
@@ -13060,6 +13061,7 @@ export async function getStarAbuseDiagnostics(input = {}) {
       username: user.username,
       first_name: user.first_name,
     },
+    is_house_account: isHouseAccount,
     thresholds: {
       min_settled: STAR_ABUSE_MIN_SETTLED,
       min_staked: STAR_ABUSE_MIN_STAKED,
@@ -13219,14 +13221,19 @@ export async function buyOutcome(input) {
         throw new Error("star_buy_cooldown");
       }
 
-      // The size cap and penalty fee are the separate, profitability-gated
-      // layer: only an account with a measured persistent edge gets those.
-      const abuseThrottle = await getStarAbuseThrottle(client, user.id);
-      if (abuseThrottle) {
-        if (amount > abuseThrottle.cappedAmount) {
-          throw new Error("star_buy_size_limited");
+      // The size cap and penalty fee are the separate, profitability/speed
+      // -gated layer. House accounts are excluded the same way the treasury
+      // audit excludes them elsewhere - they are the book's own float and
+      // test traffic, not a customer to protect other players from.
+      const isHouseAccount = config.telegramAdminUserIds.includes(String(user.telegram_id ?? ""));
+      if (!isHouseAccount) {
+        const abuseThrottle = await getStarAbuseThrottle(client, user.id);
+        if (abuseThrottle) {
+          if (amount > abuseThrottle.cappedAmount) {
+            throw new Error("star_buy_size_limited");
+          }
+          starAbusePenaltyFeeBps = abuseThrottle.penaltyFeeBps;
         }
-        starAbusePenaltyFeeBps = abuseThrottle.penaltyFeeBps;
       }
     }
 
