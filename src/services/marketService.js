@@ -11846,6 +11846,10 @@ async function executeClobMarketBuy(client, input) {
   );
   const context = await refreshMarketMakerAccount(client, input.market, funding.bookType, true);
   const tradeFeeBps = context.settings.user_trade_fee_bps;
+  // Only the flagged buyer's own fee is bumped - the counterparty (a resting
+  // order or the AMM) still pays the normal rate, so this never leaks onto
+  // someone else's fill.
+  const buyerTradeFeeBps = Math.max(tradeFeeBps, Number(input.abusePenaltyFeeBps || 0));
   const economySettings = await getEconomySettingsWithClient(client);
   const ammLevels = getAmmLevelsForAction(context.quotes, input.side, "BUY")
     .map((level) => ({ ...level, remaining: toNumber(level.shares) }));
@@ -11881,7 +11885,7 @@ async function executeClobMarketBuy(client, input) {
     if (!(price > 0) || availableShares <= CLOB_MIN_FILL_SHARES) {
       break;
     }
-    const fillShares = getFillWithinBudget(input.amount - spent, price, availableShares, tradeFeeBps);
+    const fillShares = getFillWithinBudget(input.amount - spent, price, availableShares, buyerTradeFeeBps);
     if (fillShares <= CLOB_MIN_FILL_SHARES) {
       break;
     }
@@ -11892,7 +11896,7 @@ async function executeClobMarketBuy(client, input) {
       price,
       shares: fillShares,
       bookType: funding.bookType,
-      tradeFeeBps,
+      tradeFeeBps: buyerTradeFeeBps,
       makerOrderId: useUserOrder ? userOrder.id : null,
       counterpartyUserId: useUserOrder ? userOrder.user_id : null,
       liquidityRole: "TAKER",
@@ -12915,6 +12919,58 @@ export async function matchOpenClobLimitOrders(limit = 60) {
   return { ok: true, scanned: candidates.rowCount, matched_orders: matchedOrders, fills };
 }
 
+// Only STAR is throttled: it is the book with no gamma/tail-band protection
+// (see AMM book settings), so speed-based extraction has to be capped here
+// instead. A fast bot sweeping several price levels in one burst is the
+// pattern this guards against, not a human placing occasional bets.
+const STAR_BUY_COOLDOWN_MS = 2_000;
+// Below this many settled positions a win/loss streak is still just noise;
+// flagging on a small sample would punish an ordinary lucky player.
+const STAR_ABUSE_MIN_SETTLED = 30;
+const STAR_ABUSE_MIN_STAKED = 500;
+// A persistent double-digit return on staked volume, sustained over dozens of
+// trades, is not what fair pricing plus a house edge produces by luck.
+const STAR_ABUSE_EDGE_RATIO = 0.1;
+const STAR_ABUSE_CAPPED_AMOUNT = 100;
+// The penalty fee is set relative to the user's own measured edge (with
+// margin), so it is self-tuning against whatever advantage they are actually
+// extracting instead of a guessed flat number - it only has to outrun their
+// own edge to turn future trades EV-negative for them specifically.
+const STAR_ABUSE_PENALTY_MULTIPLIER = 1.5;
+const STAR_ABUSE_PENALTY_MAX_BPS = 3_000;
+
+async function getStarAbuseThrottle(client, userId) {
+  const result = await client.query(
+    `
+      SELECT
+        COUNT(*) FILTER (WHERE status <> 'open')::int AS settled_count,
+        COALESCE(SUM(spent) FILTER (WHERE status <> 'open'), 0) AS total_staked,
+        COALESCE(SUM(pnl) FILTER (WHERE status <> 'open'), 0) AS net_pnl
+      FROM positions
+      WHERE user_id = $1 AND currency = 'STAR'
+    `,
+    [userId],
+  );
+  const row = result.rows[0] || {};
+  const settledCount = Number(row.settled_count || 0);
+  const totalStaked = Number(row.total_staked || 0);
+  const netPnl = Number(row.net_pnl || 0);
+  if (settledCount < STAR_ABUSE_MIN_SETTLED || totalStaked < STAR_ABUSE_MIN_STAKED) {
+    return null;
+  }
+  const edgeRatio = netPnl / totalStaked;
+  if (edgeRatio < STAR_ABUSE_EDGE_RATIO) {
+    return null;
+  }
+  return {
+    cappedAmount: STAR_ABUSE_CAPPED_AMOUNT,
+    penaltyFeeBps: Math.min(
+      STAR_ABUSE_PENALTY_MAX_BPS,
+      Math.round(edgeRatio * 10_000 * STAR_ABUSE_PENALTY_MULTIPLIER),
+    ),
+  };
+}
+
 export async function buyOutcome(input) {
   const marketId = Number(input.marketId);
   const side = String(input.side || "").toUpperCase();
@@ -12965,6 +13021,34 @@ export async function buyOutcome(input) {
       ensureMinimumBtcStake(amount, currency);
     }
 
+    let starAbusePenaltyFeeBps = 0;
+    if (currency === "STAR") {
+      const lastBuyResult = await client.query(
+        `
+          SELECT created_at
+          FROM trades
+          WHERE user_id = $1 AND market_id = $2 AND currency = 'STAR' AND action = 'BUY'
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+        [user.id, marketId],
+      );
+      const lastBuyAt = lastBuyResult.rows[0]?.created_at
+        ? new Date(lastBuyResult.rows[0].created_at).getTime()
+        : 0;
+      if (lastBuyAt && nowMs - lastBuyAt < STAR_BUY_COOLDOWN_MS) {
+        throw new Error("star_buy_cooldown");
+      }
+
+      const abuseThrottle = await getStarAbuseThrottle(client, user.id);
+      if (abuseThrottle) {
+        if (amount > abuseThrottle.cappedAmount) {
+          throw new Error("star_buy_size_limited");
+        }
+        starAbusePenaltyFeeBps = abuseThrottle.penaltyFeeBps;
+      }
+    }
+
     if (market.trading_mode === CLOB_TRADING_MODE && isBtcMarketSymbol(market.symbol)) {
       return executeClobMarketBuy(client, {
         market,
@@ -12973,6 +13057,7 @@ export async function buyOutcome(input) {
         amount,
         currency,
         bookType: input.book_type || input.bookType,
+        abusePenaltyFeeBps: starAbusePenaltyFeeBps,
       });
     }
     if (!isBtcMarketSymbol(market.symbol)) {
