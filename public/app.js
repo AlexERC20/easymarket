@@ -108,6 +108,7 @@ const state = {
   usdtBonusBalance: 0,
   bonusUnlock: null,
   starConversion: null,
+  starStrike: null,
   positions: [],
   recentTrades: [],
   marketStats: [],
@@ -10597,6 +10598,95 @@ async function loadEngagementState() {
   }
 }
 
+async function loadStarStrikeStatus() {
+  if (!state.user?.telegram_id) return;
+  try {
+    const params = new URLSearchParams({ telegram_id: String(state.user.telegram_id) });
+    const data = await api(`/api/star-strike/status?${params.toString()}`);
+    state.starStrike = data;
+  } catch {
+    state.starStrike = null;
+  }
+  renderStarStrikeBanner();
+}
+
+function renderStarStrikeBanner() {
+  const banner = $("starStrikeBanner");
+  const taskList = document.querySelector("#tasksSheet .task-list");
+  if (!banner || !taskList) return;
+
+  const info = state.starStrike;
+  const banned = Boolean(info?.actively_banned);
+  banner.classList.toggle("hidden", !banned);
+  taskList.classList.toggle("strike-locked", banned);
+  if (!banned) return;
+
+  const levelEl = $("starStrikeLevel");
+  if (levelEl) levelEl.textContent = String(info.strike_count ?? 1);
+
+  const percentEl = $("starStrikeBalancePercent");
+  const balanceBtn = $("starStrikePayBalanceBtn");
+  if (info.unban?.balance_paid) {
+    if (balanceBtn) balanceBtn.classList.add("hidden");
+  } else {
+    if (balanceBtn) balanceBtn.classList.remove("hidden");
+    if (percentEl) percentEl.textContent = String(info.unban?.balance_cost_percent ?? 20);
+  }
+
+  const starsBtn = $("starStrikePayStarsBtn");
+  const starsAmountEl = $("starStrikeStarsAmount");
+  const starsNeeded = Boolean(info.unban?.stars_required) && !info.unban?.stars_paid;
+  if (starsBtn) starsBtn.classList.toggle("hidden", !starsNeeded);
+  if (starsNeeded && starsAmountEl) {
+    starsAmountEl.textContent = String(info.unban?.stars_cost ?? 1000);
+  }
+}
+
+async function payStarStrikeWithBalance() {
+  if (!state.user?.telegram_id) return;
+  const button = $("starStrikePayBalanceBtn");
+  if (button) button.disabled = true;
+  try {
+    const result = await api("/api/star-strike/pay-balance", {
+      method: "POST",
+      body: JSON.stringify({ telegram_id: state.user.telegram_id }),
+    });
+    showToast(result.lifted ? "Страйк снят" : `Списано ${result.cost}★, осталась оплата звёздами`);
+    await Promise.all([loadStarStrikeStatus(), loadMe()]);
+  } catch (error) {
+    showToast(error.message === "insufficient_fire" ? "Недостаточно звёзд на балансе" : "Не получилось списать");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function payStarStrikeWithStars() {
+  if (!state.user?.telegram_id) return;
+  const button = $("starStrikePayStarsBtn");
+  if (button) button.disabled = true;
+  try {
+    const result = await api("/api/star-strike/pay-stars", {
+      method: "POST",
+      body: JSON.stringify({ telegram_id: state.user.telegram_id }),
+    });
+    showToast(result.lifted ? "Страйк снят" : "Оплата звёздами принята");
+    await Promise.all([loadStarStrikeStatus(), loadMe()]);
+  } catch (error) {
+    if (error.message === "star_strike_stars_topup_required") {
+      showToast("Сначала купи столько звёзд у Telegram — это должна быть свежая покупка");
+    } else if (error.message === "insufficient_fire") {
+      showToast("Недостаточно звёзд на балансе");
+    } else {
+      showToast("Не получилось списать");
+    }
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+$("starStrikePayBalanceBtn")?.addEventListener("click", () => void payStarStrikeWithBalance());
+$("starStrikePayStarsBtn")?.addEventListener("click", () => void payStarStrikeWithStars());
+
 // Тап живёт между pointerdown и click. Если в этом окне заменить innerHTML
 // списка заданий (loadMe обновил прогресс дейликов), click улетает в уже
 // отсоединённый узел и пропадает — ни начисления, ни тоста, ни вспышки.
@@ -10744,6 +10834,8 @@ function setTasksSheetOpen(open) {
     renderTaskTabs();
     renderEngagement();
     void loadEngagementState();
+    renderStarStrikeBanner();
+    void loadStarStrikeStatus();
     openSheet(sheet);
     renderTaskStats();
   } else {

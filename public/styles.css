@@ -3091,6 +3091,54 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   color: var(--text);
 }
 
+.star-strike-banner {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(239, 70, 111, 0.4);
+  background: linear-gradient(180deg, rgba(239, 70, 111, 0.16), rgba(239, 70, 111, 0.06));
+}
+
+.star-strike-banner.hidden {
+  display: none;
+}
+
+.star-strike-text strong {
+  display: block;
+  color: var(--no);
+  font-size: 14px;
+  font-weight: 950;
+  letter-spacing: 0.01em;
+}
+
+.star-strike-text p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.star-strike-actions {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.star-strike-actions .task-button {
+  width: 100%;
+  border-color: rgba(239, 70, 111, 0.35);
+}
+
+.star-strike-actions .task-button.hidden {
+  display: none;
+}
+
+.task-list.strike-locked .task-item {
+  opacity: 0.4;
+  filter: grayscale(1);
+  pointer-events: none;
+}
+
 .task-settings-toggle {
   width: 100%;
   margin-top: 9px;

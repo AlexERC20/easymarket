@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260817-02" />
+    <link rel="stylesheet" href="/styles.css?v=20260819-01" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260711-03" />
     <link rel="stylesheet" href="/kyivstoner-motion.css?v=20260714-02" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -180,6 +180,20 @@
           <div class="task-tabs" role="tablist" aria-label="Разделы заданий">
             <button id="tasksTabTasks" class="active" type="button" data-task-tab="tasks">Задания</button>
             <button id="tasksTabStats" type="button" data-task-tab="stats">Моя статистика</button>
+          </div>
+          <div id="starStrikeBanner" class="star-strike-banner hidden">
+            <div class="star-strike-text">
+              <strong>Страйк <span id="starStrikeLevel">1</span></strong>
+              <p>Задания и вывод недоступны, пока действует страйк.</p>
+            </div>
+            <div class="star-strike-actions">
+              <button id="starStrikePayBalanceBtn" class="task-button" type="button">
+                Снять за <span id="starStrikeBalancePercent">20</span>% баланса
+              </button>
+              <button id="starStrikePayStarsBtn" class="task-button gold hidden" type="button">
+                Купить <span id="starStrikeStarsAmount">1000</span>⭐ и снять
+              </button>
+            </div>
           </div>
           <div class="task-list">
             <div id="depositBonusTask" class="task-item featured hidden">
@@ -917,6 +931,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260817-03" type="module"></script>
+    <script src="/app.js?v=20260819-01" type="module"></script>
   </body>
 </html>
