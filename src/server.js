@@ -1268,12 +1268,14 @@ app.get("/api/star-strike/status", async (req, res) => {
     const diagnostics = await getStarAbuseDiagnostics({
       telegram_id: req.query.telegram_id,
     });
-    // Deliberately no banned_until/remaining time here - only the strike
-    // level is meant to be shown, never a countdown.
+    // unlock_at is only ever non-null once required payment(s) are made and
+    // the escalating timer has actually started - before that, no countdown
+    // is shown, only the strike level.
     res.status(200).json({
       ok: true,
       strike_count: diagnostics.strike_count,
       actively_banned: diagnostics.actively_banned,
+      unlock_at: diagnostics.unlock_at,
       last_ban_reason: diagnostics.last_ban_reason,
       unban: diagnostics.unban,
     });

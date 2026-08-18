@@ -3133,6 +3133,29 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   display: none;
 }
 
+.star-strike-actions.hidden {
+  display: none;
+}
+
+.star-strike-countdown {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-size: 13px;
+  text-align: center;
+}
+
+.star-strike-countdown.hidden {
+  display: none;
+}
+
+.star-strike-countdown b {
+  font-variant-numeric: tabular-nums;
+  color: var(--no);
+}
+
 .task-list.strike-locked .task-item {
   opacity: 0.4;
   filter: grayscale(1);

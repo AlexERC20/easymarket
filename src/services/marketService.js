@@ -13023,7 +13023,7 @@ export async function getActiveStarBan(dbClient, userId) {
     [userId],
   );
   const row = result.rows[0];
-  if (!row?.banned_until || new Date(row.banned_until).getTime() <= Date.now()) {
+  if (!isBanRowActive(row)) {
     return null;
   }
   return { strikeCount: Number(row.strike_count || 0), bannedUntil: row.banned_until };
@@ -13034,6 +13034,14 @@ export async function getActiveStarBan(dbClient, userId) {
 // to "now" on every new ban, so the NEXT check only judges behavior after
 // this ban ends - old evidence that already earned a strike doesn't count
 // again once the account starts fresh.
+// banned_until NULL means "banned, indefinitely, until paid" - there is no
+// free ride by just waiting. Once required payment(s) are made, banned_until
+// gets set to a real future timestamp elsewhere and this same NULL check
+// still reads it as banned until that time passes.
+function isBanRowActive(row) {
+  return Boolean(row) && (row.banned_until === null || new Date(row.banned_until).getTime() > Date.now());
+}
+
 async function checkStarAbuseBan(client, userId) {
   const existingResult = await client.query(
     `
@@ -13046,7 +13054,7 @@ async function checkStarAbuseBan(client, userId) {
   );
   const existing = existingResult.rows[0];
 
-  if (existing?.banned_until && new Date(existing.banned_until).getTime() > Date.now()) {
+  if (isBanRowActive(existing)) {
     return { banned: true, bannedUntil: existing.banned_until, strike: existing.strike_count };
   }
 
@@ -13058,8 +13066,6 @@ async function checkStarAbuseBan(client, userId) {
   }
 
   const strike = Number(existing?.strike_count || 0) + 1;
-  const banHours = STAR_ABUSE_BASE_BAN_HOURS * (2 ** (strike - 1));
-  const bannedUntil = new Date(Date.now() + banHours * 3_600_000).toISOString();
   const reason = flag.profitFlagged && flag.speedFlagged
     ? "profit_and_speed"
     : flag.profitFlagged ? "profit" : "speed";
@@ -13069,21 +13075,21 @@ async function checkStarAbuseBan(client, userId) {
       INSERT INTO star_abuse_bans (
         user_id, strike_count, banned_until, evaluate_since, last_reason, updated_at
       )
-      VALUES ($1, $2, $3::timestamptz, now(), $4, now())
+      VALUES ($1, $2, NULL, now(), $3, now())
       ON CONFLICT (user_id) DO UPDATE SET
         strike_count = EXCLUDED.strike_count,
-        banned_until = EXCLUDED.banned_until,
+        banned_until = NULL,
         evaluate_since = EXCLUDED.evaluate_since,
         last_reason = EXCLUDED.last_reason,
         balance_paid_at = NULL,
         stars_paid_at = NULL,
         updated_at = now()
     `,
-    [userId, strike, bannedUntil, reason],
+    [userId, strike, reason],
   );
 
   return {
-    banned: true, bannedUntil, strike, hours: banHours, reason,
+    banned: true, bannedUntil: null, strike, reason,
   };
 }
 
@@ -13114,23 +13120,29 @@ async function loadActiveBanForPayment(client, userId) {
     [userId],
   );
   const ban = result.rows[0];
-  if (!ban?.banned_until || new Date(ban.banned_until).getTime() <= Date.now()) {
+  if (!isBanRowActive(ban)) {
     throw new Error("star_strike_not_active");
   }
   return ban;
 }
 
-async function liftStarStrikeIfSatisfied(client, userId, ban, strike) {
+// Paying off the required leg(s) does not unban immediately - it starts the
+// same escalating timer the strike would have run anyway, just gated behind
+// payment instead of ticking for free. Returns the unlock timestamp once the
+// timer starts, or null while a required payment is still outstanding.
+async function startStarStrikeTimerIfSatisfied(client, userId, ban, strike) {
   const needsStars = strike >= STAR_STRIKE_STARS_MIN_STRIKE;
   const satisfied = Boolean(ban.balance_paid_at) && (!needsStars || Boolean(ban.stars_paid_at));
   if (!satisfied) {
-    return false;
+    return null;
   }
+  const banHours = STAR_ABUSE_BASE_BAN_HOURS * (2 ** (strike - 1));
+  const unlockAt = new Date(Date.now() + banHours * 3_600_000).toISOString();
   await client.query(
-    "UPDATE star_abuse_bans SET banned_until = now(), updated_at = now() WHERE user_id = $1",
-    [userId],
+    "UPDATE star_abuse_bans SET banned_until = $2::timestamptz, updated_at = now() WHERE user_id = $1",
+    [userId, unlockAt],
   );
-  return true;
+  return unlockAt;
 }
 
 // Pays off the balance leg of an active strike - always required, first
@@ -13167,9 +13179,12 @@ export async function payStarStrikeWithBalance(input) {
       [user.id],
     );
 
-    const lifted = await liftStarStrikeIfSatisfied(client, user.id, { ...ban, balance_paid_at: true }, strike);
+    const unlockAt = await startStarStrikeTimerIfSatisfied(
+      client, user.id, { ...ban, balance_paid_at: true }, strike,
+    );
     return {
-      lifted,
+      timer_started: unlockAt !== null,
+      unlock_at: unlockAt,
       cost,
       percent,
       stars_required: strike >= STAR_STRIKE_STARS_MIN_STRIKE && !ban.stars_paid_at
@@ -13226,8 +13241,10 @@ export async function payStarStrikeWithStars(input) {
       [user.id],
     );
 
-    const lifted = await liftStarStrikeIfSatisfied(client, user.id, { ...ban, stars_paid_at: true }, strike);
-    return { lifted, cost };
+    const unlockAt = await startStarStrikeTimerIfSatisfied(
+      client, user.id, { ...ban, stars_paid_at: true }, strike,
+    );
+    return { timer_started: unlockAt !== null, unlock_at: unlockAt, cost };
   });
 }
 
@@ -13267,9 +13284,10 @@ export async function getStarAbuseDiagnostics(input = {}) {
   const sinceIso = banRow?.evaluate_since || new Date(0).toISOString();
   const stats = await getStarAbuseStats({ query }, user.id, sinceIso);
   const flag = isHouseAccount ? null : evaluateStarAbuseStats(stats);
-  const activelyBanned = Boolean(
-    banRow?.banned_until && new Date(banRow.banned_until).getTime() > Date.now(),
-  );
+  const activelyBanned = isBanRowActive(banRow);
+  // Only meaningful once set to a real future timestamp - NULL means still
+  // waiting on payment, which is deliberately not exposed as a timer.
+  const unlockAt = activelyBanned && banRow.banned_until ? banRow.banned_until : null;
   const nextStrike = Number(banRow?.strike_count || 0) + 1;
   return {
     user: {
@@ -13301,7 +13319,7 @@ export async function getStarAbuseDiagnostics(input = {}) {
     speed_flagged: flag?.speedFlagged ?? false,
     strike_count: Number(banRow?.strike_count || 0),
     actively_banned: activelyBanned,
-    banned_until: activelyBanned ? banRow.banned_until : null,
+    unlock_at: unlockAt,
     last_ban_reason: banRow?.last_reason ?? null,
     next_ban_hours_if_flagged_again: STAR_ABUSE_BASE_BAN_HOURS * (2 ** (nextStrike - 1)),
     unban: activelyBanned ? {
@@ -15361,7 +15379,7 @@ export async function getLeaderboard(options = {}) {
         WHERE ranked_positions.row_rank = 1
           AND NOT EXISTS (
             SELECT 1 FROM star_abuse_bans b
-            WHERE b.user_id = users.id AND b.banned_until > now()
+            WHERE b.user_id = users.id AND (b.banned_until IS NULL OR b.banned_until > now())
           )
         ORDER BY daily_totals.best_pnl_24h DESC, daily_totals.total_pnl_24h DESC, ranked_positions.resolved_at DESC
         LIMIT $1
@@ -15428,7 +15446,7 @@ export async function getLeaderboard(options = {}) {
         LEFT JOIN position_stats ON position_stats.user_id = users.id
         WHERE NOT EXISTS (
           SELECT 1 FROM star_abuse_bans b
-          WHERE b.user_id = users.id AND b.banned_until > now()
+          WHERE b.user_id = users.id AND (b.banned_until IS NULL OR b.banned_until > now())
         )
         GROUP BY
           users.telegram_id,
@@ -15486,7 +15504,7 @@ export async function getLeaderboard(options = {}) {
         LEFT JOIN position_stats ON position_stats.user_id = users.id
         WHERE NOT EXISTS (
           SELECT 1 FROM star_abuse_bans b
-          WHERE b.user_id = users.id AND b.banned_until > now()
+          WHERE b.user_id = users.id AND (b.banned_until IS NULL OR b.banned_until > now())
         )
         ORDER BY (COALESCE(cash.balance, 0) + COALESCE(bonus.balance, 0)) DESC,
           COALESCE(trade_stats.bet_count, 0) DESC,
@@ -15538,7 +15556,7 @@ export async function getLeaderboard(options = {}) {
       LEFT JOIN position_stats ON position_stats.user_id = users.id
       WHERE NOT EXISTS (
         SELECT 1 FROM star_abuse_bans b
-        WHERE b.user_id = users.id AND b.banned_until > now()
+        WHERE b.user_id = users.id AND (b.banned_until IS NULL OR b.banned_until > now())
       )
       ORDER BY balances.balance DESC, COALESCE(trade_stats.bet_count, 0) DESC, users.updated_at DESC
       LIMIT $1

@@ -10598,6 +10598,8 @@ async function loadEngagementState() {
   }
 }
 
+let starStrikeCountdownTimer = 0;
+
 async function loadStarStrikeStatus() {
   if (!state.user?.telegram_id) return;
   try {
@@ -10610,19 +10612,61 @@ async function loadStarStrikeStatus() {
   renderStarStrikeBanner();
 }
 
+function formatStarStrikeCountdown(msRemaining) {
+  const totalSeconds = Math.max(0, Math.floor(msRemaining / 1000));
+  const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, "0");
+  const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+  return `${hours}:${minutes}:${seconds}`;
+}
+
+function stopStarStrikeCountdown() {
+  if (starStrikeCountdownTimer) {
+    window.clearInterval(starStrikeCountdownTimer);
+    starStrikeCountdownTimer = 0;
+  }
+}
+
 function renderStarStrikeBanner() {
   const banner = $("starStrikeBanner");
   const taskList = document.querySelector("#tasksSheet .task-list");
+  const actions = $("starStrikeActions");
+  const countdown = $("starStrikeCountdown");
+  const countdownText = $("starStrikeCountdownText");
   if (!banner || !taskList) return;
 
   const info = state.starStrike;
   const banned = Boolean(info?.actively_banned);
   banner.classList.toggle("hidden", !banned);
   taskList.classList.toggle("strike-locked", banned);
+  stopStarStrikeCountdown();
   if (!banned) return;
 
   const levelEl = $("starStrikeLevel");
   if (levelEl) levelEl.textContent = String(info.strike_count ?? 1);
+
+  // Once the timer has actually started (both required payments made), swap
+  // the payment buttons for a ticking countdown - no buttons left to press.
+  if (info.unlock_at) {
+    actions?.classList.add("hidden");
+    countdown?.classList.remove("hidden");
+    const unlockAtMs = new Date(info.unlock_at).getTime();
+    const tick = () => {
+      const remaining = unlockAtMs - Date.now();
+      if (remaining <= 0) {
+        stopStarStrikeCountdown();
+        void loadStarStrikeStatus();
+        return;
+      }
+      if (countdownText) countdownText.textContent = formatStarStrikeCountdown(remaining);
+    };
+    tick();
+    starStrikeCountdownTimer = window.setInterval(tick, 1000);
+    return;
+  }
+
+  actions?.classList.remove("hidden");
+  countdown?.classList.add("hidden");
 
   const percentEl = $("starStrikeBalancePercent");
   const balanceBtn = $("starStrikePayBalanceBtn");
@@ -10651,7 +10695,9 @@ async function payStarStrikeWithBalance() {
       method: "POST",
       body: JSON.stringify({ telegram_id: state.user.telegram_id }),
     });
-    showToast(result.lifted ? "Страйк снят" : `Списано ${result.cost}★, осталась оплата звёздами`);
+    showToast(result.timer_started
+      ? "Оплачено, идёт обратный отсчёт разблокировки"
+      : `Списано ${result.cost}★, осталась оплата звёздами`);
     await Promise.all([loadStarStrikeStatus(), loadMe()]);
   } catch (error) {
     showToast(error.message === "insufficient_fire" ? "Недостаточно звёзд на балансе" : "Не получилось списать");
@@ -10669,7 +10715,9 @@ async function payStarStrikeWithStars() {
       method: "POST",
       body: JSON.stringify({ telegram_id: state.user.telegram_id }),
     });
-    showToast(result.lifted ? "Страйк снят" : "Оплата звёздами принята");
+    showToast(result.timer_started
+      ? "Оплачено, идёт обратный отсчёт разблокировки"
+      : "Оплата звёздами принята");
     await Promise.all([loadStarStrikeStatus(), loadMe()]);
   } catch (error) {
     if (error.message === "star_strike_stars_topup_required") {
@@ -10839,6 +10887,7 @@ function setTasksSheetOpen(open) {
     openSheet(sheet);
     renderTaskStats();
   } else {
+    stopStarStrikeCountdown();
     closeSheet(sheet);
   }
 }
