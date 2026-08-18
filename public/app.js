@@ -10630,12 +10630,22 @@ function stopStarStrikeCountdown() {
   }
 }
 
+const STAR_STRIKE_REASON_TEXT = {
+  profit: "Замечена устойчиво прибыльная торговля звёздами, которая не укладывается в честную статистику — так не выигрывают на удаче.",
+  speed: "Замечена подозрительно быстрая серия сделок подряд — так быстро торгует скрипт, а не человек.",
+  profit_and_speed: "Замечены и подозрительно быстрая серия сделок подряд, и устойчиво прибыльная торговля звёздами, которая не укладывается в честную статистику.",
+  manual_test: "Страйк выдан вручную для проверки.",
+};
+
+let starStrikeInfoExpanded = false;
+
 function renderStarStrikeBanner() {
   const banner = $("starStrikeBanner");
   const taskList = document.querySelector("#tasksSheet .task-list");
   const actions = $("starStrikeActions");
   const countdown = $("starStrikeCountdown");
   const countdownText = $("starStrikeCountdownText");
+  const infoText = $("starStrikeInfoText");
   if (!banner || !taskList) return;
 
   const info = state.starStrike;
@@ -10643,6 +10653,10 @@ function renderStarStrikeBanner() {
   banner.classList.toggle("hidden", !banned);
   taskList.classList.toggle("strike-locked", banned);
   taskList.classList.toggle("strike-collapsed", banned && !starStrikeTasksExpanded);
+  if (infoText) {
+    infoText.textContent = STAR_STRIKE_REASON_TEXT[info?.last_ban_reason] || "Причина страйка не указана.";
+    infoText.classList.toggle("hidden", !starStrikeInfoExpanded);
+  }
   const toggleBtn = $("starStrikeToggleTasksBtn");
   if (toggleBtn) {
     toggleBtn.classList.toggle("hidden", !banned);
@@ -10795,6 +10809,10 @@ $("starStrikePayBalanceBtn")?.addEventListener("click", () => void payStarStrike
 $("starStrikePayStarsBtn")?.addEventListener("click", () => void payStarStrikeWithStars());
 $("starStrikeToggleTasksBtn")?.addEventListener("click", () => {
   starStrikeTasksExpanded = !starStrikeTasksExpanded;
+  renderStarStrikeBanner();
+});
+$("starStrikeInfoBtn")?.addEventListener("click", () => {
+  starStrikeInfoExpanded = !starStrikeInfoExpanded;
   renderStarStrikeBanner();
 });
 
@@ -10952,6 +10970,7 @@ function setTasksSheetOpen(open) {
   } else {
     stopStarStrikeCountdown();
     starStrikeTasksExpanded = false;
+    starStrikeInfoExpanded = false;
     closeSheet(sheet);
   }
 }

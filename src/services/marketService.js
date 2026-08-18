@@ -13094,8 +13094,10 @@ async function checkStarAbuseBan(client, userId) {
 }
 
 // Escalates with strike level like the ban itself, capped so a strike never
-// literally wipes the account to zero.
-const STAR_STRIKE_BALANCE_PERCENT_PER_LEVEL = 20;
+// literally wipes the account to zero. Kept gentler than the ban/stars
+// escalation on purpose - the real bite for a repeat (strike 3+) offender is
+// the stars leg below, not this one.
+const STAR_STRIKE_BALANCE_PERCENT_PER_LEVEL = 10;
 const STAR_STRIKE_BALANCE_PERCENT_MAX = 80;
 // From strike 3 on, balance alone is not enough - a farmed pile of stars
 // pays that off for free. The stars portion requires a real fresh purchase

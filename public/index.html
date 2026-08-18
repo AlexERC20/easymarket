@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260819-04" />
+    <link rel="stylesheet" href="/styles.css?v=20260819-05" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260711-03" />
     <link rel="stylesheet" href="/kyivstoner-motion.css?v=20260714-02" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -182,10 +182,12 @@
             <button id="tasksTabStats" type="button" data-task-tab="stats">Моя статистика</button>
           </div>
           <div id="starStrikeBanner" class="star-strike-banner hidden">
+            <button id="starStrikeInfoBtn" class="star-strike-info-btn" type="button" aria-label="Почему страйк">ⓘ</button>
             <div class="star-strike-text">
               <strong>Страйк <span id="starStrikeLevel">1</span></strong>
               <p>Задания и вывод недоступны, пока действует страйк.</p>
             </div>
+            <p id="starStrikeInfoText" class="star-strike-info-text hidden"></p>
             <div id="starStrikeActions" class="star-strike-actions">
               <button id="starStrikePayBalanceBtn" class="task-button" type="button">
                 Снять за <span id="starStrikeBalancePercent">20</span>% баланса
@@ -935,6 +937,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260819-04" type="module"></script>
+    <script src="/app.js?v=20260819-05" type="module"></script>
   </body>
 </html>
