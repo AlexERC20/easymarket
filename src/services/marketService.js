@@ -12939,8 +12939,8 @@ const STAR_ABUSE_CAPPED_AMOUNT = 100;
 const STAR_ABUSE_PENALTY_MULTIPLIER = 1.5;
 const STAR_ABUSE_PENALTY_MAX_BPS = 3_000;
 
-async function getStarAbuseThrottle(client, userId) {
-  const result = await client.query(
+async function getStarAbuseStats(dbClient, userId) {
+  const result = await dbClient.query(
     `
       SELECT
         COUNT(*) FILTER (WHERE status <> 'open')::int AS settled_count,
@@ -12955,19 +12955,77 @@ async function getStarAbuseThrottle(client, userId) {
   const settledCount = Number(row.settled_count || 0);
   const totalStaked = Number(row.total_staked || 0);
   const netPnl = Number(row.net_pnl || 0);
-  if (settledCount < STAR_ABUSE_MIN_SETTLED || totalStaked < STAR_ABUSE_MIN_STAKED) {
-    return null;
-  }
-  const edgeRatio = netPnl / totalStaked;
-  if (edgeRatio < STAR_ABUSE_EDGE_RATIO) {
+  const edgeRatio = totalStaked > 0 ? netPnl / totalStaked : 0;
+  return { settledCount, totalStaked, netPnl, edgeRatio };
+}
+
+function evaluateStarAbuseStats(stats) {
+  if (
+    stats.settledCount < STAR_ABUSE_MIN_SETTLED
+    || stats.totalStaked < STAR_ABUSE_MIN_STAKED
+    || stats.edgeRatio < STAR_ABUSE_EDGE_RATIO
+  ) {
     return null;
   }
   return {
     cappedAmount: STAR_ABUSE_CAPPED_AMOUNT,
     penaltyFeeBps: Math.min(
       STAR_ABUSE_PENALTY_MAX_BPS,
-      Math.round(edgeRatio * 10_000 * STAR_ABUSE_PENALTY_MULTIPLIER),
+      Math.round(stats.edgeRatio * 10_000 * STAR_ABUSE_PENALTY_MULTIPLIER),
     ),
+  };
+}
+
+async function getStarAbuseThrottle(client, userId) {
+  const stats = await getStarAbuseStats(client, userId);
+  return evaluateStarAbuseStats(stats);
+}
+
+// Diagnostic-only: exposes the exact same numbers/decision buyOutcome uses,
+// so abuse-detection tuning can be checked against a real account without
+// reconstructing it by hand from the ledger.
+export async function getStarAbuseDiagnostics(input = {}) {
+  const telegramId = String(input.telegram_id || input.telegramId || "").trim();
+  const username = String(input.username || "").replace(/^@/, "").trim();
+  if (!telegramId && !username) {
+    throw new Error("telegram_id_or_username_required");
+  }
+  const userResult = await query(
+    `
+      SELECT id, telegram_id, username, first_name
+      FROM users
+      WHERE ($1::text <> '' AND telegram_id = $1::text)
+         OR ($2::text <> '' AND lower(username) = lower($2::text))
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `,
+    [telegramId, username],
+  );
+  const user = userResult.rows[0];
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+  const stats = await getStarAbuseStats({ query }, user.id);
+  const throttle = evaluateStarAbuseStats(stats);
+  return {
+    user: {
+      id: Number(user.id),
+      telegram_id: user.telegram_id,
+      username: user.username,
+      first_name: user.first_name,
+    },
+    thresholds: {
+      min_settled: STAR_ABUSE_MIN_SETTLED,
+      min_staked: STAR_ABUSE_MIN_STAKED,
+      edge_ratio: STAR_ABUSE_EDGE_RATIO,
+    },
+    settled_count: stats.settledCount,
+    total_staked: roundMoney(stats.totalStaked),
+    net_pnl: roundMoney(stats.netPnl),
+    edge_ratio: Math.round(stats.edgeRatio * 10_000) / 10_000,
+    flagged: throttle !== null,
+    capped_amount: throttle?.cappedAmount ?? null,
+    penalty_fee_bps: throttle?.penaltyFeeBps ?? null,
   };
 }
 

@@ -56,6 +56,7 @@ import {
   getRecentMarketOutcomes,
   getRecentMarkets,
   getSportsMarkets,
+  getStarAbuseDiagnostics,
   getTopMarkets,
   getUserSnapshot,
   getUsdtLedgerEvents,
@@ -161,6 +162,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
   const publicErrors = new Set([
     "telegram_id_required",
     "telegram_id_missing",
+    "telegram_id_or_username_required",
     "username_required",
     "amount_must_be_positive",
     "amount_must_be_non_negative",
@@ -2016,6 +2018,21 @@ app.get("/api/bridge/economy/market-maker-audit", requireBridgeSecret, async (re
     res.status(200).json({
       ok: true,
       audit,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/star-abuse-check", requireBridgeSecret, async (req, res) => {
+  try {
+    const diagnostics = await getStarAbuseDiagnostics({
+      telegram_id: req.query.telegram_id ?? req.query.telegramId,
+      username: req.query.username,
+    });
+    res.status(200).json({
+      ok: true,
+      ...diagnostics,
     });
   } catch (error) {
     sendApiError(res, error);
