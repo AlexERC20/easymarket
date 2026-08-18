@@ -664,8 +664,13 @@ export async function runMigrations() {
       banned_until TIMESTAMPTZ,
       evaluate_since TIMESTAMPTZ NOT NULL DEFAULT now(),
       last_reason TEXT,
+      balance_paid_at TIMESTAMPTZ,
+      stars_paid_at TIMESTAMPTZ,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    ALTER TABLE star_abuse_bans ADD COLUMN IF NOT EXISTS balance_paid_at TIMESTAMPTZ;
+    ALTER TABLE star_abuse_bans ADD COLUMN IF NOT EXISTS stars_paid_at TIMESTAMPTZ;
 
     CREATE TABLE IF NOT EXISTS profit_fee_distributions (
       id BIGSERIAL PRIMARY KEY,

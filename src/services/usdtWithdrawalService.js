@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { config } from "../config.js";
 import { query, toNumber, withTransaction } from "../db.js";
 import {
+  getActiveStarBan,
   getUserByTelegramId,
   revokePendingReferralDepositRewardsForWithdrawal,
   upsertUser,
@@ -205,6 +206,9 @@ export async function createUsdtWithdrawalRequest(input) {
   });
 
   const result = await withTransaction(async (client) => {
+    if (await getActiveStarBan(client, user.id)) {
+      throw new Error("withdrawal_blocked_star_strike");
+    }
     const depositResult = await client.query(
       `
         SELECT (

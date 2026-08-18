@@ -5837,6 +5837,9 @@ export async function claimShareTask(input) {
   const taskKey = "share_friend";
 
   return withTransaction(async (client) => {
+    if (await getActiveStarBan(client, user.id)) {
+      throw new Error("tasks_blocked_star_strike");
+    }
     const claimPlan = await getDailyTaskClaimPlan(client, user.id, taskKey);
     const amount = claimPlan.amount;
     if (!amount) {
@@ -6303,6 +6306,9 @@ export function getDailyRotation(dayKey = getDayKey()) {
 }
 
 async function claimDailyTaskForUser(client, user, taskKey) {
+  if (await getActiveStarBan(client, user.id)) {
+    throw new Error("tasks_blocked_star_strike");
+  }
   const rawTaskKey = String(taskKey || "").trim();
   const normalizedTaskKey = rawTaskKey === "daily_btc_prediction" ? "daily_btc_5_predictions" : rawTaskKey;
   const claimPlan = await getDailyTaskClaimPlan(client, user.id, normalizedTaskKey);
@@ -13008,6 +13014,21 @@ function evaluateStarAbuseStats(stats) {
   return { profitFlagged, speedFlagged };
 }
 
+// Plain read used to gate unrelated features (tasks, real withdrawals,
+// leaderboard) for the duration of an active ban - no locking, no
+// escalation, just "is this account currently serving a strike."
+export async function getActiveStarBan(dbClient, userId) {
+  const result = await dbClient.query(
+    "SELECT strike_count, banned_until FROM star_abuse_bans WHERE user_id = $1",
+    [userId],
+  );
+  const row = result.rows[0];
+  if (!row?.banned_until || new Date(row.banned_until).getTime() <= Date.now()) {
+    return null;
+  }
+  return { strikeCount: Number(row.strike_count || 0), bannedUntil: row.banned_until };
+}
+
 // Locks and reads/writes star_abuse_bans for this user, escalating the ban on
 // a fresh violation and leaving an active ban alone. evaluate_since is reset
 // to "now" on every new ban, so the NEXT check only judges behavior after
@@ -13045,13 +13066,17 @@ async function checkStarAbuseBan(client, userId) {
 
   await client.query(
     `
-      INSERT INTO star_abuse_bans (user_id, strike_count, banned_until, evaluate_since, last_reason, updated_at)
+      INSERT INTO star_abuse_bans (
+        user_id, strike_count, banned_until, evaluate_since, last_reason, updated_at
+      )
       VALUES ($1, $2, $3::timestamptz, now(), $4, now())
       ON CONFLICT (user_id) DO UPDATE SET
         strike_count = EXCLUDED.strike_count,
         banned_until = EXCLUDED.banned_until,
         evaluate_since = EXCLUDED.evaluate_since,
         last_reason = EXCLUDED.last_reason,
+        balance_paid_at = NULL,
+        stars_paid_at = NULL,
         updated_at = now()
     `,
     [userId, strike, bannedUntil, reason],
@@ -13060,6 +13085,150 @@ async function checkStarAbuseBan(client, userId) {
   return {
     banned: true, bannedUntil, strike, hours: banHours, reason,
   };
+}
+
+// Escalates with strike level like the ban itself, capped so a strike never
+// literally wipes the account to zero.
+const STAR_STRIKE_BALANCE_PERCENT_PER_LEVEL = 20;
+const STAR_STRIKE_BALANCE_PERCENT_MAX = 80;
+// From strike 3 on, balance alone is not enough - a farmed pile of stars
+// pays that off for free. The stars portion requires a real fresh purchase
+// (see the fire_ledger check below), not just existing balance.
+const STAR_STRIKE_STARS_MIN_STRIKE = 3;
+const STAR_STRIKE_STARS_BASE = 1_000;
+const STAR_STRIKE_STARS_STEP = 1_000;
+
+function computeStarStrikeStarsCost(strike) {
+  return STAR_STRIKE_STARS_BASE
+    + STAR_STRIKE_STARS_STEP * Math.max(0, strike - STAR_STRIKE_STARS_MIN_STRIKE);
+}
+
+async function loadActiveBanForPayment(client, userId) {
+  const result = await client.query(
+    `
+      SELECT strike_count, banned_until, evaluate_since, balance_paid_at, stars_paid_at
+      FROM star_abuse_bans
+      WHERE user_id = $1
+      FOR UPDATE
+    `,
+    [userId],
+  );
+  const ban = result.rows[0];
+  if (!ban?.banned_until || new Date(ban.banned_until).getTime() <= Date.now()) {
+    throw new Error("star_strike_not_active");
+  }
+  return ban;
+}
+
+async function liftStarStrikeIfSatisfied(client, userId, ban, strike) {
+  const needsStars = strike >= STAR_STRIKE_STARS_MIN_STRIKE;
+  const satisfied = Boolean(ban.balance_paid_at) && (!needsStars || Boolean(ban.stars_paid_at));
+  if (!satisfied) {
+    return false;
+  }
+  await client.query(
+    "UPDATE star_abuse_bans SET banned_until = now(), updated_at = now() WHERE user_id = $1",
+    [userId],
+  );
+  return true;
+}
+
+// Pays off the balance leg of an active strike - always required, first
+// available step regardless of strike level.
+export async function payStarStrikeWithBalance(input) {
+  const user = await getUserByTelegramId(input.telegram_id);
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+  return withTransaction(async (client) => {
+    const ban = await loadActiveBanForPayment(client, user.id);
+    if (ban.balance_paid_at) {
+      throw new Error("star_strike_balance_already_paid");
+    }
+    const strike = Number(ban.strike_count || 0);
+    const percent = Math.min(
+      STAR_STRIKE_BALANCE_PERCENT_MAX,
+      STAR_STRIKE_BALANCE_PERCENT_PER_LEVEL * strike,
+    );
+
+    const balanceResult = await client.query(
+      "SELECT balance FROM fire_balances WHERE user_id = $1 FOR UPDATE",
+      [user.id],
+    );
+    const balance = toNumber(balanceResult.rows[0]?.balance);
+    const cost = Math.round(balance * percent) / 100;
+    if (cost <= 0) {
+      throw new Error("insufficient_fire");
+    }
+
+    await adjustBalance(client, user.id, -cost, "star_strike_unban_balance", `strike:${strike}`);
+    await client.query(
+      "UPDATE star_abuse_bans SET balance_paid_at = now(), updated_at = now() WHERE user_id = $1",
+      [user.id],
+    );
+
+    const lifted = await liftStarStrikeIfSatisfied(client, user.id, { ...ban, balance_paid_at: true }, strike);
+    return {
+      lifted,
+      cost,
+      percent,
+      stars_required: strike >= STAR_STRIKE_STARS_MIN_STRIKE && !ban.stars_paid_at
+        ? computeStarStrikeStarsCost(strike)
+        : null,
+    };
+  });
+}
+
+// Pays off the stars leg - only relevant/required from strike 3 on. Requires
+// a fresh real-money top-up recorded since this ban started, not just
+// spending whatever farmed balance the account already had.
+export async function payStarStrikeWithStars(input) {
+  const user = await getUserByTelegramId(input.telegram_id);
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+  return withTransaction(async (client) => {
+    const ban = await loadActiveBanForPayment(client, user.id);
+    const strike = Number(ban.strike_count || 0);
+    if (strike < STAR_STRIKE_STARS_MIN_STRIKE) {
+      throw new Error("star_strike_stars_not_required");
+    }
+    if (ban.stars_paid_at) {
+      throw new Error("star_strike_stars_already_paid");
+    }
+    const cost = computeStarStrikeStarsCost(strike);
+
+    const topupResult = await client.query(
+      `
+        SELECT COALESCE(SUM(amount), 0) AS total
+        FROM fire_ledger
+        WHERE user_id = $1 AND reason = 'stars_fire_topup' AND created_at >= $2::timestamptz
+      `,
+      [user.id, ban.evaluate_since],
+    );
+    const freshTopup = Number(topupResult.rows[0]?.total || 0);
+    if (freshTopup < cost) {
+      throw new Error("star_strike_stars_topup_required");
+    }
+
+    const balanceResult = await client.query(
+      "SELECT balance FROM fire_balances WHERE user_id = $1 FOR UPDATE",
+      [user.id],
+    );
+    const balance = toNumber(balanceResult.rows[0]?.balance);
+    if (balance < cost) {
+      throw new Error("insufficient_fire");
+    }
+
+    await adjustBalance(client, user.id, -cost, "star_strike_unban_stars", `strike:${strike}`);
+    await client.query(
+      "UPDATE star_abuse_bans SET stars_paid_at = now(), updated_at = now() WHERE user_id = $1",
+      [user.id],
+    );
+
+    const lifted = await liftStarStrikeIfSatisfied(client, user.id, { ...ban, stars_paid_at: true }, strike);
+    return { lifted, cost };
+  });
 }
 
 // Diagnostic-only: exposes the exact same numbers/decision buyOutcome uses,
@@ -13088,7 +13257,10 @@ export async function getStarAbuseDiagnostics(input = {}) {
   }
   const isHouseAccount = config.telegramAdminUserIds.includes(String(user.telegram_id ?? ""));
   const banRowResult = await query(
-    "SELECT strike_count, banned_until, evaluate_since, last_reason FROM star_abuse_bans WHERE user_id = $1",
+    `
+      SELECT strike_count, banned_until, evaluate_since, last_reason, balance_paid_at, stars_paid_at
+      FROM star_abuse_bans WHERE user_id = $1
+    `,
     [user.id],
   );
   const banRow = banRowResult.rows[0] || null;
@@ -13132,6 +13304,18 @@ export async function getStarAbuseDiagnostics(input = {}) {
     banned_until: activelyBanned ? banRow.banned_until : null,
     last_ban_reason: banRow?.last_reason ?? null,
     next_ban_hours_if_flagged_again: STAR_ABUSE_BASE_BAN_HOURS * (2 ** (nextStrike - 1)),
+    unban: activelyBanned ? {
+      balance_paid: Boolean(banRow.balance_paid_at),
+      balance_cost_percent: Math.min(
+        STAR_STRIKE_BALANCE_PERCENT_MAX,
+        STAR_STRIKE_BALANCE_PERCENT_PER_LEVEL * Number(banRow.strike_count || 0),
+      ),
+      stars_required: Number(banRow.strike_count || 0) >= STAR_STRIKE_STARS_MIN_STRIKE,
+      stars_paid: Boolean(banRow.stars_paid_at),
+      stars_cost: Number(banRow.strike_count || 0) >= STAR_STRIKE_STARS_MIN_STRIKE
+        ? computeStarStrikeStarsCost(Number(banRow.strike_count || 0))
+        : null,
+    } : null,
   };
 }
 
@@ -15175,6 +15359,10 @@ export async function getLeaderboard(options = {}) {
         LEFT JOIN trade_stats ON trade_stats.user_id = users.id
         LEFT JOIN position_stats ON position_stats.user_id = users.id
         WHERE ranked_positions.row_rank = 1
+          AND NOT EXISTS (
+            SELECT 1 FROM star_abuse_bans b
+            WHERE b.user_id = users.id AND b.banned_until > now()
+          )
         ORDER BY daily_totals.best_pnl_24h DESC, daily_totals.total_pnl_24h DESC, ranked_positions.resolved_at DESC
         LIMIT $1
       `,
@@ -15238,6 +15426,10 @@ export async function getLeaderboard(options = {}) {
         JOIN users ON users.id = daily_positions.user_id
         LEFT JOIN trade_stats ON trade_stats.user_id = users.id
         LEFT JOIN position_stats ON position_stats.user_id = users.id
+        WHERE NOT EXISTS (
+          SELECT 1 FROM star_abuse_bans b
+          WHERE b.user_id = users.id AND b.banned_until > now()
+        )
         GROUP BY
           users.telegram_id,
           users.username,
@@ -15292,6 +15484,10 @@ export async function getLeaderboard(options = {}) {
         LEFT JOIN usdt_bonus_balances bonus ON bonus.user_id = users.id
         LEFT JOIN trade_stats ON trade_stats.user_id = users.id
         LEFT JOIN position_stats ON position_stats.user_id = users.id
+        WHERE NOT EXISTS (
+          SELECT 1 FROM star_abuse_bans b
+          WHERE b.user_id = users.id AND b.banned_until > now()
+        )
         ORDER BY (COALESCE(cash.balance, 0) + COALESCE(bonus.balance, 0)) DESC,
           COALESCE(trade_stats.bet_count, 0) DESC,
           users.updated_at DESC
@@ -15340,6 +15536,10 @@ export async function getLeaderboard(options = {}) {
       JOIN ${balanceTable} balances ON balances.user_id = users.id
       LEFT JOIN trade_stats ON trade_stats.user_id = users.id
       LEFT JOIN position_stats ON position_stats.user_id = users.id
+      WHERE NOT EXISTS (
+        SELECT 1 FROM star_abuse_bans b
+        WHERE b.user_id = users.id AND b.banned_until > now()
+      )
       ORDER BY balances.balance DESC, COALESCE(trade_stats.bet_count, 0) DESC, users.updated_at DESC
       LIMIT $1
     `,

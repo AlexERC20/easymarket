@@ -58,6 +58,8 @@ import {
   getFireIncomeBreakdown,
   getSportsMarkets,
   getStarAbuseDiagnostics,
+  payStarStrikeWithBalance,
+  payStarStrikeWithStars,
   getTopMarkets,
   getUserSnapshot,
   getUsdtLedgerEvents,
@@ -182,6 +184,13 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "market_trading_paused",
     "star_buy_cooldown",
     "star_trading_banned",
+    "tasks_blocked_star_strike",
+    "withdrawal_blocked_star_strike",
+    "star_strike_not_active",
+    "star_strike_balance_already_paid",
+    "star_strike_stars_not_required",
+    "star_strike_stars_already_paid",
+    "star_strike_stars_topup_required",
     "price_unavailable",
     "insufficient_market_liquidity",
     "market_maker_unavailable",
@@ -1249,6 +1258,47 @@ app.post("/api/tasks/share", async (req, res) => {
       first_name: req.body?.first_name,
     });
     res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/star-strike/status", async (req, res) => {
+  try {
+    const diagnostics = await getStarAbuseDiagnostics({
+      telegram_id: req.query.telegram_id,
+    });
+    // Deliberately no banned_until/remaining time here - only the strike
+    // level is meant to be shown, never a countdown.
+    res.status(200).json({
+      ok: true,
+      strike_count: diagnostics.strike_count,
+      actively_banned: diagnostics.actively_banned,
+      last_ban_reason: diagnostics.last_ban_reason,
+      unban: diagnostics.unban,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/star-strike/pay-balance", async (req, res) => {
+  try {
+    const result = await payStarStrikeWithBalance({
+      telegram_id: req.body?.telegram_id,
+    });
+    res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/star-strike/pay-stars", async (req, res) => {
+  try {
+    const result = await payStarStrikeWithStars({
+      telegram_id: req.body?.telegram_id,
+    });
+    res.status(200).json({ ok: true, ...result });
   } catch (error) {
     sendApiError(res, error);
   }
