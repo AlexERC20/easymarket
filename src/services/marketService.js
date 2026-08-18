@@ -13029,6 +13029,67 @@ export async function getStarAbuseDiagnostics(input = {}) {
   };
 }
 
+// Diagnostic-only: one aggregate query answers "where do this account's stars
+// actually come from" (trading vs tasks vs referrals vs admin credits)
+// without paging the global fire_ledger feed by hand.
+export async function getFireIncomeBreakdown(input = {}) {
+  const telegramId = String(input.telegram_id || input.telegramId || "").trim();
+  const username = String(input.username || "").replace(/^@/, "").trim();
+  if (!telegramId && !username) {
+    throw new Error("telegram_id_or_username_required");
+  }
+  const userResult = await query(
+    `
+      SELECT id, telegram_id, username, first_name
+      FROM users
+      WHERE ($1::text <> '' AND telegram_id = $1::text)
+         OR ($2::text <> '' AND lower(username) = lower($2::text))
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `,
+    [telegramId, username],
+  );
+  const user = userResult.rows[0];
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+  const result = await query(
+    `
+      SELECT
+        reason,
+        COUNT(*)::int AS entries,
+        COALESCE(SUM(amount) FILTER (WHERE amount > 0), 0) AS credited,
+        COALESCE(SUM(amount) FILTER (WHERE amount < 0), 0) AS debited,
+        COALESCE(SUM(amount), 0) AS net
+      FROM fire_ledger
+      WHERE user_id = $1
+      GROUP BY reason
+      ORDER BY net DESC
+    `,
+    [user.id],
+  );
+  const balanceResult = await query(
+    "SELECT balance FROM fire_balances WHERE user_id = $1",
+    [user.id],
+  );
+  return {
+    user: {
+      id: Number(user.id),
+      telegram_id: user.telegram_id,
+      username: user.username,
+      first_name: user.first_name,
+    },
+    current_balance: roundMoney(Number(balanceResult.rows[0]?.balance || 0)),
+    by_reason: result.rows.map((row) => ({
+      reason: row.reason,
+      entries: Number(row.entries),
+      credited: roundMoney(Number(row.credited)),
+      debited: roundMoney(Number(row.debited)),
+      net: roundMoney(Number(row.net)),
+    })),
+  };
+}
+
 export async function buyOutcome(input) {
   const marketId = Number(input.marketId);
   const side = String(input.side || "").toUpperCase();

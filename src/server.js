@@ -55,6 +55,7 @@ import {
   getRecentActivity,
   getRecentMarketOutcomes,
   getRecentMarkets,
+  getFireIncomeBreakdown,
   getSportsMarkets,
   getStarAbuseDiagnostics,
   getTopMarkets,
@@ -2033,6 +2034,21 @@ app.get("/api/bridge/economy/star-abuse-check", requireBridgeSecret, async (req,
     res.status(200).json({
       ok: true,
       ...diagnostics,
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/fire-income-breakdown", requireBridgeSecret, async (req, res) => {
+  try {
+    const breakdown = await getFireIncomeBreakdown({
+      telegram_id: req.query.telegram_id ?? req.query.telegramId,
+      username: req.query.username,
+    });
+    res.status(200).json({
+      ok: true,
+      ...breakdown,
     });
   } catch (error) {
     sendApiError(res, error);
