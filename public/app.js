@@ -10599,6 +10599,9 @@ async function loadEngagementState() {
 }
 
 let starStrikeCountdownTimer = 0;
+// Collapsed by default while a strike is active - a full grid of greyed-out,
+// unclickable tasks is just visual noise under the banner, not useful info.
+let starStrikeTasksExpanded = false;
 
 async function loadStarStrikeStatus() {
   if (!state.user?.telegram_id) return;
@@ -10639,6 +10642,12 @@ function renderStarStrikeBanner() {
   const banned = Boolean(info?.actively_banned);
   banner.classList.toggle("hidden", !banned);
   taskList.classList.toggle("strike-locked", banned);
+  taskList.classList.toggle("strike-collapsed", banned && !starStrikeTasksExpanded);
+  const toggleBtn = $("starStrikeToggleTasksBtn");
+  if (toggleBtn) {
+    toggleBtn.classList.toggle("hidden", !banned);
+    toggleBtn.textContent = starStrikeTasksExpanded ? "Скрыть задания" : "Показать задания";
+  }
   stopStarStrikeCountdown();
   if (!banned) return;
 
@@ -10734,6 +10743,10 @@ async function payStarStrikeWithStars() {
 
 $("starStrikePayBalanceBtn")?.addEventListener("click", () => void payStarStrikeWithBalance());
 $("starStrikePayStarsBtn")?.addEventListener("click", () => void payStarStrikeWithStars());
+$("starStrikeToggleTasksBtn")?.addEventListener("click", () => {
+  starStrikeTasksExpanded = !starStrikeTasksExpanded;
+  renderStarStrikeBanner();
+});
 
 // Тап живёт между pointerdown и click. Если в этом окне заменить innerHTML
 // списка заданий (loadMe обновил прогресс дейликов), click улетает в уже
@@ -10888,6 +10901,7 @@ function setTasksSheetOpen(open) {
     renderTaskStats();
   } else {
     stopStarStrikeCountdown();
+    starStrikeTasksExpanded = false;
     closeSheet(sheet);
   }
 }

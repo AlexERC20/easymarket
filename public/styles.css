@@ -3156,10 +3156,25 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   color: var(--no);
 }
 
+.star-strike-toggle {
+  width: 100%;
+  margin-top: 10px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: underline;
+  padding: 4px;
+}
+
 .task-list.strike-locked .task-item {
   opacity: 0.4;
   filter: grayscale(1);
   pointer-events: none;
+}
+
+.task-list.strike-collapsed {
+  display: none;
 }
 
 .task-settings-toggle {
