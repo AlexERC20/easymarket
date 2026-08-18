@@ -12943,10 +12943,14 @@ const STAR_ABUSE_PENALTY_MAX_BPS = 3_000;
 // Speed is its own signal, independent of profitability: a losing bot that
 // sweeps several price levels in under a second still starves other players
 // of that liquidity. Counts consecutive same-market buys under this gap as
-// "rapid" - a human occasionally double-tapping won't rack up enough of
-// these to cross the threshold below.
+// "rapid". Judged as a SHARE of the account's own buy volume, not a raw
+// count - a heavy long-time player who occasionally double-taps racks up a
+// few of these over thousands of trades too, but at a tiny density; a
+// script whose whole behavior is rapid bursts sits at a very different
+// share of its own volume regardless of how active the account is overall.
 const STAR_ABUSE_RAPID_PAIR_MS = 1_000;
-const STAR_ABUSE_RAPID_PAIR_THRESHOLD = 15;
+const STAR_ABUSE_RAPID_PAIR_MIN = 10;
+const STAR_ABUSE_RAPID_PAIR_DENSITY = 0.03;
 // No measurable edge to scale off when flagged on speed alone, so this is a
 // flat deterrent rather than a self-tuning one.
 const STAR_ABUSE_SPEED_PENALTY_BPS = 1_000;
@@ -12971,7 +12975,12 @@ async function getStarAbuseStats(dbClient, userId) {
 
   const rapidResult = await dbClient.query(
     `
-      SELECT COUNT(*)::int AS rapid_pairs
+      SELECT
+        COUNT(*)::int AS total_buys,
+        COUNT(*) FILTER (
+          WHERE prev_created_at IS NOT NULL
+            AND EXTRACT(EPOCH FROM (created_at - prev_created_at)) * 1000 < $2
+        )::int AS rapid_pairs
       FROM (
         SELECT
           created_at,
@@ -12979,15 +12988,15 @@ async function getStarAbuseStats(dbClient, userId) {
         FROM trades
         WHERE user_id = $1 AND currency = 'STAR' AND action = 'BUY'
       ) buys
-      WHERE prev_created_at IS NOT NULL
-        AND EXTRACT(EPOCH FROM (created_at - prev_created_at)) * 1000 < $2
     `,
     [userId, STAR_ABUSE_RAPID_PAIR_MS],
   );
+  const totalBuys = Number(rapidResult.rows[0]?.total_buys || 0);
   const rapidPairs = Number(rapidResult.rows[0]?.rapid_pairs || 0);
+  const rapidPairDensity = totalBuys > 0 ? rapidPairs / totalBuys : 0;
 
   return {
-    settledCount, totalStaked, netPnl, edgeRatio, rapidPairs,
+    settledCount, totalStaked, netPnl, edgeRatio, totalBuys, rapidPairs, rapidPairDensity,
   };
 }
 
@@ -12995,7 +13004,8 @@ function evaluateStarAbuseStats(stats) {
   const hasSample = stats.settledCount >= STAR_ABUSE_MIN_SETTLED
     && stats.totalStaked >= STAR_ABUSE_MIN_STAKED;
   const profitFlagged = hasSample && stats.edgeRatio >= STAR_ABUSE_EDGE_RATIO;
-  const speedFlagged = stats.rapidPairs >= STAR_ABUSE_RAPID_PAIR_THRESHOLD;
+  const speedFlagged = stats.rapidPairs >= STAR_ABUSE_RAPID_PAIR_MIN
+    && stats.rapidPairDensity >= STAR_ABUSE_RAPID_PAIR_DENSITY;
   if (!profitFlagged && !speedFlagged) {
     return null;
   }
@@ -13055,13 +13065,16 @@ export async function getStarAbuseDiagnostics(input = {}) {
       min_staked: STAR_ABUSE_MIN_STAKED,
       edge_ratio: STAR_ABUSE_EDGE_RATIO,
       rapid_pair_ms: STAR_ABUSE_RAPID_PAIR_MS,
-      rapid_pair_threshold: STAR_ABUSE_RAPID_PAIR_THRESHOLD,
+      rapid_pair_min: STAR_ABUSE_RAPID_PAIR_MIN,
+      rapid_pair_density: STAR_ABUSE_RAPID_PAIR_DENSITY,
     },
     settled_count: stats.settledCount,
     total_staked: roundMoney(stats.totalStaked),
     net_pnl: roundMoney(stats.netPnl),
     edge_ratio: Math.round(stats.edgeRatio * 10_000) / 10_000,
+    total_buys: stats.totalBuys,
     rapid_pairs: stats.rapidPairs,
+    rapid_pair_density: Math.round(stats.rapidPairDensity * 10_000) / 10_000,
     flagged: throttle !== null,
     profit_flagged: throttle?.profitFlagged ?? false,
     speed_flagged: throttle?.speedFlagged ?? false,
