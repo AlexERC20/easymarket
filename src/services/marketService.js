@@ -12940,6 +12940,16 @@ const STAR_ABUSE_CAPPED_AMOUNT = 100;
 // own edge to turn future trades EV-negative for them specifically.
 const STAR_ABUSE_PENALTY_MULTIPLIER = 1.5;
 const STAR_ABUSE_PENALTY_MAX_BPS = 3_000;
+// Speed is its own signal, independent of profitability: a losing bot that
+// sweeps several price levels in under a second still starves other players
+// of that liquidity. Counts consecutive same-market buys under this gap as
+// "rapid" - a human occasionally double-tapping won't rack up enough of
+// these to cross the threshold below.
+const STAR_ABUSE_RAPID_PAIR_MS = 1_000;
+const STAR_ABUSE_RAPID_PAIR_THRESHOLD = 15;
+// No measurable edge to scale off when flagged on speed alone, so this is a
+// flat deterrent rather than a self-tuning one.
+const STAR_ABUSE_SPEED_PENALTY_BPS = 1_000;
 
 async function getStarAbuseStats(dbClient, userId) {
   const result = await dbClient.query(
@@ -12958,23 +12968,47 @@ async function getStarAbuseStats(dbClient, userId) {
   const totalStaked = Number(row.total_staked || 0);
   const netPnl = Number(row.net_pnl || 0);
   const edgeRatio = totalStaked > 0 ? netPnl / totalStaked : 0;
-  return { settledCount, totalStaked, netPnl, edgeRatio };
+
+  const rapidResult = await dbClient.query(
+    `
+      SELECT COUNT(*)::int AS rapid_pairs
+      FROM (
+        SELECT
+          created_at,
+          LAG(created_at) OVER (PARTITION BY market_id ORDER BY created_at) AS prev_created_at
+        FROM trades
+        WHERE user_id = $1 AND currency = 'STAR' AND action = 'BUY'
+      ) buys
+      WHERE prev_created_at IS NOT NULL
+        AND EXTRACT(EPOCH FROM (created_at - prev_created_at)) * 1000 < $2
+    `,
+    [userId, STAR_ABUSE_RAPID_PAIR_MS],
+  );
+  const rapidPairs = Number(rapidResult.rows[0]?.rapid_pairs || 0);
+
+  return {
+    settledCount, totalStaked, netPnl, edgeRatio, rapidPairs,
+  };
 }
 
 function evaluateStarAbuseStats(stats) {
-  if (
-    stats.settledCount < STAR_ABUSE_MIN_SETTLED
-    || stats.totalStaked < STAR_ABUSE_MIN_STAKED
-    || stats.edgeRatio < STAR_ABUSE_EDGE_RATIO
-  ) {
+  const hasSample = stats.settledCount >= STAR_ABUSE_MIN_SETTLED
+    && stats.totalStaked >= STAR_ABUSE_MIN_STAKED;
+  const profitFlagged = hasSample && stats.edgeRatio >= STAR_ABUSE_EDGE_RATIO;
+  const speedFlagged = stats.rapidPairs >= STAR_ABUSE_RAPID_PAIR_THRESHOLD;
+  if (!profitFlagged && !speedFlagged) {
     return null;
   }
   return {
     cappedAmount: STAR_ABUSE_CAPPED_AMOUNT,
-    penaltyFeeBps: Math.min(
-      STAR_ABUSE_PENALTY_MAX_BPS,
-      Math.round(stats.edgeRatio * 10_000 * STAR_ABUSE_PENALTY_MULTIPLIER),
-    ),
+    penaltyFeeBps: profitFlagged
+      ? Math.min(
+        STAR_ABUSE_PENALTY_MAX_BPS,
+        Math.round(stats.edgeRatio * 10_000 * STAR_ABUSE_PENALTY_MULTIPLIER),
+      )
+      : STAR_ABUSE_SPEED_PENALTY_BPS,
+    profitFlagged,
+    speedFlagged,
   };
 }
 
@@ -13020,12 +13054,17 @@ export async function getStarAbuseDiagnostics(input = {}) {
       min_settled: STAR_ABUSE_MIN_SETTLED,
       min_staked: STAR_ABUSE_MIN_STAKED,
       edge_ratio: STAR_ABUSE_EDGE_RATIO,
+      rapid_pair_ms: STAR_ABUSE_RAPID_PAIR_MS,
+      rapid_pair_threshold: STAR_ABUSE_RAPID_PAIR_THRESHOLD,
     },
     settled_count: stats.settledCount,
     total_staked: roundMoney(stats.totalStaked),
     net_pnl: roundMoney(stats.netPnl),
     edge_ratio: Math.round(stats.edgeRatio * 10_000) / 10_000,
+    rapid_pairs: stats.rapidPairs,
     flagged: throttle !== null,
+    profit_flagged: throttle?.profitFlagged ?? false,
+    speed_flagged: throttle?.speedFlagged ?? false,
     capped_amount: throttle?.cappedAmount ?? null,
     penalty_fee_bps: throttle?.penaltyFeeBps ?? null,
   };
