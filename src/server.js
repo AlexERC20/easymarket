@@ -58,6 +58,7 @@ import {
   getFireIncomeBreakdown,
   getSportsMarkets,
   getStarAbuseDiagnostics,
+  issueTestStarStrike,
   payStarStrikeWithBalance,
   payStarStrikeWithStars,
   getTopMarkets,
@@ -2087,6 +2088,19 @@ app.get("/api/bridge/economy/star-abuse-check", requireBridgeSecret, async (req,
       ok: true,
       ...diagnostics,
     });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/economy/star-strike/test", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await issueTestStarStrike({
+      telegram_id: req.body?.telegram_id,
+      username: req.body?.username,
+      strike: req.body?.strike,
+    });
+    res.status(200).json({ ok: true, ...result });
   } catch (error) {
     sendApiError(res, error);
   }

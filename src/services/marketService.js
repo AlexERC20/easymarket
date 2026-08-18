@@ -13248,6 +13248,60 @@ export async function payStarStrikeWithStars(input) {
   });
 }
 
+// QA-only: manually issues a strike (banned_until = NULL, same as a real
+// detection) so the strike UI/unban flow can be exercised on demand instead
+// of waiting for a real violation. Bypasses detection and the house-account
+// exclusion on purpose - enforcement itself doesn't check house status
+// either, only the auto-issuance path in checkStarAbuseBan does.
+export async function issueTestStarStrike(input = {}) {
+  const telegramId = String(input.telegram_id || input.telegramId || "").trim();
+  const username = String(input.username || "").replace(/^@/, "").trim();
+  if (!telegramId && !username) {
+    throw new Error("telegram_id_or_username_required");
+  }
+  const userResult = await query(
+    `
+      SELECT id, telegram_id, username, first_name
+      FROM users
+      WHERE ($1::text <> '' AND telegram_id = $1::text)
+         OR ($2::text <> '' AND lower(username) = lower($2::text))
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `,
+    [telegramId, username],
+  );
+  const user = userResult.rows[0];
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+  const strike = Math.max(1, Math.round(Number(input.strike) || 1));
+
+  await query(
+    `
+      INSERT INTO star_abuse_bans (
+        user_id, strike_count, banned_until, evaluate_since, last_reason, updated_at
+      )
+      VALUES ($1, $2, NULL, now(), 'manual_test', now())
+      ON CONFLICT (user_id) DO UPDATE SET
+        strike_count = EXCLUDED.strike_count,
+        banned_until = NULL,
+        evaluate_since = now(),
+        last_reason = 'manual_test',
+        balance_paid_at = NULL,
+        stars_paid_at = NULL,
+        updated_at = now()
+    `,
+    [user.id, strike],
+  );
+
+  return {
+    user: {
+      id: Number(user.id), telegram_id: user.telegram_id, username: user.username,
+    },
+    strike_count: strike,
+  };
+}
+
 // Diagnostic-only: exposes the exact same numbers/decision buyOutcome uses,
 // so abuse-detection tuning can be checked against a real account without
 // reconstructing it by hand from the ledger.
