@@ -13023,25 +13023,27 @@ export async function buyOutcome(input) {
 
     let starAbusePenaltyFeeBps = 0;
     if (currency === "STAR") {
-      const lastBuyResult = await client.query(
-        `
-          SELECT created_at
-          FROM trades
-          WHERE user_id = $1 AND market_id = $2 AND currency = 'STAR' AND action = 'BUY'
-          ORDER BY created_at DESC
-          LIMIT 1
-        `,
-        [user.id, marketId],
-      );
-      const lastBuyAt = lastBuyResult.rows[0]?.created_at
-        ? new Date(lastBuyResult.rows[0].created_at).getTime()
-        : 0;
-      if (lastBuyAt && nowMs - lastBuyAt < STAR_BUY_COOLDOWN_MS) {
-        throw new Error("star_buy_cooldown");
-      }
-
+      // Everything below only ever fires for an account already flagged by
+      // getStarAbuseThrottle - an ordinary player never sees a cooldown, a
+      // size cap, or a fee bump, no matter how fast they click.
       const abuseThrottle = await getStarAbuseThrottle(client, user.id);
       if (abuseThrottle) {
+        const lastBuyResult = await client.query(
+          `
+            SELECT created_at
+            FROM trades
+            WHERE user_id = $1 AND market_id = $2 AND currency = 'STAR' AND action = 'BUY'
+            ORDER BY created_at DESC
+            LIMIT 1
+          `,
+          [user.id, marketId],
+        );
+        const lastBuyAt = lastBuyResult.rows[0]?.created_at
+          ? new Date(lastBuyResult.rows[0].created_at).getTime()
+          : 0;
+        if (lastBuyAt && nowMs - lastBuyAt < STAR_BUY_COOLDOWN_MS) {
+          throw new Error("star_buy_cooldown");
+        }
         if (amount > abuseThrottle.cappedAmount) {
           throw new Error("star_buy_size_limited");
         }
