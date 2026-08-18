@@ -658,6 +658,15 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_trades_created
       ON trades(created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS star_abuse_bans (
+      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      strike_count INT NOT NULL DEFAULT 0,
+      banned_until TIMESTAMPTZ,
+      evaluate_since TIMESTAMPTZ NOT NULL DEFAULT now(),
+      last_reason TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS profit_fee_distributions (
       id BIGSERIAL PRIMARY KEY,
       event_key TEXT UNIQUE NOT NULL,

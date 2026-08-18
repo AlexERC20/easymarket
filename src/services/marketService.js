@@ -11846,10 +11846,6 @@ async function executeClobMarketBuy(client, input) {
   );
   const context = await refreshMarketMakerAccount(client, input.market, funding.bookType, true);
   const tradeFeeBps = context.settings.user_trade_fee_bps;
-  // Only the flagged buyer's own fee is bumped - the counterparty (a resting
-  // order or the AMM) still pays the normal rate, so this never leaks onto
-  // someone else's fill.
-  const buyerTradeFeeBps = Math.max(tradeFeeBps, Number(input.abusePenaltyFeeBps || 0));
   const economySettings = await getEconomySettingsWithClient(client);
   const ammLevels = getAmmLevelsForAction(context.quotes, input.side, "BUY")
     .map((level) => ({ ...level, remaining: toNumber(level.shares) }));
@@ -11885,7 +11881,7 @@ async function executeClobMarketBuy(client, input) {
     if (!(price > 0) || availableShares <= CLOB_MIN_FILL_SHARES) {
       break;
     }
-    const fillShares = getFillWithinBudget(input.amount - spent, price, availableShares, buyerTradeFeeBps);
+    const fillShares = getFillWithinBudget(input.amount - spent, price, availableShares, tradeFeeBps);
     if (fillShares <= CLOB_MIN_FILL_SHARES) {
       break;
     }
@@ -11896,7 +11892,7 @@ async function executeClobMarketBuy(client, input) {
       price,
       shares: fillShares,
       bookType: funding.bookType,
-      tradeFeeBps: buyerTradeFeeBps,
+      tradeFeeBps,
       makerOrderId: useUserOrder ? userOrder.id : null,
       counterpartyUserId: useUserOrder ? userOrder.user_id : null,
       liquidityRole: "TAKER",
@@ -12933,13 +12929,6 @@ const STAR_ABUSE_MIN_STAKED = 500;
 // A persistent double-digit return on staked volume, sustained over dozens of
 // trades, is not what fair pricing plus a house edge produces by luck.
 const STAR_ABUSE_EDGE_RATIO = 0.1;
-const STAR_ABUSE_CAPPED_AMOUNT = 100;
-// The penalty fee is set relative to the user's own measured edge (with
-// margin), so it is self-tuning against whatever advantage they are actually
-// extracting instead of a guessed flat number - it only has to outrun their
-// own edge to turn future trades EV-negative for them specifically.
-const STAR_ABUSE_PENALTY_MULTIPLIER = 1.5;
-const STAR_ABUSE_PENALTY_MAX_BPS = 3_000;
 // Speed is its own signal, independent of profitability: a losing bot that
 // sweeps several price levels in under a second still starves other players
 // of that liquidity. Counts consecutive same-market buys under this gap as
@@ -12951,19 +12940,13 @@ const STAR_ABUSE_PENALTY_MAX_BPS = 3_000;
 const STAR_ABUSE_RAPID_PAIR_MS = 1_000;
 const STAR_ABUSE_RAPID_PAIR_MIN = 10;
 const STAR_ABUSE_RAPID_PAIR_DENSITY = 0.03;
-// No measurable edge to scale off when flagged on speed alone, so this is a
-// flat deterrent rather than a self-tuning one. Well above the normal 1%
-// trade fee is intentional - the density threshold to get flagged at all is
-// already far above what an ordinary player could hit by accident.
-const STAR_ABUSE_SPEED_PENALTY_BPS = 2_000;
-// A lifetime-cumulative measure never lets an account earn its way back -
-// with enough historical volume, diluting it back under threshold would
-// take more future trades than anyone would ever place. A rolling window
-// means someone who actually stops the behavior clears the flag once the
-// bad history ages out, instead of it being a de facto permanent mark.
-const STAR_ABUSE_WINDOW_DAYS = 30;
+// Escalating time-out instead of an ongoing cap/fee: first offense costs an
+// hour, and it doubles every time the account is flagged again after a ban
+// already expired - a few repeats gets expensive fast without waiting on a
+// slow-to-dilute rolling average to sort it out.
+const STAR_ABUSE_BASE_BAN_HOURS = 1;
 
-async function getStarAbuseStats(dbClient, userId) {
+async function getStarAbuseStats(dbClient, userId, sinceIso) {
   const result = await dbClient.query(
     `
       SELECT
@@ -12973,9 +12956,9 @@ async function getStarAbuseStats(dbClient, userId) {
       FROM positions
       WHERE user_id = $1
         AND currency = 'STAR'
-        AND updated_at >= now() - ($2::int * interval '1 day')
+        AND updated_at >= $2::timestamptz
     `,
-    [userId, STAR_ABUSE_WINDOW_DAYS],
+    [userId, sinceIso],
   );
   const row = result.rows[0] || {};
   const settledCount = Number(row.settled_count || 0);
@@ -12999,10 +12982,10 @@ async function getStarAbuseStats(dbClient, userId) {
         WHERE user_id = $1
           AND currency = 'STAR'
           AND action = 'BUY'
-          AND created_at >= now() - ($3::int * interval '1 day')
+          AND created_at >= $3::timestamptz
       ) buys
     `,
-    [userId, STAR_ABUSE_RAPID_PAIR_MS, STAR_ABUSE_WINDOW_DAYS],
+    [userId, STAR_ABUSE_RAPID_PAIR_MS, sinceIso],
   );
   const totalBuys = Number(rapidResult.rows[0]?.total_buys || 0);
   const rapidPairs = Number(rapidResult.rows[0]?.rapid_pairs || 0);
@@ -13022,22 +13005,61 @@ function evaluateStarAbuseStats(stats) {
   if (!profitFlagged && !speedFlagged) {
     return null;
   }
-  return {
-    cappedAmount: STAR_ABUSE_CAPPED_AMOUNT,
-    penaltyFeeBps: profitFlagged
-      ? Math.min(
-        STAR_ABUSE_PENALTY_MAX_BPS,
-        Math.round(stats.edgeRatio * 10_000 * STAR_ABUSE_PENALTY_MULTIPLIER),
-      )
-      : STAR_ABUSE_SPEED_PENALTY_BPS,
-    profitFlagged,
-    speedFlagged,
-  };
+  return { profitFlagged, speedFlagged };
 }
 
-async function getStarAbuseThrottle(client, userId) {
-  const stats = await getStarAbuseStats(client, userId);
-  return evaluateStarAbuseStats(stats);
+// Locks and reads/writes star_abuse_bans for this user, escalating the ban on
+// a fresh violation and leaving an active ban alone. evaluate_since is reset
+// to "now" on every new ban, so the NEXT check only judges behavior after
+// this ban ends - old evidence that already earned a strike doesn't count
+// again once the account starts fresh.
+async function checkStarAbuseBan(client, userId) {
+  const existingResult = await client.query(
+    `
+      SELECT strike_count, banned_until, evaluate_since
+      FROM star_abuse_bans
+      WHERE user_id = $1
+      FOR UPDATE
+    `,
+    [userId],
+  );
+  const existing = existingResult.rows[0];
+
+  if (existing?.banned_until && new Date(existing.banned_until).getTime() > Date.now()) {
+    return { banned: true, bannedUntil: existing.banned_until, strike: existing.strike_count };
+  }
+
+  const sinceIso = existing?.evaluate_since || new Date(0).toISOString();
+  const stats = await getStarAbuseStats(client, userId, sinceIso);
+  const flag = evaluateStarAbuseStats(stats);
+  if (!flag) {
+    return { banned: false };
+  }
+
+  const strike = Number(existing?.strike_count || 0) + 1;
+  const banHours = STAR_ABUSE_BASE_BAN_HOURS * (2 ** (strike - 1));
+  const bannedUntil = new Date(Date.now() + banHours * 3_600_000).toISOString();
+  const reason = flag.profitFlagged && flag.speedFlagged
+    ? "profit_and_speed"
+    : flag.profitFlagged ? "profit" : "speed";
+
+  await client.query(
+    `
+      INSERT INTO star_abuse_bans (user_id, strike_count, banned_until, evaluate_since, last_reason, updated_at)
+      VALUES ($1, $2, $3::timestamptz, now(), $4, now())
+      ON CONFLICT (user_id) DO UPDATE SET
+        strike_count = EXCLUDED.strike_count,
+        banned_until = EXCLUDED.banned_until,
+        evaluate_since = EXCLUDED.evaluate_since,
+        last_reason = EXCLUDED.last_reason,
+        updated_at = now()
+    `,
+    [userId, strike, bannedUntil, reason],
+  );
+
+  return {
+    banned: true, bannedUntil, strike, hours: banHours, reason,
+  };
 }
 
 // Diagnostic-only: exposes the exact same numbers/decision buyOutcome uses,
@@ -13065,8 +13087,18 @@ export async function getStarAbuseDiagnostics(input = {}) {
     throw new Error("user_not_found");
   }
   const isHouseAccount = config.telegramAdminUserIds.includes(String(user.telegram_id ?? ""));
-  const stats = await getStarAbuseStats({ query }, user.id);
-  const throttle = isHouseAccount ? null : evaluateStarAbuseStats(stats);
+  const banRowResult = await query(
+    "SELECT strike_count, banned_until, evaluate_since, last_reason FROM star_abuse_bans WHERE user_id = $1",
+    [user.id],
+  );
+  const banRow = banRowResult.rows[0] || null;
+  const sinceIso = banRow?.evaluate_since || new Date(0).toISOString();
+  const stats = await getStarAbuseStats({ query }, user.id, sinceIso);
+  const flag = isHouseAccount ? null : evaluateStarAbuseStats(stats);
+  const activelyBanned = Boolean(
+    banRow?.banned_until && new Date(banRow.banned_until).getTime() > Date.now(),
+  );
+  const nextStrike = Number(banRow?.strike_count || 0) + 1;
   return {
     user: {
       id: Number(user.id),
@@ -13082,8 +13114,9 @@ export async function getStarAbuseDiagnostics(input = {}) {
       rapid_pair_ms: STAR_ABUSE_RAPID_PAIR_MS,
       rapid_pair_min: STAR_ABUSE_RAPID_PAIR_MIN,
       rapid_pair_density: STAR_ABUSE_RAPID_PAIR_DENSITY,
-      window_days: STAR_ABUSE_WINDOW_DAYS,
+      base_ban_hours: STAR_ABUSE_BASE_BAN_HOURS,
     },
+    evaluated_since: sinceIso,
     settled_count: stats.settledCount,
     total_staked: roundMoney(stats.totalStaked),
     net_pnl: roundMoney(stats.netPnl),
@@ -13091,11 +13124,14 @@ export async function getStarAbuseDiagnostics(input = {}) {
     total_buys: stats.totalBuys,
     rapid_pairs: stats.rapidPairs,
     rapid_pair_density: Math.round(stats.rapidPairDensity * 10_000) / 10_000,
-    flagged: throttle !== null,
-    profit_flagged: throttle?.profitFlagged ?? false,
-    speed_flagged: throttle?.speedFlagged ?? false,
-    capped_amount: throttle?.cappedAmount ?? null,
-    penalty_fee_bps: throttle?.penaltyFeeBps ?? null,
+    currently_flagged: flag !== null,
+    profit_flagged: flag?.profitFlagged ?? false,
+    speed_flagged: flag?.speedFlagged ?? false,
+    strike_count: Number(banRow?.strike_count || 0),
+    actively_banned: activelyBanned,
+    banned_until: activelyBanned ? banRow.banned_until : null,
+    last_ban_reason: banRow?.last_reason ?? null,
+    next_ban_hours_if_flagged_again: STAR_ABUSE_BASE_BAN_HOURS * (2 ** (nextStrike - 1)),
   };
 }
 
@@ -13210,7 +13246,6 @@ export async function buyOutcome(input) {
       ensureMinimumBtcStake(amount, currency);
     }
 
-    let starAbusePenaltyFeeBps = 0;
     if (currency === "STAR") {
       // The cooldown protects OTHER players' access to liquidity, which has
       // nothing to do with whether this particular account is profitable -
@@ -13235,18 +13270,15 @@ export async function buyOutcome(input) {
         throw new Error("star_buy_cooldown");
       }
 
-      // The size cap and penalty fee are the separate, profitability/speed
-      // -gated layer. House accounts are excluded the same way the treasury
-      // audit excludes them elsewhere - they are the book's own float and
-      // test traffic, not a customer to protect other players from.
+      // The escalating ban is the separate, profitability/speed-gated layer.
+      // House accounts are excluded the same way the treasury audit excludes
+      // them elsewhere - they are the book's own float and test traffic, not
+      // a customer to protect other players from.
       const isHouseAccount = config.telegramAdminUserIds.includes(String(user.telegram_id ?? ""));
       if (!isHouseAccount) {
-        const abuseThrottle = await getStarAbuseThrottle(client, user.id);
-        if (abuseThrottle) {
-          if (amount > abuseThrottle.cappedAmount) {
-            throw new Error("star_buy_size_limited");
-          }
-          starAbusePenaltyFeeBps = abuseThrottle.penaltyFeeBps;
+        const ban = await checkStarAbuseBan(client, user.id);
+        if (ban.banned) {
+          throw new Error("star_trading_banned");
         }
       }
     }
@@ -13259,7 +13291,6 @@ export async function buyOutcome(input) {
         amount,
         currency,
         bookType: input.book_type || input.bookType,
-        abusePenaltyFeeBps: starAbusePenaltyFeeBps,
       });
     }
     if (!isBtcMarketSymbol(market.symbol)) {

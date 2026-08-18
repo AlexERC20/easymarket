@@ -181,7 +181,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "market_buy_frozen",
     "market_trading_paused",
     "star_buy_cooldown",
-    "star_buy_size_limited",
+    "star_trading_banned",
     "price_unavailable",
     "insufficient_market_liquidity",
     "market_maker_unavailable",
