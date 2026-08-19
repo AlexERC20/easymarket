@@ -13093,6 +13093,30 @@ async function checkStarAbuseBan(client, userId) {
   };
 }
 
+// checkStarAbuseBan's own stats query scans a user's whole recent trade
+// history with a window function - fine occasionally, but running it inside
+// every single buy's transaction (as this used to) meant a heavy trader's
+// own volume made their next trade slower, and enough concurrent heavy
+// traders queued up real contention on the shared Postgres instance that
+// OTHER currencies' trades stalled too. Detection now runs after the
+// triggering trade has already committed and returned to the user - it only
+// affects whether their NEXT trade gets rejected, never this one - and is
+// throttled per user so it does not re-run on every single fast trade.
+const STAR_ABUSE_CHECK_MIN_INTERVAL_MS = 30_000;
+const starAbuseLastCheckedAt = new Map();
+
+function scheduleStarAbuseDetection(userId) {
+  const last = starAbuseLastCheckedAt.get(userId) || 0;
+  const now = Date.now();
+  if (now - last < STAR_ABUSE_CHECK_MIN_INTERVAL_MS) {
+    return;
+  }
+  starAbuseLastCheckedAt.set(userId, now);
+  void withTransaction((client) => checkStarAbuseBan(client, userId)).catch((error) => {
+    console.warn(`[star-abuse] background check failed user_id=${userId}: ${error?.message || error}`);
+  });
+}
+
 // Escalates with strike level like the ban itself, capped so a strike never
 // literally wipes the account to zero. Kept gentler than the ban/stars
 // escalation on purpose - the real bite for a repeat (strike 3+) offender is
@@ -13513,7 +13537,10 @@ export async function buyOutcome(input) {
     throw new Error("user_not_found");
   }
 
-  return withTransaction(async (client) => {
+  const isHouseAccount = currency === "STAR"
+    && config.telegramAdminUserIds.includes(String(user.telegram_id ?? ""));
+
+  const result = await withTransaction(async (client) => {
     const marketResult = await client.query(
       `
         SELECT *
@@ -13567,14 +13594,15 @@ export async function buyOutcome(input) {
         throw new Error("star_buy_cooldown");
       }
 
-      // The escalating ban is the separate, profitability/speed-gated layer.
-      // House accounts are excluded the same way the treasury audit excludes
-      // them elsewhere - they are the book's own float and test traffic, not
-      // a customer to protect other players from.
-      const isHouseAccount = config.telegramAdminUserIds.includes(String(user.telegram_id ?? ""));
+      // Only a cheap single-row lookup here - the expensive stats scan that
+      // decides whether to ISSUE a new ban runs afterward, in the background
+      // (see scheduleStarAbuseDetection below), so it never adds latency to
+      // this trade. House accounts are excluded the same way the treasury
+      // audit excludes them elsewhere - they are the book's own float and
+      // test traffic, not a customer to protect other players from.
       if (!isHouseAccount) {
-        const ban = await checkStarAbuseBan(client, user.id);
-        if (ban.banned) {
+        const existingBan = await getActiveStarBan(client, user.id);
+        if (existingBan) {
           throw new Error("star_trading_banned");
         }
       }
@@ -13785,6 +13813,15 @@ export async function buyOutcome(input) {
       }),
     };
   });
+
+  // Runs after the trade has already committed and the response is on its
+  // way to the trader - never adds latency to their own buy, only decides
+  // whether their NEXT one gets rejected.
+  if (currency === "STAR" && !isHouseAccount) {
+    scheduleStarAbuseDetection(user.id);
+  }
+
+  return result;
 }
 
 export async function sellOutcome(input) {
