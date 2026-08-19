@@ -12935,17 +12935,19 @@ const STAR_ABUSE_MIN_STAKED = 500;
 // A persistent double-digit return on staked volume, sustained over dozens of
 // trades, is not what fair pricing plus a house edge produces by luck.
 const STAR_ABUSE_EDGE_RATIO = 0.1;
-// Speed is its own signal, independent of profitability: a losing bot that
-// sweeps several price levels in under a second still starves other players
-// of that liquidity. Counts consecutive same-market buys under this gap as
-// "rapid". Judged as a SHARE of the account's own buy volume, not a raw
-// count - a heavy long-time player who occasionally double-taps racks up a
-// few of these over thousands of trades too, but at a tiny density; a
-// script whose whole behavior is rapid bursts sits at a very different
-// share of its own volume regardless of how active the account is overall.
+// Speed alone turned out to catch ordinary players too: with no volume
+// floor, someone with e.g. 20 total buys who twice bought a bit more of the
+// same side within a second already hits 10+ rapid pairs at high density -
+// that is just "add to my bet," not a bot. Two things fix this: (1) require
+// real volume before speed is even evaluated, same idea as the profit
+// sample gate, and (2) a losing-money bot is self-limiting anyway (it burns
+// through its own stars faster the more it trades), so speed alone no
+// longer flags an account that is not at least breaking even - only a fast
+// AND profitable pattern is worth a strike on its own.
 const STAR_ABUSE_RAPID_PAIR_MS = 1_000;
 const STAR_ABUSE_RAPID_PAIR_MIN = 10;
 const STAR_ABUSE_RAPID_PAIR_DENSITY = 0.03;
+const STAR_ABUSE_SPEED_MIN_BUYS = 200;
 // Escalating time-out instead of an ongoing cap/fee: first offense costs an
 // hour, and it doubles every time the account is flagged again after a ban
 // already expired - a few repeats gets expensive fast without waiting on a
@@ -13006,8 +13008,10 @@ function evaluateStarAbuseStats(stats) {
   const hasSample = stats.settledCount >= STAR_ABUSE_MIN_SETTLED
     && stats.totalStaked >= STAR_ABUSE_MIN_STAKED;
   const profitFlagged = hasSample && stats.edgeRatio >= STAR_ABUSE_EDGE_RATIO;
-  const speedFlagged = stats.rapidPairs >= STAR_ABUSE_RAPID_PAIR_MIN
-    && stats.rapidPairDensity >= STAR_ABUSE_RAPID_PAIR_DENSITY;
+  const speedFlagged = stats.totalBuys >= STAR_ABUSE_SPEED_MIN_BUYS
+    && stats.rapidPairs >= STAR_ABUSE_RAPID_PAIR_MIN
+    && stats.rapidPairDensity >= STAR_ABUSE_RAPID_PAIR_DENSITY
+    && stats.edgeRatio >= 0;
   if (!profitFlagged && !speedFlagged) {
     return null;
   }
@@ -13367,6 +13371,47 @@ export async function clearTestStarStrike(input = {}) {
   };
 }
 
+// Ops-only: lists every account currently serving a strike and re-evaluates
+// each one against the CURRENT thresholds - built to clean up after a
+// threshold change, so anyone flagged under stricter old rules who would not
+// qualify anymore is easy to spot (still_qualifies: false) without paging
+// through accounts by hand.
+export async function listActiveStarStrikes() {
+  const rowsResult = await query(
+    `
+      SELECT
+        b.user_id, b.strike_count, b.banned_until, b.evaluate_since, b.last_reason,
+        u.telegram_id, u.username, u.first_name
+      FROM star_abuse_bans b
+      JOIN users u ON u.id = b.user_id
+      WHERE b.banned_until IS NULL OR b.banned_until > now()
+      ORDER BY b.updated_at DESC
+    `,
+  );
+  const houseIds = new Set(config.telegramAdminUserIds.map((id) => String(id)));
+
+  const results = [];
+  for (const row of rowsResult.rows) {
+    const isHouseAccount = houseIds.has(String(row.telegram_id));
+    const stats = await getStarAbuseStats({ query }, row.user_id, row.evaluate_since);
+    const flag = evaluateStarAbuseStats(stats);
+    results.push({
+      user: {
+        id: Number(row.user_id), telegram_id: row.telegram_id, username: row.username,
+      },
+      is_house_account: isHouseAccount,
+      strike_count: Number(row.strike_count || 0),
+      last_reason: row.last_reason,
+      awaiting_payment: row.banned_until === null,
+      total_buys: stats.totalBuys,
+      rapid_pair_density: Math.round(stats.rapidPairDensity * 10_000) / 10_000,
+      edge_ratio: Math.round(stats.edgeRatio * 10_000) / 10_000,
+      still_qualifies: flag !== null,
+    });
+  }
+  return { count: results.length, strikes: results };
+}
+
 // Diagnostic-only: exposes the exact same numbers/decision buyOutcome uses,
 // so abuse-detection tuning can be checked against a real account without
 // reconstructing it by hand from the ledger.
@@ -13423,6 +13468,7 @@ export async function getStarAbuseDiagnostics(input = {}) {
       rapid_pair_ms: STAR_ABUSE_RAPID_PAIR_MS,
       rapid_pair_min: STAR_ABUSE_RAPID_PAIR_MIN,
       rapid_pair_density: STAR_ABUSE_RAPID_PAIR_DENSITY,
+      speed_min_buys: STAR_ABUSE_SPEED_MIN_BUYS,
       base_ban_hours: STAR_ABUSE_BASE_BAN_HOURS,
     },
     evaluated_since: sinceIso,

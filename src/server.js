@@ -60,6 +60,7 @@ import {
   clearTestStarStrike,
   getStarAbuseDiagnostics,
   issueTestStarStrike,
+  listActiveStarStrikes,
   payStarStrikeWithBalance,
   payStarStrikeWithStars,
   getTopMarkets,
@@ -2113,6 +2114,15 @@ app.post("/api/bridge/economy/star-strike/clear", requireBridgeSecret, async (re
       telegram_id: req.body?.telegram_id,
       username: req.body?.username,
     });
+    res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/star-strike/active", requireBridgeSecret, async (_req, res) => {
+  try {
+    const result = await listActiveStarStrikes();
     res.status(200).json({ ok: true, ...result });
   } catch (error) {
     sendApiError(res, error);
