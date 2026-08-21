@@ -4118,8 +4118,11 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
 
 .task-stats-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   align-content: start;
+  width: 100%;
+  min-width: 0;
   /* Ровно та же высота, что у списка заданий (.task-list: 62vh): панель не
      меняет размер при переключении вкладок. Раньше кап 390px сжимал вкладку
      статистики, и шит прыгал. Список скроллится внутри. */
@@ -4203,7 +4206,12 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
 .task-stat-row {
   position: relative;
   display: block;
+  justify-self: stretch;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
+  box-sizing: border-box;
   border: 1px solid var(--line-soft);
   border-radius: 16px;
   background:
@@ -4211,7 +4219,7 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
     rgba(10, 16, 26, 0.82);
   padding: 0;
   box-shadow: 0 7px 18px rgba(0, 0, 0, 0.16);
-  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+  transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
 }
 
 .task-stat-row.expanded {
@@ -4226,6 +4234,7 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   align-items: center;
   gap: 12px;
   width: 100%;
+  min-width: 0;
   min-height: 84px;
   margin: 0;
   border: 0;
@@ -4235,15 +4244,12 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   font: inherit;
   text-align: left;
   cursor: pointer;
+  box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
 }
 
 .task-stat-toggle:active {
   background: rgba(75, 213, 255, 0.055);
-}
-
-.task-stat-row:active {
-  transform: scale(0.985);
 }
 
 .task-stat-main,
