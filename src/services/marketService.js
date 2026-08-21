@@ -651,13 +651,18 @@ function mapUserMarketStat(row) {
     market_type: row.market_type,
     label: row.label,
     title: row.title,
+    title_en: row.title_en || row.question_en || row.title,
     question: row.question,
+    question_en: row.question_en || row.question,
     team: row.team,
+    team_en: row.team_en || row.question_en || row.team,
     icon: row.icon,
     status: row.market_status,
     winner: row.winner,
     yes_label: row.yes_label || null,
     no_label: row.no_label || null,
+    yes_label_en: row.yes_label_en || row.yes_label || null,
+    no_label_en: row.no_label_en || row.no_label || null,
     has_yes_position: row.has_yes_position === true || row.has_yes_position === "true",
     has_no_position: row.has_no_position === true || row.has_no_position === "true",
     currency: normalizeCurrency(row.currency),
@@ -3471,6 +3476,7 @@ async function reconcileFilledSellLimitOrderProfitFeesForUser(userId, limit = 20
         FROM limit_orders lo
         WHERE lo.user_id = $1
           AND lo.order_side = 'SELL'
+          AND lo.book_type = 'LEGACY'
           AND lo.status = 'filled'
           AND lo.reserved_amount > lo.reserved_spent
           AND NOT EXISTS (
@@ -4514,6 +4520,361 @@ function getBonusRatioForAmount(bonusAmount, totalAmount) {
   return clamp(Number(bonusAmount || 0) / total, 0, 1);
 }
 
+function historySum(rows, field) {
+  return roundMoney(rows.reduce((total, row) => total + toNumber(row?.[field]), 0));
+}
+
+function historyShares(rows, field = "shares") {
+  return roundShares(rows.reduce((total, row) => total + toNumber(row?.[field]), 0));
+}
+
+function isSettlementProfitFee(row) {
+  return String(row?.reason || "") === "market_settlement_profit_fee";
+}
+
+function historyMarketType(symbol) {
+  if (isBtcMarketSymbol(symbol)) return "BTC_UPDOWN";
+  if (String(symbol || "").startsWith(WORLD_CUP_SYMBOL_PREFIX)) return "WORLD_CUP_WINNER";
+  if (String(symbol || "").startsWith(TOP_MARKET_SYMBOL_PREFIX)) return "TOP_MARKET";
+  if (String(symbol || "").startsWith(SPORTS_MARKET_SYMBOL_PREFIX)) return "SPORTS_MARKET";
+  if (String(symbol || "").startsWith(SPECIAL_MARKET_SYMBOL_PREFIX)) return "SPECIAL_MARKET";
+  return null;
+}
+
+export function buildUserMarketHistoryDetail({
+  market,
+  currency,
+  positions = [],
+  trades = [],
+  orders = [],
+  tradeFees = [],
+  profitFees = [],
+  settlementCredits = [],
+}) {
+  const normalizedCurrency = normalizeCurrency(currency);
+  const tradeFeeRowsByTrade = new Map();
+  const orderIdByTrade = new Map();
+  for (const row of tradeFees) {
+    const tradeId = Number(row.trade_id || 0);
+    if (!tradeId) continue;
+    const rows = tradeFeeRowsByTrade.get(tradeId) || [];
+    rows.push(row);
+    tradeFeeRowsByTrade.set(tradeId, rows);
+    if (row.order_id !== null && row.order_id !== undefined) {
+      orderIdByTrade.set(tradeId, Number(row.order_id));
+    }
+  }
+
+  const directlyDistributedOrderIds = new Set();
+  for (const row of profitFees) {
+    const tradeId = Number(row.trade_id || 0);
+    const orderId = orderIdByTrade.get(tradeId);
+    if (tradeId && orderId) {
+      directlyDistributedOrderIds.add(orderId);
+    }
+  }
+  const effectiveProfitFees = profitFees.filter((row) => {
+    if (row.trade_id || String(row.reason || "") !== "limit_sell_profit_fee") {
+      return true;
+    }
+    const match = String(row.event_key || "").match(/^limit_order:(\d+):profit_fee$/);
+    return !match || !directlyDistributedOrderIds.has(Number(match[1]));
+  });
+
+  const profitFeeRowsByTrade = new Map();
+  for (const row of effectiveProfitFees) {
+    const tradeId = Number(row.trade_id || 0);
+    if (!tradeId) continue;
+    const rows = profitFeeRowsByTrade.get(tradeId) || [];
+    rows.push(row);
+    profitFeeRowsByTrade.set(tradeId, rows);
+  }
+
+  const executions = trades.map((trade) => {
+    const tradeId = Number(trade.id);
+    const action = String(trade.action || "BUY").toUpperCase() === "SELL" ? "SELL" : "BUY";
+    const executionFeeRows = tradeFeeRowsByTrade.get(tradeId) || [];
+    const distributionRows = profitFeeRowsByTrade.get(tradeId) || [];
+    const recordedExecutionFee = historySum(executionFeeRows, "amount");
+    const executionFee = recordedExecutionFee > 0
+      ? recordedExecutionFee
+      : roundMoney(toNumber(trade.trade_fee));
+    const distributedProfitFee = historySum(distributionRows, "total_fee");
+    const tradeTotalFee = roundMoney(toNumber(trade.fee));
+    const profitFee = distributedProfitFee > 0
+      ? distributedProfitFee
+      : roundMoney(Math.max(0, tradeTotalFee - executionFee));
+    const amount = roundMoney(toNumber(trade.amount));
+    const storedGross = roundMoney(toNumber(trade.gross_amount));
+    const grossAmount = storedGross > 0
+      ? storedGross
+      : action === "BUY"
+        ? roundMoney(Math.max(0, amount - executionFee))
+        : roundMoney(amount + executionFee + profitFee);
+
+    return {
+      id: tradeId,
+      action,
+      side: String(trade.side || "").toUpperCase(),
+      price: toNumber(trade.price),
+      shares: toNumber(trade.shares),
+      gross_amount: grossAmount,
+      net_amount: amount,
+      execution_fee: executionFee,
+      profit_fee: profitFee,
+      total_fee: roundMoney(executionFee + profitFee),
+      liquidity_role: String(trade.liquidity_role || "TAKER").toUpperCase(),
+      order_id: orderIdByTrade.get(tradeId) || null,
+      book_type: trade.book_type || "LEGACY",
+      created_at: trade.created_at,
+    };
+  });
+
+  const settlementProfitRows = effectiveProfitFees.filter(isSettlementProfitFee);
+  const settlementProfitFee = historySum(settlementProfitRows, "total_fee");
+  const executionFeeTotal = historySum(executions, "execution_fee");
+  const exitProfitFee = historySum(executions, "profit_fee");
+  const profitFeeTotal = roundMoney(exitProfitFee + settlementProfitFee);
+  const buyExecutions = executions.filter((trade) => trade.action === "BUY");
+  const sellExecutions = executions.filter((trade) => trade.action === "SELL");
+  const totalBuyCost = Math.max(
+    historySum(buyExecutions, "net_amount"),
+    historySum(positions, "spent"),
+  );
+  const totalSellProceeds = historySum(sellExecutions, "net_amount");
+  const ledgerSettlementPayout = historySum(settlementCredits, "amount");
+  const recordedPositionPayout = historySum(positions, "payout");
+  const settlementPayout = settlementCredits.length > 0
+    ? ledgerSettlementPayout
+    : roundMoney(Math.max(0, recordedPositionPayout - totalSellProceeds));
+  const totalReturn = roundMoney(totalSellProceeds + settlementPayout);
+  const isFinal = ["resolved", "price_error", "superseded", "refunded", "unwound", "cancelled"].includes(String(market?.status || ""));
+  const cashflowPnl = roundMoney(totalReturn - totalBuyCost);
+  const recordedPnl = historySum(positions, "pnl");
+
+  const distribution = {
+    total_fee: historySum(effectiveProfitFees, "total_fee"),
+    project_fee: historySum(effectiveProfitFees, "project_fee"),
+    referral_fee: historySum(effectiveProfitFees, "referral_fee"),
+    clan_fee: historySum(effectiveProfitFees, "clan_fee"),
+    bonus_unlock_fee: historySum(effectiveProfitFees, "bonus_unlock_fee"),
+    bonus_fee: historySum(effectiveProfitFees, "bonus_fee"),
+  };
+
+  const sides = ["YES", "NO"].map((side) => {
+    const sidePositions = positions.filter((position) => String(position.side).toUpperCase() === side);
+    const buys = buyExecutions.filter((trade) => trade.side === side);
+    const sells = sellExecutions.filter((trade) => trade.side === side);
+    const boughtShares = historyShares(buys);
+    const soldShares = historyShares(sells);
+    const buyGross = historySum(buys, "gross_amount");
+    const sellGross = historySum(sells, "gross_amount");
+    const settlementGross = market?.status === "resolved" && String(market?.winner || "").toUpperCase() === side
+      ? historyShares(sidePositions)
+      : 0;
+    const settlementFeeForSide = historySum(
+      settlementProfitRows.filter((fee) => sidePositions.some((position) => Number(position.id) === Number(fee.position_id))),
+      "total_fee",
+    );
+
+    return {
+      side,
+      bought_shares: boughtShares,
+      buy_cost: historySum(buys, "net_amount"),
+      buy_gross: buyGross,
+      avg_buy_price: boughtShares > 0 ? buyGross / boughtShares : 0,
+      sold_shares: soldShares,
+      sell_proceeds: historySum(sells, "net_amount"),
+      sell_gross: sellGross,
+      avg_sell_price: soldShares > 0 ? sellGross / soldShares : 0,
+      remaining_shares: historyShares(sidePositions),
+      remaining_cost_basis: historySum(sidePositions, "spent"),
+      settlement_price: market?.status === "resolved"
+        ? (String(market?.winner || "").toUpperCase() === side ? 1 : 0)
+        : null,
+      settlement_gross: settlementGross,
+      settlement_fee: settlementFeeForSide,
+      settlement_net: roundMoney(Math.max(0, settlementGross - settlementFeeForSide)),
+      payout: historySum(sidePositions, "payout"),
+      pnl: historySum(sidePositions, "pnl"),
+      status: sidePositions.some((position) => position.status === "open") ? "open" : (sidePositions[0]?.status || null),
+    };
+  }).filter((side) => side.bought_shares > 0 || side.sold_shares > 0 || side.remaining_shares > 0);
+
+  const mappedOrders = orders.map((order) => ({
+    id: Number(order.id),
+    side: String(order.side || "").toUpperCase(),
+    order_side: String(order.order_side || "BUY").toUpperCase(),
+    limit_price: toNumber(order.limit_price),
+    shares: toNumber(order.shares),
+    filled_shares: toNumber(order.filled_shares),
+    remaining_shares: toNumber(order.remaining_shares),
+    reserved_amount: toNumber(order.reserved_amount),
+    fee_paid: toNumber(order.fee_paid),
+    status: order.status,
+    book_type: order.book_type || "LEGACY",
+    created_at: order.created_at,
+    filled_at: order.filled_at,
+    cancelled_at: order.cancelled_at,
+  }));
+
+  return {
+    market: {
+      id: Number(market.id),
+      symbol: market.symbol,
+      market_type: historyMarketType(market.symbol),
+      question: market.question,
+      question_en: market.question_en || market.question,
+      title: market.title || null,
+      title_en: market.title_en || market.title || null,
+      team: market.team || null,
+      team_en: market.team_en || market.team || null,
+      icon: market.icon || null,
+      yes_label: market.yes_label || null,
+      no_label: market.no_label || null,
+      yes_label_en: market.yes_label_en || market.yes_label || null,
+      no_label_en: market.no_label_en || market.no_label || null,
+      open_price: toNumber(market.open_price),
+      close_price: market.close_price === null || market.close_price === undefined ? null : toNumber(market.close_price),
+      winner: market.winner,
+      status: market.status,
+      start_time: market.start_time,
+      end_time: market.end_time,
+      resolved_at: market.resolved_at,
+    },
+    currency: normalizedCurrency,
+    is_hedged: sides.length > 1,
+    summary: {
+      total_buy_cost: totalBuyCost,
+      total_sell_proceeds: totalSellProceeds,
+      settlement_payout: settlementPayout,
+      total_return: totalReturn,
+      net_pnl: isFinal ? cashflowPnl : recordedPnl,
+      recorded_pnl: recordedPnl,
+      execution_fee: executionFeeTotal,
+      exit_profit_fee: exitProfitFee,
+      settlement_profit_fee: settlementProfitFee,
+      profit_fee: profitFeeTotal,
+      service_fee: roundMoney(executionFeeTotal + profitFeeTotal),
+      execution_count: executions.length,
+      order_count: mappedOrders.length,
+    },
+    fee_distribution: distribution,
+    settlement_credits: settlementCredits.map((row) => ({
+      account: row.account || normalizedCurrency,
+      amount: toNumber(row.amount),
+      reason: row.reason,
+      created_at: row.created_at,
+    })),
+    sides,
+    executions,
+    orders: mappedOrders,
+  };
+}
+
+export async function getUserMarketHistoryDetail(telegramId, marketId, currency) {
+  const user = await getUserByTelegramId(telegramId);
+  if (!user) {
+    return null;
+  }
+  const safeMarketId = Number(marketId);
+  if (!Number.isSafeInteger(safeMarketId) || safeMarketId <= 0) {
+    throw new Error("invalid_market_id");
+  }
+  const normalizedCurrency = normalizeCurrency(currency);
+  const marketResult = await query(
+    `
+      SELECT
+        m.*,
+        COALESCE(meta.team, top_meta.title, CASE WHEN m.symbol = $2 THEN 'Киевстонер' END) AS team,
+        COALESCE(m.question_en, meta.team, top_meta.title, m.question) AS team_en,
+        COALESCE(meta.icon, top_meta.icon, CASE WHEN m.symbol = $2 THEN $3 END) AS icon,
+        top_meta.title,
+        COALESCE(m.question_en, top_meta.title, m.question) AS title_en,
+        top_meta.yes_label,
+        top_meta.no_label
+      FROM markets m
+      LEFT JOIN world_cup_market_meta meta ON meta.symbol = m.symbol
+      LEFT JOIN top_market_meta top_meta ON top_meta.symbol = m.symbol
+      WHERE m.id = $1::bigint
+      LIMIT 1
+    `,
+    [safeMarketId, KYIVSTONER_MARKET_SYMBOL, KYIVSTONER_MARKET_ICON],
+  );
+  const market = marketResult.rows[0];
+  if (!market) {
+    throw new Error("market_not_found");
+  }
+
+  const [positionsResult, tradesResult, ordersResult, tradeFeesResult, profitFeesResult, settlementCreditsResult] = await Promise.all([
+    query(
+      `SELECT * FROM positions WHERE user_id = $1 AND market_id = $2 AND currency = $3 ORDER BY created_at, id`,
+      [user.id, safeMarketId, normalizedCurrency],
+    ),
+    query(
+      `SELECT * FROM trades WHERE user_id = $1 AND market_id = $2 AND currency = $3 ORDER BY created_at, id LIMIT 500`,
+      [user.id, safeMarketId, normalizedCurrency],
+    ),
+    query(
+      `SELECT * FROM limit_orders WHERE user_id = $1 AND market_id = $2 AND currency = $3 ORDER BY created_at, id LIMIT 200`,
+      [user.id, safeMarketId, normalizedCurrency],
+    ),
+    query(
+      `SELECT * FROM market_trade_fees WHERE user_id = $1 AND market_id = $2 AND currency = $3 ORDER BY created_at, id LIMIT 500`,
+      [user.id, safeMarketId, normalizedCurrency],
+    ),
+    query(
+      `SELECT * FROM profit_fee_distributions WHERE user_id = $1 AND market_id = $2 AND currency = $3 ORDER BY created_at, id LIMIT 500`,
+      [user.id, safeMarketId, normalizedCurrency],
+    ),
+    normalizedCurrency === "USDT"
+      ? query(
+        `
+          SELECT 'CASH' AS account, amount, reason, source, created_at
+          FROM usdt_ledger
+          WHERE user_id = $1
+            AND (source = $2 OR source LIKE $2 || ':%')
+            AND (reason LIKE 'market_payout%' OR reason LIKE 'market_refund%' OR reason = 'lucky_round_bonus')
+          UNION ALL
+          SELECT 'BONUS' AS account, amount, reason, source, created_at
+          FROM usdt_bonus_ledger
+          WHERE user_id = $1
+            AND (source = $2 OR source LIKE $2 || ':%')
+            AND (reason LIKE 'market_payout%' OR reason LIKE 'market_refund%' OR reason = 'lucky_round_bonus')
+          ORDER BY created_at
+        `,
+        [user.id, `market:${safeMarketId}`],
+      )
+      : query(
+        `
+          SELECT 'STAR' AS account, amount, reason, source, created_at
+          FROM fire_ledger
+          WHERE user_id = $1
+            AND (source = $2 OR source LIKE $2 || ':%')
+            AND (reason LIKE 'market_payout%' OR reason LIKE 'market_refund%' OR reason = 'lucky_round_bonus')
+          ORDER BY created_at
+        `,
+        [user.id, `market:${safeMarketId}`],
+      ),
+  ]);
+
+  const hasHistory = positionsResult.rowCount > 0 || tradesResult.rowCount > 0 || ordersResult.rowCount > 0;
+  if (!hasHistory) {
+    throw new Error("market_history_not_found");
+  }
+
+  return buildUserMarketHistoryDetail({
+    market,
+    currency: normalizedCurrency,
+    positions: positionsResult.rows,
+    trades: tradesResult.rows,
+    orders: ordersResult.rows,
+    tradeFees: tradeFeesResult.rows,
+    profitFees: profitFeesResult.rows,
+    settlementCredits: settlementCreditsResult.rows,
+  });
+}
+
 async function getUserMarketStats(userId, limit = 40) {
   const safeLimit = Math.max(1, Math.min(100, Number(limit) || 40));
   await reconcileFilledSellLimitOrderProfitFeesForUser(userId);
@@ -4630,6 +4991,9 @@ async function getUserMarketStats(userId, limit = 40) {
           top_meta.yes_label,
           top_meta.no_label,
           m.question,
+          m.question_en,
+          m.yes_label_en,
+          m.no_label_en,
           m.status AS market_status,
           m.winner,
           COALESCE(position_stats.has_yes_position, false) AS has_yes_position,
@@ -4684,6 +5048,11 @@ async function getUserMarketStats(userId, limit = 40) {
       title: btcDefinition?.title
         || row.top_title
         || (isKyivstonerMarketSymbol(row.symbol) ? KYIVSTONER_MARKET_QUESTION : undefined),
+      title_en: btcDefinition?.title
+        || row.question_en
+        || row.top_title
+        || (isKyivstonerMarketSymbol(row.symbol) ? "How many years will Kyivstoner get?" : undefined),
+      team_en: row.question_en || row.team,
       label: btcDefinition?.label,
     });
   });

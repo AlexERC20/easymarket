@@ -120,6 +120,9 @@ const state = {
   positions: [],
   recentTrades: [],
   marketStats: [],
+  marketStatDetails: new Map(),
+  expandedMarketStatKey: null,
+  expandedMarketStatExecutions: new Set(),
   referralStats: null,
   recentMarkets: [],
   leaderboard: [],
@@ -3752,6 +3755,351 @@ function getMarketStatPositionLabel(stat) {
   return labels.join(" + ");
 }
 
+const MARKET_STAT_DETAIL_OPEN_TTL_MS = 30_000;
+
+function getMarketStatDetailKey(statOrMarketId, currency) {
+  if (typeof statOrMarketId === "object") {
+    return `${Number(statOrMarketId?.market_id || 0)}:${normalizeCurrency(statOrMarketId?.currency)}`;
+  }
+  return `${Number(statOrMarketId || 0)}:${normalizeCurrency(currency)}`;
+}
+
+function formatHistoryShares(value) {
+  return Number(value || 0).toLocaleString(getIntlLocale(), {
+    maximumFractionDigits: 4,
+  });
+}
+
+function formatHistoryTime(value) {
+  const date = new Date(value || 0);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString(getIntlLocale(), {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function historyBookLabel(bookType, english) {
+  if (bookType === "USDT_CASH") return english ? "cash" : "основной";
+  if (bookType === "USDT_BONUS") return english ? "bonus" : "бонусный";
+  if (bookType === "STAR") return english ? "stars" : "звёзды";
+  return english ? "legacy" : "старый режим";
+}
+
+function historyOrderStatusLabel(status, english) {
+  const labels = english
+    ? { open: "Open", filled: "Filled", cancelled: "Cancelled", expired: "Expired" }
+    : { open: "Открыт", filled: "Исполнен", cancelled: "Отменён", expired: "Истёк" };
+  return labels[String(status || "").toLowerCase()] || String(status || "—");
+}
+
+function renderMarketStatDetail(detail, stat, key, shareable) {
+  const english = getLanguage() === "en";
+  const market = applyMarketLanguage(detail.market || {});
+  const currency = normalizeCurrency(detail.currency || stat.currency);
+  const summary = detail.summary || {};
+  const feeDistribution = detail.fee_distribution || {};
+  const executions = detail.executions || [];
+  const orders = detail.orders || [];
+  const expandedExecutions = state.expandedMarketStatExecutions.has(key);
+  const compactExecutions = executions.length > 8
+    ? [...executions.slice(0, 4), ...executions.slice(-4)]
+    : executions;
+  const visibleExecutions = expandedExecutions ? executions : compactExecutions;
+  const visibleOrders = expandedExecutions ? orders : orders.slice(-4);
+  const copy = english ? {
+    invested: "Invested",
+    returned: "Returned",
+    pnl: "Net PnL",
+    fees: "Fees",
+    result: "Settlement",
+    winner: "Winner",
+    hedge: "Hedge: both outcomes",
+    target: "Open BTC",
+    close: "Close BTC",
+    bought: "Bought",
+    sold: "Sold",
+    average: "avg",
+    received: "received",
+    settled: "Settled",
+    remaining: "Remaining",
+    commission: "Fee breakdown",
+    tradeFee: "Trading fee",
+    exitFee: "Profit fee on exits",
+    winFee: "Profit fee on win",
+    totalFee: "Service fee total",
+    distribution: "Where the profit fee went",
+    project: "Project",
+    referral: "Inviter",
+    clan: "Winning clan fund",
+    reserve: "Bonus unlock reserve",
+    bonusPart: "Bonus-funded part",
+    executions: "Executions",
+    orders: "Limit orders",
+    buy: "Buy",
+    sell: "Sell",
+    debited: "Debited",
+    credited: "Credited",
+    gross: "gross",
+    fee: "fee",
+    maker: "maker",
+    taker: "taker",
+    filled: "filled",
+    of: "of",
+    showAll: "Show all",
+    collapse: "Collapse",
+    share: "Share win",
+    cash: "cash",
+    bonus: "bonus",
+  } : {
+    invested: "Вложено",
+    returned: "Получено",
+    pnl: "Чистый PnL",
+    fees: "Комиссии",
+    result: "Расчёт рынка",
+    winner: "Победил исход",
+    hedge: "Хедж: обе стороны",
+    target: "BTC на старте",
+    close: "BTC на закрытии",
+    bought: "Куплено",
+    sold: "Продано",
+    average: "средняя",
+    received: "получено",
+    settled: "Погашение",
+    remaining: "Осталось",
+    commission: "Расчёт комиссий",
+    tradeFee: "Торговая комиссия",
+    exitFee: "С прибыли при продаже",
+    winFee: "С прибыли при победе",
+    totalFee: "Сервисная комиссия всего",
+    distribution: "Куда ушла комиссия с прибыли",
+    project: "Проект",
+    referral: "Пригласившему",
+    clan: "В фонд клана-победителя",
+    reserve: "В резерв разблокировки бонусов",
+    bonusPart: "Бонусная часть",
+    executions: "Исполнения",
+    orders: "Лимитные ордера",
+    buy: "Покупка",
+    sell: "Продажа",
+    debited: "Списано",
+    credited: "Зачислено",
+    gross: "до комиссий",
+    fee: "комиссия",
+    maker: "мейкер",
+    taker: "тейкер",
+    filled: "исполнено",
+    of: "из",
+    showAll: "Показать всё",
+    collapse: "Свернуть",
+    share: "Поделиться победой",
+    cash: "основной",
+    bonus: "бонусный",
+  };
+
+  const winner = /^(YES|NO)$/.test(String(market.winner || ""))
+    ? marketSideLabel(market, market.winner)
+    : "—";
+  const settlementAccounts = (detail.settlement_credits || []).reduce((totals, credit) => {
+    const account = String(credit.account || "").toUpperCase();
+    totals[account] = Number(totals[account] || 0) + Number(credit.amount || 0);
+    return totals;
+  }, {});
+  const settlementAccountText = currency === "USDT" && Number(summary.settlement_payout || 0) > 0
+    ? [
+      settlementAccounts.CASH ? `${copy.cash} ${formatCurrencyAmount(settlementAccounts.CASH, currency)}` : "",
+      settlementAccounts.BONUS ? `${copy.bonus} ${formatCurrencyAmount(settlementAccounts.BONUS, currency)}` : "",
+    ].filter(Boolean).join(" · ")
+    : "";
+
+  const priceFacts = [
+    Number(market.open_price || 0) > 0
+      ? `<span><small>${copy.target}</small><b>$${escapeHtml(formatPrice(market.open_price))}</b></span>`
+      : "",
+    market.close_price !== null && Number(market.close_price || 0) > 0
+      ? `<span><small>${copy.close}</small><b>$${escapeHtml(formatPrice(market.close_price))}</b></span>`
+      : "",
+  ].filter(Boolean).join("");
+
+  const sideCards = (detail.sides || []).map((side) => {
+    const sideName = marketSideLabel(market, side.side);
+    const settlementPrice = side.settlement_price === 1
+      ? "100¢"
+      : side.settlement_price === 0
+        ? "0¢"
+        : formatCents(side.settlement_price);
+    const settlementText = side.settlement_price === null
+      ? ""
+      : `${copy.settled} ${settlementPrice}${side.settlement_net > 0 ? ` · ${formatCurrencyAmount(side.settlement_net, currency)}` : ""}`;
+    return `
+      <div class="task-stat-side ${side.side === "YES" ? "yes" : "no"}">
+        <div class="task-stat-side-head">
+          <strong>${escapeHtml(sideName)}</strong>
+          <b class="${Number(side.pnl || 0) >= 0 ? "profit" : "loss"}">${formatSignedCurrencyAmount(side.pnl || 0, currency)}</b>
+        </div>
+        <div class="task-stat-side-lines">
+          ${side.bought_shares > 0 ? `<span>${copy.bought} ${formatHistoryShares(side.bought_shares)} · ${formatCurrencyAmount(side.buy_cost, currency)} <small>${copy.average} ${formatCents(side.avg_buy_price)}</small></span>` : ""}
+          ${side.sold_shares > 0 ? `<span>${copy.sold} ${formatHistoryShares(side.sold_shares)} · ${copy.received} ${formatCurrencyAmount(side.sell_proceeds, currency)} <small>${copy.average} ${formatCents(side.avg_sell_price)}</small></span>` : ""}
+          ${side.remaining_shares > 0 ? `<span>${copy.remaining} ${formatHistoryShares(side.remaining_shares)} shares</span>` : ""}
+          ${settlementText ? `<span>${escapeHtml(settlementText)}</span>` : ""}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  const feeRows = [
+    [copy.tradeFee, summary.execution_fee],
+    [copy.exitFee, summary.exit_profit_fee],
+    [copy.winFee, summary.settlement_profit_fee],
+  ].filter(([, amount]) => Number(amount || 0) > 0);
+  const distributionRows = [
+    [copy.project, feeDistribution.project_fee],
+    [copy.referral, feeDistribution.referral_fee],
+    [copy.clan, feeDistribution.clan_fee],
+    [copy.reserve, feeDistribution.bonus_unlock_fee],
+    [copy.bonusPart, feeDistribution.bonus_fee],
+  ].filter(([, amount]) => Number(amount || 0) > 0);
+
+  const executionRows = visibleExecutions.map((execution) => {
+    const action = execution.action === "SELL" ? copy.sell : copy.buy;
+    const amountLabel = execution.action === "SELL" ? copy.credited : copy.debited;
+    const role = execution.liquidity_role === "MAKER" ? copy.maker : copy.taker;
+    return `
+      <div class="task-stat-execution ${execution.action === "SELL" ? "sell" : "buy"}">
+        <span class="task-stat-execution-dot"></span>
+        <div>
+          <strong>${action} ${escapeHtml(marketSideLabel(market, execution.side))}</strong>
+          <small>${formatHistoryShares(execution.shares)} shares × ${formatCents(execution.price)} · ${role} · ${historyBookLabel(execution.book_type, english)}</small>
+          <small>${amountLabel} ${formatCurrencyAmount(execution.net_amount, currency)} · ${copy.gross} ${formatCurrencyAmount(execution.gross_amount, currency)}${execution.total_fee > 0 ? ` · ${copy.fee} ${formatCurrencyAmount(execution.total_fee, currency)}` : ""}</small>
+        </div>
+        <time>${escapeHtml(formatHistoryTime(execution.created_at))}</time>
+      </div>
+    `;
+  }).join("");
+
+  const orderRows = visibleOrders.map((order) => {
+    const filledShares = Number(order.filled_shares || 0) || Math.max(0, Number(order.shares || 0) - Number(order.remaining_shares || 0));
+    return `
+      <div class="task-stat-order">
+        <div>
+          <strong>#${order.id} · ${order.order_side === "SELL" ? copy.sell : copy.buy} ${escapeHtml(marketSideLabel(market, order.side))}</strong>
+          <small>${formatCents(order.limit_price)} · ${copy.filled} ${formatHistoryShares(filledShares)} ${copy.of} ${formatHistoryShares(order.shares)}${order.fee_paid > 0 ? ` · ${copy.fee} ${formatCurrencyAmount(order.fee_paid, currency)}` : ""}</small>
+        </div>
+        <span class="status-${escapeHtml(String(order.status || ""))}">${escapeHtml(historyOrderStatusLabel(order.status, english))}</span>
+      </div>
+    `;
+  }).join("");
+
+  const needsExpand = executions.length > 8 || orders.length > 4;
+  return `
+    <div class="task-stat-detail-summary">
+      <span><small>${copy.invested}</small><b>${formatCurrencyAmount(summary.total_buy_cost || 0, currency)}</b></span>
+      <span><small>${copy.returned}</small><b>${formatCurrencyAmount(summary.total_return || 0, currency)}</b></span>
+      <span><small>${copy.pnl}</small><b class="${Number(summary.net_pnl || 0) >= 0 ? "profit" : "loss"}">${formatSignedCurrencyAmount(summary.net_pnl || 0, currency)}</b></span>
+      <span><small>${copy.fees}</small><b>${formatCurrencyAmount(summary.service_fee || 0, currency)}</b></span>
+    </div>
+    <section class="task-stat-settlement">
+      <div class="task-stat-section-head">
+        <strong>${copy.result}</strong>
+        ${detail.is_hedged ? `<span class="task-stat-hedge">${copy.hedge}</span>` : ""}
+      </div>
+      <p>${copy.winner}: <b>${escapeHtml(winner)}</b>${market.resolved_at ? ` · ${escapeHtml(formatHistoryTime(market.resolved_at))}` : ""}</p>
+      ${settlementAccountText ? `<small>${escapeHtml(settlementAccountText)}</small>` : ""}
+      ${priceFacts ? `<div class="task-stat-price-facts">${priceFacts}</div>` : ""}
+    </section>
+    ${sideCards ? `<section class="task-stat-side-grid">${sideCards}</section>` : ""}
+    <section class="task-stat-fees">
+      <div class="task-stat-section-head"><strong>${copy.commission}</strong></div>
+      <div class="task-stat-fee-list">
+        ${feeRows.map(([label, amount]) => `<span><small>${label}</small><b>${formatCurrencyAmount(amount, currency)}</b></span>`).join("") || `<span><small>${copy.tradeFee}</small><b>${formatCurrencyAmount(0, currency)}</b></span>`}
+        <span class="total"><small>${copy.totalFee}</small><b>${formatCurrencyAmount(summary.service_fee || 0, currency)}</b></span>
+      </div>
+      ${distributionRows.length ? `
+        <details class="task-stat-fee-distribution" open>
+          <summary>${copy.distribution}</summary>
+          ${distributionRows.map(([label, amount]) => `<span><small>${label}</small><b>${formatCurrencyAmount(amount, currency)}</b></span>`).join("")}
+        </details>
+      ` : ""}
+    </section>
+    ${executionRows ? `
+      <section class="task-stat-executions">
+        <div class="task-stat-section-head"><strong>${copy.executions}</strong><span>${executions.length}</span></div>
+        <div class="task-stat-execution-list">${executionRows}</div>
+      </section>
+    ` : ""}
+    ${orderRows ? `
+      <section class="task-stat-orders">
+        <div class="task-stat-section-head"><strong>${copy.orders}</strong><span>${orders.length}</span></div>
+        <div class="task-stat-order-list">${orderRows}</div>
+      </section>
+    ` : ""}
+    <div class="task-stat-detail-actions">
+      ${needsExpand ? `<button type="button" data-stat-executions-toggle="${escapeHtml(key)}">${expandedExecutions ? copy.collapse : copy.showAll}</button>` : ""}
+      ${shareable ? `<button class="task-stat-share-button" type="button" data-stat-share>${copy.share}</button>` : ""}
+    </div>
+  `;
+}
+
+function renderMarketStatDetailState(stat, key, shareable) {
+  const cached = state.marketStatDetails.get(key);
+  const english = getLanguage() === "en";
+  if (cached?.detail) {
+    return renderMarketStatDetail(cached.detail, stat, key, shareable);
+  }
+  if (cached?.error) {
+    return `
+      <div class="task-stat-detail-message error">
+        <span>${english ? "Could not load the calculation." : "Не получилось загрузить расчёт."}</span>
+        <button type="button" data-stat-detail-retry>${english ? "Retry" : "Повторить"}</button>
+      </div>
+    `;
+  }
+  return `
+    <div class="task-stat-detail-message" role="status">
+      <span class="task-stat-detail-spinner"></span>
+      <span>${english ? "Loading executions and fees..." : "Загружаю исполнения и комиссии..."}</span>
+    </div>
+  `;
+}
+
+async function loadMarketStatDetail(stat, force = false) {
+  if (!state.user?.telegram_id || !stat?.market_id) return;
+  const key = getMarketStatDetailKey(stat);
+  const cached = state.marketStatDetails.get(key);
+  const isFinal = ["resolved", "price_error", "superseded", "refunded", "unwound", "cancelled"].includes(String(stat.status || ""));
+  if (!force && cached?.detail && (isFinal || Date.now() - Number(cached.loadedAt || 0) < MARKET_STAT_DETAIL_OPEN_TTL_MS)) {
+    return;
+  }
+  if (cached?.loading) return;
+  state.marketStatDetails.set(key, { ...cached, loading: true, error: null });
+  renderTaskStats();
+  try {
+    const data = await api(
+      `/api/me/markets/${encodeURIComponent(stat.market_id)}/history-detail?telegram_id=${encodeURIComponent(state.user.telegram_id)}&currency=${encodeURIComponent(normalizeCurrency(stat.currency))}`,
+      { timeoutMs: 20_000 },
+    );
+    state.marketStatDetails.set(key, {
+      detail: data.detail,
+      loadedAt: Date.now(),
+      loading: false,
+      error: null,
+    });
+  } catch (error) {
+    state.marketStatDetails.set(key, {
+      detail: null,
+      loadedAt: 0,
+      loading: false,
+      error: error instanceof Error ? error.message : "request_failed",
+    });
+  }
+  if (state.expandedMarketStatKey === key) {
+    renderTaskStats();
+  }
+}
+
 function renderTaskTabs() {
   const isStats = state.taskTab === "stats";
   morphSheetContent("tasksSheet", `tasks:${isStats ? "stats" : "rewards"}`, () => {
@@ -3859,6 +4207,8 @@ function renderTaskStats() {
 
   const rows = visibleStats.slice(0, 30).map((stat) => {
     const currency = normalizeCurrency(stat.currency);
+    const detailKey = getMarketStatDetailKey(stat);
+    const detailExpanded = state.expandedMarketStatKey === detailKey;
     const pnl = Number(stat.pnl || 0);
     const status = stat.open_positions_count > 0 ? "LIVE" : (stat.status === "resolved" ? "CLOSED" : String(stat.status || "").toUpperCase());
     const limitCount = Number(stat.limit_orders_count || 0);
@@ -3883,20 +4233,27 @@ function renderTaskStats() {
       ? ` data-share-pnl="${pnl}" data-share-currency="${escapeHtml(currency)}" data-share-ticker="${escapeHtml(getMarketStatTitle(stat))}" data-share-theme="${getShareThemeKey(stat.symbol)}"`
       : "";
     return `
-      <div class="task-stat-row pnl-${pnl >= 0 ? "up" : "down"}${shareable ? " task-stat-shareable" : ""}"${shareAttrs}>
-        <div class="task-stat-main">
-          <strong>${escapeHtml(getMarketStatTitle(stat))}</strong>
-          <small>${escapeHtml(resultText)}</small>
+      <article class="task-stat-row pnl-${pnl >= 0 ? "up" : "down"}${shareable ? " task-stat-shareable" : ""}${detailExpanded ? " expanded" : ""}" data-stat-key="${escapeHtml(detailKey)}" data-stat-market-id="${Number(stat.market_id)}" data-stat-currency="${escapeHtml(currency)}"${shareAttrs}>
+        <button class="task-stat-toggle" type="button" data-stat-detail-toggle aria-expanded="${detailExpanded ? "true" : "false"}">
+          <span class="task-stat-main">
+            <strong>${escapeHtml(getMarketStatTitle(stat))}</strong>
+            <small>${escapeHtml(resultText)}</small>
+          </span>
+          <span class="task-stat-numbers">
+            <strong class="${pnl >= 0 ? "profit" : "loss"}">${formatSignedCurrencyAmount(pnl, currency)}</strong>
+            <small>ставка ${formatCurrencyAmount(stat.spent || 0, currency)} · выплата ${formatCurrencyAmount(stat.payout || 0, currency)}</small>
+          </span>
+          <span class="task-stat-chevron" aria-hidden="true"></span>
+        </button>
+        <div class="task-stat-detail${detailExpanded ? "" : " hidden"}">
+          ${detailExpanded ? renderMarketStatDetailState(stat, detailKey, shareable) : ""}
         </div>
-        <div class="task-stat-numbers">
-          <strong class="${pnl >= 0 ? "profit" : "loss"}">${formatSignedCurrencyAmount(pnl, currency)}</strong>
-          <small>ставка ${formatCurrencyAmount(stat.spent || 0, currency)} · выплата ${formatCurrencyAmount(stat.payout || 0, currency)}</small>
-          ${shareable ? '<small class="task-stat-share-hint">в сторис ↗</small>' : ""}
-        </div>
-      </div>
+      </article>
     `;
   }).join("");
+  const scrollTop = list.scrollTop;
   setInnerHtmlIfChanged(list, referralSummary + summary + rows);
+  list.scrollTop = scrollTop;
 }
 
 async function api(path, options = {}) {
@@ -4174,7 +4531,7 @@ async function upsertMe() {
   state.bonusUnlock = data.bonus_unlock || null;
   state.starConversion = data.star_conversion || null;
   state.positions = applyMarketListLanguage(data.positions || []);
-  state.marketStats = data.market_stats || [];
+  state.marketStats = applyMarketListLanguage(data.market_stats || []);
   state.referralStats = data.referral_stats || null;
   noteReferralEarnings();
   state.dailyTasks = data.daily_tasks || {};
@@ -4513,7 +4870,7 @@ async function loadMe() {
   state.starConversion = data.star_conversion || null;
   state.positions = applyMarketListLanguage(data.positions || []);
   state.recentTrades = data.recent_trades || [];
-  state.marketStats = data.market_stats || [];
+  state.marketStats = applyMarketListLanguage(data.market_stats || []);
   state.referralStats = data.referral_stats || null;
   noteReferralEarnings();
   state.dailyTasks = data.daily_tasks || {};
@@ -9360,6 +9717,7 @@ onLanguageChange(() => {
   state.sportsMarkets = applyMarketListLanguage(state.sportsMarkets);
   state.specialMarkets = applyMarketListLanguage(state.specialMarkets);
   state.positions = applyMarketListLanguage(state.positions);
+  state.marketStats = applyMarketListLanguage(state.marketStats);
   chartBetLabelCache = null;
   chartTickerLabelCache = null;
   state.chartYMin = null;
@@ -9417,31 +9775,57 @@ $("shareWinSheet")?.addEventListener("click", (event) => {
 $("shareToStoryBtn")?.addEventListener("click", () => shareWinToStory());
 $("shareToChatBtn")?.addEventListener("click", () => shareWinToChat());
 
-// Шэр из истории: тап по выигранному маркету в «Моей статистике» собирает
-// ту же карточку победы и открывает шит шэринга поверх статистики.
 $("taskStatsList")?.addEventListener("click", (event) => {
-  const row = event.target.closest?.(".task-stat-shareable");
-  if (!row) {
+  const target = event.target;
+  const row = target.closest?.(".task-stat-row");
+  if (!row) return;
+  const key = row.dataset.statKey;
+  const stat = state.marketStats.find((item) => getMarketStatDetailKey(item) === key);
+
+  if (target.closest?.("[data-stat-share]")) {
+    const pnl = Number(row.dataset.sharePnl || 0);
+    if (!(pnl > 0)) return;
+    const currency = normalizeCurrency(row.dataset.shareCurrency);
+    triggerHaptic("selection");
+    state.lastWin = {
+      amountLabel: formatSignedCurrencyAmount(pnl, currency),
+      primaryValue: Math.abs(pnl),
+      primaryCurrency: currency,
+      label: formatSignedCurrencyAmount(pnl, currency),
+      ticker: row.dataset.shareTicker || "BTC · 5 мин",
+      side: "",
+      tier: getTierForAmount(pnl, currency),
+      theme: row.dataset.shareTheme || "btc",
+      at: Date.now(),
+    };
+    openShareWinSheet();
     return;
   }
-  const pnl = Number(row.dataset.sharePnl || 0);
-  if (!(pnl > 0)) {
+
+  if (target.closest?.("[data-stat-executions-toggle]")) {
+    triggerHaptic("selection");
+    if (state.expandedMarketStatExecutions.has(key)) {
+      state.expandedMarketStatExecutions.delete(key);
+    } else {
+      state.expandedMarketStatExecutions.add(key);
+    }
+    renderTaskStats();
     return;
   }
-  const currency = normalizeCurrency(row.dataset.shareCurrency);
+
+  if (target.closest?.("[data-stat-detail-retry]")) {
+    triggerHaptic("selection");
+    if (stat) void loadMarketStatDetail(stat, true);
+    return;
+  }
+
+  if (!target.closest?.("[data-stat-detail-toggle]") || !stat) return;
   triggerHaptic("selection");
-  state.lastWin = {
-    amountLabel: formatSignedCurrencyAmount(pnl, currency),
-    primaryValue: Math.abs(pnl),
-    primaryCurrency: currency,
-    label: formatSignedCurrencyAmount(pnl, currency),
-    ticker: row.dataset.shareTicker || "BTC · 5 мин",
-    side: "",
-    tier: getTierForAmount(pnl, currency),
-    theme: row.dataset.shareTheme || "btc",
-    at: Date.now(),
-  };
-  openShareWinSheet();
+  state.expandedMarketStatKey = state.expandedMarketStatKey === key ? null : key;
+  renderTaskStats();
+  if (state.expandedMarketStatKey === key) {
+    void loadMarketStatDetail(stat);
+  }
 });
 $("shareCopyBtn")?.addEventListener("click", () => shareWinCopy());
 $("winOverlay")?.addEventListener("click", () => {

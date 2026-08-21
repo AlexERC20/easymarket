@@ -64,6 +64,7 @@ import {
   payStarStrikeWithBalance,
   payStarStrikeWithStars,
   getTopMarkets,
+  getUserMarketHistoryDetail,
   getUserSnapshot,
   getUsdtLedgerEvents,
   getWorldCupMarkets,
@@ -766,6 +767,27 @@ app.get("/api/me", async (req, res) => {
       ok: true,
       ...snapshot,
     });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/me/markets/:marketId/history-detail", async (req, res) => {
+  try {
+    const telegramId = getTelegramId(req);
+    if (!telegramId) {
+      throw new Error("telegram_id_missing");
+    }
+    const detail = await getUserMarketHistoryDetail(
+      telegramId,
+      req.params.marketId,
+      req.query.currency,
+    );
+    if (!detail) {
+      res.status(404).json({ ok: false, message: "user_not_found" });
+      return;
+    }
+    res.status(200).json({ ok: true, detail });
   } catch (error) {
     sendApiError(res, error);
   }
