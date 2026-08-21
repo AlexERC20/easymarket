@@ -881,7 +881,8 @@ app.get("/api/share/story", async (req, res) => {
     const label = formatStoryAmount(req.query.value, req.query.currency)
       || String(req.query.amount || "");
     // theme/t — только латинский слаг и цифра, свободный текст не принимаем.
-    const jpeg = await renderStoryCardJpeg(label, req.query.theme, req.query.t);
+    const language = String(req.query.lang || "").toLowerCase() === "en" ? "en" : "ru";
+    const jpeg = await renderStoryCardJpeg(label, req.query.theme, req.query.t, language);
     res.setHeader("Content-Type", "image/jpeg");
     // Картинка детерминирована суммой в query — можно кэшировать надолго.
     res.setHeader("Cache-Control", "public, max-age=86400, immutable");
@@ -911,13 +912,14 @@ app.post("/api/share/prepare-message", async (req, res) => {
     const currency = String(req.body?.currency ?? "USDT").toUpperCase() === "STAR" ? "STAR" : "USDT";
     const theme = /^[a-z_]{1,24}$/.test(String(req.body?.theme ?? "")) ? String(req.body.theme) : "btc";
     const taglineIndex = Number(req.body?.tagline_index ?? req.body?.taglineIndex);
+    const language = String(req.body?.language || "").toLowerCase() === "en" ? "en" : "ru";
     const caption = String(req.body?.text ?? "").slice(0, 900);
     const linkUrl = String(req.body?.url ?? config.publicMiniAppUrl).slice(0, 400);
     if (!/^https:\/\/t\.me\//.test(linkUrl)) {
       throw new Error("invalid_share_url");
     }
 
-    const params = new URLSearchParams({ currency, theme, v: "3" });
+    const params = new URLSearchParams({ currency, theme, lang: language, v: "4" });
     if (Number.isFinite(value) && value > 0) {
       params.set("value", String(value));
     }

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260819-05" />
+    <link rel="stylesheet" href="/styles.css?v=20260821-01" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260711-03" />
     <link rel="stylesheet" href="/kyivstoner-motion.css?v=20260714-02" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -124,6 +124,17 @@
             <button id="settingsCloseBtn" class="icon-button" type="button" aria-label="Закрыть настройки">×</button>
           </div>
           <div class="settings-list">
+            <div class="settings-row language-settings-row">
+              <div class="settings-row-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M3.8 12h16.4M12 3.5c2.2 2.3 3.4 5.2 3.4 8.5S14.2 18.2 12 20.5C9.8 18.2 8.6 15.3 8.6 12S9.8 5.8 12 3.5Z"/></svg></div>
+              <div class="settings-row-body">
+                <strong>Язык приложения</strong>
+                <small>Можно изменить в любой момент.</small>
+              </div>
+              <div class="language-segment" role="group" aria-label="Язык">
+                <button type="button" data-language-option="ru" aria-pressed="false">RU</button>
+                <button type="button" data-language-option="en" aria-pressed="false">EN</button>
+              </div>
+            </div>
             <div class="settings-row">
               <div class="settings-row-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3l4-3.5v12l-4-3.5H4z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg></div>
               <div class="settings-row-body">
@@ -937,6 +948,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260819-05" type="module"></script>
+    <script src="/app.js?v=20260821-01" type="module"></script>
   </body>
 </html>

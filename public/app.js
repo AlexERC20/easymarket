@@ -28,6 +28,14 @@ import "./basketball-scene.js?v=20260712-03"; // регистрирует сце
 import { playKyivstonerMotion, preloadKyivstonerMotion } from "./kyivstoner-motion.js?v=20260714-01";
 import { playFootballWow } from "./football-wow.js?v=20260716-01";
 import { isAccountSnapshotCurrent } from "./account-state.js?v=20260729-01";
+import {
+  getIntlLocale,
+  getLanguage,
+  initI18n,
+  onLanguageChange,
+  setLanguage,
+  translateText,
+} from "./i18n.js?v=20260821-01";
 
 const DEFAULT_USDT_PROFIT_FEE_RATE = 0.07;
 const DEFAULT_STAR_PROFIT_FEE_RATE = 0.15;
@@ -316,6 +324,8 @@ const sheetCloseTimers = new WeakMap();
 const sheetHeightTimers = new WeakMap();
 const $ = (id) => document.getElementById(id);
 
+initI18n();
+
 function markTelegramShellEarly() {
   const tg = window.Telegram?.WebApp;
   if (!tg) {
@@ -346,8 +356,8 @@ setAquariumShakeFeeder(() => {
   return buildAquariumFoodForMarket(market);
 });
 
-const formatFire = (value) => Math.floor(Number(value || 0)).toLocaleString("ru-RU");
-const formatFireDecimal = (value) => Number(value || 0).toLocaleString("ru-RU", {
+const formatFire = (value) => Math.floor(Number(value || 0)).toLocaleString(getIntlLocale());
+const formatFireDecimal = (value) => Number(value || 0).toLocaleString(getIntlLocale(), {
   maximumFractionDigits: 1,
 });
 const normalizeCurrency = (value) => (String(value || "STAR").toUpperCase() === "USDT" ? "USDT" : "STAR");
@@ -364,7 +374,7 @@ const getTierForAmount = (amount, currency = state.currency) => {
 };
 const formatCurrencyAmount = (value, currency = state.currency) => {
   const safeCurrency = normalizeCurrency(currency);
-  const formatted = Number(value || 0).toLocaleString("ru-RU", {
+  const formatted = Number(value || 0).toLocaleString(getIntlLocale(), {
     minimumFractionDigits: safeCurrency === "USDT" ? 0 : 0,
     maximumFractionDigits: safeCurrency === "USDT" ? 2 : 0,
   });
@@ -372,14 +382,14 @@ const formatCurrencyAmount = (value, currency = state.currency) => {
 };
 const formatWholeCurrencyAmount = (value, currency = state.currency) => {
   const safeCurrency = normalizeCurrency(currency);
-  const formatted = Math.floor(Number(value || 0)).toLocaleString("ru-RU", {
+  const formatted = Math.floor(Number(value || 0)).toLocaleString(getIntlLocale(), {
     maximumFractionDigits: 0,
   });
   return safeCurrency === "USDT" ? `$${formatted}` : formatted;
 };
 const formatHeaderCurrencyAmount = (value, currency = state.currency) => {
   const safeCurrency = normalizeCurrency(currency);
-  const formatted = Number(value || 0).toLocaleString("ru-RU", {
+  const formatted = Number(value || 0).toLocaleString(getIntlLocale(), {
     maximumFractionDigits: 0,
   });
   return safeCurrency === "USDT" ? `$${formatted}` : formatted;
@@ -411,23 +421,34 @@ const getStarConversionTopupRequired = (conversion) => Math.max(
 );
 
 const getStarConversionWalletText = (conversion) => {
+  const english = getLanguage() === "en";
   if (conversion.eligible) {
-    const converted = Number(conversion.converted_total || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
-    const cap = Number(conversion.lifetime_cap || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+    const converted = Number(conversion.converted_total || 0).toLocaleString(getIntlLocale(), { maximumFractionDigits: 2 });
+    const cap = Number(conversion.lifetime_cap || 0).toLocaleString(getIntlLocale(), { maximumFractionDigits: 2 });
     const mult = Number(conversion.streak_multiplier || 1);
-    const streak = mult > 1 ? ` · ⚡ заряд x${mult}` : "";
-    return `Конвертировано $${converted} из $${cap} · пополни ещё — потолок вырастет${streak}`;
+    const streak = mult > 1 ? ` · ⚡ ${english ? "charge" : "заряд"} x${mult}` : "";
+    return english
+      ? `Converted $${converted} of $${cap} · deposit more to raise the limit${streak}`
+      : `Конвертировано $${converted} из $${cap} · пополни ещё — потолок вырастет${streak}`;
   }
   if (conversion.deposit_qualified && !conversion.cash_play_qualified) {
-    return "💫 Конвертация почти включена — осталась ставка основными USDT";
+    return english
+      ? "💫 Conversion is almost active — place one cash-USDT bet"
+      : "💫 Конвертация почти включена — осталась ставка основными USDT";
   }
   const frozenUsdt = Number(conversion.available_from_stars || 0);
   if (frozenUsdt >= 1) {
     const topup = formatCurrencyAmount(getStarConversionTopupRequired(conversion), "USDT");
-    const verb = Number(conversion.deposit_total || 0) > 0 ? "пополни ещё" : "пополни от";
+    const hasDeposit = Number(conversion.deposit_total || 0) > 0;
+    const verb = english ? (hasDeposit ? "deposit more" : "deposit at least") : (hasDeposit ? "пополни ещё" : "пополни от");
+    if (english) {
+      return `💫 ${formatFire(conversion.star_balance || 0)}⭐ can unlock up to $${Math.floor(frozenUsdt)} · locked, ${verb} ${topup}`;
+    }
     return `💫 ${formatFire(conversion.star_balance || 0)}⭐ — это до $${Math.floor(frozenUsdt)} · заморожено, ${verb} ${topup}`;
   }
-  return `Конвертация звёзд в USDT включится после пополнения от ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`;
+  return english
+    ? `Star-to-USDT conversion activates after a deposit of ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`
+    : `Конвертация звёзд в USDT включится после пополнения от ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`;
 };
 const normalizeTopupAmount = (value, currency = state.topup.currency) => {
   const safeCurrency = normalizeCurrency(currency);
@@ -497,7 +518,7 @@ function applyCurrencyMutationPayload(currency, payload = {}) {
   state.accountMutationRevision += 1;
   applyCurrencyBalancePayload(currency, payload);
 }
-const formatPrice = (value) => Number(value || 0).toLocaleString("ru-RU", {
+const formatPrice = (value) => Number(value || 0).toLocaleString(getIntlLocale(), {
   maximumFractionDigits: 2,
 });
 const formatCents = (value) => {
@@ -517,9 +538,53 @@ const outcomePriceToCentsInput = (value) => {
 const centsInputToOutcomePrice = (value) => Number(value) / 100;
 const yesNoSideLabel = (side) => (side === "YES" ? "Yes" : "No");
 const sideLabel = (side) => (side === "YES" ? "UP" : "DOWN");
+const MARKET_LANGUAGE_SOURCE = Symbol("marketLanguageSource");
+
+function applyMarketLanguage(market) {
+  if (!market || typeof market !== "object") return market;
+  if (!market[MARKET_LANGUAGE_SOURCE]) {
+    Object.defineProperty(market, MARKET_LANGUAGE_SOURCE, {
+      configurable: true,
+      value: {
+        title: market.title,
+        team: market.team,
+        event_title: market.event_title,
+        question: market.question,
+        yes_label: market.yes_label,
+        no_label: market.no_label,
+      },
+    });
+  }
+  const source = market[MARKET_LANGUAGE_SOURCE];
+  const english = getLanguage() === "en";
+  market.title = english ? (market.title_en || source.title) : source.title;
+  market.team = english ? (market.team_en || market.title_en || source.team) : source.team;
+  market.event_title = english
+    ? (market.event_title_en || market.title_en || source.event_title)
+    : source.event_title;
+  market.question = english ? (market.question_en || source.question) : source.question;
+  market.yes_label = english ? (market.yes_label_en || source.yes_label) : source.yes_label;
+  market.no_label = english ? (market.no_label_en || source.no_label) : source.no_label;
+  return market;
+}
+
+function applyMarketListLanguage(markets) {
+  return (markets || []).map(applyMarketLanguage);
+}
+
+function carryMarketLanguageSource(from, to) {
+  if (from?.[MARKET_LANGUAGE_SOURCE] && to && typeof to === "object") {
+    Object.defineProperty(to, MARKET_LANGUAGE_SOURCE, {
+      configurable: true,
+      value: from[MARKET_LANGUAGE_SOURCE],
+    });
+  }
+  return to;
+}
+
 const marketSideLabel = (market, side) => (
   market?.market_type === "SPECIAL_MARKET" || String(market?.symbol || market?.market_symbol || "").startsWith("SPECIAL:")
-    ? (side === "YES" ? (market.yes_label || "Больше 8") : (market.no_label || "Меньше 8"))
+    ? translateText(side === "YES" ? (market.yes_label || "Больше 8") : (market.no_label || "Меньше 8"))
     : market?.market_type === "SPORTS_MARKET" || String(market?.symbol || market?.market_symbol || "").startsWith("SPORT:")
     ? (side === "YES" ? (market.yes_label || "Yes") : (market.no_label || "No"))
     : market?.market_type === "WORLD_CUP_WINNER"
@@ -563,7 +628,7 @@ function renderOutcomeOptionLabel(element, label, price, stacked = false) {
 }
 
 const sideClass = (side) => (side === "YES" ? "yes" : "no");
-const actionLabel = (action) => (action === "SELL" ? "продал" : "купил");
+const actionLabel = (action) => translateText(action === "SELL" ? "продал" : "купил");
 const marketStatusLabel = (status) => {
   if (status === "open") {
     return "LIVE";
@@ -1153,13 +1218,13 @@ function abbreviateSportsOutcomeLabel(value) {
       .map((word) => Array.from(word)[0] || "")
       .join("")
       .slice(0, 4)
-      .toLocaleUpperCase("ru-RU");
+      .toLocaleUpperCase(getIntlLocale());
   }
   const characters = Array.from(words[0] || label);
   return characters
     .slice(0, characters.length > 4 ? 3 : 4)
     .join("")
-    .toLocaleUpperCase("ru-RU");
+    .toLocaleUpperCase(getIntlLocale());
 }
 
 function marketButtonSideLabel(market, side) {
@@ -1390,19 +1455,19 @@ function renderDepositBonusTask() {
     bar.style.width = `${Math.round(Math.min(1, Math.max(0, fill)) * 100)}%`;
   }
   if ($("depositBonusCur")) {
-    const goalLabel = `$${Math.floor(next ? next.goal : lastGoal).toLocaleString("ru-RU")}`;
-    $("depositBonusCur").textContent = `$${Math.floor(total).toLocaleString("ru-RU")} из ${goalLabel}`;
+    const goalLabel = `$${Math.floor(next ? next.goal : lastGoal).toLocaleString(getIntlLocale())}`;
+    $("depositBonusCur").textContent = `$${Math.floor(total).toLocaleString(getIntlLocale())} из ${goalLabel}`;
   }
   const nextLabel = $("depositBonusNext");
   if (nextLabel) {
     const nextBonus = Number(next?.bonus) || 0;
-    nextLabel.textContent = `+$${Math.floor(nextBonus).toLocaleString("ru-RU")}`;
+    nextLabel.textContent = `+$${Math.floor(nextBonus).toLocaleString(getIntlLocale())}`;
     nextLabel.classList.toggle("hidden", nextBonus <= 0);
   }
   const button = $("depositBonusBtn");
   if (button) {
     if (readySum > 0) {
-      button.textContent = `Забрать $${Math.floor(readySum).toLocaleString("ru-RU")}`;
+      button.textContent = `Забрать $${Math.floor(readySum).toLocaleString(getIntlLocale())}`;
       button.disabled = false;
     } else if (next) {
       button.textContent = "Пополнить";
@@ -1513,10 +1578,10 @@ function renderLegendSceneTask() {
     $("legendSceneTaskBar").style.width = `${Math.round((total / goal) * 100)}%`;
   }
   if ($("legendSceneTaskCur")) {
-    $("legendSceneTaskCur").textContent = `$${Math.floor(total).toLocaleString("ru-RU")}`;
+    $("legendSceneTaskCur").textContent = `$${Math.floor(total).toLocaleString(getIntlLocale())}`;
   }
   if ($("legendSceneTaskGoal")) {
-    $("legendSceneTaskGoal").textContent = `$${Math.floor(goal).toLocaleString("ru-RU")}`;
+    $("legendSceneTaskGoal").textContent = `$${Math.floor(goal).toLocaleString(getIntlLocale())}`;
   }
   const button = $("legendSceneTaskBtn");
   if (button) {
@@ -1651,15 +1716,17 @@ function upsertMarketListItem(listName, market) {
   if (!market?.id) {
     return;
   }
-  const index = state[listName].findIndex((item) => item.id === market.id);
+  const localizedMarket = applyMarketLanguage(market);
+  const index = state[listName].findIndex((item) => item.id === localizedMarket.id);
   if (index >= 0) {
-    state[listName][index] = {
+    state[listName][index] = carryMarketLanguageSource(state[listName][index], {
       ...state[listName][index],
-      ...market,
-    };
+      ...localizedMarket,
+    });
+    applyMarketLanguage(state[listName][index]);
     return;
   }
-  state[listName].push(market);
+  state[listName].push(localizedMarket);
 }
 
 function upsertLocalMarket(market) {
@@ -1670,10 +1737,11 @@ function upsertLocalMarket(market) {
     Object.entries(market).filter(([, value]) => value !== undefined),
   );
   if (marketPatch.id === state.market?.id) {
-    state.market = {
+    state.market = carryMarketLanguageSource(state.market, {
       ...state.market,
       ...marketPatch,
-    };
+    });
+    applyMarketLanguage(state.market);
   }
   if (marketPatch.market_type === "BTC_UPDOWN") {
     upsertMarketListItem("btcMarkets", marketPatch);
@@ -2430,7 +2498,11 @@ function drawMarketChartFrame(ts) {
     ctx.shadowBlur = 7 * dpr;
     ctx.font = `900 ${Math.max(10, width * 0.024)}px Inter, system-ui, sans-serif`;
     ctx.textBaseline = "middle";
-    ctx.fillText(luckyLeftSec > 0 ? `x2 · ${luckyLeftSec}с` : "x2", luckyX + 20 * dpr, luckyY + 1 * dpr);
+    ctx.fillText(
+      luckyLeftSec > 0 ? `x2 · ${luckyLeftSec}${getLanguage() === "en" ? "s" : "с"}` : "x2",
+      luckyX + 20 * dpr,
+      luckyY + 1 * dpr,
+    );
     ctx.restore();
   }
 
@@ -2657,7 +2729,7 @@ function drawMarketChartFrame(ts) {
   const myBet = getMyChartBet(market);
   if (myBet) {
     const sideColor = myBet.side === "YES" ? "#19c37d" : "#ef466f";
-    const seg1 = "Твоя ставка: ";
+    const seg1 = `${translateText("Твоя ставка:")} `;
     const seg2 = `${marketButtonSideLabel(market, myBet.side)} ${formatCurrencyAmount(myBet.spent, myBet.currency)}`;
     const netWin = getNetResolvedPayout(myBet.shares, myBet.spent, myBet.currency);
     const seg3 = ` Win ${formatCurrencyAmount(netWin, myBet.currency)}`;
@@ -2857,7 +2929,7 @@ function drawLiveTickerPill(ctx, { width, height, nowTs, myBetPillEnd }) {
   const rawName = formatUserDisplayName(trade, { preferAt: false });
   const name = rawName.length > 12 ? `${rawName.slice(0, 11)}…` : rawName;
   const seg1 = `${name} `;
-  const verb = (trade.action || "BUY") === "SELL" ? "продал" : "ставит";
+  const verb = translateText((trade.action || "BUY") === "SELL" ? "продал" : "ставит");
   const seg2 = `${verb} ${getActivitySideLabel(trade)} ${formatCurrencyAmount(trade.amount, trade.currency)}`;
   const fontPx = Math.max(11, width * 0.024);
   ctx.font = `${fontPx}px Inter, system-ui, sans-serif`;
@@ -2986,7 +3058,7 @@ function renderMarketChart() {
 
 function showToast(message) {
   const toast = $("toast");
-  toast.textContent = message;
+  toast.textContent = translateText(message);
   toast.classList.remove("hidden");
   toast.classList.remove("toast-show");
   void toast.offsetWidth;
@@ -3221,8 +3293,8 @@ function formatMarketWindow(market) {
         return details ? `Сейчас · ${details}` : "Событие идёт сейчас";
       }
       if (startsAtMs > Date.now()) {
-        const day = startsAt.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
-        const time = startsAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+        const day = startsAt.toLocaleDateString(getIntlLocale(), { day: "numeric", month: "short" });
+        const time = startsAt.toLocaleTimeString(getIntlLocale(), { hour: "2-digit", minute: "2-digit" });
         return `Начало ${day}, ${time}`;
       }
       if (Date.now() - startsAtMs <= 36 * 60 * 60_000) {
@@ -3236,15 +3308,15 @@ function formatMarketWindow(market) {
 
   const start = new Date(market.start_time);
   const end = new Date(market.end_time);
-  const day = start.toLocaleDateString("ru-RU", {
+  const day = start.toLocaleDateString(getIntlLocale(), {
     day: "numeric",
     month: "short",
   });
-  const startTime = start.toLocaleTimeString("ru-RU", {
+  const startTime = start.toLocaleTimeString(getIntlLocale(), {
     hour: "2-digit",
     minute: "2-digit",
   });
-  const endTime = end.toLocaleTimeString("ru-RU", {
+  const endTime = end.toLocaleTimeString(getIntlLocale(), {
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -3312,6 +3384,7 @@ function normalizeTelegramUser(user, authSource) {
     telegram_id: String(user.id),
     username: user.username || null,
     first_name: user.first_name || null,
+    language_code: user.language_code || null,
     auth_source: authSource,
   };
 }
@@ -4100,7 +4173,7 @@ async function upsertMe() {
   state.usdtBonusBalance = data.usdt_bonus_balance || 0;
   state.bonusUnlock = data.bonus_unlock || null;
   state.starConversion = data.star_conversion || null;
-  state.positions = data.positions || [];
+  state.positions = applyMarketListLanguage(data.positions || []);
   state.marketStats = data.market_stats || [];
   state.referralStats = data.referral_stats || null;
   noteReferralEarnings();
@@ -4394,7 +4467,7 @@ function renderRoundHistoryStrip(market, recentOutcomes) {
 async function loadMarket() {
   const data = await api("/api/market/active");
   const previousMarketId = state.market?.id || null;
-  state.market = data.market;
+  state.market = applyMarketLanguage(data.market);
   const activeMarketChanged = previousMarketId && data.market?.id && previousMarketId !== data.market.id;
   const pruned = pruneClosedLocalMarkets({ renderLists: true });
   state.chartPoints = mergeChartPoints(data.chart, data.market);
@@ -4438,7 +4511,7 @@ async function loadMe() {
   state.usdtBonusBalance = data.usdt_bonus_balance || 0;
   state.bonusUnlock = data.bonus_unlock || null;
   state.starConversion = data.star_conversion || null;
-  state.positions = data.positions || [];
+  state.positions = applyMarketListLanguage(data.positions || []);
   state.recentTrades = data.recent_trades || [];
   state.marketStats = data.market_stats || [];
   state.referralStats = data.referral_stats || null;
@@ -4632,8 +4705,8 @@ function renderComments() {
 
   const market = getDisplayMarket();
   if ($("marketChatOnline")) {
-    const online = Math.max(0, Math.round(Number(state.commentsOnlineCount || 0))).toLocaleString("ru-RU");
-    const bets = Math.max(0, Math.round(Number(state.appTotalBets || 0))).toLocaleString("ru-RU");
+    const online = Math.max(0, Math.round(Number(state.commentsOnlineCount || 0))).toLocaleString(getIntlLocale());
+    const bets = Math.max(0, Math.round(Number(state.appTotalBets || 0))).toLocaleString(getIntlLocale());
     $("marketChatOnline").textContent = `${online} · Ставки: ${bets}`;
   }
   if (!market?.id) {
@@ -5011,8 +5084,8 @@ function renderOrderbookPanel() {
         data-book-price="${outcomePriceToCentsInput(row.price)}"
         style="--depth:${depthFor(row)}">
         <b>${formatCents(row.price)}</b>
-        <span class="ob-size">${Math.round(row.size).toLocaleString("ru-RU")}</span>
-        <span class="ob-total">${Math.round(row.total).toLocaleString("ru-RU")}</span>
+        <span class="ob-size">${Math.round(row.size).toLocaleString(getIntlLocale())}</span>
+        <span class="ob-total">${Math.round(row.total).toLocaleString(getIntlLocale())}</span>
       </button>
     `;
   };
@@ -5176,7 +5249,7 @@ async function loadBtcMarkets() {
     const symbol = String(market.symbol || market.id);
     if (seenSymbols.has(symbol)) continue;
     seenSymbols.add(symbol);
-    incomingMarkets.push(market);
+    incomingMarkets.push(applyMarketLanguage(market));
   }
   state.btcMarkets = incomingMarkets;
   state.btcMarkets.forEach(mergeBtcChartPoint);
@@ -5197,7 +5270,7 @@ async function loadBtcMarkets() {
 async function loadWorldCupMarkets() {
   const data = await api("/api/world-cup/markets");
   const incomingMarkets = retainPendingExternalMarkets(data.markets || []);
-  state.worldCupMarkets = incomingMarkets;
+  state.worldCupMarkets = applyMarketListLanguage(incomingMarkets);
   state.worldCupMarkets.forEach(mergeWorldCupChartPoint);
   if (
     state.selectedWorldCupMarketId
@@ -5216,7 +5289,7 @@ async function loadWorldCupMarkets() {
 async function loadTopMarkets() {
   const data = await api("/api/top/markets");
   const incomingMarkets = retainPendingExternalMarkets(data.markets || []);
-  state.topMarkets = incomingMarkets;
+  state.topMarkets = applyMarketListLanguage(incomingMarkets);
   state.topMarkets.forEach(mergeTopMarketChartPoint);
   if (
     state.selectedTopMarketId
@@ -5235,7 +5308,7 @@ async function loadTopMarkets() {
 async function loadSportsMarkets() {
   const data = await api("/api/sports/markets");
   const incomingMarkets = retainPendingExternalMarkets(data.markets || []);
-  state.sportsMarkets = incomingMarkets;
+  state.sportsMarkets = applyMarketListLanguage(incomingMarkets);
   state.sportsMarkets.forEach(mergeTopMarketChartPoint);
   if (
     state.selectedSportsMarketId
@@ -5254,7 +5327,7 @@ async function loadSportsMarkets() {
 async function loadSpecialMarket() {
   const data = await api("/api/special/kyivstoner");
   const market = data.market;
-  state.specialMarkets = market?.status === "open" ? [market] : [];
+  state.specialMarkets = market?.status === "open" ? [applyMarketLanguage(market)] : [];
   if (market) {
     mergeSpecialMarketChartPoints(market);
   }
@@ -5847,7 +5920,7 @@ function getRecentMarketLabel(market) {
     return `#${market.id} · ${winner} SPORT`;
   }
   if (String(market.symbol || "").startsWith("SPECIAL:")) {
-    return `#${market.id} · ${winner} КИЕВСТОНЕР`;
+    return `#${market.id} · ${winner} ${getLanguage() === "en" ? "KYIVSTONER" : "КИЕВСТОНЕР"}`;
   }
   return `#${market.id} · ${winner} ${market.symbol}`;
 }
@@ -6468,7 +6541,7 @@ function formatClanWarCountdown(iso) {
 function formatClanWarBank(value) {
   const num = Math.max(0, Number(value || 0));
   const rounded = num >= 100 ? Math.round(num) : Math.round(num * 10) / 10;
-  return `${rounded.toLocaleString("ru-RU", { maximumFractionDigits: 1 })} USDT`;
+  return `${rounded.toLocaleString(getIntlLocale(), { maximumFractionDigits: 1 })} USDT`;
 }
 
 function renderClanWar() {
@@ -6775,7 +6848,9 @@ async function shareClan(clan) {
   }
   triggerHaptic("selection");
   const inviteUrl = buildClanInviteUrl(clan);
-  const text = `Вступай в клан ${clan.name} в EasyMarket.`;
+  const text = getLanguage() === "en"
+    ? `Join the ${clan.name} clan in EasyMarket.`
+    : `Вступай в клан ${clan.name} в EasyMarket.`;
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
@@ -6862,14 +6937,14 @@ function getShareTheme() {
 function getShareTagline() {
   const theme = getShareTheme();
   const idx = Number(state.lastWin?.taglineIndex);
-  return theme.taglines[Number.isInteger(idx) ? Math.min(Math.max(idx, 0), theme.taglines.length - 1) : 0];
+  return translateText(theme.taglines[Number.isInteger(idx) ? Math.min(Math.max(idx, 0), theme.taglines.length - 1) : 0]);
 }
 
 function getShareWinText() {
   const amount = state.lastWin?.amountLabel || state.lastWin?.label || "";
   const theme = getShareTheme();
-  const head = amount ? `${amount} ${theme.line}. ` : "";
-  return `${head}${getShareTagline()}. Играй и ты в EasyMarket →`;
+  const head = amount ? `${amount} ${translateText(theme.line)}. ` : "";
+  return `${head}${getShareTagline()}. ${getLanguage() === "en" ? "Play in EasyMarket" : "Играй и ты в EasyMarket"} →`;
 }
 
 function getStoryMediaUrl() {
@@ -6884,7 +6959,7 @@ function getStoryMediaUrl() {
     const taglineIndex = Number(state.lastWin?.taglineIndex);
     const taglinePart = Number.isInteger(taglineIndex) ? `&t=${taglineIndex}` : "";
     // v бампается при смене дизайна/текстов: URL с immutable-кэшем должен смениться.
-    return `${window.location.origin}/api/share/story?value=${encodeURIComponent(value)}&currency=${encodeURIComponent(currency)}&theme=${themeKey}${taglinePart}&v=3`;
+    return `${window.location.origin}/api/share/story?value=${encodeURIComponent(value)}&currency=${encodeURIComponent(currency)}&theme=${themeKey}${taglinePart}&lang=${getLanguage()}&v=4`;
   }
   return `${window.location.origin}/share/story-win.png`;
 }
@@ -7032,6 +7107,7 @@ async function shareWinToChat() {
         currency: state.lastWin?.primaryCurrency || "USDT",
         theme: themeKey,
         tagline_index: Number.isInteger(taglineIndex) ? taglineIndex : undefined,
+        language: getLanguage(),
         text: getShareWinText(),
         url: getShareWinUrl(),
       }),
@@ -7103,10 +7179,10 @@ async function shareWinCopy() {
 function formatVolume(value) {
   const num = Number(value || 0);
   if (num >= 1_000_000) {
-    return `${(num / 1_000_000).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}M`;
+    return `${(num / 1_000_000).toLocaleString(getIntlLocale(), { maximumFractionDigits: 1 })}M`;
   }
   if (num >= 1_000) {
-    return `${(num / 1_000).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}K`;
+    return `${(num / 1_000).toLocaleString(getIntlLocale(), { maximumFractionDigits: 1 })}K`;
   }
   return formatFire(num);
 }
@@ -7134,7 +7210,7 @@ function renderWorldCupList() {
       const canTrade = isMarketOpenForBuy(market);
       if (volume) volume.textContent = `${formatVolume(market.volume)} Vol.`;
       if (chance) {
-        chance.textContent = `${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%`;
+        chance.textContent = `${Number(market.chance_pct || market.yes_price * 100).toLocaleString(getIntlLocale(), { maximumFractionDigits: 1 })}%`;
       }
       if (yesButton) {
         yesButton.disabled = !canTrade;
@@ -7157,7 +7233,7 @@ function renderWorldCupList() {
           <strong>${escapeHtml(market.team)}</strong>
           <small data-world-cup-volume>${formatVolume(market.volume)} Vol.</small>
         </span>
-        <b data-world-cup-chance>${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%</b>
+        <b data-world-cup-chance>${Number(market.chance_pct || market.yes_price * 100).toLocaleString(getIntlLocale(), { maximumFractionDigits: 1 })}%</b>
       </button>
       <div class="world-cup-actions">
         <button class="wc-yes" data-world-cup-buy="${market.id}" data-side="YES" type="button">Buy Yes ${formatCents(market.yes_price)}</button>
@@ -7190,7 +7266,7 @@ function renderTopMarketsList() {
       const canTrade = isMarketOpenForBuy(market);
       if (volume) volume.textContent = `Vol. ${formatVolume(market.volume)}`;
       if (chance) {
-        chance.textContent = `${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%`;
+        chance.textContent = `${Number(market.chance_pct || market.yes_price * 100).toLocaleString(getIntlLocale(), { maximumFractionDigits: 1 })}%`;
       }
       if (yesButton) {
         yesButton.disabled = !canTrade;
@@ -7216,7 +7292,7 @@ function renderTopMarketsList() {
             <strong>${escapeHtml(market.title || market.question)}</strong>
             <small><i>${rankLabel}</i> · <span data-top-volume>Vol. ${formatVolume(market.volume)}</span></small>
           </span>
-          <b data-top-chance>${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%</b>
+          <b data-top-chance>${Number(market.chance_pct || market.yes_price * 100).toLocaleString(getIntlLocale(), { maximumFractionDigits: 1 })}%</b>
         </button>
         <div class="world-cup-actions">
           <button class="wc-yes" data-top-buy="${market.id}" data-side="YES" type="button" ${canTrade ? "" : "disabled"}>${canTrade ? `Buy Yes ${formatCents(market.yes_price)}` : "Ждём итог"}</button>
@@ -7236,12 +7312,12 @@ function formatSportsMarketMeta(market) {
   if (!Number.isFinite(startsAt)) return "Скоро";
   const date = new Date(startsAt);
   const now = new Date();
-  const time = date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const time = date.toLocaleTimeString(getIntlLocale(), { hour: "2-digit", minute: "2-digit" });
   if (date.toDateString() === now.toDateString()) return `Сегодня · ${time}`;
   const tomorrow = new Date(now);
   tomorrow.setDate(now.getDate() + 1);
   if (date.toDateString() === tomorrow.toDateString()) return `Завтра · ${time}`;
-  return `${date.toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })} · ${time}`;
+  return `${date.toLocaleDateString(getIntlLocale(), { day: "2-digit", month: "short" })} · ${time}`;
 }
 
 function renderSportsMarketsList() {
@@ -7264,7 +7340,7 @@ function renderSportsMarketsList() {
       const canTrade = isMarketOpenForBuy(market);
       row.classList.toggle("is-live", isSportsEventLive(market));
       if (meta) meta.innerHTML = formatSportsMarketMeta(market);
-      if (chance) chance.textContent = `${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%`;
+      if (chance) chance.textContent = `${Number(market.chance_pct || market.yes_price * 100).toLocaleString(getIntlLocale(), { maximumFractionDigits: 1 })}%`;
       if (yesButton) {
         yesButton.disabled = !canTrade;
         yesButton.textContent = canTrade ? `${marketButtonSideLabel(market, "YES")} ${formatCents(market.yes_price)}` : "Ждём итог";
@@ -7290,7 +7366,7 @@ function renderSportsMarketsList() {
           <strong>${escapeHtml(market.title || market.question)}</strong>
           <small data-sports-meta>${formatSportsMarketMeta(market)}</small>
         </span>
-        <b data-sports-chance>${Number(market.chance_pct || market.yes_price * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%</b>
+        <b data-sports-chance>${Number(market.chance_pct || market.yes_price * 100).toLocaleString(getIntlLocale(), { maximumFractionDigits: 1 })}%</b>
       </button>
       <div class="world-cup-actions sports-market-actions">
         <button class="wc-yes" data-sports-buy="${market.id}" data-side="YES" type="button" title="${escapeHtml(marketSideLabel(market, "YES"))}" aria-label="${escapeHtml(marketSideLabel(market, "YES"))}" ${canTrade ? "" : "disabled"}>${canTrade ? `${escapeHtml(marketButtonSideLabel(market, "YES"))} ${formatCents(market.yes_price)}` : "Ждём итог"}</button>
@@ -7785,7 +7861,7 @@ function renderTopupSheet() {
   }
   if ($("usdtDepositExactAmount")) {
     const exactAmountText = hasPendingIntent
-      ? `${Number(intent.deposit_amount || 0).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`
+      ? `${Number(intent.deposit_amount || 0).toLocaleString(getIntlLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`
       : "";
     $("usdtDepositExactAmount").textContent = exactAmountText;
     $("usdtDepositAmountCopy")?.setAttribute(
@@ -7873,14 +7949,15 @@ function renderTopupSheet() {
   if ($("walletBonusUnlock")) {
     const unlock = state.bonusUnlock;
     const hasBonus = isUsdt && Number(state.usdtBonusBalance || 0) > 0;
+    const english = getLanguage() === "en";
     $("walletBonusUnlock").classList.toggle("hidden", !hasBonus);
     $("walletBonusUnlock").textContent = !hasBonus
       ? ""
       : unlock?.eligible
-        ? `Разблокировка: до ${Number(unlock.rate_pct || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 })}% от прибыли${Number(unlock.streak_multiplier || 1) > 1 ? ` · заряд x${unlock.streak_multiplier}` : ""}`
+        ? `${english ? "Unlock: up to" : "Разблокировка: до"} ${Number(unlock.rate_pct || 0).toLocaleString(getIntlLocale(), { maximumFractionDigits: 2 })}% ${english ? "of profit" : "от прибыли"}${Number(unlock.streak_multiplier || 1) > 1 ? ` · ${english ? "charge" : "заряд"} x${unlock.streak_multiplier}` : ""}`
         : unlock?.deposit_qualified && !unlock?.cash_play_qualified
-          ? "Конвертация включится после ставки основными USDT"
-          : `Разблокировка после депозита от ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`;
+          ? (english ? "Conversion activates after a cash-USDT bet" : "Конвертация включится после ставки основными USDT")
+          : `${english ? "Unlocks after a deposit of" : "Разблокировка после депозита от"} ${formatCurrencyAmount(getUsdtDepositMinimum(), "USDT")}`;
   }
   if ($("walletStarConversion")) {
     const conversion = state.starConversion;
@@ -9263,6 +9340,58 @@ $("settingsBtn")?.addEventListener("click", () => {
   openSheet($("settingsSheet"));
 });
 
+document.querySelectorAll("[data-language-option]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const language = button.dataset.languageOption;
+    if (!language || language === getLanguage()) {
+      return;
+    }
+    triggerHaptic("selection");
+    showButtonPressed(button);
+    setLanguage(language);
+  });
+});
+
+onLanguageChange(() => {
+  state.market = applyMarketLanguage(state.market);
+  state.btcMarkets = applyMarketListLanguage(state.btcMarkets);
+  state.worldCupMarkets = applyMarketListLanguage(state.worldCupMarkets);
+  state.topMarkets = applyMarketListLanguage(state.topMarkets);
+  state.sportsMarkets = applyMarketListLanguage(state.sportsMarkets);
+  state.specialMarkets = applyMarketListLanguage(state.specialMarkets);
+  state.positions = applyMarketListLanguage(state.positions);
+  chartBetLabelCache = null;
+  chartTickerLabelCache = null;
+  state.chartYMin = null;
+  state.chartYMax = null;
+  [
+    renderMarket,
+    renderMe,
+    renderTradeTicket,
+    renderComments,
+    renderLeaderboard,
+    renderClans,
+    renderWorldCupList,
+    renderTopMarketsList,
+    renderSportsMarketsList,
+    renderBtcMarketsList,
+    renderTopupSheet,
+    renderWalletHistory,
+    renderTaskTabs,
+    renderTaskStats,
+    renderEngagement,
+    renderActivity,
+    renderRecentMarkets,
+  ].forEach((render) => {
+    try {
+      render();
+    } catch {
+      // A not-yet-loaded screen will render normally when its data arrives.
+    }
+  });
+  renderMarketChart();
+});
+
 $("settingsCloseBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
   closeSheet($("settingsSheet"));
@@ -10072,7 +10201,9 @@ async function shareInvite({ awardShareTask = false, sourceElement = null } = {}
   }
 
   const inviteUrl = buildInviteUrl(state.user.telegram_id);
-  const text = "Залетай в EasyMarket. Мне начислят на баланс сумму твоего пополнения: половину сразу, половину после твоей ставки. Ещё я получу 1% с твоих побед.";
+  const text = getLanguage() === "en"
+    ? "Join me in EasyMarket. I earn your deposit amount: half now, half after your first bet, plus 1% from your wins."
+    : "Залетай в EasyMarket. Мне начислят на баланс сумму твоего пополнения: половину сразу, половину после твоей ставки. Ещё я получу 1% с твоих побед.";
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
@@ -10252,7 +10383,7 @@ function getTaskProgress(taskKey) {
 function formatTaskProgressValue(value, unit) {
   const numeric = Number(value || 0);
   if (unit === "USDT") {
-    return numeric.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+    return numeric.toLocaleString(getIntlLocale(), { maximumFractionDigits: 2 });
   }
   return formatFire(numeric);
 }
@@ -12214,7 +12345,7 @@ function drawRoulettePills(ctx, width, height, nowTs) {
   let myPillEnd = width * 0.04;
   const mine = round.segments.find((item) => item.is_me);
   if (mine) {
-    const seg1 = "Твоя ставка ";
+    const seg1 = `${translateText("Твоя ставка")} `;
     const seg2 = `${Math.round(mine.amount)} ★`;
     const seg3 = `  ${Math.round(mine.share * 100)}%`;
     const w1 = ctx.measureText(seg1).width;
@@ -13221,8 +13352,12 @@ $("rouletteInviteBtn")?.addEventListener("click", () => {
     ? buildInviteUrl(state.user.telegram_id)
     : buildTelegramMiniAppLaunchUrl("easymarket");
   const text = pot > 0
-    ? `В EasyMarket висит банк ${pot} ★ и ждёт соперника. Крутанём?`
-    : "Погнали крутить колесо в EasyMarket — победитель забирает весь банк.";
+    ? (getLanguage() === "en"
+        ? `A ${pot} ★ EasyMarket pool is waiting for an opponent. Spin it?`
+        : `В EasyMarket висит банк ${pot} ★ и ждёт соперника. Крутанём?`)
+    : (getLanguage() === "en"
+        ? "Spin the EasyMarket wheel with me — the winner takes the pool."
+        : "Погнали крутить колесо в EasyMarket — победитель забирает весь банк.");
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${encodeURIComponent(text)}`;
   if (window.Telegram?.WebApp?.openTelegramLink) {
     window.Telegram.WebApp.openTelegramLink(shareUrl);
@@ -13236,13 +13371,21 @@ $("rouletteFairBtn")?.addEventListener("click", () => {
   if (!round) {
     return;
   }
-  const lines = [
-    `Раунд #${round.id}`,
-    `Хеш зерна: ${round.seed_hash}`,
-    round.seed ? `Зерно: ${round.seed}` : "Зерно откроется при раскрутке.",
-    round.final_angle !== null ? `Точка остановки: ${round.final_angle}` : "",
-    "Проверка: sha256(зерно) должен совпасть с хешем.",
-  ].filter(Boolean);
+  const lines = getLanguage() === "en"
+    ? [
+        `Round #${round.id}`,
+        `Seed hash: ${round.seed_hash}`,
+        round.seed ? `Seed: ${round.seed}` : "The seed is revealed when the wheel spins.",
+        round.final_angle !== null ? `Stop point: ${round.final_angle}` : "",
+        "Verification: sha256(seed) must match the hash.",
+      ].filter(Boolean)
+    : [
+        `Раунд #${round.id}`,
+        `Хеш зерна: ${round.seed_hash}`,
+        round.seed ? `Зерно: ${round.seed}` : "Зерно откроется при раскрутке.",
+        round.final_angle !== null ? `Точка остановки: ${round.final_angle}` : "",
+        "Проверка: sha256(зерно) должен совпасть с хешем.",
+      ].filter(Boolean);
   showToast(lines.join("\n"));
 });
 

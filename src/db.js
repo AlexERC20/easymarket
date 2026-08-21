@@ -453,6 +453,11 @@ export async function runMigrations() {
     ALTER TABLE markets
       ADD COLUMN IF NOT EXISTS trading_mode TEXT NOT NULL DEFAULT 'LEGACY';
 
+    ALTER TABLE markets
+      ADD COLUMN IF NOT EXISTS question_en TEXT,
+      ADD COLUMN IF NOT EXISTS yes_label_en TEXT,
+      ADD COLUMN IF NOT EXISTS no_label_en TEXT;
+
     CREATE INDEX IF NOT EXISTS idx_markets_status_end_time
       ON markets(status, end_time);
 

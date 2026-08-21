@@ -252,14 +252,25 @@ function mapMarket(row) {
     title: isKyivstoner
       ? KYIVSTONER_MARKET_QUESTION
       : (btcDefinition?.title || row.title || ((isTop || isSports) ? row.question : undefined)),
+    title_en: isKyivstoner
+      ? "How many years will Kyivstoner get?"
+      : (btcDefinition?.title || row.question_en || row.title || row.question),
     team: isKyivstoner
       ? "Киевстонер"
       : (row.team || ((isTop || isSports) ? row.title || row.question : undefined)),
+    team_en: isKyivstoner
+      ? "Kyivstoner"
+      : (row.question_en || row.team || row.title || row.question),
     icon: isKyivstoner ? KYIVSTONER_MARKET_ICON : row.icon,
     yes_label: isKyivstoner ? KYIVSTONER_YES_LABEL : (row.yes_label || (isSports ? undefined : "Yes")),
     no_label: isKyivstoner ? KYIVSTONER_NO_LABEL : (row.no_label || (isSports ? undefined : "No")),
+    yes_label_en: isKyivstoner ? "Over 8" : (row.yes_label_en || row.yes_label || (isSports ? undefined : "Yes")),
+    no_label_en: isKyivstoner ? "Under 8" : (row.no_label_en || row.no_label || (isSports ? undefined : "No")),
     label: btcDefinition?.label,
     question: row.question,
+    question_en: btcDefinition
+      ? `Will BTC close above ${Math.round(toNumber(row.open_price)).toLocaleString("en-US")} in ${btcDefinition.label}?`
+      : (isKyivstoner ? "How many years will Kyivstoner get?" : (row.question_en || row.question)),
     open_price: toNumber(row.open_price),
     close_price: row.close_price === null ? null : toNumber(row.close_price),
     current_price: row.current_price === null ? null : toNumber(row.current_price),
@@ -326,6 +337,7 @@ function mapPosition(row) {
     created_at: row.created_at,
     updated_at: row.updated_at,
     question: row.question,
+    question_en: row.question_en || row.question,
     winner: row.winner,
     market_status: row.market_status,
     market_end_time: row.market_end_time,
@@ -334,9 +346,12 @@ function mapPosition(row) {
     best_bid: row.best_bid === null || row.best_bid === undefined ? null : toNumber(row.best_bid),
     best_ask: row.best_ask === null || row.best_ask === undefined ? null : toNumber(row.best_ask),
     team: isKyivstoner ? "Киевстонер" : row.team,
+    team_en: isKyivstoner ? "Kyivstoner" : (row.question_en || row.team),
     icon: isKyivstoner ? KYIVSTONER_MARKET_ICON : row.icon,
     yes_label: isKyivstoner ? KYIVSTONER_YES_LABEL : (row.yes_label || undefined),
     no_label: isKyivstoner ? KYIVSTONER_NO_LABEL : (row.no_label || undefined),
+    yes_label_en: isKyivstoner ? "Over 8" : (row.yes_label_en || row.yes_label || undefined),
+    no_label_en: isKyivstoner ? "Under 8" : (row.no_label_en || row.no_label || undefined),
     yes_price: row.yes_price === undefined ? undefined : toNumber(row.yes_price),
     no_price: row.no_price === undefined ? undefined : toNumber(row.no_price),
   };
@@ -506,12 +521,15 @@ function mapTopMarket(row) {
     symbol: row.symbol,
     market_type: "TOP_MARKET",
     title: row.title || row.question,
+    title_en: row.question_en || row.title || row.question,
     team: row.title || row.question,
+    team_en: row.question_en || row.title || row.question,
     icon: row.icon || "↗",
     image: row.icon || null,
     slug: row.slug,
     polymarket_id: row.polymarket_id,
     question: row.question,
+    question_en: row.question_en || row.question,
     yes_label: row.yes_label || "Yes",
     no_label: row.no_label || "No",
     open_price: toNumber(row.open_price),
@@ -541,8 +559,11 @@ function mapSportsMarket(row) {
     symbol: row.symbol,
     market_type: "SPORTS_MARKET",
     title: row.title || row.question,
+    title_en: row.question_en || row.title || row.question,
     team: row.title || row.question,
+    team_en: row.question_en || row.title || row.question,
     event_title: row.event_title || row.title || row.question,
+    event_title_en: row.question_en || row.event_title || row.title || row.question,
     icon: row.icon || "",
     image: row.icon || null,
     slug: row.slug,
@@ -551,8 +572,11 @@ function mapSportsMarket(row) {
     event_id: row.event_id,
     sport: row.sport || "sports",
     question: row.question,
+    question_en: row.question_en || row.question,
     yes_label: row.yes_label || "Yes",
     no_label: row.no_label || "No",
+    yes_label_en: row.yes_label_en || row.yes_label || "Yes",
+    no_label_en: row.no_label_en || row.no_label || "No",
     open_price: toNumber(row.open_price),
     current_price: yesPrice,
     yes_price: yesPrice,
@@ -2351,6 +2375,11 @@ function normalizeSportsFeedEvent(event) {
     timingRank,
     activityScore: timingRank * 1_000_000_000_000 + eventVolume24h * 1_000 + selected.liquidity,
     eventKey: getSportsEventKey(event),
+    originalTitle: labelsAreYesNo
+      ? String(market.question || eventTitle).trim()
+      : eventTitle,
+    yesLabelEn: selected.outcomes[0],
+    noLabelEn: selected.outcomes[1],
   };
 }
 
@@ -5026,6 +5055,7 @@ export async function getUserSnapshot(telegramId) {
         SELECT
           p.*,
           m.question,
+          m.question_en,
           m.winner,
           m.status AS market_status,
           m.end_time AS market_end_time,
@@ -5035,6 +5065,8 @@ export async function getUserSnapshot(telegramId) {
           COALESCE(meta.icon, top_meta.icon) AS icon,
           top_meta.yes_label,
           top_meta.no_label,
+          m.yes_label_en,
+          m.no_label_en,
           m.yes_price,
           m.no_price,
           CASE p.side
@@ -9185,21 +9217,23 @@ async function performTopMarketSync() {
           `
             UPDATE markets
             SET question = $2,
-                current_price = $3,
-                yes_price = (yes_price * 0.70 + $3::numeric * 0.30),
-                no_price = (no_price * 0.70 + $4::numeric * 0.30),
-                liquidity = $5,
-                end_time = $6
+                question_en = $3,
+                current_price = $4,
+                yes_price = (yes_price * 0.70 + $4::numeric * 0.30),
+                no_price = (no_price * 0.70 + $5::numeric * 0.30),
+                liquidity = $6,
+                end_time = $7
             WHERE id = $1
             RETURNING *
           `,
-          [existingMarket.id, question, yesPrice, noPrice, liquidity, feedMarket.endTime],
+          [existingMarket.id, question, feedMarket.originalTitle, yesPrice, noPrice, liquidity, feedMarket.endTime],
         )
         : await client.query(
           `
             INSERT INTO markets (
               symbol,
               question,
+              question_en,
               open_price,
               current_price,
               yes_price,
@@ -9211,10 +9245,10 @@ async function performTopMarketSync() {
               end_time,
               status
             )
-            VALUES ($1, $2, $3, $3, $3, $4, 0, 0, $5, $6, $7, 'open')
+            VALUES ($1, $2, $3, $4, $4, $4, $5, 0, 0, $6, $7, $8, 'open')
             RETURNING *
           `,
-          [symbol, question, yesPrice, noPrice, liquidity, now, feedMarket.endTime],
+          [symbol, question, feedMarket.originalTitle, yesPrice, noPrice, liquidity, now, feedMarket.endTime],
         );
 
       await client.query(
@@ -9547,21 +9581,37 @@ async function performSportsMarketSync() {
           `
             UPDATE markets
             SET question = $2,
-                current_price = $3,
-                yes_price = (yes_price * 0.72 + $3::numeric * 0.28),
-                no_price = (no_price * 0.72 + $4::numeric * 0.28),
-                liquidity = $5,
-                end_time = $6
+                question_en = $3,
+                yes_label_en = $4,
+                no_label_en = $5,
+                current_price = $6,
+                yes_price = (yes_price * 0.72 + $6::numeric * 0.28),
+                no_price = (no_price * 0.72 + $7::numeric * 0.28),
+                liquidity = $8,
+                end_time = $9
             WHERE id = $1
             RETURNING *
           `,
-          [existingMarket.id, feedMarket.title, yesPrice, noPrice, liquidity, feedMarket.endTime],
+          [
+            existingMarket.id,
+            feedMarket.title,
+            feedMarket.originalTitle,
+            feedMarket.yesLabelEn,
+            feedMarket.noLabelEn,
+            yesPrice,
+            noPrice,
+            liquidity,
+            feedMarket.endTime,
+          ],
         )
         : await client.query(
           `
             INSERT INTO markets (
               symbol,
               question,
+              question_en,
+              yes_label_en,
+              no_label_en,
               open_price,
               current_price,
               yes_price,
@@ -9573,10 +9623,21 @@ async function performSportsMarketSync() {
               end_time,
               status
             )
-            VALUES ($1, $2, $3, $3, $3, $4, 0, 0, $5, $6, $7, 'open')
+            VALUES ($1, $2, $3, $4, $5, $6, $6, $6, $7, 0, 0, $8, $9, $10, 'open')
             RETURNING *
           `,
-          [symbol, feedMarket.title, yesPrice, noPrice, liquidity, now, feedMarket.endTime],
+          [
+            symbol,
+            feedMarket.title,
+            feedMarket.originalTitle,
+            feedMarket.yesLabelEn,
+            feedMarket.noLabelEn,
+            yesPrice,
+            noPrice,
+            liquidity,
+            now,
+            feedMarket.endTime,
+          ],
         );
 
       await client.query(

@@ -3348,6 +3348,44 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   transform: translateX(19px);
 }
 
+.language-segment {
+  display: grid;
+  grid-template-columns: repeat(2, 34px);
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 11px;
+  background: rgba(6, 11, 21, 0.62);
+}
+
+.language-segment button {
+  min-width: 34px;
+  height: 27px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
+  transition:
+    color 160ms var(--ease-default),
+    background 180ms var(--ease-default),
+    box-shadow 180ms var(--ease-default),
+    transform 120ms var(--ease-default);
+}
+
+.language-segment button.active {
+  color: #07101a;
+  background: linear-gradient(135deg, var(--neon-lime), var(--neon-cyan));
+  box-shadow: 0 0 14px rgba(53, 246, 255, 0.2);
+}
+
+.language-segment button:active {
+  transform: scale(0.94);
+}
+
 .top-more-item.settings-action {
   color: rgba(200, 208, 220, 0.92);
 }

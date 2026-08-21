@@ -59,8 +59,46 @@ export const STORY_THEMES = {
   },
 };
 
-function resolveStoryTheme(themeKey) {
-  return STORY_THEMES[String(themeKey || "").toLowerCase()] || STORY_THEMES.btc;
+const STORY_THEMES_EN = {
+  btc: {
+    subtitle: "BTC up or down in 5 minutes",
+    taglines: [
+      "A win worth celebrating",
+      "Not gambling. Pure analysis.",
+      "While you hesitated, I won",
+      "Loss? Never heard of it",
+    ],
+  },
+  football: {
+    subtitle: "Sports markets in EasyMarket",
+    taglines: [
+      "The score says it all",
+      "I knew before kickoff",
+      "Even VAR agrees",
+      "Top-corner prediction",
+    ],
+  },
+  top: {
+    subtitle: "Hot markets in EasyMarket",
+    taglines: [
+      "Saw it before it was trending",
+      "No insider info, just instinct",
+      "The trend played out perfectly",
+    ],
+  },
+  kyivstoner: {
+    subtitle: "Special market in EasyMarket",
+    taglines: [
+      "Called it. Won it.",
+      "Instinct delivered",
+      "Did it hit? Absolutely.",
+    ],
+  },
+};
+
+function resolveStoryTheme(themeKey, language = "ru") {
+  const themes = language === "en" ? STORY_THEMES_EN : STORY_THEMES;
+  return themes[String(themeKey || "").toLowerCase()] || themes.btc;
 }
 
 function pickTagline(theme, taglineIndex, amountLabel) {
@@ -503,19 +541,30 @@ const THEME_CHIPS = {
   kyivstoner: "KYIVSTONER",
 };
 
+const THEME_CHIPS_EN = {
+  btc: "BTC · 5 MIN",
+  football: "SPORTS",
+  top: "TOP MARKETS",
+  kyivstoner: "KYIVSTONER",
+};
+
 // Вертикальная Story-карточка «победный билет»: тематическая hero-сцена,
 // билетная панель с перфорацией, штрих-код и голо-полоса. Сознательно БЕЗ
 // SVG-фильтров (feGaussianBlur/feDropShadow) — librsvg через sharp рендерит их
 // ненадёжно; всё свечение сделано слоями полупрозрачных градиентных фигур.
-export function buildStoryCardSvg(amountLabel, themeKey = "btc", taglineIndex = null) {
+export function buildStoryCardSvg(amountLabel, themeKey = "btc", taglineIndex = null, language = "ru") {
+  const safeLanguage = language === "en" ? "en" : "ru";
   const raw = normalizeAmount(amountLabel);
   const amount = escapeXml(raw);
   const amountSize = amountFontSize(raw);
   const themeSlug = STORY_THEMES[String(themeKey || "").toLowerCase()] ? String(themeKey).toLowerCase() : "btc";
-  const theme = resolveStoryTheme(themeSlug);
+  const theme = resolveStoryTheme(themeSlug, safeLanguage);
   const tagline = escapeXml(pickTagline(theme, taglineIndex, amountLabel));
   const subtitle = escapeXml(theme.subtitle);
-  const chip = THEME_CHIPS[themeSlug];
+  const chip = (safeLanguage === "en" ? THEME_CHIPS_EN : THEME_CHIPS)[themeSlug];
+  const winLabel = safeLanguage === "en" ? "YOUR WIN" : "ТВОЙ ВЫИГРЫШ";
+  const playLabel = safeLanguage === "en" ? "Play now  →" : "Играй и ты  →";
+  const linkLabel = safeLanguage === "en" ? "tap the link below" : "жми ссылку ниже";
   // Сид зависит от суммы и темы: одна пара — навсегда одна картинка.
   let seed = 0x9e3779b9;
   for (const ch of `${themeSlug}:${raw}`) {
@@ -623,7 +672,7 @@ export function buildStoryCardSvg(amountLabel, themeKey = "btc", taglineIndex = 
   <rect x="60" y="1030" width="960" height="470" rx="36" fill="#0c1322" stroke="#223146" stroke-width="2"/>
   <ellipse cx="540" cy="1270" rx="430" ry="150" fill="url(#glowAmount)"/>
   <text x="540" y="1108" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
-    font-size="34" letter-spacing="12" fill="#c9d4e5" fill-opacity="0.82">ТВОЙ ВЫИГРЫШ</text>
+    font-size="34" letter-spacing="12" fill="#c9d4e5" fill-opacity="0.82">${winLabel}</text>
   <text x="534" y="1290" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
     font-size="${amountSize}" fill="#35f6ff" fill-opacity="0.9">${amount}</text>
   <text x="546" y="1290" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
@@ -649,13 +698,13 @@ export function buildStoryCardSvg(amountLabel, themeKey = "btc", taglineIndex = 
 
   <rect x="310" y="1636" width="460" height="104" rx="52" fill="none" stroke="#b7ff4d" stroke-width="3"/>
   <text x="540" y="1704" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold"
-    font-size="46" fill="#b7ff4d">Играй и ты  →</text>
+    font-size="46" fill="#b7ff4d">${playLabel}</text>
 
   ${buildBarcode(rand, 120, 1782, 380, 72)}
   <text x="120" y="1888" text-anchor="start" font-family="DejaVu Sans"
     font-size="24" letter-spacing="6" fill="#8b97a8">№ ${serial}</text>
   <text x="960" y="1888" text-anchor="end" font-family="DejaVu Sans"
-    font-size="26" fill="#8b97a8" fill-opacity="0.85">жми ссылку ниже</text>
+    font-size="26" fill="#8b97a8" fill-opacity="0.85">${linkLabel}</text>
 
   <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#vignette)"/>
 </svg>`;
@@ -669,13 +718,14 @@ export function buildStoryCardSvg(amountLabel, themeKey = "btc", taglineIndex = 
 const storyCardCache = new Map();
 const STORY_CARD_CACHE_MAX = 60;
 
-export async function renderStoryCardJpeg(amountLabel, themeKey = "btc", taglineIndex = null) {
-  const key = `${String(themeKey || "btc")}:${taglineIndex ?? "-"}:${normalizeAmount(amountLabel)}`;
+export async function renderStoryCardJpeg(amountLabel, themeKey = "btc", taglineIndex = null, language = "ru") {
+  const safeLanguage = language === "en" ? "en" : "ru";
+  const key = `${safeLanguage}:${String(themeKey || "btc")}:${taglineIndex ?? "-"}:${normalizeAmount(amountLabel)}`;
   const cached = storyCardCache.get(key);
   if (cached) {
     return cached;
   }
-  const svg = buildStoryCardSvg(amountLabel, themeKey, taglineIndex);
+  const svg = buildStoryCardSvg(amountLabel, themeKey, taglineIndex, safeLanguage);
   const buffer = await sharp(Buffer.from(svg)).jpeg({ quality: 88, mozjpeg: true }).toBuffer();
   if (storyCardCache.size >= STORY_CARD_CACHE_MAX) {
     storyCardCache.delete(storyCardCache.keys().next().value);
