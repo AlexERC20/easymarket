@@ -4222,40 +4222,47 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
 }
 
-.task-stat-row.expanded {
+.task-stat-row.task-stat-detail-view {
   border-color: rgba(75, 213, 255, 0.3);
   background: rgba(11, 18, 29, 0.96);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
 }
 
-.task-stat-toggle {
+.task-stat-overview {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(112px, auto) 11px;
+  grid-template-columns: minmax(0, 1fr) auto 9px;
+  grid-template-areas:
+    "main pnl chevron"
+    "money money chevron";
   align-items: center;
-  gap: 12px;
+  column-gap: 10px;
+  row-gap: 11px;
   width: 100%;
   min-width: 0;
-  min-height: 84px;
+  min-height: 104px;
   margin: 0;
-  border: 0;
   background: transparent;
-  padding: 13px 12px 13px 14px;
+  padding: 13px 12px 12px 14px;
   color: inherit;
-  font: inherit;
-  text-align: left;
   cursor: pointer;
   box-sizing: border-box;
+  outline: none;
   -webkit-tap-highlight-color: transparent;
+  animation: task-stat-face-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.task-stat-toggle:active {
+.task-stat-overview:active {
   background: rgba(75, 213, 255, 0.055);
 }
 
-.task-stat-main,
-.task-stat-numbers {
+.task-stat-overview:focus-visible {
+  box-shadow: inset 0 0 0 2px rgba(75, 213, 255, 0.42);
+}
+
+.task-stat-main {
+  grid-area: main;
   display: grid;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -4265,14 +4272,8 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   border-color: rgba(183, 255, 77, 0.22);
 }
 
-.task-stat-row.task-stat-shareable.expanded {
+.task-stat-row.task-stat-shareable.task-stat-detail-view {
   border-color: rgba(183, 255, 77, 0.3);
-}
-
-.task-stat-numbers .task-stat-share-hint {
-  color: rgba(183, 255, 77, 0.9);
-  font-weight: 850;
-  text-align: right;
 }
 
 /* Шит шэринга должен всплывать ПОВЕРХ шита заданий (у того z-index 34). */
@@ -4280,28 +4281,21 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   z-index: 56;
 }
 
-.task-stat-main strong,
-.task-stat-numbers strong {
+.task-stat-main strong {
+  max-height: 2.3em;
+  overflow: hidden;
   font-size: 14px;
   font-weight: 950;
   line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 
 .task-stat-main small,
-.task-stat-numbers small,
 .task-stat-empty {
   color: var(--muted);
   font-size: 10.5px;
   font-weight: 780;
   line-height: 1.25;
-}
-
-.task-stat-main strong {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  white-space: normal;
 }
 
 .task-stat-main small {
@@ -4310,39 +4304,148 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   white-space: nowrap;
 }
 
-.task-stat-numbers {
+.task-stat-pnl {
+  grid-area: pnl;
+  align-self: start;
+  max-width: 112px;
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 950;
+  line-height: 1.15;
   text-align: right;
-  flex: 0 0 auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.task-stat-numbers strong {
-  font-size: 15px;
+.task-stat-pnl.profit,
+.task-stat-detail-head > b.profit {
+  color: var(--yes);
+}
+
+.task-stat-pnl.loss,
+.task-stat-detail-head > b.loss {
+  color: var(--no);
+}
+
+.task-stat-money {
+  grid-area: money;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.075);
+  padding-top: 9px;
+}
+
+.task-stat-money > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 7px;
+  min-width: 0;
+}
+
+.task-stat-money > span + span {
+  border-left: 1px solid rgba(255, 255, 255, 0.07);
+  padding-left: 12px;
+}
+
+.task-stat-money small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.task-stat-money b {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-stat-chevron {
+  grid-area: chevron;
   width: 7px;
   height: 7px;
   border-right: 1.5px solid rgba(210, 220, 235, 0.62);
   border-bottom: 1.5px solid rgba(210, 220, 235, 0.62);
-  transform: rotate(45deg) translateY(-2px);
-  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms ease;
+  transform: rotate(-45deg);
 }
 
-.task-stat-row.expanded .task-stat-chevron {
-  border-color: var(--neon-cyan);
-  transform: rotate(225deg) translate(-1px, -1px);
+.task-stat-detail-view {
+  animation: task-stat-face-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.task-stat-numbers .profit {
-  color: var(--yes);
+.task-stat-detail-head {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+  padding: 11px 12px;
 }
 
-.task-stat-numbers .loss {
-  color: var(--no);
+.task-stat-detail-back {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(75, 213, 255, 0.2);
+  border-radius: 10px;
+  background: rgba(75, 213, 255, 0.07);
+  padding: 0;
+  color: var(--text);
+}
+
+.task-stat-detail-back svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.task-stat-detail-head > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.task-stat-detail-head > span strong,
+.task-stat-detail-head > span small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-stat-detail-head > span strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.task-stat-detail-head > span small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.task-stat-detail-head > b {
+  max-width: 88px;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-stat-detail {
-  border-top: 1px solid rgba(255, 255, 255, 0.075);
   padding: 12px;
   animation: task-stat-detail-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -4355,6 +4458,17 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   from {
     opacity: 0;
     transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes task-stat-face-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
   }
   to {
     opacity: 1;
@@ -4416,10 +4530,11 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   overflow: hidden;
-  border: 1px solid var(--line-soft);
-  border-radius: 11px;
-  background: var(--line-soft);
-  gap: 1px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 0;
+  background: transparent;
+  gap: 0;
 }
 
 .task-stat-detail-summary > span {
@@ -4427,9 +4542,14 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   align-content: center;
   min-width: 0;
   min-height: 53px;
-  background: rgba(9, 15, 24, 0.97);
+  border-right: 1px solid rgba(255, 255, 255, 0.065);
+  background: transparent;
   padding: 7px 6px;
   text-align: center;
+}
+
+.task-stat-detail-summary > span:last-child {
+  border-right: 0;
 }
 
 .task-stat-detail-summary small,
@@ -4756,18 +4876,24 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
 }
 
 @media (max-width: 360px) {
-  .task-stat-toggle {
-    grid-template-columns: minmax(0, 1fr) minmax(98px, auto) 9px;
-    gap: 8px;
-    min-height: 82px;
-    padding: 12px 9px 12px 12px;
+  .task-stat-overview {
+    grid-template-columns: minmax(0, 1fr) auto 8px;
+    column-gap: 8px;
+    min-height: 102px;
+    padding: 12px 9px 11px 12px;
   }
 
-  .task-stat-numbers small {
-    max-width: 112px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .task-stat-pnl {
+    max-width: 88px;
+    font-size: 14px;
+  }
+
+  .task-stat-money {
+    gap: 8px;
+  }
+
+  .task-stat-money > span + span {
+    padding-left: 8px;
   }
 
   .task-stat-detail-summary small {
@@ -4791,9 +4917,15 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
 
   .task-stat-chevron,
   .task-stat-row,
+  .task-stat-overview,
   .task-stat-detail-actions button,
   .task-stat-detail-message button {
     transition: none !important;
+  }
+
+  .task-stat-overview,
+  .task-stat-detail-view {
+    animation: none !important;
   }
 }
 

@@ -4232,21 +4232,41 @@ function renderTaskStats() {
     const shareAttrs = shareable
       ? ` data-share-pnl="${pnl}" data-share-currency="${escapeHtml(currency)}" data-share-ticker="${escapeHtml(getMarketStatTitle(stat))}" data-share-theme="${getShareThemeKey(stat.symbol)}"`
       : "";
+    const title = escapeHtml(getMarketStatTitle(stat));
+    const pnlLabel = formatSignedCurrencyAmount(pnl, currency);
+    const pnlClass = pnl >= 0 ? "profit" : "loss";
+    if (detailExpanded) {
+      return `
+        <article class="task-stat-row task-stat-detail-view pnl-${pnl >= 0 ? "up" : "down"}${shareable ? " task-stat-shareable" : ""}" data-stat-key="${escapeHtml(detailKey)}" data-stat-market-id="${Number(stat.market_id)}" data-stat-currency="${escapeHtml(currency)}"${shareAttrs}>
+          <div class="task-stat-detail-head">
+            <button class="task-stat-detail-back" type="button" data-stat-detail-back aria-label="Назад к списку сделок">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 6-6 6 6 6" /></svg>
+            </button>
+            <span>
+              <strong>${title}</strong>
+              <small>${escapeHtml(resultText)}</small>
+            </span>
+            <b class="${pnlClass}">${pnlLabel}</b>
+          </div>
+          <div class="task-stat-detail">
+            ${renderMarketStatDetailState(stat, detailKey, shareable)}
+          </div>
+        </article>
+      `;
+    }
     return `
-      <article class="task-stat-row pnl-${pnl >= 0 ? "up" : "down"}${shareable ? " task-stat-shareable" : ""}${detailExpanded ? " expanded" : ""}" data-stat-key="${escapeHtml(detailKey)}" data-stat-market-id="${Number(stat.market_id)}" data-stat-currency="${escapeHtml(currency)}"${shareAttrs}>
-        <button class="task-stat-toggle" type="button" data-stat-detail-toggle aria-expanded="${detailExpanded ? "true" : "false"}">
+      <article class="task-stat-row pnl-${pnl >= 0 ? "up" : "down"}${shareable ? " task-stat-shareable" : ""}" data-stat-key="${escapeHtml(detailKey)}" data-stat-market-id="${Number(stat.market_id)}" data-stat-currency="${escapeHtml(currency)}"${shareAttrs}>
+        <div class="task-stat-overview" data-stat-detail-toggle role="button" tabindex="0" aria-label="Открыть расчёт сделки">
           <span class="task-stat-main">
-            <strong>${escapeHtml(getMarketStatTitle(stat))}</strong>
+            <strong>${title}</strong>
             <small>${escapeHtml(resultText)}</small>
           </span>
-          <span class="task-stat-numbers">
-            <strong class="${pnl >= 0 ? "profit" : "loss"}">${formatSignedCurrencyAmount(pnl, currency)}</strong>
-            <small>ставка ${formatCurrencyAmount(stat.spent || 0, currency)} · выплата ${formatCurrencyAmount(stat.payout || 0, currency)}</small>
+          <strong class="task-stat-pnl ${pnlClass}">${pnlLabel}</strong>
+          <span class="task-stat-money">
+            <span><small>Ставка</small><b>${formatCurrencyAmount(stat.spent || 0, currency)}</b></span>
+            <span><small>Выплата</small><b>${formatCurrencyAmount(stat.payout || 0, currency)}</b></span>
           </span>
           <span class="task-stat-chevron" aria-hidden="true"></span>
-        </button>
-        <div class="task-stat-detail${detailExpanded ? "" : " hidden"}">
-          ${detailExpanded ? renderMarketStatDetailState(stat, detailKey, shareable) : ""}
         </div>
       </article>
     `;
@@ -9819,13 +9839,26 @@ $("taskStatsList")?.addEventListener("click", (event) => {
     return;
   }
 
+  if (target.closest?.("[data-stat-detail-back]")) {
+    triggerHaptic("selection");
+    state.expandedMarketStatKey = null;
+    renderTaskStats();
+    return;
+  }
+
   if (!target.closest?.("[data-stat-detail-toggle]") || !stat) return;
   triggerHaptic("selection");
-  state.expandedMarketStatKey = state.expandedMarketStatKey === key ? null : key;
+  state.expandedMarketStatKey = key;
   renderTaskStats();
-  if (state.expandedMarketStatKey === key) {
-    void loadMarketStatDetail(stat);
-  }
+  void loadMarketStatDetail(stat);
+});
+
+$("taskStatsList")?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const toggle = event.target.closest?.("[data-stat-detail-toggle]");
+  if (!toggle) return;
+  event.preventDefault();
+  toggle.click();
 });
 $("shareCopyBtn")?.addEventListener("click", () => shareWinCopy());
 $("winOverlay")?.addEventListener("click", () => {
