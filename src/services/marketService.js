@@ -14076,6 +14076,30 @@ export async function getFireIncomeBreakdown(input = {}) {
     "SELECT balance FROM fire_balances WHERE user_id = $1",
     [user.id],
   );
+  const byDayResult = await query(
+    `
+      SELECT
+        date_trunc('day', created_at) AS day,
+        COALESCE(SUM(amount), 0) AS net,
+        COUNT(*)::int AS entries
+      FROM fire_ledger
+      WHERE user_id = $1
+        AND created_at >= now() - interval '14 days'
+      GROUP BY 1
+      ORDER BY 1 DESC
+    `,
+    [user.id],
+  );
+  const recentResult = await query(
+    `
+      SELECT id, amount, reason, source, created_at
+      FROM fire_ledger
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 60
+    `,
+    [user.id],
+  );
   return {
     user: {
       id: Number(user.id),
@@ -14090,6 +14114,18 @@ export async function getFireIncomeBreakdown(input = {}) {
       credited: roundMoney(Number(row.credited)),
       debited: roundMoney(Number(row.debited)),
       net: roundMoney(Number(row.net)),
+    })),
+    by_day: byDayResult.rows.map((row) => ({
+      day: row.day,
+      net: roundMoney(Number(row.net)),
+      entries: Number(row.entries),
+    })),
+    recent_entries: recentResult.rows.map((row) => ({
+      id: Number(row.id),
+      amount: Number(row.amount),
+      reason: row.reason,
+      source: row.source,
+      created_at: row.created_at,
     })),
   };
 }
