@@ -14,7 +14,13 @@
   pointer-events: none;
   overflow: hidden;
   opacity: 0.18;
-  mix-blend-mode: screen;
+  /* Раньше был mix-blend-mode: screen на span'ах ещё и filter: blur(). На iOS
+     WKWebView (Telegram) blend-mode на fixed-слое с overflow:hidden, чьи дети
+     одновременно анимируют filter+transform, ловит баг GPU-компоузинга: этот
+     слой (z-index:1) на долю секунды "пролезает" поверх z-index:999 велком-
+     лоадера цветным артефактом (цианово-лаймовый градиент читается как
+     фиолетовая полоска). Убрали обе форсирующие отдельный composite layer
+     эффекты - декоративные стрики того же вида, но без риска. */
 }
 
 .lm-energy-bg span {
@@ -23,7 +29,6 @@
   height: 120px;
   border-radius: 999px;
   background: linear-gradient(180deg, transparent, rgba(53, 246, 255, 0.5), rgba(183, 255, 77, 0.12), transparent);
-  filter: blur(0.2px);
   transform: rotate(22deg);
   animation: lmEnergyDrift 8s var(--lm-ease) infinite;
 }
