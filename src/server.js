@@ -143,14 +143,15 @@ app.use(compression());
 app.use(express.json({ limit: "128kb" }));
 app.use(express.static(publicDir, {
   setHeaders(res, filePath) {
-    // index.html указывает актуальные версии через ?v=, поэтому сам он должен
-    // всегда перепроверяться. Версионированные js/css, наоборот, безопасно
-    // кешировать надолго: при любом изменении файла ?v= в index.html/app.js
-    // бампается, и браузер запросит уже новый URL.
+    // Telegram WebView can retain an immutable asset even after its query
+    // version changes. Revalidate code and styles on each app open; ETags keep
+    // unchanged responses cheap while a deploy becomes visible immediately.
     if (/\.html$/i.test(filePath)) {
       res.setHeader("Cache-Control", "no-store, max-age=0");
     } else if (/\.(js|css)$/i.test(filePath)) {
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("Cache-Control", "no-cache, max-age=0, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
     }
   },
 }));
@@ -2309,6 +2310,9 @@ app.post("/api/bridge/tasks/complete", requireBridgeSecret, async (req, res) => 
 });
 
 app.get("*", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
   res.sendFile(path.join(publicDir, "index.html"));
 });
 
