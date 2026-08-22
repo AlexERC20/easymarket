@@ -6869,7 +6869,7 @@ function renderLeaderboard() {
           ? Number(player.referral_earnings || 0)
           : Number(player.balance || 0);
     const meta = mode === "BEST_24H"
-      ? `${escapeHtml(player.market_label || player.market_title || "market")} · ${escapeHtml(isPredictionTrade(player) ? yesNoSideLabel(player.side || "") : sideLabel(player.side || ""))} · всего +${formatCurrencyAmount(player.total_pnl_24h || player.best_pnl_24h || 0, player.currency || state.leaderboardCurrency)}`
+      ? `${escapeHtml(player.market_label || player.market_title || "market")} · ${escapeHtml(isPredictionTrade(player) ? yesNoSideLabel(player.side || "") : sideLabel(player.side || ""))} · всего ${formatSignedCurrencyAmount(player.total_pnl_24h || player.best_pnl_24h || 0, player.currency || state.leaderboardCurrency)}`
       : mode === "WINS_24H"
         ? `${formatFire(player.wins_24h)} побед · лучший ${formatCurrencyAmount(player.best_pnl_24h || 0, player.currency || state.leaderboardCurrency)}`
         : mode === "REFERRALS"

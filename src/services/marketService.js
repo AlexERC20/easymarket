@@ -16034,13 +16034,12 @@ export async function getLeaderboard(options = {}) {
           JOIN markets m ON m.id = p.market_id
           WHERE p.currency = $2
             AND p.status = 'resolved'
-            AND p.pnl > 0
             AND COALESCE(m.resolved_at, p.updated_at) >= now() - interval '24 hours'
         ),
         daily_totals AS (
           SELECT
             user_id,
-            COUNT(*) AS wins_24h,
+            COUNT(*) FILTER (WHERE pnl > 0) AS wins_24h,
             SUM(pnl) AS total_pnl_24h,
             SUM(payout) AS total_payout_24h,
             MAX(pnl) AS best_pnl_24h
@@ -16113,7 +16112,6 @@ export async function getLeaderboard(options = {}) {
           JOIN markets m ON m.id = p.market_id
           WHERE p.currency = $2
             AND p.status = 'resolved'
-            AND p.pnl > 0
             AND COALESCE(m.resolved_at, p.updated_at) >= now() - interval '24 hours'
         ),
         trade_stats AS (
@@ -16139,7 +16137,7 @@ export async function getLeaderboard(options = {}) {
           MAX(daily_positions.pnl) AS best_pnl_24h,
           SUM(daily_positions.pnl) AS total_pnl_24h,
           SUM(daily_positions.payout) AS total_payout_24h,
-          COUNT(*) AS wins_24h,
+          COUNT(*) FILTER (WHERE daily_positions.pnl > 0) AS wins_24h,
           COALESCE(trade_stats.bet_count, 0) AS bet_count,
           COALESCE(position_stats.settled_count, 0) AS settled_count,
           COALESCE(position_stats.win_count, 0) AS win_count,
@@ -16164,7 +16162,7 @@ export async function getLeaderboard(options = {}) {
           trade_stats.bet_count,
           position_stats.settled_count,
           position_stats.win_count
-        ORDER BY SUM(daily_positions.pnl) DESC, COUNT(*) DESC, MAX(daily_positions.pnl) DESC
+        ORDER BY SUM(daily_positions.pnl) DESC, COUNT(*) FILTER (WHERE daily_positions.pnl > 0) DESC, MAX(daily_positions.pnl) DESC
         LIMIT $1
       `,
       [safeLimit, currency],

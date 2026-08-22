@@ -605,7 +605,7 @@ function translatePatternToEnglish(value) {
     [/^💫 Эта победа могла капнуть в USDT — для запуска пополни от (.*)$/, "💫 This win could unlock USDT — activate it with a deposit of $1"],
     [/^Маркет #(\d+)$/, "Market #$1"],
     [/^(\d+) поз\.(.*)$/, "$1 pos.$2"],
-    [/^(.*?) · (.*?) · всего \+(.*)$/, "$1 · $2 · total +$3"],
+    [/^(.*?) · (.*?) · всего ([+-]?.*)$/, "$1 · $2 · total $3"],
     [/^(\d+) побед · лучший (.*)$/, "$1 wins · best $2"],
     [/^(\d+) рефералов · (\d+) начислений$/, "$1 referrals · $2 rewards"],
     [/^(\d+) ставок · WR (.*)$/, "$1 bets · WR $2"],
