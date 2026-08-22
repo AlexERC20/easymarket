@@ -13932,6 +13932,107 @@ export async function getStarAbuseDiagnostics(input = {}) {
   };
 }
 
+// Diagnostic-only: raw recent positions + trades for one account, to eyeball
+// an activity pattern (e.g. "why does this balance keep climbing") instead of
+// trusting only the aggregate star-abuse-check numbers.
+export async function getUserRecentTrades(input = {}) {
+  const telegramId = String(input.telegram_id || input.telegramId || "").trim();
+  const username = String(input.username || "").replace(/^@/, "").trim();
+  if (!telegramId && !username) {
+    throw new Error("telegram_id_or_username_required");
+  }
+  const limit = Math.max(1, Math.min(200, Number(input.limit) || 40));
+  const userResult = await query(
+    `
+      SELECT id, telegram_id, username, first_name
+      FROM users
+      WHERE ($1::text <> '' AND telegram_id = $1::text)
+         OR ($2::text <> '' AND lower(username) = lower($2::text))
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `,
+    [telegramId, username],
+  );
+  const user = userResult.rows[0];
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+
+  const positionsResult = await query(
+    `
+      SELECT
+        p.id, p.market_id, m.symbol, p.side, p.shares, p.spent, p.avg_price,
+        p.payout, p.pnl, p.status, p.created_at, p.updated_at
+      FROM positions p
+      JOIN markets m ON m.id = p.market_id
+      WHERE p.user_id = $1 AND p.currency = 'STAR'
+      ORDER BY p.updated_at DESC
+      LIMIT $2
+    `,
+    [user.id, limit],
+  );
+
+  const tradesResult = await query(
+    `
+      SELECT
+        t.id, t.market_id, m.symbol, t.action, t.side, t.amount, t.fee,
+        t.price, t.shares, t.created_at
+      FROM trades t
+      JOIN markets m ON m.id = t.market_id
+      WHERE t.user_id = $1 AND t.currency = 'STAR'
+      ORDER BY t.created_at DESC
+      LIMIT $2
+    `,
+    [user.id, limit],
+  );
+
+  const settled = positionsResult.rows.filter((row) => row.status !== "open");
+  const wins = settled.filter((row) => Number(row.pnl) > 0).length;
+  const totalPnl = settled.reduce((sum, row) => sum + Number(row.pnl || 0), 0);
+
+  return {
+    user: {
+      id: Number(user.id),
+      telegram_id: user.telegram_id,
+      username: user.username,
+      first_name: user.first_name,
+    },
+    summary: {
+      returned_positions: positionsResult.rows.length,
+      settled_in_sample: settled.length,
+      wins_in_sample: wins,
+      win_rate_in_sample_pct: settled.length ? Math.round((wins / settled.length) * 1000) / 10 : null,
+      pnl_in_sample: roundMoney(totalPnl),
+    },
+    positions: positionsResult.rows.map((row) => ({
+      id: Number(row.id),
+      market_id: Number(row.market_id),
+      symbol: row.symbol,
+      side: row.side,
+      shares: Number(row.shares),
+      spent: Number(row.spent),
+      avg_price: Number(row.avg_price),
+      payout: Number(row.payout),
+      pnl: Number(row.pnl),
+      status: row.status,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    })),
+    trades: tradesResult.rows.map((row) => ({
+      id: Number(row.id),
+      market_id: Number(row.market_id),
+      symbol: row.symbol,
+      action: row.action,
+      side: row.side,
+      amount: Number(row.amount),
+      fee: Number(row.fee),
+      price: Number(row.price),
+      shares: Number(row.shares),
+      created_at: row.created_at,
+    })),
+  };
+}
+
 // Diagnostic-only: one aggregate query answers "where do this account's stars
 // actually come from" (trading vs tasks vs referrals vs admin credits)
 // without paging the global fire_ledger feed by hand.

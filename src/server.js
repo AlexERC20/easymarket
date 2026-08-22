@@ -56,6 +56,7 @@ import {
   getRecentMarketOutcomes,
   getRecentMarkets,
   getFireIncomeBreakdown,
+  getUserRecentTrades,
   getSportsMarkets,
   clearTestStarStrike,
   getStarAbuseDiagnostics,
@@ -2148,6 +2149,19 @@ app.post("/api/bridge/economy/star-strike/clear", requireBridgeSecret, async (re
 app.get("/api/bridge/economy/star-strike/active", requireBridgeSecret, async (_req, res) => {
   try {
     const result = await listActiveStarStrikes();
+    res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/user-recent-trades", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await getUserRecentTrades({
+      telegram_id: req.query.telegram_id ?? req.query.telegramId,
+      username: req.query.username,
+      limit: req.query.limit,
+    });
     res.status(200).json({ ok: true, ...result });
   } catch (error) {
     sendApiError(res, error);
