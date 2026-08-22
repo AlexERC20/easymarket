@@ -4210,6 +4210,13 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
   width: 100%;
   min-width: 0;
   max-width: 100%;
+  /* A grid item with overflow != visible gets its automatic min-height
+     treated as 0 per spec, instead of sized to content - .task-stats-list's
+     implicit auto row track then collapses to a sliver and this card's real
+     (taller) content gets clipped by the overflow below. An explicit floor
+     sidesteps the auto-resolves-to-0 rule; it only ever acts as a minimum,
+     so the taller expanded detail view is unaffected. */
+  min-height: 106px;
   overflow: hidden;
   box-sizing: border-box;
   border: 1px solid var(--line-soft);
