@@ -4119,6 +4119,14 @@ body.sheet-overlay-active .app-shell > :not(.task-sheet) * {
 .task-stats-list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  /* Раскрытая карточка (.task-stat-detail-view) в разы выше свёрнутых
+     соседей. С дефолтным grid-auto-rows: auto Chrome в Telegram WebView
+     не домеряет её настоящую высоту (похоже, режет intrinsic-sizing pass
+     из-за overflow:hidden на глубоко вложенном контенте) и даёт строке
+     трек в размер соседей — карточка обрезается по overflow, а кнопка
+     "Поделиться победой" в самом низу расчёта уезжает за пределы трека и
+     пропадает. max-content заставляет браузер честно измерить контент. */
+  grid-auto-rows: max-content;
   gap: 8px;
   align-content: start;
   width: 100%;
