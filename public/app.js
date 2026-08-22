@@ -35,7 +35,7 @@ import {
   onLanguageChange,
   setLanguage,
   translateText,
-} from "./i18n.js?v=20260821-01";
+} from "./i18n.js?v=20260822-01";
 
 const DEFAULT_USDT_PROFIT_FEE_RATE = 0.07;
 const DEFAULT_STAR_PROFIT_FEE_RATE = 0.15;

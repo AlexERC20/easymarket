@@ -514,6 +514,38 @@ const EXACT_EN = new Map(Object.entries({
   "ты": "you",
   "Твой": "Yours",
   "свежие": "recent",
+  "Цена": "Price",
+  "Объём": "Volume",
+  "Всего": "Total",
+  "Рефералы": "Referrals",
+  "пока никого": "no one yet",
+  "Пригласи друга: половина бонуса придёт после его пополнения, вторая — после ставки на реальные. Плюс 1% с побед.": "Invite a friend: half the bonus arrives after their deposit, the other half after their first cash-USDT bet. Plus 1% from their wins.",
+  "Бонусы за приглашения": "Invite bonuses",
+  "Прибыль за их победы": "Profit from their wins",
+  "Пока нет рассчитанных рынков. Сделай ставку и дождись закрытия маркета.": "No settled markets yet. Place a bet and wait for the market to close.",
+  "винрейт": "win rate",
+  "ставок": "bets",
+  "лучшее": "best",
+  "Назад к списку сделок": "Back to trade history",
+  "Открыть расчёт сделки": "Open trade breakdown",
+  "Ставка": "Bet",
+  "Выплата": "Payout",
+  "· закрывается": "· closing",
+  "Позвать друга": "Invite a friend",
+  "место": "rank",
+  "очки месяца": "points this month",
+  "за всё время": "all-time",
+  "состав": "roster",
+  "Как поднять клан наверх": "How to climb the clan ranks",
+  "USDT-прогноз — победа": "USDT prediction — win",
+  "Заходи каждый день": "Check in daily",
+  "Серия из 5 побед": "5-win streak",
+  "Позвать друга в клан": "Invite a friend to the clan",
+  "Позвать в клан": "Invite to the clan",
+  "Счёт идёт за текущий месяц и обнуляется первого числа. В конце месяца весь банк уходит клану №1 и делится между топ-30 участниками пропорционально их очкам за этот месяц.": "The score runs for the current month and resets on the 1st. At month end, the whole pool goes to clan #1, split among the top 30 contributors in proportion to their points that month.",
+  "Комиссия": "Fee",
+  "Получишь": "You'll receive",
+  "Останется": "Remaining",
 }));
 
 const originalText = new WeakMap();
@@ -688,6 +720,19 @@ function translatePatternToEnglish(value) {
     [/^(\d+) поз\.$/, "$1 pos."],
     [/^ставка (.+)$/i, "bet $1"],
     [/^исход (.+)$/i, "outcome $1"],
+    [/^([\d,]+) участников$/, "$1 members"],
+    [/^([\d,]+) очков за месяц$/, "$1 points this month"],
+    [/^([\d,]+) всего$/, "$1 total"],
+    [/^Твой клан: (.+)$/, "Your clan: $1"],
+    [/^Вклад за месяц (.+?) · место #(.+)$/, "Contribution this month $1 · rank #$2"],
+    [/^спред (.+)$/i, "spread $1"],
+    [/^(.+) зв\.$/, "$1 stars"],
+    [/^\+(.+)\/день$/, "+$1/day"],
+    [/^\+(.+) оч\.$/, "+$1 pts"],
+    [/^1 друг$/, "1 friend"],
+    [/^(\d+) друг$/, "$1 friends"],
+    [/^(\d+) друга$/, "$1 friends"],
+    [/^(\d+) друзей$/, "$1 friends"],
   ];
   for (const [pattern, replacement] of rules) {
     if (pattern.test(value)) return value.replace(pattern, replacement);
@@ -695,12 +740,31 @@ function translatePatternToEnglish(value) {
   return value;
 }
 
+const CYRILLIC_RE = /[а-яА-ЯёЁ]/;
+
 export function translateText(value) {
   const source = String(value ?? "");
   if (currentLanguage !== "en" || !source.trim()) return source;
   const trimmed = source.trim();
   const exact = EXACT_EN.get(trimmed);
-  return preserveSpacing(source, exact || translatePatternToEnglish(trimmed));
+  if (exact) return preserveSpacing(source, exact);
+
+  const patterned = translatePatternToEnglish(trimmed);
+  if (!CYRILLIC_RE.test(patterned)) return preserveSpacing(source, patterned);
+
+  // Many rendered strings are several clauses joined with " · " (e.g. a trade's
+  // "bet YES · outcome YES · 3 pos. · STAR"). A single whole-string pattern
+  // above can match just the first clause and pass the rest through untouched
+  // (its capture group swallows the remainder verbatim). When that leaves
+  // Cyrillic behind, translate each " · "-separated clause on its own and
+  // rejoin, so a pattern that only covers one clause doesn't block the others.
+  if (trimmed.includes(" · ")) {
+    const bySegment = trimmed.split(" · ").map((part) => translateText(part)).join(" · ");
+    if (!CYRILLIC_RE.test(bySegment)) return preserveSpacing(source, bySegment);
+    if (bySegment !== trimmed) return preserveSpacing(source, bySegment);
+  }
+
+  return preserveSpacing(source, patterned);
 }
 
 function shouldSkipTextNode(node) {
