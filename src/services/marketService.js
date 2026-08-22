@@ -14090,15 +14090,20 @@ export async function getFireIncomeBreakdown(input = {}) {
     `,
     [user.id],
   );
+  const reasonFilter = Array.isArray(input.reasons)
+    ? input.reasons
+    : String(input.reasons || "").split(",").map((r) => r.trim()).filter(Boolean);
+  const recentLimit = Math.max(1, Math.min(500, Number(input.recent_limit) || 60));
   const recentResult = await query(
     `
       SELECT id, amount, reason, source, created_at
       FROM fire_ledger
       WHERE user_id = $1
+        AND ($2::text[] IS NULL OR cardinality($2::text[]) = 0 OR reason = ANY($2::text[]))
       ORDER BY created_at DESC
-      LIMIT 60
+      LIMIT $3
     `,
-    [user.id],
+    [user.id, reasonFilter.length ? reasonFilter : null, recentLimit],
   );
   return {
     user: {

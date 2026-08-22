@@ -2173,6 +2173,8 @@ app.get("/api/bridge/economy/fire-income-breakdown", requireBridgeSecret, async 
     const breakdown = await getFireIncomeBreakdown({
       telegram_id: req.query.telegram_id ?? req.query.telegramId,
       username: req.query.username,
+      reasons: req.query.reasons,
+      recent_limit: req.query.recent_limit,
     });
     res.status(200).json({
       ok: true,
