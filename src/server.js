@@ -2161,6 +2161,7 @@ app.get("/api/bridge/economy/user-recent-trades", requireBridgeSecret, async (re
       telegram_id: req.query.telegram_id ?? req.query.telegramId,
       username: req.query.username,
       limit: req.query.limit,
+      since_hours: req.query.since_hours,
     });
     res.status(200).json({ ok: true, ...result });
   } catch (error) {

@@ -13941,7 +13941,11 @@ export async function getUserRecentTrades(input = {}) {
   if (!telegramId && !username) {
     throw new Error("telegram_id_or_username_required");
   }
-  const limit = Math.max(1, Math.min(200, Number(input.limit) || 40));
+  const limit = Math.max(1, Math.min(3000, Number(input.limit) || 40));
+  const sinceHours = input.since_hours !== undefined
+    ? Math.max(0, Math.min(24 * 30, Number(input.since_hours) || 0))
+    : null;
+  const sinceIso = sinceHours !== null ? new Date(Date.now() - sinceHours * 3_600_000).toISOString() : null;
   const userResult = await query(
     `
       SELECT id, telegram_id, username, first_name
@@ -13966,24 +13970,29 @@ export async function getUserRecentTrades(input = {}) {
       FROM positions p
       JOIN markets m ON m.id = p.market_id
       WHERE p.user_id = $1 AND p.currency = 'STAR'
+        AND ($3::timestamptz IS NULL OR p.updated_at >= $3::timestamptz)
       ORDER BY p.updated_at DESC
       LIMIT $2
     `,
-    [user.id, limit],
+    [user.id, limit, sinceIso],
   );
 
   const tradesResult = await query(
     `
       SELECT
         t.id, t.market_id, m.symbol, t.action, t.side, t.amount, t.fee,
-        t.price, t.shares, t.created_at
+        t.price, t.shares, t.created_at, t.book_type, t.liquidity_role,
+        t.counterparty_user_id, cp.telegram_id AS counterparty_telegram_id,
+        cp.username AS counterparty_username
       FROM trades t
       JOIN markets m ON m.id = t.market_id
+      LEFT JOIN users cp ON cp.id = t.counterparty_user_id
       WHERE t.user_id = $1 AND t.currency = 'STAR'
+        AND ($3::timestamptz IS NULL OR t.created_at >= $3::timestamptz)
       ORDER BY t.created_at DESC
       LIMIT $2
     `,
-    [user.id, limit],
+    [user.id, limit, sinceIso],
   );
 
   const settled = positionsResult.rows.filter((row) => row.status !== "open");
@@ -14029,6 +14038,11 @@ export async function getUserRecentTrades(input = {}) {
       price: Number(row.price),
       shares: Number(row.shares),
       created_at: row.created_at,
+      book_type: row.book_type,
+      liquidity_role: row.liquidity_role,
+      counterparty_user_id: row.counterparty_user_id === null ? null : Number(row.counterparty_user_id),
+      counterparty_telegram_id: row.counterparty_telegram_id,
+      counterparty_username: row.counterparty_username,
     })),
   };
 }
