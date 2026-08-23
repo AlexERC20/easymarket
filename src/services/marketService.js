@@ -13983,7 +13983,9 @@ export async function getUserRecentTrades(input = {}) {
         t.id, t.market_id, m.symbol, t.action, t.side, t.amount, t.fee,
         t.price, t.shares, t.created_at, t.book_type, t.liquidity_role,
         t.counterparty_user_id, cp.telegram_id AS counterparty_telegram_id,
-        cp.username AS counterparty_username
+        cp.username AS counterparty_username,
+        m.end_time, m.resolved_at, m.winner, m.status AS market_status,
+        m.open_price, m.close_price
       FROM trades t
       JOIN markets m ON m.id = t.market_id
       LEFT JOIN users cp ON cp.id = t.counterparty_user_id
@@ -14043,6 +14045,12 @@ export async function getUserRecentTrades(input = {}) {
       counterparty_user_id: row.counterparty_user_id === null ? null : Number(row.counterparty_user_id),
       counterparty_telegram_id: row.counterparty_telegram_id,
       counterparty_username: row.counterparty_username,
+      market_end_time: row.end_time,
+      market_resolved_at: row.resolved_at,
+      market_winner: row.winner,
+      market_status: row.market_status,
+      market_open_price: row.open_price === null ? null : Number(row.open_price),
+      market_close_price: row.close_price === null ? null : Number(row.close_price),
     })),
   };
 }
