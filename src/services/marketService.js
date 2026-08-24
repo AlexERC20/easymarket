@@ -14055,6 +14055,30 @@ export async function getUserRecentTrades(input = {}) {
   };
 }
 
+// Admin-only: full user roster for bulk operations (mass bonus grants etc.)
+// that need every registered telegram_id rather than a leaderboard slice.
+export async function listAllUsers(input = {}) {
+  const limit = Math.max(1, Math.min(20_000, Number(input.limit) || 10_000));
+  const result = await query(
+    `
+      SELECT telegram_id, username, first_name, created_at
+      FROM users
+      ORDER BY id ASC
+      LIMIT $1
+    `,
+    [limit],
+  );
+  return {
+    count: result.rows.length,
+    users: result.rows.map((row) => ({
+      telegram_id: row.telegram_id,
+      username: row.username,
+      first_name: row.first_name,
+      created_at: row.created_at,
+    })),
+  };
+}
+
 // Diagnostic-only: one aggregate query answers "where do this account's stars
 // actually come from" (trading vs tasks vs referrals vs admin credits)
 // without paging the global fire_ledger feed by hand.

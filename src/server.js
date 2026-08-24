@@ -56,6 +56,7 @@ import {
   getRecentMarketOutcomes,
   getRecentMarkets,
   getFireIncomeBreakdown,
+  listAllUsers,
   getUserRecentTrades,
   getSportsMarkets,
   clearTestStarStrike,
@@ -2163,6 +2164,15 @@ app.get("/api/bridge/economy/user-recent-trades", requireBridgeSecret, async (re
       limit: req.query.limit,
       since_hours: req.query.since_hours,
     });
+    res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/users", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await listAllUsers({ limit: req.query.limit });
     res.status(200).json({ ok: true, ...result });
   } catch (error) {
     sendApiError(res, error);
