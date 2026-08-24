@@ -56,6 +56,7 @@ import {
   getRecentMarketOutcomes,
   getRecentMarkets,
   getFireIncomeBreakdown,
+  getLiveStats,
   listAllUsers,
   getUserRecentTrades,
   getSportsMarkets,
@@ -2164,6 +2165,15 @@ app.get("/api/bridge/economy/user-recent-trades", requireBridgeSecret, async (re
       limit: req.query.limit,
       since_hours: req.query.since_hours,
     });
+    res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/live-stats", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await getLiveStats({ online_window_minutes: req.query.online_window_minutes });
     res.status(200).json({ ok: true, ...result });
   } catch (error) {
     sendApiError(res, error);

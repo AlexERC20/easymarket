@@ -14055,6 +14055,58 @@ export async function getUserRecentTrades(input = {}) {
   };
 }
 
+// Powers the AV bot's promo leaderboard post footer: how many accounts have
+// touched the app recently (no real presence tracking, so "online" is
+// approximated as "updated_at within the window"), plus the single most
+// recent win across both currencies for a "last winner" line.
+export async function getLiveStats(input = {}) {
+  const onlineWindowMinutes = Math.max(1, Math.min(120, Number(input.online_window_minutes) || 5));
+
+  const onlineResult = await query(
+    `
+      SELECT COUNT(*)::int AS online_count
+      FROM users
+      WHERE updated_at >= now() - ($1 || ' minutes')::interval
+    `,
+    [onlineWindowMinutes],
+  );
+
+  const lastWinResult = await query(
+    `
+      SELECT
+        p.pnl, p.payout, p.currency, p.side, p.updated_at,
+        users.telegram_id, users.username, users.first_name,
+        m.symbol, m.question
+      FROM positions p
+      JOIN users ON users.id = p.user_id
+      JOIN markets m ON m.id = p.market_id
+      WHERE p.status = 'resolved' AND p.pnl > 0
+      ORDER BY p.updated_at DESC
+      LIMIT 1
+    `,
+  );
+  const winRow = lastWinResult.rows[0] || null;
+
+  return {
+    online_count: Number(onlineResult.rows[0]?.online_count || 0),
+    online_window_minutes: onlineWindowMinutes,
+    last_win: winRow ? {
+      amount: roundMoney(Number(winRow.pnl)),
+      payout: roundMoney(Number(winRow.payout)),
+      currency: winRow.currency,
+      side: winRow.side,
+      symbol: winRow.symbol,
+      question: winRow.question,
+      resolved_at: winRow.updated_at,
+      user: {
+        telegram_id: winRow.telegram_id,
+        username: winRow.username,
+        first_name: winRow.first_name,
+      },
+    } : null,
+  };
+}
+
 // Admin-only: full user roster for bulk operations (mass bonus grants etc.)
 // that need every registered telegram_id rather than a leaderboard slice.
 export async function listAllUsers(input = {}) {
