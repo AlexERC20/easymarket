@@ -93,6 +93,19 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_users_updated_at
       ON users(updated_at DESC);
 
+    -- DEFAULT now() is evaluated once at ALTER time for existing rows, so
+    -- shipping this starts every current user's 24h inactivity clock fresh
+    -- from deploy instead of counting whatever their real last action was -
+    -- nobody loses a balance to a clock that was already running before the
+    -- feature existed. Deliberately separate from users.updated_at, which
+    -- also gets touched by a bare app open; this only moves on a bet or a
+    -- claimed task (see touchUserActivity call sites).
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS last_meaningful_activity_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+    CREATE INDEX IF NOT EXISTS idx_users_last_meaningful_activity_at
+      ON users(last_meaningful_activity_at);
+
     CREATE TABLE IF NOT EXISTS fire_balances (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       balance NUMERIC(20, 8) NOT NULL DEFAULT 0,

@@ -3684,6 +3684,107 @@ export async function distributeDueClanRewardFunds() {
   });
 }
 
+// Marks "real" engagement (a bet, a claimed task) as opposed to just opening
+// the app - users.updated_at already moves on a bare app open via
+// upsertUser, so the 24h inactivity-expiry sweep needs its own clock that
+// only advances on something that shows the account is actually being used.
+// Accepts an optional client so callers already inside a transaction don't
+// pay for a second round trip / connection.
+export async function touchUserActivity(userId, client = null) {
+  const runner = client ?? { query };
+  await runner.query(
+    "UPDATE users SET last_meaningful_activity_at = now() WHERE id = $1",
+    [userId],
+  );
+}
+
+// Burns (not redistributes - deliberately, see the AV bot's fire_expiry
+// snowball this session spent a day cleaning up) STAR and bonus-USDT
+// balances for accounts that placed no bet and claimed no task in the last
+// 24h. Cash USDT is never touched here. Each user is its own transaction so
+// one bad row can't roll back a whole batch, and a user drops out of the
+// candidate set as soon as both balances hit zero, so a slow sweep just
+// picks up where it left off next tick instead of double-processing.
+export async function expireInactiveBalances({ limit = 500 } = {}) {
+  const candidates = await query(
+    `
+      SELECT u.id, u.telegram_id
+      FROM users u
+      WHERE u.last_meaningful_activity_at < now() - interval '24 hours'
+        AND (
+          EXISTS (SELECT 1 FROM fire_balances fb WHERE fb.user_id = u.id AND fb.balance > 0)
+          OR EXISTS (SELECT 1 FROM usdt_bonus_balances bb WHERE bb.user_id = u.id AND bb.balance > 0)
+        )
+      LIMIT $1
+    `,
+    [Math.max(1, Math.min(2_000, Number(limit) || 500))],
+  );
+
+  let expiredUsers = 0;
+  let expiredStars = 0;
+  let expiredBonusUsdt = 0;
+
+  for (const row of candidates.rows) {
+    const userId = row.id;
+    await withTransaction(async (client) => {
+      let touchedThisUser = false;
+
+      const starResult = await client.query(
+        "SELECT balance FROM fire_balances WHERE user_id = $1 FOR UPDATE",
+        [userId],
+      );
+      const starBalance = toNumber(starResult.rows[0]?.balance);
+      if (starBalance > 0) {
+        await client.query(
+          "UPDATE fire_balances SET balance = 0, updated_at = now() WHERE user_id = $1",
+          [userId],
+        );
+        await client.query(
+          `
+            INSERT INTO fire_ledger (user_id, amount, reason, source)
+            VALUES ($1, $2, 'inactivity_expiry', 'system')
+          `,
+          [userId, -starBalance],
+        );
+        expiredStars += starBalance;
+        touchedThisUser = true;
+      }
+
+      const bonusResult = await client.query(
+        "SELECT balance FROM usdt_bonus_balances WHERE user_id = $1 FOR UPDATE",
+        [userId],
+      );
+      const bonusBalance = toNumber(bonusResult.rows[0]?.balance);
+      if (bonusBalance > 0) {
+        await client.query(
+          "UPDATE usdt_bonus_balances SET balance = 0, updated_at = now() WHERE user_id = $1",
+          [userId],
+        );
+        await client.query(
+          `
+            INSERT INTO usdt_bonus_ledger (user_id, amount, reason, source)
+            VALUES ($1, $2::numeric, 'inactivity_expiry', 'system')
+          `,
+          [userId, -bonusBalance],
+        );
+        expiredBonusUsdt += bonusBalance;
+        touchedThisUser = true;
+      }
+
+      if (touchedThisUser) {
+        expiredUsers += 1;
+      }
+    });
+  }
+
+  return {
+    checked: candidates.rows.length,
+    expired_users: expiredUsers,
+    expired_stars: roundMoney(expiredStars),
+    expired_bonus_usdt: roundMoney(expiredBonusUsdt),
+  };
+}
+
 export async function upsertUser(input) {
   const telegramId = String(input.telegram_id ?? "").trim();
   if (!telegramId) {
@@ -6287,6 +6388,7 @@ export async function claimShareTask(input) {
       "SELECT balance FROM fire_balances WHERE user_id = $1",
       [user.id],
     );
+    await touchUserActivity(user.id, client);
 
     return {
       ok: true,
@@ -6768,6 +6870,7 @@ async function claimDailyTaskForUser(client, user, taskKey) {
     [user.id],
   );
   const nextProgress = await getDailyTaskProgress(client, user.id, normalizedTaskKey);
+  await touchUserActivity(user.id, client);
 
   return {
     ok: true,
@@ -14508,6 +14611,7 @@ export async function buyOutcome(input) {
       : null;
     const referralBonus = await awardReferralBetBonus(client, user, marketId);
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
+    await touchUserActivity(user.id, client);
 
     return {
       ok: true,

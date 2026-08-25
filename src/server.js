@@ -117,6 +117,7 @@ import {
   dismissDepositEvent,
   auditUserDeposits,
   expirePendingDepositIntents,
+  expireInactiveBalances,
   listPendingDepositIntents,
   getDepositReviewQueue,
   getPublicUsdtDepositNetworks,
@@ -167,6 +168,7 @@ let usdtDepositScannerStartedAt = 0;
 let usdtDepositExpiryBusy = false;
 let databaseCleanupBusy = false;
 let clanRewardDistributionBusy = false;
+let inactivityExpiryBusy = false;
 
 function sendApiError(res, error, fallbackStatus = 500) {
   const message = error instanceof Error ? error.message : String(error);
@@ -2452,6 +2454,27 @@ async function usdtDepositExpiryTick() {
   }
 }
 
+async function inactivityExpiryTick() {
+  if (inactivityExpiryBusy) {
+    return;
+  }
+
+  inactivityExpiryBusy = true;
+  try {
+    const summary = await expireInactiveBalances();
+    if (summary.expired_users > 0) {
+      console.log("[easymarket] inactivity expiry finished", summary);
+    }
+  } catch (error) {
+    console.warn(
+      "[easymarket] inactivity expiry failed:",
+      error instanceof Error ? error.message : "unknown error",
+    );
+  } finally {
+    inactivityExpiryBusy = false;
+  }
+}
+
 async function databaseCleanupTick(reason = "scheduled") {
   if (databaseCleanupBusy || !config.databaseCleanupEnabled) {
     return null;
@@ -2545,6 +2568,10 @@ async function startMarketEngine() {
   setInterval(() => {
     void usdtDepositExpiryTick();
   }, 60_000);
+
+  setInterval(() => {
+    void inactivityExpiryTick();
+  }, 15 * 60_000);
 
   if (config.databaseCleanupEnabled) {
     if (config.databaseCleanupRunOnStart) {
