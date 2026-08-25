@@ -188,27 +188,6 @@ export async function getPromoContestStateForUser(userId, client = { query }) {
   return row ? buildPromoContestState(row, startedAt, dayKey) : null;
 }
 
-export async function getPromoContestSnapshot(telegramIds) {
-  const ids = [...new Set((telegramIds || []).map((value) => String(value || "").trim()).filter(Boolean))]
-    .slice(0, 500);
-  if (ids.length === 0) {
-    return [];
-  }
-  const dayKey = getDayKey();
-  const startedAt = await getContestStartedAt();
-  const result = await loadPromoRows({ query }, "users.telegram_id = ANY($3::text[])", {
-    startedAt,
-    dayKey,
-    whereParams: [ids],
-  });
-  return result.rows.map((row) => ({
-    telegram_id: row.telegram_id,
-    username: row.username,
-    first_name: row.first_name,
-    promo_contest: buildPromoContestState(row, startedAt, dayKey),
-  }));
-}
-
 export async function creditPromoPointsFromTelegramStars(client, input) {
   const stars = Math.round(toNumber(input.stars));
   const selected = PROMO_POINT_PACKAGES.find((option) => option.stars === stars);

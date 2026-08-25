@@ -94,7 +94,6 @@ import {
 } from "./services/marketService.js";
 import {
   creditTelegramStarsPromoPointPurchase,
-  getPromoContestSnapshot,
   resetTelegramPromoPointPurchaseDay,
 } from "./services/promoContestService.js";
 import {
@@ -2275,10 +2274,38 @@ app.get("/api/bridge/tasks/state", requireBridgeSecret, async (req, res) => {
 
 app.post("/api/bridge/promo/contest-snapshot", requireBridgeSecret, async (req, res) => {
   try {
-    const telegramIds = Array.isArray(req.body?.telegram_ids)
-      ? req.body.telegram_ids
-      : [];
-    const users = await getPromoContestSnapshot(telegramIds);
+    const telegramIds = [
+      ...new Set(
+        (Array.isArray(req.body?.telegram_ids) ? req.body.telegram_ids : [])
+          .map((value) => String(value || "").trim())
+          .filter(Boolean),
+      ),
+    ].slice(0, 500);
+    // Reuses the same per-user engagement computation as the on-demand
+    // /api/bridge/tasks/state path (getEngagementState) instead of the old
+    // lightweight SQL snapshot, which only ever covered the 4 balance-hold
+    // tasks and silently never credited the other ~15 easymarket-sourced
+    // promo tasks (daily bets, topups, referrals, promo_usdt_play, etc.)
+    // for anyone relying on the bot's periodic bulk sync.
+    const users = (
+      await Promise.all(
+        telegramIds.map(async (telegram_id) => {
+          try {
+            const state = await getEngagementState({ telegram_id });
+            return {
+              telegram_id,
+              username: null,
+              first_name: null,
+              progress: state.progress,
+              once: state.once,
+              promo_contest: state.promo_contest,
+            };
+          } catch (error) {
+            return null;
+          }
+        }),
+      )
+    ).filter(Boolean);
     res.status(200).json({ ok: true, users });
   } catch (error) {
     sendApiError(res, error);
