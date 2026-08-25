@@ -6047,15 +6047,26 @@ export async function syncFireBalance(input) {
   const result = await withTransaction(async (client) => {
     const balanceResult = await client.query(
       `
-        SELECT balance
-        FROM fire_balances
-        WHERE user_id = $1
-        FOR UPDATE
+        SELECT fb.balance, u.last_meaningful_activity_at < now() - interval '24 hours' AS is_inactive
+        FROM users u
+        LEFT JOIN fire_balances fb ON fb.user_id = u.id
+        WHERE u.id = $1
+        FOR UPDATE OF u
       `,
       [user.id],
     );
     const previousBalance = toNumber(balanceResult.rows[0]?.balance);
-    const nextBalance = !allowDecrease && source === "bridge_sync" && balance < previousBalance
+    const isInactive = Boolean(balanceResult.rows[0]?.is_inactive);
+    // The AV bot's fire counter and this balance are synced one-way (bot ->
+    // here), so it has no idea the inactivity sweep already zeroed this
+    // account. Without this check, the bot's next unrelated sync (its own
+    // chat activity, or a redistribution payout) would push the old fire
+    // value back in and quietly resurrect a balance that was deliberately
+    // expired. Blocked the same way an explicit decrease is blocked below -
+    // by holding at previousBalance - until the user does something in
+    // EasyMarket again and touchUserActivity clears is_inactive.
+    const blockedByInactivityExpiry = source === "bridge_sync" && isInactive && balance > previousBalance;
+    const nextBalance = (!allowDecrease && source === "bridge_sync" && balance < previousBalance) || blockedByInactivityExpiry
       ? previousBalance
       : balance;
     const delta = Math.round((nextBalance - previousBalance) * 100) / 100;
@@ -6085,6 +6096,7 @@ export async function syncFireBalance(input) {
       previous_balance: previousBalance,
       delta,
       ignored_decrease: nextBalance === previousBalance && balance < previousBalance,
+      ignored_inactivity_resurrect: nextBalance === previousBalance && blockedByInactivityExpiry,
     };
   });
 
