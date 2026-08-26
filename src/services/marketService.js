@@ -7805,11 +7805,27 @@ export async function ingestTaskEvent(input) {
 
 // ===== Состояние заданий дня: ротация, лестница, разовые, стрик =====
 export async function getEngagementState(input) {
-  const user = await upsertUser({
-    telegram_id: input.telegram_id,
-    username: input.username,
-    first_name: input.first_name,
-  });
+  // The passive bulk sync (promo/contest-snapshot) calls this once a minute
+  // for every promo participant just to read their progress - it must not
+  // go through upsertUser, since that stamps users.updated_at = now() on
+  // every call and would keep every participant looking "online" forever,
+  // regardless of whether they actually opened the app.
+  let user;
+  if (input.skip_activity_touch) {
+    const existing = await query("SELECT * FROM users WHERE telegram_id = $1", [
+      String(input.telegram_id ?? "").trim(),
+    ]);
+    if (!existing.rows[0]) {
+      throw new Error("user_not_found");
+    }
+    user = existing.rows[0];
+  } else {
+    user = await upsertUser({
+      telegram_id: input.telegram_id,
+      username: input.username,
+      first_name: input.first_name,
+    });
+  }
   const shim = { query };
   const today = getDayKey();
   const rotationKeys = getDailyRotation(today);

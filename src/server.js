@@ -2291,7 +2291,7 @@ app.post("/api/bridge/promo/contest-snapshot", requireBridgeSecret, async (req, 
       await Promise.all(
         telegramIds.map(async (telegram_id) => {
           try {
-            const state = await getEngagementState({ telegram_id });
+            const state = await getEngagementState({ telegram_id, skip_activity_touch: true });
             return {
               telegram_id,
               username: null,
