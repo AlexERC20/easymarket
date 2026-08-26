@@ -13529,7 +13529,7 @@ export async function matchOpenClobLimitOrders(limit = 60) {
 // pattern this guards against, not a human placing occasional bets. Applied
 // to every STAR buyer (see buyOutcome), so it is kept short enough to sit
 // below normal human tap-to-tap timing.
-const STAR_BUY_COOLDOWN_MS = 750;
+const STAR_BUY_COOLDOWN_MS = 100;
 // Below this many settled positions a win/loss streak is still just noise;
 // flagging on a small sample would punish an ordinary lucky player.
 const STAR_ABUSE_MIN_SETTLED = 30;
