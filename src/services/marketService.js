@@ -14223,6 +14223,42 @@ export async function getLiveStats(input = {}) {
     [onlineWindowMinutes],
   );
 
+  const totalUsersResult = await query("SELECT COUNT(*)::int AS total_users FROM users");
+
+  const bonusTurnoverResult = await query(
+    `
+      SELECT COALESCE(SUM(ABS(amount)), 0) AS turnover
+      FROM usdt_bonus_ledger
+      WHERE created_at >= now() - interval '24 hours'
+        AND (reason LIKE 'buy_%' OR reason LIKE 'limit_buy_%')
+    `,
+  );
+  const cashTurnoverResult = await query(
+    `
+      SELECT COALESCE(SUM(ABS(amount)), 0) AS turnover
+      FROM usdt_ledger
+      WHERE created_at >= now() - interval '24 hours'
+        AND (reason LIKE 'buy_%' OR reason LIKE 'limit_buy_%')
+    `,
+  );
+  const starTurnoverResult = await query(
+    `
+      SELECT COALESCE(SUM(ABS(amount)), 0) AS turnover
+      FROM fire_ledger
+      WHERE created_at >= now() - interval '24 hours'
+        AND (reason LIKE 'buy_%' OR reason LIKE 'limit_buy_%')
+    `,
+  );
+  const ammTurnoverResult = await query(
+    `
+      SELECT COALESCE(SUM(amount), 0) AS turnover
+      FROM trades
+      WHERE created_at >= now() - interval '24 hours'
+        AND currency = 'USDT'
+        AND maker_order_id IS NULL
+    `,
+  );
+
   const lastWinResult = await query(
     `
       SELECT
@@ -14242,6 +14278,13 @@ export async function getLiveStats(input = {}) {
   return {
     online_count: Number(onlineResult.rows[0]?.online_count || 0),
     online_window_minutes: onlineWindowMinutes,
+    total_users: Number(totalUsersResult.rows[0]?.total_users || 0),
+    turnover_24h: {
+      bonus_usdt: roundMoney(toNumber(bonusTurnoverResult.rows[0]?.turnover)),
+      cash_usdt: roundMoney(toNumber(cashTurnoverResult.rows[0]?.turnover)),
+      amm_usdt: roundMoney(toNumber(ammTurnoverResult.rows[0]?.turnover)),
+      star: roundMoney(toNumber(starTurnoverResult.rows[0]?.turnover)),
+    },
     last_win: winRow ? {
       amount: roundMoney(Number(winRow.pnl)),
       payout: roundMoney(Number(winRow.payout)),
