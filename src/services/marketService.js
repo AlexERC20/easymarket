@@ -13555,14 +13555,14 @@ const STAR_ABUSE_SPEED_MIN_BUYS = 200;
 // already expired - a few repeats gets expensive fast without waiting on a
 // slow-to-dilute rolling average to sort it out.
 const STAR_ABUSE_BASE_BAN_HOURS = 1;
-// A pure profit flag (no speed signature) can just be one lucky, honestly
-// skilled session - striking on the very first check burned real players.
-// Speed flags already require heavy volume (200+ buys) and a mechanical
-// rapid-pairing pattern, so they're left immediate; only the profit-alone
-// case has to show up on multiple separate checks (each throttled 30s
-// apart, so this needs several minutes of sustained edge) before it
-// escalates to an actual strike.
-const STAR_ABUSE_PROFIT_CONFIRMATIONS = 3;
+// Any single flagged check - profit ratio, absolute profit, balance spike,
+// or speed - can still be one lucky/unusual session rather than a bot.
+// Strikes now require the SAME account to come back flagged (any
+// combination of those reasons, doesn't have to be the same one twice) on
+// this many separate checks before escalating - each check is throttled
+// 30s apart, so this needs several minutes of sustained suspicious
+// behavior, not a single snapshot, before concluding "probably a bot."
+const STAR_ABUSE_STRIKE_CONFIRMATIONS = 3;
 // Edge ratio alone can miss someone who stakes huge volume at a modest
 // percentage edge and still walks away with a large absolute pile of stars -
 // this catches the amount itself regardless of what ratio it works out to.
@@ -13736,8 +13736,7 @@ async function checkStarAbuseBan(client, userId) {
     return { banned: false };
   }
 
-  const pureProfitFlag = flag.profitFlagged && !flag.speedFlagged;
-  if (pureProfitFlag && pendingFlags + 1 < STAR_ABUSE_PROFIT_CONFIRMATIONS) {
+  if (pendingFlags + 1 < STAR_ABUSE_STRIKE_CONFIRMATIONS) {
     // banned_until must be a real (past) timestamp, never NULL, on a row
     // that isn't an active ban - NULL there means "banned until paid"
     // everywhere else in this file, and isBanRowActive would misread a
@@ -14194,7 +14193,7 @@ export async function getStarAbuseDiagnostics(input = {}) {
       rapid_pair_density: STAR_ABUSE_RAPID_PAIR_DENSITY,
       speed_min_buys: STAR_ABUSE_SPEED_MIN_BUYS,
       base_ban_hours: STAR_ABUSE_BASE_BAN_HOURS,
-      profit_confirmations_required: STAR_ABUSE_PROFIT_CONFIRMATIONS,
+      profit_confirmations_required: STAR_ABUSE_STRIKE_CONFIRMATIONS,
     },
     evaluated_since: sinceIso,
     settled_count: stats.settledCount,
