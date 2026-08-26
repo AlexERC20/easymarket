@@ -146,6 +146,7 @@ const DAILY_TASK_KEYS = [
 ];
 
 const PROMO_USDT_PLAY_TARGETS = [1, 3, 5, 10, 20];
+const PROMO_LIMIT_ORDER_TARGETS = [1, 3, 5, 10, 20];
 
 const WORLD_CUP_FALLBACK_MARKETS = [
   { polymarketId: "fallback-france", team: "France", icon: "🇫🇷", yesPrice: 0.3845, volume: 97_261_093 },
@@ -7134,6 +7135,41 @@ async function getPromoUsdtPlayProgress(client, userId, dayKey = getDayKey()) {
   );
 }
 
+export function buildPromoLimitOrdersProgress(orderCount, dayKey = getDayKey()) {
+  const value = Math.max(0, Math.floor(Number(orderCount || 0)));
+  const claimedLevels = PROMO_LIMIT_ORDER_TARGETS
+    .map((target, index) => ({ target, level: index + 1 }))
+    .filter((entry) => value >= entry.target)
+    .map((entry) => entry.level);
+  const nextIndex = Math.min(claimedLevels.length, PROMO_LIMIT_ORDER_TARGETS.length - 1);
+  return {
+    value,
+    target: PROMO_LIMIT_ORDER_TARGETS[nextIndex],
+    unit: "лимиток",
+    level: nextIndex + 1,
+    levels: PROMO_LIMIT_ORDER_TARGETS.length,
+    amount: 0,
+    claim_task_key: null,
+    ready: false,
+    claimed: claimedLevels.length === PROMO_LIMIT_ORDER_TARGETS.length,
+    claimed_levels: claimedLevels,
+    day_key: dayKey,
+  };
+}
+
+async function getPromoLimitOrdersProgress(client, userId, dayKey = getDayKey()) {
+  const result = await client.query(
+    `
+      SELECT COUNT(*)::int AS order_count
+      FROM limit_orders
+      WHERE user_id = $1
+        AND created_at >= date_trunc('day', now())
+    `,
+    [userId],
+  );
+  return buildPromoLimitOrdersProgress(result.rows[0]?.order_count, dayKey);
+}
+
 function getProgressTaskDayKey(taskKey) {
   return DAILY_PROGRESS_TASKS[taskKey]?.claimDayKey || getDayKey();
 }
@@ -7845,6 +7881,7 @@ export async function getEngagementState(input) {
     }
   }
   progress.promo_usdt_play = await getPromoUsdtPlayProgress(shim, user.id, today);
+  progress.promo_limit_orders = await getPromoLimitOrdersProgress(shim, user.id, today);
 
   const streakResult = await query("SELECT * FROM user_streaks WHERE user_id = $1", [user.id]);
 
