@@ -73,7 +73,10 @@ let lastChartDrawTs = 0;
 let chartSnapshotCanvas = null; // offscreen copy of the previous market's frame
 let chartBetLabelCache = null; // cached measureText widths for the "your bet" pill
 let chartTickerLabelCache = null; // cached measureText widths for the live ticker pill
-const ACTIVE_MARKET_POLL_MS = 1_500;
+// Matches the backend's price tick (config.pricePollMs, default 1000ms) -
+// polling slower just adds pure lag; polling faster gets the same cached
+// value back since /api/market/active is cached with the same TTL.
+const ACTIVE_MARKET_POLL_MS = 1_000;
 const MARKET_LIST_POLL_MS = 10_000;
 const SPECIAL_MARKET_POLL_MS = 3_000;
 const COMMENTS_POLL_MS = 10_000;
@@ -2315,20 +2318,16 @@ function drawMarketChartFrame(ts) {
   const currentPrice = worldCup
     ? Math.max(0.1, Math.min(99.9, Number(market.yes_price || 0.5) * 100))
     : Number(market.current_price || openPrice || 0);
-  if (!state.smoothedPrice || Math.abs(state.smoothedPrice - currentPrice) > Math.max(250, currentPrice * 0.015)) {
-    state.smoothedPrice = currentPrice;
-  } else {
-    state.smoothedPrice += (currentPrice - state.smoothedPrice) * 0.09;
-  }
+  // Was exponentially eased toward currentPrice (factor 0.09/frame), which
+  // looked smooth but put the displayed number and dot 1-1.8s behind the
+  // actual polled price - on a live BTC market that reads as lag against
+  // Binance, not smoothness. Track the polled value immediately instead.
+  state.smoothedPrice = currentPrice;
   const currentNoPrice = dualSpecialChart
     ? Math.max(0.1, Math.min(99.9, Number(market.no_price || 0.5) * 100))
     : 100 - currentPrice;
   if (dualSpecialChart) {
-    if (!state.smoothedNoPrice || Math.abs(state.smoothedNoPrice - currentNoPrice) > 25) {
-      state.smoothedNoPrice = currentNoPrice;
-    } else {
-      state.smoothedNoPrice += (currentNoPrice - state.smoothedNoPrice) * 0.09;
-    }
+    state.smoothedNoPrice = currentNoPrice;
   }
   if (!worldCup && Number.isFinite(openPrice) && openPrice > 0) {
     detectTargetCross(market, openPrice);
