@@ -5301,11 +5301,11 @@ function renderMyLimitOrders() {
   const orders = (state.orderbook.myOrders || [])
     .filter((order) => normalizeCurrency(order.currency) === state.currency);
   if (!orders.length) {
-    container.innerHTML = '<p class="orderbook-empty">Открытых заявок нет. Поставь цену в стакане.</p>';
+    setInnerHtmlIfChanged(container, '<p class="orderbook-empty">Открытых заявок нет. Поставь цену в стакане.</p>');
     return;
   }
 
-  container.innerHTML = `
+  setInnerHtmlIfChanged(container, `
     ${orders.map((order) => `
         <div class="my-limit-order">
           <span class="lo-side ${order.order_side === "SELL" ? "sell" : "buy"}" title="${escapeHtml(marketSideLabel(getDisplayMarket(), order.side))}">${order.order_side === "SELL" ? "Sell" : "Buy"} ${escapeHtml(marketButtonSideLabel(getDisplayMarket(), order.side))}</span>
@@ -5314,7 +5314,7 @@ function renderMyLimitOrders() {
           <button type="button" data-cancel-limit-order="${order.id}" ${state.orderbook.cancelPendingId === order.id ? "disabled" : ""}>Cancel</button>
         </div>
       `).join("")}
-  `;
+  `);
 }
 
 async function loadOrderbook({ force = false } = {}) {
@@ -5466,7 +5466,10 @@ function renderOrderbookPanel() {
     `;
   };
 
-  list.innerHTML = `
+  // Was an unconditional innerHTML rewrite on every ~1s market poll, even
+  // when the book hadn't actually moved - same skip-if-unchanged guard
+  // already used for comments/activity/recent markets.
+  setInnerHtmlIfChanged(list, `
     <div class="orderbook-cols">
       <span>Цена</span><span>Объём</span><span>Всего</span>
     </div>
@@ -5478,7 +5481,7 @@ function renderOrderbookPanel() {
         : `спред ${spreadCents.toFixed(1)}¢${spreadShare !== null ? ` · ${spreadShare}%` : ""}`}</small>
     </div>
     ${bidRows.map(rowMarkup).join("")}
-  `;
+  `);
   list.dataset.bookSide = `${market.id}:${side}:${state.currency}`;
   renderMyLimitOrders();
   renderOrderbookTabs();
@@ -8568,6 +8571,7 @@ async function refreshDepositIntent() {
 function startDepositPolling() {
   stopDepositPolling();
   state.topup.pollTimer = setInterval(() => {
+    if (isAppInBackground()) return;
     void refreshDepositIntent();
   }, 5000);
   void refreshDepositIntent();
@@ -12449,9 +12453,13 @@ function isAppInBackground() {
     return false;
   }
   const webApp = window.Telegram?.WebApp;
-  if (webApp) {
-    return webApp.isActive === false;
+  if (webApp && webApp.isActive === true) {
+    // Telegram explicitly says foreground despite document.hidden - this is
+    // the iOS WKWebView false-positive the comment above refers to.
+    return false;
   }
+  // isActive === false, or undefined on clients below Bot API 8.0: nothing
+  // contradicts document.hidden, so trust it (it's already true here).
   return true;
 }
 
@@ -13697,6 +13705,19 @@ function startMiniWheel() {
   }, 6_000);
 }
 
+// Иконка в шапке жила своим rAF-циклом без единой проверки на фон - в
+// отличие от большого колеса (см. visibilitychange выше), она крутилась на
+// полном fps всегда, когда шёл раунд, даже со свёрнутым/скрытым мини-аппом.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    miniWheel.lastAt = 0;
+    kickMiniWheel();
+  } else if (miniWheel.raf !== null) {
+    cancelAnimationFrame(miniWheel.raf);
+    miniWheel.raf = null;
+  }
+});
+
 function openRoulette() {
   if (roulette.active) {
     return;
@@ -13723,6 +13744,9 @@ function openRoulette() {
 
   void loadRouletteState();
   roulette.pollTimer = window.setInterval(() => {
+    // The rAF loop already stops on visibilitychange (below); the network
+    // poll timer itself kept running unconditionally in the background.
+    if (isAppInBackground()) return;
     void loadRouletteState();
   }, ROULETTE_POLL_MS);
   if (roulette.raf === null) {
