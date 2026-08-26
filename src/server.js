@@ -286,9 +286,18 @@ function sendApiError(res, error, fallbackStatus = 500) {
     return;
   }
 
-  res.status(publicErrors.has(message) ? 400 : fallbackStatus).json({
+  const isKnown = publicErrors.has(message);
+  if (!isKnown) {
+    // This is the catch-all for ~100 route handlers, several of them
+    // money-moving (withdrawals, deposit credits, star-strike payments)
+    // with no try/catch of their own further up the stack - an unexpected
+    // exception here was the only place it could ever surface, and it
+    // wasn't being logged anywhere before this.
+    console.error("[api] unhandled error:", error instanceof Error ? error.stack || error.message : error);
+  }
+  res.status(isKnown ? 400 : fallbackStatus).json({
     ok: false,
-    message: publicErrors.has(message) ? message : "Request failed.",
+    message: isKnown ? message : "Request failed.",
   });
 }
 

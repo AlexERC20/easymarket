@@ -14041,10 +14041,15 @@ export async function clearTestStarStrike(input = {}) {
   if (!user) {
     throw new Error("user_not_found");
   }
+  // evaluate_since/pending_flags must reset too, not just the ban fields -
+  // otherwise the original violation's evidence is still sitting in the
+  // window and as few as 3 throttled checks (~90s) can re-strike the same
+  // account on the same stale data right after it was cleared.
   await query(
     `
       UPDATE star_abuse_bans
-      SET banned_until = now(), balance_paid_at = now(), stars_paid_at = now(), updated_at = now()
+      SET banned_until = now(), balance_paid_at = now(), stars_paid_at = now(),
+          evaluate_since = now(), pending_flags = 0, updated_at = now()
       WHERE user_id = $1
     `,
     [user.id],
