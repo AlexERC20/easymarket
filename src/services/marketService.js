@@ -7117,13 +7117,17 @@ async function getPromoUsdtPlayProgress(client, userId, dayKey = getDayKey()) {
   const result = await client.query(
     `
       SELECT
-        COUNT(DISTINCT source)::int AS market_count,
+        COUNT(DISTINCT split_part(source, ':', 2))::int AS market_count,
         ABS(COALESCE(SUM(amount), 0)) AS cash_staked
       FROM usdt_ledger
       WHERE user_id = $1
         AND created_at >= date_trunc('day', now())
         AND amount < 0
-        AND reason IN ('buy_yes_usdt', 'buy_no_usdt')
+        AND reason IN (
+          'buy_yes_usdt', 'buy_no_usdt',
+          'clob_buy_yes', 'clob_buy_no',
+          'clob_limit_buy_yes', 'clob_limit_buy_no'
+        )
         AND source LIKE 'market:%'
     `,
     [userId],
@@ -14225,12 +14229,17 @@ export async function getLiveStats(input = {}) {
 
   const totalUsersResult = await query("SELECT COUNT(*)::int AS total_users FROM users");
 
+  const buySpendReasons = `(
+    reason IN ('buy_yes', 'buy_no', 'buy_yes_usdt', 'buy_no_usdt',
+               'limit_buy_yes', 'limit_buy_no', 'limit_buy_yes_usdt', 'limit_buy_no_usdt')
+    OR reason IN ('clob_buy_yes', 'clob_buy_no', 'clob_limit_buy_yes', 'clob_limit_buy_no')
+  )`;
   const bonusTurnoverResult = await query(
     `
       SELECT COALESCE(SUM(ABS(amount)), 0) AS turnover
       FROM usdt_bonus_ledger
       WHERE created_at >= now() - interval '24 hours'
-        AND (reason LIKE 'buy_%' OR reason LIKE 'limit_buy_%')
+        AND ${buySpendReasons}
     `,
   );
   const cashTurnoverResult = await query(
@@ -14238,7 +14247,7 @@ export async function getLiveStats(input = {}) {
       SELECT COALESCE(SUM(ABS(amount)), 0) AS turnover
       FROM usdt_ledger
       WHERE created_at >= now() - interval '24 hours'
-        AND (reason LIKE 'buy_%' OR reason LIKE 'limit_buy_%')
+        AND ${buySpendReasons}
     `,
   );
   const starTurnoverResult = await query(
@@ -14246,7 +14255,7 @@ export async function getLiveStats(input = {}) {
       SELECT COALESCE(SUM(ABS(amount)), 0) AS turnover
       FROM fire_ledger
       WHERE created_at >= now() - interval '24 hours'
-        AND (reason LIKE 'buy_%' OR reason LIKE 'limit_buy_%')
+        AND ${buySpendReasons}
     `,
   );
   const ammTurnoverResult = await query(
