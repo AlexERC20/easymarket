@@ -73,6 +73,7 @@ let lastChartDrawTs = 0;
 let chartSnapshotCanvas = null; // offscreen copy of the previous market's frame
 let chartBetLabelCache = null; // cached measureText widths for the "your bet" pill
 let chartTickerLabelCache = null; // cached measureText widths for the live ticker pill
+let tickerSegmentCache = null; // cached formatted name/verb/amount strings, keyed by trade id
 // Matches the backend's price tick (config.pricePollMs, default 1000ms) -
 // polling slower just adds pure lag; polling faster gets the same cached
 // value back since /api/market/active is cached with the same TTL.
@@ -1067,6 +1068,11 @@ function getCachedTradeAvatarImage(url) {
 
   const image = new Image();
   const entry = { image, loaded: false, failed: false };
+  // Unlike its sprite-cache sibling below, this held every decoded avatar
+  // bitmap ever drawn for the whole session - cap it the same way.
+  if (chartAvatarImages.size > 240) {
+    chartAvatarImages.delete(chartAvatarImages.keys().next().value);
+  }
   chartAvatarImages.set(url, entry);
   image.decoding = "async";
   image.onload = () => {
@@ -1857,24 +1863,34 @@ function captureChartSnapshot(canvas) {
 }
 
 // The user's own open bet on a market (largest by stake), for the chart label.
+// Called every ~30fps chart frame, but state.positions is only ever replaced
+// (not mutated) on a ~1s poll - so a reference-equality cache skips the
+// filter+sort on every frame where nothing actually changed.
+let myChartBetCache = { positions: null, marketId: null, result: null };
 function getMyChartBet(market) {
   if (!market?.id || !state.user) {
     return null;
+  }
+  if (myChartBetCache.positions === state.positions && myChartBetCache.marketId === market.id) {
+    return myChartBetCache.result;
   }
   const mine = (state.positions || []).filter(
     (p) => p.market_id === market.id && p.status === "open" && Number(p.shares || 0) > 0,
   );
   if (!mine.length) {
+    myChartBetCache = { positions: state.positions, marketId: market.id, result: null };
     return null;
   }
   mine.sort((a, b) => Number(b.spent || 0) - Number(a.spent || 0));
   const p = mine[0];
-  return {
+  const result = {
     side: p.side === "YES" ? "YES" : "NO",
     spent: Number(p.spent || 0),
     shares: Number(p.shares || 0),
     currency: normalizeCurrency(p.currency),
   };
+  myChartBetCache = { positions: state.positions, marketId: market.id, result };
+  return result;
 }
 
 // Блик по наклону. Логотип остаётся нетронутым DOM-узлом, а поверх него лежит
@@ -2926,13 +2942,22 @@ function drawLiveTickerPill(ctx, { width, height, nowTs, myBetPillEnd }) {
     return;
   }
 
+  // The displayed trade only changes once per CHART_TICKER_SLOT_MS (3.2s),
+  // but this ran at ~30fps - cache the formatted segments by trade id so the
+  // name/translate/amount formatting isn't redone ~96x per actual change.
   const tier = getTierForAmount(trade.amount, trade.currency);
   const spec = CHART_TICKER_TIER_SPEC[tier] || null;
-  const rawName = formatUserDisplayName(trade, { preferAt: false });
-  const name = rawName.length > 12 ? `${rawName.slice(0, 11)}…` : rawName;
-  const seg1 = `${name} `;
-  const verb = translateText((trade.action || "BUY") === "SELL" ? "продал" : "ставит");
-  const seg2 = `${verb} ${getActivitySideLabel(trade)} ${formatCurrencyAmount(trade.amount, trade.currency)}`;
+  if (!tickerSegmentCache || tickerSegmentCache.tradeId !== trade.id) {
+    const rawName = formatUserDisplayName(trade, { preferAt: false });
+    const name = rawName.length > 12 ? `${rawName.slice(0, 11)}…` : rawName;
+    const verb = translateText((trade.action || "BUY") === "SELL" ? "продал" : "ставит");
+    tickerSegmentCache = {
+      tradeId: trade.id,
+      seg1: `${name} `,
+      seg2: `${verb} ${getActivitySideLabel(trade)} ${formatCurrencyAmount(trade.amount, trade.currency)}`,
+    };
+  }
+  const { seg1, seg2 } = tickerSegmentCache;
   const fontPx = Math.max(11, width * 0.024);
   ctx.font = `${fontPx}px Inter, system-ui, sans-serif`;
   ctx.textBaseline = "middle";
@@ -3040,7 +3065,7 @@ function nearestPathPoint(points, x) {
 // reason to keep repainting it behind them — doing so churns the compositor
 // (visible jitter on the open sheet) and burns CPU/heat.
 function isBlockingSheetOpen() {
-  return Boolean(document.querySelector(".task-sheet.sheet-open"));
+  return blockingSheetOpenCache;
 }
 
 function renderMarketChart() {
@@ -4330,8 +4355,15 @@ function prefersReducedMotion() {
   return reduced && !isTelegramWebApp();
 }
 
+// isBlockingSheetOpen() below is called every ~30fps chart frame plus several
+// 1s poll timers - this is the single choke point where sheet-open/closing
+// classes actually change, so it caches the query result here instead of
+// re-querying the DOM from every one of those call sites.
+let blockingSheetOpenCache = false;
 function syncSheetOverlayState() {
-  const overlayActive = Boolean(document.querySelector(".task-sheet.sheet-open, .task-sheet.sheet-closing"));
+  blockingSheetOpenCache = Boolean(document.querySelector(".task-sheet.sheet-open"));
+  const overlayActive = blockingSheetOpenCache
+    || Boolean(document.querySelector(".task-sheet.sheet-closing"));
   document.body.classList.toggle("sheet-overlay-active", overlayActive);
 }
 
@@ -4690,6 +4722,15 @@ function buildAquariumFoodForMarket(market) {
   });
 }
 
+// seenActivityIds/seenCommentIds/seenSettledPositionIds only ever grew for
+// the life of the tab, unlike their sibling bubbledActivityIds/
+// playedActivityAnimIds which already cap themselves - same fix here.
+function capIdSet(set, maxSize) {
+  while (set.size > maxSize) {
+    set.delete(set.values().next().value);
+  }
+}
+
 function handleActivity(activity) {
   const nextActivity = activity || [];
   rememberChartTrades(nextActivity);
@@ -4709,6 +4750,7 @@ function handleActivity(activity) {
   }
 
   nextActivity.forEach((trade) => state.seenActivityIds.add(trade.id));
+  capIdSet(state.seenActivityIds, 500);
   state.activityLoaded = true;
   state.activity = nextActivity;
 }
@@ -4724,6 +4766,7 @@ function handleMarketActivity(activity) {
   }
 
   marketActivity.forEach((trade) => state.seenActivityIds.add(trade.id));
+  capIdSet(state.seenActivityIds, 500);
 }
 
 function handleSettlements(positions) {
@@ -4801,6 +4844,7 @@ function handleSettlements(positions) {
   }
 
   allSettled.forEach((position) => state.seenSettledPositionIds.add(position.id));
+  capIdSet(state.seenSettledPositionIds, 500);
   state.settlementsLoaded = true;
 }
 
@@ -5065,6 +5109,7 @@ async function loadComments() {
   }
 
   nextComments.forEach((comment) => state.seenCommentIds.add(`${market.id}:${comment.id}`));
+  capIdSet(state.seenCommentIds, 500);
   state.comments = nextComments;
   state.commentsOnlineCount = Number(data.online_count || 0);
   state.appTotalBets = Number(data.total_bets || state.appTotalBets || 0);
@@ -5324,9 +5369,10 @@ async function loadOrderbook({ force = false } = {}) {
   }
 
   const now = Date.now();
-  const bookType = getPreferredBookType(state.currency, state.selectedAmount);
+  const requestCurrency = state.currency;
+  const bookType = getPreferredBookType(requestCurrency, state.selectedAmount);
   const sameBook = state.orderbook.marketId === Number(market.id)
-    && state.orderbook.currency === state.currency
+    && state.orderbook.currency === requestCurrency
     && state.orderbook.bookType === bookType;
   if (!force && sameBook && now - state.orderbook.loadedAt < 4_000) {
     return;
@@ -5335,7 +5381,14 @@ async function loadOrderbook({ force = false } = {}) {
   state.orderbook.loading = true;
   renderOrderbookPanel();
   try {
-    const data = await api(`/api/market/${market.id}/orderbook?telegram_id=${encodeURIComponent(state.user.telegram_id)}&currency=${encodeURIComponent(state.currency)}&book_type=${encodeURIComponent(bookType)}`);
+    const data = await api(`/api/market/${market.id}/orderbook?telegram_id=${encodeURIComponent(state.user.telegram_id)}&currency=${encodeURIComponent(requestCurrency)}&book_type=${encodeURIComponent(bookType)}`);
+    // The user may have switched markets/currency while this request was in
+    // flight - a late response for the old selection would otherwise
+    // overwrite whatever the newer request (or the user's current view) has.
+    const stillCurrent = getDisplayMarket()?.id === market.id && state.currency === requestCurrency;
+    if (!stillCurrent) {
+      return;
+    }
     state.orderbook.marketId = Number(market.id);
     state.orderbook.currency = normalizeCurrency(data.currency || state.currency);
     state.orderbook.bookType = data.book_type || bookType;
@@ -9237,6 +9290,7 @@ function addLocalActivity(trade) {
   state.activity = [enriched, ...state.activity].slice(0, 24);
   rememberChartTrades([enriched]);
   state.seenActivityIds.add(enriched.id);
+  capIdSet(state.seenActivityIds, 500);
   showTradeBubble(enriched);
 }
 
@@ -11721,12 +11775,22 @@ $("taskBotStartBtn")?.addEventListener("click", (event) => {
   // Проверяем не сразу: пользователю нужно успеть нажать Start в боте.
   // Ещё одна попытка при возврате в приложение — на случай медленного старта.
   window.setTimeout(() => void verifyBotStartTask(sourceElement), 3_500);
+  // Guarded like claimSubscriptionTaskOnReturn below: without a fallback
+  // timeout, a WebView that never actually blurs (seen on Telegram Desktop)
+  // left this listener attached forever, stacking one more per click.
+  let removed = false;
+  const removeOnBack = () => {
+    if (removed) return;
+    removed = true;
+    document.removeEventListener("visibilitychange", onBack);
+  };
   const onBack = () => {
     if (document.visibilityState !== "visible") return;
-    document.removeEventListener("visibilitychange", onBack);
+    removeOnBack();
     window.setTimeout(() => void verifyBotStartTask(sourceElement), 800);
   };
   document.addEventListener("visibilitychange", onBack);
+  window.setTimeout(removeOnBack, 12_000);
 });
 
 async function verifyBotStartTask(sourceElement = null) {
