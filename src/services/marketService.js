@@ -13563,6 +13563,50 @@ const STAR_ABUSE_BASE_BAN_HOURS = 1;
 // apart, so this needs several minutes of sustained edge) before it
 // escalates to an actual strike.
 const STAR_ABUSE_PROFIT_CONFIRMATIONS = 3;
+// Edge ratio alone can miss someone who stakes huge volume at a modest
+// percentage edge and still walks away with a large absolute pile of stars -
+// this catches the amount itself regardless of what ratio it works out to.
+const STAR_ABUSE_ABSOLUTE_PROFIT = 10_000;
+// Separate from both: how fast the balance itself is moving, not how it was
+// won. A account jumping several times over (or appearing from near-zero) in
+// a few hours is worth a look even if no single ratio/volume check fires.
+const STAR_ABUSE_BALANCE_SPIKE_WINDOW_MS = 6 * 60 * 60 * 1000;
+const STAR_ABUSE_BALANCE_SPIKE_MULTIPLIER = 5;
+// Floor so "10 stars became 60" doesn't count as a 6x spike - only a jump
+// that lands on a meaningful balance is worth flagging.
+const STAR_ABUSE_BALANCE_SPIKE_MIN_BALANCE = 1_000;
+
+async function getBalanceSpikeMultiplier(dbClient, userId) {
+  const result = await dbClient.query(
+    `
+      SELECT
+        COALESCE(fb.balance, 0) AS current_balance,
+        COALESCE((
+          SELECT SUM(amount)
+          FROM fire_ledger
+          WHERE user_id = $1
+            AND created_at >= now() - ($2 || ' milliseconds')::interval
+        ), 0) AS recent_delta
+      FROM fire_balances fb
+      WHERE fb.user_id = $1
+    `,
+    [userId, STAR_ABUSE_BALANCE_SPIKE_WINDOW_MS],
+  );
+  const row = result.rows[0];
+  const currentBalance = toNumber(row?.current_balance);
+  const recentDelta = toNumber(row?.recent_delta);
+  const balanceStart = currentBalance - recentDelta;
+  if (currentBalance < STAR_ABUSE_BALANCE_SPIKE_MIN_BALANCE) {
+    return 0;
+  }
+  if (balanceStart <= 0) {
+    // Went from nothing (or less) to a real balance inside the window -
+    // report as an effectively infinite multiplier rather than dividing by
+    // a non-positive number.
+    return Number.POSITIVE_INFINITY;
+  }
+  return currentBalance / balanceStart;
+}
 
 async function getStarAbuseStats(dbClient, userId, sinceIso) {
   const result = await dbClient.query(
@@ -13608,16 +13652,22 @@ async function getStarAbuseStats(dbClient, userId, sinceIso) {
   const totalBuys = Number(rapidResult.rows[0]?.total_buys || 0);
   const rapidPairs = Number(rapidResult.rows[0]?.rapid_pairs || 0);
   const rapidPairDensity = totalBuys > 0 ? rapidPairs / totalBuys : 0;
+  const balanceSpikeMultiplier = await getBalanceSpikeMultiplier(dbClient, userId);
 
   return {
     settledCount, totalStaked, netPnl, edgeRatio, totalBuys, rapidPairs, rapidPairDensity,
+    balanceSpikeMultiplier,
   };
 }
 
 function evaluateStarAbuseStats(stats) {
   const hasSample = stats.settledCount >= STAR_ABUSE_MIN_SETTLED
     && stats.totalStaked >= STAR_ABUSE_MIN_STAKED;
-  const profitFlagged = hasSample && stats.edgeRatio >= STAR_ABUSE_EDGE_RATIO;
+  const profitFlagged = hasSample && (
+    stats.edgeRatio >= STAR_ABUSE_EDGE_RATIO
+    || stats.netPnl >= STAR_ABUSE_ABSOLUTE_PROFIT
+    || stats.balanceSpikeMultiplier >= STAR_ABUSE_BALANCE_SPIKE_MULTIPLIER
+  );
   const speedFlagged = stats.totalBuys >= STAR_ABUSE_SPEED_MIN_BUYS
     && stats.rapidPairs >= STAR_ABUSE_RAPID_PAIR_MIN
     && stats.rapidPairDensity >= STAR_ABUSE_RAPID_PAIR_DENSITY
@@ -14043,6 +14093,10 @@ export async function listActiveStarStrikes() {
       total_buys: stats.totalBuys,
       rapid_pair_density: Math.round(stats.rapidPairDensity * 10_000) / 10_000,
       edge_ratio: Math.round(stats.edgeRatio * 10_000) / 10_000,
+      net_pnl: Math.round(stats.netPnl * 100) / 100,
+      balance_spike_multiplier: Number.isFinite(stats.balanceSpikeMultiplier)
+        ? Math.round(stats.balanceSpikeMultiplier * 100) / 100
+        : null,
       still_qualifies: flag !== null,
     });
   }
@@ -14132,17 +14186,24 @@ export async function getStarAbuseDiagnostics(input = {}) {
       min_settled: STAR_ABUSE_MIN_SETTLED,
       min_staked: STAR_ABUSE_MIN_STAKED,
       edge_ratio: STAR_ABUSE_EDGE_RATIO,
+      absolute_profit: STAR_ABUSE_ABSOLUTE_PROFIT,
+      balance_spike_window_ms: STAR_ABUSE_BALANCE_SPIKE_WINDOW_MS,
+      balance_spike_multiplier: STAR_ABUSE_BALANCE_SPIKE_MULTIPLIER,
       rapid_pair_ms: STAR_ABUSE_RAPID_PAIR_MS,
       rapid_pair_min: STAR_ABUSE_RAPID_PAIR_MIN,
       rapid_pair_density: STAR_ABUSE_RAPID_PAIR_DENSITY,
       speed_min_buys: STAR_ABUSE_SPEED_MIN_BUYS,
       base_ban_hours: STAR_ABUSE_BASE_BAN_HOURS,
+      profit_confirmations_required: STAR_ABUSE_PROFIT_CONFIRMATIONS,
     },
     evaluated_since: sinceIso,
     settled_count: stats.settledCount,
     total_staked: roundMoney(stats.totalStaked),
     net_pnl: roundMoney(stats.netPnl),
     edge_ratio: Math.round(stats.edgeRatio * 10_000) / 10_000,
+    balance_spike_multiplier: Number.isFinite(stats.balanceSpikeMultiplier)
+      ? Math.round(stats.balanceSpikeMultiplier * 100) / 100
+      : null,
     total_buys: stats.totalBuys,
     rapid_pairs: stats.rapidPairs,
     rapid_pair_density: Math.round(stats.rapidPairDensity * 10_000) / 10_000,
