@@ -13555,6 +13555,14 @@ const STAR_ABUSE_SPEED_MIN_BUYS = 200;
 // already expired - a few repeats gets expensive fast without waiting on a
 // slow-to-dilute rolling average to sort it out.
 const STAR_ABUSE_BASE_BAN_HOURS = 1;
+// A pure profit flag (no speed signature) can just be one lucky, honestly
+// skilled session - striking on the very first check burned real players.
+// Speed flags already require heavy volume (200+ buys) and a mechanical
+// rapid-pairing pattern, so they're left immediate; only the profit-alone
+// case has to show up on multiple separate checks (each throttled 30s
+// apart, so this needs several minutes of sustained edge) before it
+// escalates to an actual strike.
+const STAR_ABUSE_PROFIT_CONFIRMATIONS = 3;
 
 async function getStarAbuseStats(dbClient, userId, sinceIso) {
   const result = await dbClient.query(
@@ -13651,7 +13659,7 @@ function isBanRowActive(row) {
 async function checkStarAbuseBan(client, userId) {
   const existingResult = await client.query(
     `
-      SELECT strike_count, banned_until, evaluate_since
+      SELECT strike_count, banned_until, evaluate_since, pending_flags
       FROM star_abuse_bans
       WHERE user_id = $1
       FOR UPDATE
@@ -13667,7 +13675,33 @@ async function checkStarAbuseBan(client, userId) {
   const sinceIso = existing?.evaluate_since || new Date(0).toISOString();
   const stats = await getStarAbuseStats(client, userId, sinceIso);
   const flag = evaluateStarAbuseStats(stats);
+  const pendingFlags = Number(existing?.pending_flags || 0);
   if (!flag) {
+    if (pendingFlags > 0) {
+      await client.query(
+        "UPDATE star_abuse_bans SET pending_flags = 0, updated_at = now() WHERE user_id = $1",
+        [userId],
+      );
+    }
+    return { banned: false };
+  }
+
+  const pureProfitFlag = flag.profitFlagged && !flag.speedFlagged;
+  if (pureProfitFlag && pendingFlags + 1 < STAR_ABUSE_PROFIT_CONFIRMATIONS) {
+    // banned_until must be a real (past) timestamp, never NULL, on a row
+    // that isn't an active ban - NULL there means "banned until paid"
+    // everywhere else in this file, and isBanRowActive would misread a
+    // brand-new pending-only row as an active strike on the next check.
+    await client.query(
+      `
+        INSERT INTO star_abuse_bans (user_id, banned_until, evaluate_since, pending_flags, updated_at)
+        VALUES ($1, now(), $2::timestamptz, 1, now())
+        ON CONFLICT (user_id) DO UPDATE SET
+          pending_flags = star_abuse_bans.pending_flags + 1,
+          updated_at = now()
+      `,
+      [userId, sinceIso],
+    );
     return { banned: false };
   }
 
@@ -13679,9 +13713,9 @@ async function checkStarAbuseBan(client, userId) {
   await client.query(
     `
       INSERT INTO star_abuse_bans (
-        user_id, strike_count, banned_until, evaluate_since, last_reason, updated_at
+        user_id, strike_count, banned_until, evaluate_since, last_reason, pending_flags, updated_at
       )
-      VALUES ($1, $2, NULL, now(), $3, now())
+      VALUES ($1, $2, NULL, now(), $3, 0, now())
       ON CONFLICT (user_id) DO UPDATE SET
         strike_count = EXCLUDED.strike_count,
         banned_until = NULL,
@@ -13689,6 +13723,7 @@ async function checkStarAbuseBan(client, userId) {
         last_reason = EXCLUDED.last_reason,
         balance_paid_at = NULL,
         stars_paid_at = NULL,
+        pending_flags = 0,
         updated_at = now()
     `,
     [userId, strike, reason],
@@ -14012,6 +14047,36 @@ export async function listActiveStarStrikes() {
     });
   }
   return { count: results.length, strikes: results };
+}
+
+// Ops-only: exact fire_ledger rows for whatever a star-strike ban actually
+// took from this user, so a manual reversal refunds the real amount instead
+// of recomputing it from the current (possibly since-changed) formula.
+export async function getStarStrikePayments(input = {}) {
+  const telegramId = String(input.telegram_id || input.telegramId || "").trim();
+  if (!telegramId) {
+    throw new Error("telegram_id_required");
+  }
+  const result = await query(
+    `
+      SELECT ledger.id, ledger.amount, ledger.reason, ledger.source, ledger.created_at
+      FROM fire_ledger ledger
+      JOIN users ON users.id = ledger.user_id
+      WHERE users.telegram_id = $1
+        AND ledger.reason IN ('star_strike_unban_balance', 'star_strike_unban_stars')
+      ORDER BY ledger.created_at ASC
+    `,
+    [telegramId],
+  );
+  return {
+    payments: result.rows.map((row) => ({
+      id: Number(row.id),
+      amount: toNumber(row.amount),
+      reason: row.reason,
+      source: row.source,
+      created_at: row.created_at,
+    })),
+  };
 }
 
 // Diagnostic-only: exposes the exact same numbers/decision buyOutcome uses,
