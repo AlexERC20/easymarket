@@ -14123,20 +14123,50 @@ export async function getInactivityExpiryAudit(input = {}) {
   const sinceHours = Math.max(1, Math.min(168, Number(input.since_hours) || 48));
   const result = await query(
     `
+      WITH burns AS (
+        SELECT user_id, amount, created_at, 'star' AS kind
+        FROM fire_ledger
+        WHERE reason = 'inactivity_expiry'
+          AND created_at >= now() - ($1 || ' hours')::interval
+        UNION ALL
+        SELECT user_id, amount, created_at, 'usdt_bonus' AS kind
+        FROM usdt_bonus_ledger
+        WHERE reason = 'inactivity_expiry'
+          AND created_at >= now() - ($1 || ' hours')::interval
+      ),
+      per_user AS (
+        SELECT
+          user_id,
+          SUM(amount) FILTER (WHERE kind = 'star') AS star_burned,
+          SUM(amount) FILTER (WHERE kind = 'usdt_bonus') AS usdt_bonus_burned,
+          COUNT(*) FILTER (WHERE kind = 'star') AS star_burn_count,
+          COUNT(*) FILTER (WHERE kind = 'usdt_bonus') AS usdt_bonus_burn_count,
+          MIN(created_at) AS first_at,
+          MAX(created_at) AS last_at
+        FROM burns
+        GROUP BY user_id
+      )
       SELECT
         users.telegram_id,
         users.username,
         users.first_name,
-        SUM(ledger.amount) AS total_burned,
-        COUNT(*) AS burn_count,
-        MIN(ledger.created_at) AS first_at,
-        MAX(ledger.created_at) AS last_at
-      FROM fire_ledger ledger
-      JOIN users ON users.id = ledger.user_id
-      WHERE ledger.reason = 'inactivity_expiry'
-        AND ledger.created_at >= now() - ($1 || ' hours')::interval
-      GROUP BY users.telegram_id, users.username, users.first_name
-      ORDER BY total_burned ASC
+        per_user.star_burned,
+        per_user.usdt_bonus_burned,
+        per_user.star_burn_count,
+        per_user.usdt_bonus_burn_count,
+        per_user.first_at,
+        per_user.last_at,
+        EXISTS (
+          SELECT 1
+          FROM fire_ledger recent
+          WHERE recent.user_id = per_user.user_id
+            AND recent.reason != 'inactivity_expiry'
+            AND recent.created_at < per_user.first_at
+            AND recent.created_at >= per_user.first_at - INTERVAL '24 hours'
+        ) AS had_activity_before_burn
+      FROM per_user
+      JOIN users ON users.id = per_user.user_id
+      ORDER BY (COALESCE(per_user.star_burned, 0) + COALESCE(per_user.usdt_bonus_burned, 0)) ASC
     `,
     [sinceHours],
   );
@@ -14146,10 +14176,13 @@ export async function getInactivityExpiryAudit(input = {}) {
       telegram_id: row.telegram_id,
       username: row.username,
       first_name: row.first_name,
-      total_burned: toNumber(row.total_burned),
-      burn_count: Number(row.burn_count),
+      total_burned: toNumber(row.star_burned) + toNumber(row.usdt_bonus_burned),
+      star_burned: toNumber(row.star_burned),
+      usdt_bonus_burned: toNumber(row.usdt_bonus_burned),
+      burn_count: Number(row.star_burn_count || 0) + Number(row.usdt_bonus_burn_count || 0),
       first_at: row.first_at,
       last_at: row.last_at,
+      had_activity_before_burn: Boolean(row.had_activity_before_burn),
     })),
   };
 }
