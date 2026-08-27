@@ -3694,22 +3694,56 @@ export async function distributeDueClanRewardFunds() {
 export async function touchUserActivity(userId, client = null) {
   const runner = client ?? { query };
   await runner.query(
-    "UPDATE users SET last_meaningful_activity_at = now() WHERE id = $1",
+    "UPDATE users SET last_meaningful_activity_at = now(), inactivity_burn_stage = 0 WHERE id = $1",
     [userId],
   );
 }
 
-// Burns (not redistributes - deliberately, see the AV bot's fire_expiry
-// snowball this session spent a day cleaning up) STAR and bonus-USDT
-// balances for accounts that placed no bet and claimed no task in the last
-// 24h. Cash USDT is never touched here. Each user is its own transaction so
-// one bad row can't roll back a whole batch, and a user drops out of the
-// candidate set as soon as both balances hit zero, so a slow sweep just
-// picks up where it left off next tick instead of double-processing.
+async function notifyInactivityBurn(outcome) {
+  if (!config.telegramBotToken || !outcome.telegramId) {
+    return;
+  }
+  const parts = [];
+  if (outcome.starBurn > 0) {
+    parts.push(`-${outcome.starBurn.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}⭐`);
+  }
+  if (outcome.bonusBurn > 0) {
+    parts.push(`-${outcome.bonusBurn.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT (бонус)`);
+  }
+  const burned = parts.join(", ");
+  const text = outcome.isFinal
+    ? `❌ 3 дня без активности в EasyMarket — бонусный баланс обнулён: ${burned}.`
+    : [
+        `⚠️ Из-за 24ч без активности в EasyMarket списано 10% бонусного баланса: ${burned}.`,
+        `Осталось: ${outcome.starRemaining.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}⭐, ${outcome.bonusRemaining.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT.`,
+        outcome.stage >= 2
+          ? "Последнее предупреждение: ещё сутки без действий — и всё сгорит."
+          : "Зайди и соверши любое действие (ставка, задание), чтобы остановить списание.",
+      ].join("\n");
+
+  await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: outcome.telegramId,
+      text,
+      disable_web_page_preview: true,
+    }),
+  }).catch(() => undefined);
+}
+
+// Staged burn (not redistribution - deliberately, see the AV bot's
+// fire_expiry snowball this session spent a day cleaning up) for STAR and
+// bonus-USDT balances of accounts that placed no bet and claimed no task
+// recently: 10% at 24h inactive, another 10% at 48h, the rest at 72h. Cash
+// USDT is never touched here. touchUserActivity resets inactivity_burn_stage
+// to 0 the moment the account does anything again, so coming back stops the
+// countdown instead of just delaying the next hit. Each user is its own
+// transaction so one bad row can't roll back a whole batch.
 export async function expireInactiveBalances({ limit = 500 } = {}) {
   const candidates = await query(
     `
-      SELECT u.id, u.telegram_id
+      SELECT u.id
       FROM users u
       WHERE u.last_meaningful_activity_at < now() - interval '24 hours'
         AND (
@@ -3721,66 +3755,115 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
     [Math.max(1, Math.min(2_000, Number(limit) || 500))],
   );
 
-  let expiredUsers = 0;
+  let processedUsers = 0;
+  let finalWipes = 0;
   let expiredStars = 0;
   let expiredBonusUsdt = 0;
+  const notifications = [];
 
   for (const row of candidates.rows) {
     const userId = row.id;
-    await withTransaction(async (client) => {
-      let touchedThisUser = false;
+    const outcome = await withTransaction(async (client) => {
+      const userResult = await client.query(
+        `
+          SELECT
+            telegram_id,
+            inactivity_burn_stage,
+            GREATEST(1, FLOOR(EXTRACT(EPOCH FROM (now() - last_meaningful_activity_at)) / 86400))::int AS days_inactive
+          FROM users
+          WHERE id = $1
+          FOR UPDATE
+        `,
+        [userId],
+      );
+      const user = userResult.rows[0];
+      if (!user) {
+        return null;
+      }
+      const currentStage = Number(user.inactivity_burn_stage || 0);
+      const daysInactive = Number(user.days_inactive);
+      const isFinal = daysInactive >= 3;
+      const targetStage = isFinal ? 3 : Math.min(daysInactive, 2);
+      if (targetStage <= currentStage) {
+        return null;
+      }
 
       const starResult = await client.query(
         "SELECT balance FROM fire_balances WHERE user_id = $1 FOR UPDATE",
         [userId],
       );
       const starBalance = toNumber(starResult.rows[0]?.balance);
-      if (starBalance > 0) {
-        await client.query(
-          "UPDATE fire_balances SET balance = 0, updated_at = now() WHERE user_id = $1",
-          [userId],
-        );
-        await client.query(
-          `
-            INSERT INTO fire_ledger (user_id, amount, reason, source)
-            VALUES ($1, $2, 'inactivity_expiry', 'system')
-          `,
-          [userId, -starBalance],
-        );
-        expiredStars += starBalance;
-        touchedThisUser = true;
-      }
-
       const bonusResult = await client.query(
         "SELECT balance FROM usdt_bonus_balances WHERE user_id = $1 FOR UPDATE",
         [userId],
       );
       const bonusBalance = toNumber(bonusResult.rows[0]?.balance);
-      if (bonusBalance > 0) {
+
+      const starBurn = isFinal ? starBalance : roundMoney(starBalance * 0.1);
+      const bonusBurn = isFinal ? bonusBalance : roundMoney(bonusBalance * 0.1);
+
+      if (starBurn > 0) {
         await client.query(
-          "UPDATE usdt_bonus_balances SET balance = 0, updated_at = now() WHERE user_id = $1",
-          [userId],
+          isFinal
+            ? "UPDATE fire_balances SET balance = 0, updated_at = now() WHERE user_id = $1"
+            : "UPDATE fire_balances SET balance = balance - $2::numeric, updated_at = now() WHERE user_id = $1",
+          isFinal ? [userId] : [userId, starBurn],
         );
         await client.query(
-          `
-            INSERT INTO usdt_bonus_ledger (user_id, amount, reason, source)
-            VALUES ($1, $2::numeric, 'inactivity_expiry', 'system')
-          `,
-          [userId, -bonusBalance],
+          `INSERT INTO fire_ledger (user_id, amount, reason, source) VALUES ($1, $2, 'inactivity_expiry', 'system')`,
+          [userId, -starBurn],
         );
-        expiredBonusUsdt += bonusBalance;
-        touchedThisUser = true;
+      }
+      if (bonusBurn > 0) {
+        await client.query(
+          isFinal
+            ? "UPDATE usdt_bonus_balances SET balance = 0, updated_at = now() WHERE user_id = $1"
+            : "UPDATE usdt_bonus_balances SET balance = balance - $2::numeric, updated_at = now() WHERE user_id = $1",
+          isFinal ? [userId] : [userId, bonusBurn],
+        );
+        await client.query(
+          `INSERT INTO usdt_bonus_ledger (user_id, amount, reason, source) VALUES ($1, $2::numeric, 'inactivity_expiry', 'system')`,
+          [userId, -bonusBurn],
+        );
       }
 
-      if (touchedThisUser) {
-        expiredUsers += 1;
+      await client.query(
+        "UPDATE users SET inactivity_burn_stage = $2 WHERE id = $1",
+        [userId, isFinal ? 0 : targetStage],
+      );
+
+      if (starBurn <= 0 && bonusBurn <= 0) {
+        return null;
       }
+
+      return {
+        telegramId: user.telegram_id,
+        stage: targetStage,
+        isFinal,
+        starBurn,
+        bonusBurn,
+        starRemaining: roundMoney(starBalance - starBurn),
+        bonusRemaining: roundMoney(bonusBalance - bonusBurn),
+      };
     });
+
+    if (outcome) {
+      processedUsers += 1;
+      expiredStars += outcome.starBurn;
+      expiredBonusUsdt += outcome.bonusBurn;
+      if (outcome.isFinal) {
+        finalWipes += 1;
+      }
+      notifications.push(outcome);
+    }
   }
+
+  await Promise.allSettled(notifications.map((outcome) => notifyInactivityBurn(outcome)));
 
   return {
     checked: candidates.rows.length,
-    expired_users: expiredUsers,
+    processed_users: processedUsers,
+    final_wipes: finalWipes,
     expired_stars: roundMoney(expiredStars),
     expired_bonus_usdt: roundMoney(expiredBonusUsdt),
   };

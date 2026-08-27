@@ -2611,7 +2611,7 @@ async function inactivityExpiryTick() {
   inactivityExpiryBusy = true;
   try {
     const summary = await expireInactiveBalances();
-    if (summary.expired_users > 0) {
+    if (summary.processed_users > 0) {
       console.log("[easymarket] inactivity expiry finished", summary);
     }
   } catch (error) {

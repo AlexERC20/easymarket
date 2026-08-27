@@ -101,7 +101,7 @@ export const config = {
   priceTicksEnabled: !parseBoolean(process.env.PRICE_TICKS_DISABLED, false),
   startupDatabaseRescueEnabled: parseBoolean(process.env.STARTUP_DATABASE_RESCUE_ENABLED, true),
   startupPriceTicksDropAboveMb: parseNumber(process.env.STARTUP_PRICE_TICKS_DROP_ABOVE_MB, 64, 0),
-  inactivityExpiryEnabled: parseBoolean(process.env.INACTIVITY_EXPIRY_ENABLED, false),
+  inactivityExpiryEnabled: parseBoolean(process.env.INACTIVITY_EXPIRY_ENABLED, true),
   databaseCleanupEnabled: parseBoolean(process.env.DATABASE_CLEANUP_ENABLED, true),
   databaseCleanupRunOnStart: parseBoolean(process.env.DATABASE_CLEANUP_RUN_ON_START, false),
   databaseCleanupIntervalMs: parseNumber(process.env.DATABASE_CLEANUP_INTERVAL_MS, 86_400_000, 60_000),

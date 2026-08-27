@@ -106,6 +106,13 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_users_last_meaningful_activity_at
       ON users(last_meaningful_activity_at);
 
+    -- How many of the staged 10%/10%/rest inactivity burns have already
+    -- fired for the CURRENT inactivity streak. touchUserActivity resets
+    -- this to 0 the moment the account does anything again, so coming
+    -- back stops the countdown instead of just delaying the next hit.
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS inactivity_burn_stage INT NOT NULL DEFAULT 0;
+
     CREATE TABLE IF NOT EXISTS fire_balances (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       balance NUMERIC(20, 8) NOT NULL DEFAULT 0,
