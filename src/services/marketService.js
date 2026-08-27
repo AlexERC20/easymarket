@@ -5700,6 +5700,7 @@ export async function addFireToUser(input) {
       `,
       [user.id, amount, reason, input.source || "api"],
     );
+    await touchUserActivity(user.id, client);
     const balanceResult = await client.query(
       "SELECT balance FROM fire_balances WHERE user_id = $1",
       [user.id],
@@ -5739,6 +5740,7 @@ export async function addUsdtBonusToUser(input) {
       `,
       [user.id, amount, reason, input.source || "api"],
     );
+    await touchUserActivity(user.id, client);
     const balanceResult = await client.query(
       `
         SELECT
