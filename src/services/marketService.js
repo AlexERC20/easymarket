@@ -14113,6 +14113,45 @@ export async function listActiveStarStrikes() {
 // Ops-only: exact fire_ledger rows for whatever a star-strike ban actually
 // took from this user, so a manual reversal refunds the real amount instead
 // of recomputing it from the current (possibly since-changed) formula.
+// Ops-only: how many distinct users hit an inactivity-expiry burn recently,
+// and how much - built to size the blast radius of the CLOB
+// touchUserActivity gap (see executeClobMarketBuy/Sell, createClobLimitOrder)
+// before deciding how broad a retroactive correction is needed.
+export async function getInactivityExpiryAudit(input = {}) {
+  const sinceHours = Math.max(1, Math.min(168, Number(input.since_hours) || 48));
+  const result = await query(
+    `
+      SELECT
+        users.telegram_id,
+        users.username,
+        users.first_name,
+        SUM(ledger.amount) AS total_burned,
+        COUNT(*) AS burn_count,
+        MIN(ledger.created_at) AS first_at,
+        MAX(ledger.created_at) AS last_at
+      FROM fire_ledger ledger
+      JOIN users ON users.id = ledger.user_id
+      WHERE ledger.reason = 'inactivity_expiry'
+        AND ledger.created_at >= now() - ($1 || ' hours')::interval
+      GROUP BY users.telegram_id, users.username, users.first_name
+      ORDER BY total_burned ASC
+    `,
+    [sinceHours],
+  );
+  return {
+    since_hours: sinceHours,
+    affected_users: result.rows.map((row) => ({
+      telegram_id: row.telegram_id,
+      username: row.username,
+      first_name: row.first_name,
+      total_burned: toNumber(row.total_burned),
+      burn_count: Number(row.burn_count),
+      first_at: row.first_at,
+      last_at: row.last_at,
+    })),
+  };
+}
+
 export async function getStarStrikePayments(input = {}) {
   const telegramId = String(input.telegram_id || input.telegramId || "").trim();
   if (!telegramId) {

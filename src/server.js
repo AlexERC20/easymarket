@@ -64,6 +64,7 @@ import {
   clearTestStarStrike,
   getStarAbuseDiagnostics,
   getStarStrikePayments,
+  getInactivityExpiryAudit,
   issueTestStarStrike,
   listActiveStarStrikes,
   payStarStrikeWithBalance,
@@ -2252,6 +2253,15 @@ app.post("/api/bridge/economy/star-strike/clear", requireBridgeSecret, async (re
 app.get("/api/bridge/economy/star-strike/active", requireBridgeSecret, async (_req, res) => {
   try {
     const result = await listActiveStarStrikes();
+    res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/inactivity-expiry-audit", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await getInactivityExpiryAudit({ since_hours: req.query?.since_hours });
     res.status(200).json({ ok: true, ...result });
   } catch (error) {
     sendApiError(res, error);
