@@ -11926,6 +11926,7 @@ async function recordRestingSellOrderFill(client, input) {
     `clob_limit_sell_${String(order.side).toLowerCase()}`,
     `market:${order.market_id}:limit_order:${order.id}`,
   );
+  await touchUserActivity(order.user_id, client);
   const trade = await insertClobTrade(client, {
     userId: order.user_id,
     marketId: order.market_id,
@@ -12046,6 +12047,7 @@ async function recordRestingBuyOrderFill(client, input) {
     shares,
     spent: totalCost,
   });
+  await touchUserActivity(order.user_id, client);
   const trade = await insertClobTrade(client, {
     userId: order.user_id,
     marketId: order.market_id,
@@ -13411,6 +13413,7 @@ export async function cancelLimitOrder(input) {
 
     const cancelled = await refundLimitOrder(client, order, "limit_order_cancel");
     const currency = normalizeCurrency(order.currency);
+    await touchUserActivity(user.id, client);
     const finalBalance = await getCurrencyBalanceSnapshot(client, user.id, currency);
     let restoredPosition = null;
     if (String(order.order_side || "BUY").toUpperCase() === "SELL" && order.position_id) {
