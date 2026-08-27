@@ -2260,7 +2260,10 @@ app.get("/api/bridge/economy/star-strike/active", requireBridgeSecret, async (_r
 
 app.get("/api/bridge/economy/star-strike/payments", requireBridgeSecret, async (req, res) => {
   try {
-    const result = await getStarStrikePayments({ telegram_id: req.query?.telegram_id });
+    const result = await getStarStrikePayments({
+      telegram_id: req.query?.telegram_id,
+      all: req.query?.all === "true",
+    });
     res.status(200).json({ ok: true, ...result });
   } catch (error) {
     sendApiError(res, error);

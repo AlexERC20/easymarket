@@ -14115,16 +14115,18 @@ export async function getStarStrikePayments(input = {}) {
   if (!telegramId) {
     throw new Error("telegram_id_required");
   }
+  const onlyStrikePayments = input.all !== true;
   const result = await query(
     `
       SELECT ledger.id, ledger.amount, ledger.reason, ledger.source, ledger.created_at
       FROM fire_ledger ledger
       JOIN users ON users.id = ledger.user_id
       WHERE users.telegram_id = $1
-        AND ledger.reason IN ('star_strike_unban_balance', 'star_strike_unban_stars')
-      ORDER BY ledger.created_at ASC
+        AND ($2::boolean = false OR ledger.reason IN ('star_strike_unban_balance', 'star_strike_unban_stars'))
+      ORDER BY ledger.created_at DESC
+      LIMIT 50
     `,
-    [telegramId],
+    [telegramId, onlyStrikePayments],
   );
   return {
     payments: result.rows.map((row) => ({
