@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260822-07" />
+    <link rel="stylesheet" href="/styles.css?v=20260828-01" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260822-01" />
     <link rel="stylesheet" href="/kyivstoner-motion.css?v=20260714-02" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -368,6 +368,25 @@
           <div id="taskStatsPanel" class="task-stats-panel hidden">
             <div id="taskStatsList" class="task-stats-list"></div>
           </div>
+        </div>
+      </section>
+
+      <section id="inactivitySheet" class="task-sheet hidden" aria-label="Списание за неактивность">
+        <div class="task-panel inactivity-panel">
+          <div class="task-head">
+            <div>
+              <p class="eyebrow">EasyMarket</p>
+              <h2 id="inactivitySheetTitle">Тебя давно не было</h2>
+            </div>
+            <button id="inactivityCloseBtn" class="icon-button" type="button" aria-label="Закрыть">×</button>
+          </div>
+          <div class="inactivity-body">
+            <div id="inactivityIconWrap" class="inactivity-icon-wrap">
+              <span class="inactivity-sad-icon">⭐</span>
+            </div>
+            <p id="inactivitySheetText" class="inactivity-text"></p>
+          </div>
+          <button id="inactivityOkBtn" class="task-button" type="button">Понятно</button>
         </div>
       </section>
 
@@ -951,6 +970,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260827-01" type="module"></script>
+    <script src="/app.js?v=20260828-01" type="module"></script>
   </body>
 </html>

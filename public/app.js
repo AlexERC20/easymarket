@@ -3219,6 +3219,66 @@ function showLossClose(label) {
   }
 }
 
+// Same falling-ash particles as showLossClose, just anchored to the
+// inactivity sheet's icon instead of the chart.
+function spawnInactivityAshParticles(host) {
+  if (prefersReducedMotion() || !host) {
+    return;
+  }
+  for (let i = 0; i < 8; i += 1) {
+    const ash = document.createElement("i");
+    ash.className = "loss-ash";
+    ash.style.setProperty("--dx", `${((Math.random() - 0.5) * 90).toFixed(0)}px`);
+    ash.style.setProperty("--fall", `${(30 + Math.random() * 50).toFixed(0)}px`);
+    ash.style.setProperty("--delay", `${(200 + Math.random() * 300).toFixed(0)}ms`);
+    ash.style.setProperty("--sz", `${(2 + Math.random() * 2.5).toFixed(1)}px`);
+    ash.style.left = `${(44 + Math.random() * 12).toFixed(1)}%`;
+    ash.style.top = `${(30 + Math.random() * 12).toFixed(1)}%`;
+    host.appendChild(ash);
+    window.setTimeout(() => ash.remove(), 2600);
+  }
+}
+
+let pendingInactivityNotice = null;
+
+// Queued rather than shown the instant /api/me returns it - the notice was
+// already atomically claimed server-side, so if a blocking sheet is open
+// right now we just hold it in memory and retry on the next loadMe() tick
+// instead of losing it.
+function tryShowPendingInactivityNotice() {
+  if (!pendingInactivityNotice || isBlockingSheetOpen()) {
+    return;
+  }
+  const notice = pendingInactivityNotice;
+  pendingInactivityNotice = null;
+
+  const starText = notice.star_burned > 0 ? `${formatFireDecimal(notice.star_burned)}⭐` : "";
+  const usdtText = notice.usdt_bonus_burned > 0 ? formatCurrencyAmount(notice.usdt_bonus_burned, "USDT") : "";
+  const amounts = [starText, usdtText].filter(Boolean).join(" + ");
+
+  const title = $("inactivitySheetTitle");
+  const text = $("inactivitySheetText");
+  if (notice.is_final) {
+    if (title) title.textContent = "Бонусный баланс обнулён";
+    if (text) {
+      text.innerHTML = `3 дня без активности в EasyMarket — списано <strong>${amounts}</strong>.`;
+    }
+    triggerHaptic("error");
+  } else {
+    if (title) title.textContent = "Тебя давно не было";
+    if (text) {
+      const warning = notice.stage >= 2
+        ? "Ещё сутки без действий — и всё сгорит."
+        : "Зайди и соверши любое действие (ставка, задание), чтобы остановить списание.";
+      text.innerHTML = `За 24ч без активности списано 10% бонусного баланса: <strong>${amounts}</strong>. ${warning}`;
+    }
+    triggerHaptic("warning");
+  }
+
+  openSheet("inactivitySheet");
+  spawnInactivityAshParticles($("inactivityIconWrap"));
+}
+
 // Escalating combo badge for consecutive winning rounds (item 5).
 function showStreakCombo(streak) {
   if (prefersReducedMotion()) {
@@ -4951,6 +5011,10 @@ async function loadMe() {
     renderEngagement();
   }
   renderTaskButtonStates();
+  if (data.pending_inactivity_notice) {
+    pendingInactivityNotice = data.pending_inactivity_notice;
+  }
+  tryShowPendingInactivityNotice();
 }
 
 async function loadRecentMarkets() {
@@ -11725,6 +11789,16 @@ document.querySelectorAll("[data-task-tab]").forEach((button) => {
 $("tasksCloseBtn").addEventListener("click", () => {
   triggerHaptic("selection");
   setTasksSheetOpen(false);
+});
+
+$("inactivityCloseBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  closeSheet("inactivitySheet");
+});
+
+$("inactivityOkBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  closeSheet("inactivitySheet");
 });
 
 $("taskSettingsToggleBtn")?.addEventListener("click", () => {

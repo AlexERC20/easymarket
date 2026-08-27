@@ -870,23 +870,13 @@ app.get("/api/me", async (req, res) => {
       return;
     }
 
+    const pendingInactivityNotice = await claimPendingInactivityNotice(telegramId);
+
     res.status(200).json({
       ok: true,
       ...snapshot,
+      pending_inactivity_notice: pendingInactivityNotice,
     });
-  } catch (error) {
-    sendApiError(res, error);
-  }
-});
-
-app.get("/api/me/inactivity-notice", async (req, res) => {
-  try {
-    const telegramId = getTelegramId(req);
-    if (!telegramId) {
-      throw new Error("telegram_id_missing");
-    }
-    const notice = await claimPendingInactivityNotice(telegramId);
-    res.status(200).json({ ok: true, notice });
   } catch (error) {
     sendApiError(res, error);
   }
