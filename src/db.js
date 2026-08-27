@@ -126,8 +126,12 @@ export async function runMigrations() {
       usdt_bonus_burned NUMERIC(20, 8) NOT NULL DEFAULT 0,
       clan_points_burned NUMERIC(20, 8) NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      shown_at TIMESTAMPTZ
+      shown_at TIMESTAMPTZ,
+      recovered_at TIMESTAMPTZ
     );
+
+    ALTER TABLE inactivity_burn_notices
+      ADD COLUMN IF NOT EXISTS recovered_at TIMESTAMPTZ;
 
     ALTER TABLE inactivity_burn_notices
       ADD COLUMN IF NOT EXISTS clan_points_burned NUMERIC(20, 8) NOT NULL DEFAULT 0;

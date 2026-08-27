@@ -68,6 +68,7 @@ import {
   claimPendingInactivityNotice,
   issueTestInactivityNotice,
   listInactivityBurnEventsSince,
+  applyInactivityRecovery,
   issueTestStarStrike,
   listActiveStarStrikes,
   payStarStrikeWithBalance,
@@ -2263,6 +2264,15 @@ app.get("/api/bridge/economy/inactivity-burn-events", requireBridgeSecret, async
   try {
     const events = await listInactivityBurnEventsSince(req.query?.since_id, req.query?.limit);
     res.status(200).json({ ok: true, events });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/economy/inactivity-notice/recover", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await applyInactivityRecovery(req.body?.telegram_id, req.body?.stars_amount);
+    res.status(200).json({ ok: true, ...result });
   } catch (error) {
     sendApiError(res, error);
   }

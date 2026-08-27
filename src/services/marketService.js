@@ -4036,6 +4036,62 @@ export async function listInactivityBurnEventsSince(sinceId = 0, limit = 200) {
   }));
 }
 
+const INACTIVITY_RECOVERY_MIN_STARS = 500;
+const INACTIVITY_RECOVERY_WINDOW_SECONDS = 60;
+
+// "Топни 500 звёзд в течение 60с после сообщения о списании — вернём всё,
+// что сгорело" (STAR + бонусный USDT only, не очки клана/конкурса - those
+// are earned-progress penalties, not a wallet balance to refund). Called
+// from the bot the moment a real Telegram Stars fire-topup payment is
+// confirmed; a topup that doesn't land inside anyone's live window just
+// silently recovers nothing; it's still a completely normal topup either way.
+export async function applyInactivityRecovery(telegramId, starsAmount) {
+  const stars = Math.round(Number(starsAmount) || 0);
+  if (stars < INACTIVITY_RECOVERY_MIN_STARS) {
+    return { recovered: false };
+  }
+  const user = await getUserByTelegramId(telegramId);
+  if (!user) {
+    return { recovered: false };
+  }
+
+  const result = await withTransaction(async (client) => {
+    const noticeResult = await client.query(
+      `
+        UPDATE inactivity_burn_notices
+        SET recovered_at = now()
+        WHERE id = (
+          SELECT id
+          FROM inactivity_burn_notices
+          WHERE user_id = $1
+            AND shown_at IS NOT NULL
+            AND shown_at >= now() - ($2 || ' seconds')::interval
+            AND recovered_at IS NULL
+          ORDER BY shown_at DESC
+          LIMIT 1
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING star_burned, usdt_bonus_burned
+      `,
+      [user.id, INACTIVITY_RECOVERY_WINDOW_SECONDS],
+    );
+    return noticeResult.rows[0] || null;
+  });
+  if (!result) {
+    return { recovered: false };
+  }
+
+  const starAmount = toNumber(result.star_burned);
+  const bonusAmount = toNumber(result.usdt_bonus_burned);
+  if (starAmount > 0) {
+    await addFireToUser({ telegram_id: telegramId, amount: starAmount, reason: "inactivity_recovery", source: "bridge" });
+  }
+  if (bonusAmount > 0) {
+    await addUsdtBonusToUser({ telegram_id: telegramId, amount: bonusAmount, reason: "inactivity_recovery", source: "bridge" });
+  }
+  return { recovered: true, star_amount: starAmount, usdt_bonus_amount: bonusAmount };
+}
+
 export async function upsertUser(input) {
   const telegramId = String(input.telegram_id ?? "").trim();
   if (!telegramId) {
