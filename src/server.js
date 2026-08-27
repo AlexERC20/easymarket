@@ -1,6 +1,6 @@
 import express from "express";
 import compression from "compression";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -159,6 +159,96 @@ app.use(express.static(publicDir, {
     }
   },
 }));
+
+// Verifies a Telegram Mini App initData string per Telegram's documented
+// algorithm: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
+// secret_key = HMAC_SHA256(key="WebAppData", data=bot_token); the data-check
+// string (every field except hash, sorted, joined with \n) is then HMACed
+// with that secret_key and compared to the hash field.
+const INIT_DATA_MAX_AGE_SECONDS = 24 * 60 * 60;
+function verifyTelegramInitData(initData, botToken) {
+  if (!initData || !botToken) {
+    return null;
+  }
+  let params;
+  try {
+    params = new URLSearchParams(initData);
+  } catch {
+    return null;
+  }
+  const hash = params.get("hash");
+  if (!hash) {
+    return null;
+  }
+  params.delete("hash");
+  const dataCheckString = [...params.entries()]
+    .map(([key, value]) => `${key}=${value}`)
+    .sort()
+    .join("\n");
+  const secretKey = createHmac("sha256", "WebAppData").update(botToken).digest();
+  const computedHash = createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
+  const hashBuf = Buffer.from(hash, "hex");
+  const computedBuf = Buffer.from(computedHash, "hex");
+  if (hashBuf.length !== computedBuf.length || !timingSafeEqual(hashBuf, computedBuf)) {
+    return null;
+  }
+  const authDate = Number(params.get("auth_date") || 0);
+  if (!authDate || Date.now() / 1000 - authDate > INIT_DATA_MAX_AGE_SECONDS) {
+    return null;
+  }
+  let user = null;
+  try {
+    user = JSON.parse(params.get("user") || "null");
+  } catch {
+    user = null;
+  }
+  const telegramId = String(user?.id ?? "").trim();
+  if (!telegramId) {
+    return null;
+  }
+  return {
+    telegramId,
+    username: user?.username ?? null,
+    firstName: user?.first_name ?? null,
+  };
+}
+
+// Every route so far trusted a bare telegram_id from the request body/query
+// with no proof it actually came from that Telegram user - anyone who knew
+// (or guessed) a real telegram_id could act as them, including withdrawals.
+// This middleware is the single choke point that closes that: a valid,
+// freshly-signed X-Telegram-Init-Data header overwrites whatever telegram_id
+// the client claimed with the verified one, so every existing route handler
+// (which reads req.body.telegram_id / req.query.telegram_id / getTelegramId)
+// gets the trustworthy value with no per-route changes. Bridge routes
+// (server-to-server, gated by requireBridgeSecret below) and requests
+// carrying no identity claim at all (genuinely public routes) pass through
+// untouched.
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/bridge/")) {
+    return next();
+  }
+  const claimedTelegramId = String(req.body?.telegram_id || req.query?.telegram_id || "").trim();
+  const initData = req.get("X-Telegram-Init-Data");
+  if (!claimedTelegramId && !initData) {
+    return next();
+  }
+  const verified = verifyTelegramInitData(initData, config.telegramBotToken);
+  if (verified) {
+    if (req.body && typeof req.body === "object") {
+      req.body.telegram_id = verified.telegramId;
+      if (verified.username) req.body.username = verified.username;
+      if (verified.firstName) req.body.first_name = verified.firstName;
+    }
+    req.query.telegram_id = verified.telegramId;
+    return next();
+  }
+  if (config.allowDevAuth) {
+    // Local/dev only: no real Telegram client to sign initData with.
+    return next();
+  }
+  res.status(401).json({ ok: false, message: "invalid_telegram_auth" });
+});
 
 let marketEngineStarted = false;
 let marketEngineBusy = false;
