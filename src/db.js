@@ -124,9 +124,13 @@ export async function runMigrations() {
       is_final BOOLEAN NOT NULL DEFAULT FALSE,
       star_burned NUMERIC(20, 8) NOT NULL DEFAULT 0,
       usdt_bonus_burned NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      clan_points_burned NUMERIC(20, 8) NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       shown_at TIMESTAMPTZ
     );
+
+    ALTER TABLE inactivity_burn_notices
+      ADD COLUMN IF NOT EXISTS clan_points_burned NUMERIC(20, 8) NOT NULL DEFAULT 0;
 
     CREATE INDEX IF NOT EXISTS idx_inactivity_burn_notices_pending
       ON inactivity_burn_notices(user_id, created_at)

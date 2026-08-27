@@ -3710,11 +3710,14 @@ async function notifyInactivityBurn(outcome) {
   if (outcome.bonusBurn > 0) {
     parts.push(`-${outcome.bonusBurn.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT (бонус)`);
   }
+  if (outcome.clanPointsBurn > 0) {
+    parts.push(`-${outcome.clanPointsBurn.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} очков клана`);
+  }
   const burned = parts.join(", ");
   const text = outcome.isFinal
-    ? `❌ 3 дня без активности в EasyMarket — бонусный баланс обнулён: ${burned}.`
+    ? `❌ 3 дня без активности в EasyMarket — списано: ${burned}.`
     : [
-        `⚠️ Из-за 24ч без активности в EasyMarket списано 10% бонусного баланса: ${burned}.`,
+        `⚠️ Из-за 24ч без активности в EasyMarket списано 10%: ${burned}.`,
         `Осталось: ${outcome.starRemaining.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}⭐, ${outcome.bonusRemaining.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} USDT.`,
         outcome.stage >= 2
           ? "Последнее предупреждение: ещё сутки без действий — и всё сгорит."
@@ -3763,6 +3766,7 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
         AND (
           EXISTS (SELECT 1 FROM fire_balances fb WHERE fb.user_id = u.id AND fb.balance > 0)
           OR EXISTS (SELECT 1 FROM usdt_bonus_balances bb WHERE bb.user_id = u.id AND bb.balance > 0)
+          OR EXISTS (SELECT 1 FROM clan_members cm WHERE cm.user_id = u.id AND cm.contribution_score > 0)
         )
       LIMIT $1
     `,
@@ -3773,6 +3777,7 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
   let finalWipes = 0;
   let expiredStars = 0;
   let expiredBonusUsdt = 0;
+  let expiredClanPoints = 0;
   const notifications = [];
 
   for (const row of candidates.rows) {
@@ -3841,21 +3846,57 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
         );
       }
 
+      // Clan contribution follows the same 10%/10%/rest schedule, but scoped
+      // to what the user actually earned THIS month - that's the number
+      // distributeDueClanRewardFunds sums to split the monthly pool, so
+      // docking it is what actually keeps an inactive member from cashing
+      // in on a payout, not just a cosmetic lifetime-score change.
+      let clanPointsBurn = 0;
+      const clanMemberResult = await client.query(
+        "SELECT clan_id FROM clan_members WHERE user_id = $1 LIMIT 1",
+        [userId],
+      );
+      const clanId = clanMemberResult.rows[0]?.clan_id;
+      if (clanId) {
+        const monthlyScoreResult = await client.query(
+          `
+            SELECT GREATEST(COALESCE(SUM(points), 0), 0) AS score
+            FROM clan_score_events
+            WHERE clan_id = $1
+              AND user_id = $2
+              AND to_char(created_at, 'YYYY-MM') = to_char(now(), 'YYYY-MM')
+          `,
+          [clanId, userId],
+        );
+        const monthlyScore = toNumber(monthlyScoreResult.rows[0]?.score);
+        clanPointsBurn = isFinal ? monthlyScore : roundMoney(monthlyScore * 0.1);
+        if (clanPointsBurn > 0) {
+          await client.query(
+            `INSERT INTO clan_score_events (clan_id, user_id, points, reason) VALUES ($1, $2, $3, 'inactivity_penalty')`,
+            [clanId, userId, -clanPointsBurn],
+          );
+          await client.query(
+            "UPDATE clan_members SET contribution_score = GREATEST(0, contribution_score - $2) WHERE user_id = $1",
+            [userId, clanPointsBurn],
+          );
+        }
+      }
+
       await client.query(
         "UPDATE users SET inactivity_burn_stage = $2 WHERE id = $1",
         [userId, isFinal ? 0 : targetStage],
       );
 
-      if (starBurn <= 0 && bonusBurn <= 0) {
+      if (starBurn <= 0 && bonusBurn <= 0 && clanPointsBurn <= 0) {
         return null;
       }
 
       await client.query(
         `
-          INSERT INTO inactivity_burn_notices (user_id, stage, is_final, star_burned, usdt_bonus_burned)
-          VALUES ($1, $2, $3, $4, $5)
+          INSERT INTO inactivity_burn_notices (user_id, stage, is_final, star_burned, usdt_bonus_burned, clan_points_burned)
+          VALUES ($1, $2, $3, $4, $5, $6)
         `,
-        [userId, targetStage, isFinal, starBurn, bonusBurn],
+        [userId, targetStage, isFinal, starBurn, bonusBurn, clanPointsBurn],
       );
 
       return {
@@ -3864,6 +3905,7 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
         isFinal,
         starBurn,
         bonusBurn,
+        clanPointsBurn,
         starRemaining: roundMoney(starBalance - starBurn),
         bonusRemaining: roundMoney(bonusBalance - bonusBurn),
       };
@@ -3873,6 +3915,7 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
       processedUsers += 1;
       expiredStars += outcome.starBurn;
       expiredBonusUsdt += outcome.bonusBurn;
+      expiredClanPoints += outcome.clanPointsBurn;
       if (outcome.isFinal) {
         finalWipes += 1;
       }
@@ -3888,12 +3931,10 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
     final_wipes: finalWipes,
     expired_stars: roundMoney(expiredStars),
     expired_bonus_usdt: roundMoney(expiredBonusUsdt),
+    expired_clan_points: roundMoney(expiredClanPoints),
   };
 }
 
-// Atomically claims the oldest not-yet-shown inactivity burn notice for a
-// user so the frontend can render it once (the sad-animation modal) without
-// a retried poll ever showing the same notice twice.
 // Test-only helper (mirrors issueTestStarStrike) to enqueue a synthetic
 // notice without waiting for a real 24h/48h/72h inactivity window.
 export async function issueTestInactivityNotice(input = {}) {
@@ -3905,15 +3946,25 @@ export async function issueTestInactivityNotice(input = {}) {
   const isFinal = stage >= 3;
   const result = await query(
     `
-      INSERT INTO inactivity_burn_notices (user_id, stage, is_final, star_burned, usdt_bonus_burned)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO inactivity_burn_notices (user_id, stage, is_final, star_burned, usdt_bonus_burned, clan_points_burned)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING id
     `,
-    [user.id, stage, isFinal, Number(input.star_burned) || 0, Number(input.usdt_bonus_burned) || 0],
+    [
+      user.id,
+      stage,
+      isFinal,
+      Number(input.star_burned) || 0,
+      Number(input.usdt_bonus_burned) || 0,
+      Number(input.clan_points_burned) || 0,
+    ],
   );
   return { ok: true, notice_id: result.rows[0]?.id };
 }
 
+// Atomically claims the oldest not-yet-shown inactivity burn notice for a
+// user so the frontend can render it once (the sad-animation modal) without
+// a retried poll ever showing the same notice twice.
 export async function claimPendingInactivityNotice(telegramId) {
   const user = await getUserByTelegramId(telegramId);
   if (!user) {
@@ -3932,7 +3983,7 @@ export async function claimPendingInactivityNotice(telegramId) {
         LIMIT 1
         FOR UPDATE SKIP LOCKED
       )
-      RETURNING stage, is_final, star_burned, usdt_bonus_burned, created_at
+      RETURNING stage, is_final, star_burned, usdt_bonus_burned, clan_points_burned, created_at
     `,
     [user.id],
   );
@@ -3945,8 +3996,44 @@ export async function claimPendingInactivityNotice(telegramId) {
     is_final: Boolean(row.is_final),
     star_burned: toNumber(row.star_burned),
     usdt_bonus_burned: toNumber(row.usdt_bonus_burned),
+    clan_points_burned: toNumber(row.clan_points_burned),
     created_at: row.created_at,
   };
+}
+
+// Independent read-only feed of the same burn events, for the AV bot to
+// dock contest points on the same 10%/10%/rest schedule. Deliberately
+// separate from claimPendingInactivityNotice's shown_at claim - the in-app
+// modal and the bot's contest-points sync are two independent consumers of
+// the same underlying event, each tracking its own cursor/marker.
+export async function listInactivityBurnEventsSince(sinceId = 0, limit = 200) {
+  const result = await query(
+    `
+      SELECT
+        notices.id,
+        users.telegram_id,
+        notices.stage,
+        notices.is_final,
+        notices.star_burned,
+        notices.usdt_bonus_burned,
+        notices.created_at
+      FROM inactivity_burn_notices notices
+      JOIN users ON users.id = notices.user_id
+      WHERE notices.id > $1
+      ORDER BY notices.id ASC
+      LIMIT $2
+    `,
+    [Math.max(0, Number(sinceId) || 0), Math.max(1, Math.min(1000, Number(limit) || 200))],
+  );
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    telegram_id: row.telegram_id,
+    stage: Number(row.stage),
+    is_final: Boolean(row.is_final),
+    star_burned: toNumber(row.star_burned),
+    usdt_bonus_burned: toNumber(row.usdt_bonus_burned),
+    created_at: row.created_at,
+  }));
 }
 
 export async function upsertUser(input) {

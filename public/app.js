@@ -3254,7 +3254,8 @@ function tryShowPendingInactivityNotice() {
 
   const starText = notice.star_burned > 0 ? `${formatFireDecimal(notice.star_burned)}⭐` : "";
   const usdtText = notice.usdt_bonus_burned > 0 ? formatCurrencyAmount(notice.usdt_bonus_burned, "USDT") : "";
-  const amounts = [starText, usdtText].filter(Boolean).join(" + ");
+  const clanText = notice.clan_points_burned > 0 ? `${formatFireDecimal(notice.clan_points_burned)} очков клана` : "";
+  const amounts = [starText, usdtText, clanText].filter(Boolean).join(" + ");
 
   const title = $("inactivitySheetTitle");
   const text = $("inactivitySheetText");
@@ -3270,7 +3271,7 @@ function tryShowPendingInactivityNotice() {
       const warning = notice.stage >= 2
         ? "Ещё сутки без действий — и всё сгорит."
         : "Зайди и соверши любое действие (ставка, задание), чтобы остановить списание.";
-      text.innerHTML = `За 24ч без активности списано 10% бонусного баланса: <strong>${amounts}</strong>. ${warning}`;
+      text.innerHTML = `За 24ч без активности списано 10%: <strong>${amounts}</strong>. ${warning}`;
     }
     triggerHaptic("warning");
   }

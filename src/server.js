@@ -67,6 +67,7 @@ import {
   getInactivityExpiryAudit,
   claimPendingInactivityNotice,
   issueTestInactivityNotice,
+  listInactivityBurnEventsSince,
   issueTestStarStrike,
   listActiveStarStrikes,
   payStarStrikeWithBalance,
@@ -2250,8 +2251,18 @@ app.post("/api/bridge/economy/inactivity-notice/test", requireBridgeSecret, asyn
       stage: req.body?.stage,
       star_burned: req.body?.star_burned,
       usdt_bonus_burned: req.body?.usdt_bonus_burned,
+      clan_points_burned: req.body?.clan_points_burned,
     });
     res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/economy/inactivity-burn-events", requireBridgeSecret, async (req, res) => {
+  try {
+    const events = await listInactivityBurnEventsSince(req.query?.since_id, req.query?.limit);
+    res.status(200).json({ ok: true, events });
   } catch (error) {
     sendApiError(res, error);
   }
