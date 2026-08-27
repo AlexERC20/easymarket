@@ -113,6 +113,25 @@ export async function runMigrations() {
     ALTER TABLE users
       ADD COLUMN IF NOT EXISTS inactivity_burn_stage INT NOT NULL DEFAULT 0;
 
+    -- One row per staged inactivity burn, queued for the frontend to show
+    -- as an in-app modal (with the sad animation) the next time the user
+    -- opens the app. shown_at is claimed atomically so a retried/duplicate
+    -- poll can't show the same notice twice.
+    CREATE TABLE IF NOT EXISTS inactivity_burn_notices (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      stage INT NOT NULL,
+      is_final BOOLEAN NOT NULL DEFAULT FALSE,
+      star_burned NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      usdt_bonus_burned NUMERIC(20, 8) NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      shown_at TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_inactivity_burn_notices_pending
+      ON inactivity_burn_notices(user_id, created_at)
+      WHERE shown_at IS NULL;
+
     CREATE TABLE IF NOT EXISTS fire_balances (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       balance NUMERIC(20, 8) NOT NULL DEFAULT 0,

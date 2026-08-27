@@ -3850,6 +3850,14 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
         return null;
       }
 
+      await client.query(
+        `
+          INSERT INTO inactivity_burn_notices (user_id, stage, is_final, star_burned, usdt_bonus_burned)
+          VALUES ($1, $2, $3, $4, $5)
+        `,
+        [userId, targetStage, isFinal, starBurn, bonusBurn],
+      );
+
       return {
         telegramId: user.telegram_id,
         stage: targetStage,
@@ -3880,6 +3888,44 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
     final_wipes: finalWipes,
     expired_stars: roundMoney(expiredStars),
     expired_bonus_usdt: roundMoney(expiredBonusUsdt),
+  };
+}
+
+// Atomically claims the oldest not-yet-shown inactivity burn notice for a
+// user so the frontend can render it once (the sad-animation modal) without
+// a retried poll ever showing the same notice twice.
+export async function claimPendingInactivityNotice(telegramId) {
+  const user = await getUserByTelegramId(telegramId);
+  if (!user) {
+    return null;
+  }
+  const result = await query(
+    `
+      UPDATE inactivity_burn_notices
+      SET shown_at = now()
+      WHERE id = (
+        SELECT id
+        FROM inactivity_burn_notices
+        WHERE user_id = $1
+          AND shown_at IS NULL
+        ORDER BY created_at ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING stage, is_final, star_burned, usdt_bonus_burned, created_at
+    `,
+    [user.id],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+  return {
+    stage: Number(row.stage),
+    is_final: Boolean(row.is_final),
+    star_burned: toNumber(row.star_burned),
+    usdt_bonus_burned: toNumber(row.usdt_bonus_burned),
+    created_at: row.created_at,
   };
 }
 
