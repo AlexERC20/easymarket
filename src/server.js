@@ -302,7 +302,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "invalid_promo_point_package",
     "invalid_telegram_payment",
     "promo_points_telegram_payment_required",
-    "promo_points_already_purchased_today",
+    "promo_point_purchase_conflict",
     "insufficient_usdt",
     "invalid_deposit_amount",
     "invalid_deposit_network",

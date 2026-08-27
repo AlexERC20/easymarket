@@ -89,6 +89,7 @@ function mapPointPurchase(row, dayKey) {
   return {
     day_key: dayKey,
     purchased: Boolean(row),
+    purchase_count: row ? Math.max(0, Number(row.purchase_count || 0)) : 0,
     stars_spent: row ? toNumber(row.stars_spent) : 0,
     points: row ? Math.max(0, Number(row.points || 0)) : 0,
     payment_source: row?.payment_source || null,
@@ -125,7 +126,7 @@ function buildPromoContestState(row, startedAt, dayKey) {
         dayKey,
       ),
     },
-    point_purchase: mapPointPurchase(row.purchase_id ? row : null, dayKey),
+    point_purchase: mapPointPurchase(Number(row.purchase_count || 0) > 0 ? row : null, dayKey),
   };
 }
 
@@ -161,13 +162,22 @@ async function loadPromoRows(client, whereSql, params) {
             AND ledger.amount >= 500
             AND ledger.created_at >= $1::timestamptz
         ), 0) AS star_deposit_count,
-        purchases.id AS purchase_id,
+        purchases.purchase_count,
         purchases.stars_spent,
         purchases.points
       FROM users
       LEFT JOIN fire_balances fire ON fire.user_id = users.id
       LEFT JOIN usdt_balances cash ON cash.user_id = users.id
-      LEFT JOIN promo_point_purchases purchases
+      LEFT JOIN (
+        SELECT
+          user_id,
+          day_key,
+          COUNT(*) AS purchase_count,
+          SUM(stars_spent) AS stars_spent,
+          SUM(points) AS points
+        FROM promo_point_purchases
+        GROUP BY user_id, day_key
+      ) purchases
         ON purchases.user_id = users.id
        AND purchases.day_key = $2
       WHERE ${whereSql}
@@ -214,14 +224,6 @@ export async function creditPromoPointsFromTelegramStars(client, input) {
     return { ...existingPayment.rows[0], already_credited: true };
   }
 
-  const existing = await client.query(
-    "SELECT * FROM promo_point_purchases WHERE user_id = $1::bigint AND day_key = $2 LIMIT 1",
-    [input.userId, dayKey],
-  );
-  if (existing.rows[0]) {
-    throw new Error("promo_points_already_purchased_today");
-  }
-
   const purchaseResult = await client.query(
     `
       INSERT INTO promo_point_purchases (
@@ -254,7 +256,7 @@ export async function creditPromoPointsFromTelegramStars(client, input) {
   if (racedPayment.rows[0]) {
     return { ...racedPayment.rows[0], already_credited: true };
   }
-  throw new Error("promo_points_already_purchased_today");
+  throw new Error("promo_point_purchase_conflict");
 }
 
 export async function creditTelegramStarsPromoPointPurchase(input) {

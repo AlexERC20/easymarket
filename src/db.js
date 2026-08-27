@@ -148,8 +148,7 @@ export async function runMigrations() {
       points INTEGER NOT NULL CHECK (points > 0),
       payment_source TEXT NOT NULL DEFAULT 'internal_balance',
       telegram_payment_charge_id TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      UNIQUE(user_id, day_key)
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     ALTER TABLE promo_point_purchases
@@ -157,6 +156,9 @@ export async function runMigrations() {
 
     ALTER TABLE promo_point_purchases
       ADD COLUMN IF NOT EXISTS telegram_payment_charge_id TEXT;
+
+    ALTER TABLE promo_point_purchases
+      DROP CONSTRAINT IF EXISTS promo_point_purchases_user_id_day_key_key;
 
     CREATE INDEX IF NOT EXISTS idx_promo_point_purchases_day
       ON promo_point_purchases(day_key, created_at DESC);
