@@ -4308,11 +4308,16 @@ async function api(path, options = {}) {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
+    // Backend verifies this signature and derives the real telegram_id from
+    // it - any telegram_id in the request body/query is now just a hint the
+    // server ignores unless this header checks out.
+    const initData = window.Telegram?.WebApp?.initData || "";
     const response = await fetch(path, {
       ...fetchOptions,
       signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
+        ...(initData ? { "X-Telegram-Init-Data": initData } : {}),
         ...(fetchOptions.headers || {}),
       },
     });
