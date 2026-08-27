@@ -12429,6 +12429,7 @@ async function createClobLimitOrder(client, input) {
     input.user.id,
     currencyForBookType(bookType),
   );
+  await touchUserActivity(input.user.id, client);
   return {
     ok: true,
     currency: currencyForBookType(bookType),
@@ -12601,6 +12602,7 @@ async function executeClobMarketBuy(client, input) {
   const refreshedAccount = ammAccount.id === context.account.id
     ? await refreshMarketMakerAccount(client, input.market, funding.bookType, false, true)
     : context;
+  await touchUserActivity(input.user.id, client);
   return {
     ok: true,
     currency: currencyForBookType(funding.bookType),
@@ -12779,6 +12781,7 @@ async function executeClobMarketSell(client, input) {
     await awardReferralBetBonusByUserId(client, userId, input.market.id);
   }
   const refreshedAccount = await refreshMarketMakerAccount(client, input.market, bookType, false, true);
+  await touchUserActivity(input.user.id, client);
   return {
     ok: true,
     currency: currencyForBookType(bookType),
