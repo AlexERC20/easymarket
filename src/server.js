@@ -66,6 +66,7 @@ import {
   getStarStrikePayments,
   getInactivityExpiryAudit,
   claimPendingInactivityNotice,
+  issueTestInactivityNotice,
   issueTestStarStrike,
   listActiveStarStrikes,
   payStarStrikeWithBalance,
@@ -2237,6 +2238,20 @@ app.post("/api/bridge/economy/star-strike/test", requireBridgeSecret, async (req
       strike: req.body?.strike,
     });
     res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/economy/inactivity-notice/test", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await issueTestInactivityNotice({
+      telegram_id: req.body?.telegram_id,
+      stage: req.body?.stage,
+      star_burned: req.body?.star_burned,
+      usdt_bonus_burned: req.body?.usdt_bonus_burned,
+    });
+    res.status(200).json(result);
   } catch (error) {
     sendApiError(res, error);
   }

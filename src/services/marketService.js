@@ -3894,6 +3894,26 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
 // Atomically claims the oldest not-yet-shown inactivity burn notice for a
 // user so the frontend can render it once (the sad-animation modal) without
 // a retried poll ever showing the same notice twice.
+// Test-only helper (mirrors issueTestStarStrike) to enqueue a synthetic
+// notice without waiting for a real 24h/48h/72h inactivity window.
+export async function issueTestInactivityNotice(input = {}) {
+  const user = await getUserByTelegramId(input.telegram_id);
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+  const stage = Math.max(1, Math.min(3, Number(input.stage) || 1));
+  const isFinal = stage >= 3;
+  const result = await query(
+    `
+      INSERT INTO inactivity_burn_notices (user_id, stage, is_final, star_burned, usdt_bonus_burned)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id
+    `,
+    [user.id, stage, isFinal, Number(input.star_burned) || 0, Number(input.usdt_bonus_burned) || 0],
+  );
+  return { ok: true, notice_id: result.rows[0]?.id };
+}
+
 export async function claimPendingInactivityNotice(telegramId) {
   const user = await getUserByTelegramId(telegramId);
   if (!user) {
