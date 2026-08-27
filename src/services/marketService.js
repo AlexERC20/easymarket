@@ -3721,15 +3721,29 @@ async function notifyInactivityBurn(outcome) {
           : "Зайди и соверши любое действие (ставка, задание), чтобы остановить списание.",
       ].join("\n");
 
-  await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: outcome.telegramId,
-      text,
-      disable_web_page_preview: true,
-    }),
-  }).catch(() => undefined);
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: outcome.telegramId,
+        text,
+        disable_web_page_preview: true,
+      }),
+    });
+    if (!response.ok) {
+      console.warn("[easymarket] inactivity burn notify failed", {
+        telegram_id: outcome.telegramId,
+        status: response.status,
+        body: await response.text().catch(() => ""),
+      });
+    }
+  } catch (error) {
+    console.warn("[easymarket] inactivity burn notify error", {
+      telegram_id: outcome.telegramId,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 // Staged burn (not redistribution - deliberately, see the AV bot's
