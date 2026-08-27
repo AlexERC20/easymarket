@@ -3004,6 +3004,24 @@ code {
   color: #ff8ba1;
 }
 
+.inactivity-recovery {
+  margin-bottom: 10px;
+}
+
+.inactivity-recovery.hidden {
+  display: none;
+}
+
+.inactivity-recovery .task-button {
+  width: 100%;
+  animation: inactivityRecoveryPulse 1400ms ease-in-out infinite;
+}
+
+@keyframes inactivityRecoveryPulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(255, 200, 60, 0); }
+  50% { box-shadow: 0 0 18px rgba(255, 200, 60, 0.45); }
+}
+
 .task-panel {
   width: min(100%, 430px);
   max-height: calc(100dvh - max(54px, env(safe-area-inset-top)) - max(18px, env(safe-area-inset-bottom)));

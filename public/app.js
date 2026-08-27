@@ -3278,6 +3278,77 @@ function tryShowPendingInactivityNotice() {
 
   openSheet("inactivitySheet");
   spawnInactivityAshParticles($("inactivityIconWrap"));
+
+  if (notice.star_burned > 0 || notice.usdt_bonus_burned > 0) {
+    startInactivityRecoveryOffer();
+  } else {
+    stopInactivityRecoveryOffer();
+  }
+}
+
+let inactivityRecoveryTimer = null;
+const INACTIVITY_RECOVERY_SECONDS = 60;
+
+// Purely a countdown display - the actual 60s deadline is enforced
+// server-side against shown_at (see applyInactivityRecovery), this just
+// mirrors it so the offer visibly expires instead of sitting there forever.
+function startInactivityRecoveryOffer() {
+  const block = $("inactivityRecoveryBlock");
+  const timerEl = $("inactivityRecoveryTimer");
+  if (!block || !timerEl) {
+    return;
+  }
+  if (inactivityRecoveryTimer) {
+    window.clearInterval(inactivityRecoveryTimer);
+  }
+  let remaining = INACTIVITY_RECOVERY_SECONDS;
+  timerEl.textContent = String(remaining);
+  block.classList.remove("hidden");
+  inactivityRecoveryTimer = window.setInterval(() => {
+    remaining -= 1;
+    if (remaining <= 0) {
+      stopInactivityRecoveryOffer();
+      return;
+    }
+    timerEl.textContent = String(remaining);
+  }, 1_000);
+}
+
+function stopInactivityRecoveryOffer() {
+  if (inactivityRecoveryTimer) {
+    window.clearInterval(inactivityRecoveryTimer);
+    inactivityRecoveryTimer = null;
+  }
+  $("inactivityRecoveryBlock")?.classList.add("hidden");
+}
+
+async function handleInactivityRecoveryClick() {
+  triggerHaptic("selection");
+  try {
+    const result = await api("/api/stars/invoice", {
+      method: "POST",
+      body: JSON.stringify({ telegram_id: state.user.telegram_id, amount: 500 }),
+    });
+    const invoiceUrl = result.invoice_url;
+    const tg = window.Telegram?.WebApp;
+    if (tg?.openInvoice) {
+      tg.openInvoice(invoiceUrl, (status) => {
+        if (status === "paid") {
+          showToast("Оплата прошла. Проверяю восстановление...");
+          closeSheet("inactivitySheet");
+          void refreshBalanceAfterInvoice();
+        } else if (status === "cancelled") {
+          showToast("Оплата отменена.");
+        }
+      });
+    } else {
+      window.open(invoiceUrl, "_blank", "noopener,noreferrer");
+      showToast("После оплаты баланс обновится автоматически.");
+    }
+  } catch {
+    triggerHaptic("error");
+    showToast("Не получилось открыть оплату. Попробуй ещё раз.");
+  }
 }
 
 // Escalating combo badge for consecutive winning rounds (item 5).
@@ -11794,12 +11865,18 @@ $("tasksCloseBtn").addEventListener("click", () => {
 
 $("inactivityCloseBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
+  stopInactivityRecoveryOffer();
   closeSheet("inactivitySheet");
 });
 
 $("inactivityOkBtn")?.addEventListener("click", () => {
   triggerHaptic("selection");
+  stopInactivityRecoveryOffer();
   closeSheet("inactivitySheet");
+});
+
+$("inactivityRecoveryBtn")?.addEventListener("click", () => {
+  void handleInactivityRecoveryClick();
 });
 
 $("taskSettingsToggleBtn")?.addEventListener("click", () => {
