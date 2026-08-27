@@ -2604,7 +2604,7 @@ async function usdtDepositExpiryTick() {
 }
 
 async function inactivityExpiryTick() {
-  if (inactivityExpiryBusy) {
+  if (!config.inactivityExpiryEnabled || inactivityExpiryBusy) {
     return;
   }
 
