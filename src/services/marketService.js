@@ -14159,13 +14159,28 @@ export async function getInactivityExpiryAudit(input = {}) {
         per_user.usdt_bonus_burn_count,
         per_user.first_at,
         per_user.last_at,
-        EXISTS (
-          SELECT 1
-          FROM fire_ledger recent
-          WHERE recent.user_id = per_user.user_id
-            AND recent.reason != 'inactivity_expiry'
-            AND recent.created_at < per_user.first_at
-            AND recent.created_at >= per_user.first_at - INTERVAL '24 hours'
+        (
+          EXISTS (
+            SELECT 1 FROM fire_ledger recent
+            WHERE recent.user_id = per_user.user_id
+              AND recent.reason != 'inactivity_expiry'
+              AND recent.created_at < per_user.first_at
+              AND recent.created_at >= per_user.first_at - INTERVAL '24 hours'
+          )
+          OR EXISTS (
+            SELECT 1 FROM usdt_ledger recent
+            WHERE recent.user_id = per_user.user_id
+              AND recent.reason != 'inactivity_expiry'
+              AND recent.created_at < per_user.first_at
+              AND recent.created_at >= per_user.first_at - INTERVAL '24 hours'
+          )
+          OR EXISTS (
+            SELECT 1 FROM usdt_bonus_ledger recent
+            WHERE recent.user_id = per_user.user_id
+              AND recent.reason != 'inactivity_expiry'
+              AND recent.created_at < per_user.first_at
+              AND recent.created_at >= per_user.first_at - INTERVAL '24 hours'
+          )
         ) AS had_activity_before_burn
       FROM per_user
       JOIN users ON users.id = per_user.user_id
