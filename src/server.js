@@ -115,11 +115,13 @@ import { ensureRouletteSchema, getRouletteState, placeRouletteBet, rouletteTick 
 import {
   COMEBACK_WHEEL_SPIN_STARS,
   getComebackWheelStatus,
+  resetComebackWheelFreeSpin,
   spinComebackWheelFree,
   spinComebackWheelPaid,
   claimLatestComebackWheelSpin,
   getComebackWheelReminderTargets,
   markComebackWheelRemindersSent,
+  getComebackWheelPromoImage,
 } from "./services/comebackWheelService.js";
 import { PriceUnavailableError, startBtcPriceStream } from "./services/priceService.js";
 import { runDatabaseCleanup, runStartupDatabaseRescue } from "./services/databaseCleanupService.js";
@@ -905,6 +907,19 @@ app.get("/api/me", async (req, res) => {
       ...snapshot,
       pending_inactivity_notice: pendingInactivityNotice,
     });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+// Public/unauthenticated on purpose - Telegram's own servers fetch this URL
+// directly when rendering sendPhoto, they don't carry a user's initData.
+app.get("/api/wheel/comeback/promo-image.jpg", async (_req, res) => {
+  try {
+    const jpeg = await getComebackWheelPromoImage();
+    res.setHeader("Content-Type", "image/jpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+    res.status(200).end(jpeg);
   } catch (error) {
     sendApiError(res, error);
   }
@@ -2351,6 +2366,15 @@ app.post("/api/bridge/economy/inactivity-notice/test", requireBridgeSecret, asyn
       usdt_bonus_burned: req.body?.usdt_bonus_burned,
       clan_points_burned: req.body?.clan_points_burned,
     });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/wheel/comeback/reset-free-spin", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await resetComebackWheelFreeSpin(req.body?.telegram_id);
     res.status(200).json(result);
   } catch (error) {
     sendApiError(res, error);

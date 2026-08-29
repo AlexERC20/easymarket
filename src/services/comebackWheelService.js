@@ -1,4 +1,5 @@
 import { randomInt } from "node:crypto";
+import sharp from "sharp";
 
 import { query, toNumber, withTransaction } from "../db.js";
 import { getUserByTelegramId, touchUserActivity, addFireToUser } from "./marketService.js";
@@ -63,6 +64,17 @@ export async function getComebackWheelStatus(telegramId) {
     spin_stars_cost: COMEBACK_WHEEL_SPIN_STARS,
     prizes: COMEBACK_WHEEL_PRIZES.map((tier) => tier.amount),
   };
+}
+
+// Test-only helper so a free spin can be re-tested without waiting for a
+// real 3-day-inactive cycle.
+export async function resetComebackWheelFreeSpin(telegramId) {
+  const user = await getUserByTelegramId(telegramId);
+  if (!user) {
+    throw new Error("user_not_found");
+  }
+  await query("UPDATE users SET comeback_wheel_free_spin_used_at = NULL WHERE id = $1", [user.id]);
+  return { ok: true };
 }
 
 export async function spinComebackWheelFree(telegramId) {
@@ -246,4 +258,63 @@ export async function markComebackWheelRemindersSent(telegramIds = []) {
     [ids],
   );
   return { marked: result.rowCount || 0 };
+}
+
+// Static promo photo for the win-back DM (sendPhoto needs a raster image, not
+// an emoji) - same SVG-to-JPEG approach as shareCardService's story cards.
+// Content is fixed (no per-user data baked in), so it's rendered once and
+// the buffer is kept forever instead of a bounded cache.
+const PROMO_IMAGE_WIDTH = 1200;
+const PROMO_IMAGE_HEIGHT = 630;
+let promoImageBuffer = null;
+
+function buildComebackWheelPromoSvg() {
+  const cx = 860;
+  const cy = 315;
+  const outerRadius = 260;
+  const segments = 16;
+  const segmentAngle = (Math.PI * 2) / segments;
+  const jackpotIndex = 0;
+
+  const wedges = Array.from({ length: segments }, (_, i) => {
+    const start = i * segmentAngle - Math.PI / 2;
+    const end = start + segmentAngle;
+    const x1 = cx + outerRadius * Math.cos(start);
+    const y1 = cy + outerRadius * Math.sin(start);
+    const x2 = cx + outerRadius * Math.cos(end);
+    const y2 = cy + outerRadius * Math.sin(end);
+    const fill = i === jackpotIndex ? "#ffd54a" : (i % 2 === 0 ? "#2a3350" : "#1c2233");
+    return `<path d="M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${outerRadius},${outerRadius} 0 0,1 ${x2.toFixed(2)},${y2.toFixed(2)} Z" fill="${fill}" stroke="rgba(255,255,255,0.10)" stroke-width="2"/>`;
+  }).join("");
+
+  return `<svg width="${PROMO_IMAGE_WIDTH}" height="${PROMO_IMAGE_HEIGHT}" viewBox="0 0 ${PROMO_IMAGE_WIDTH} ${PROMO_IMAGE_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#0a0e16"/>
+        <stop offset="1" stop-color="#151c2e"/>
+      </linearGradient>
+      <radialGradient id="glow" cx="${cx}" cy="${cy}" r="${outerRadius + 60}" gradientUnits="userSpaceOnUse">
+        <stop offset="0.7" stop-color="#ffd54a" stop-opacity="0.22"/>
+        <stop offset="1" stop-color="#ffd54a" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="${PROMO_IMAGE_WIDTH}" height="${PROMO_IMAGE_HEIGHT}" fill="url(#bg)"/>
+    <circle cx="${cx}" cy="${cy}" r="${outerRadius + 50}" fill="url(#glow)"/>
+    ${wedges}
+    <circle cx="${cx}" cy="${cy}" r="${outerRadius}" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="4"/>
+    <circle cx="${cx}" cy="${cy}" r="26" fill="#0a0e16" stroke="#ffd54a" stroke-width="4"/>
+    <text x="70" y="270" font-family="DejaVu Sans" font-weight="bold" font-size="64" fill="#e7ecf5">WHEEL OF</text>
+    <text x="70" y="345" font-family="DejaVu Sans" font-weight="bold" font-size="86" fill="#ffd54a">FORTUNE</text>
+    <text x="70" y="420" font-family="DejaVu Sans" font-weight="bold" font-size="52" fill="#7dffb0">UP TO $5000</text>
+    <text x="70" y="480" font-family="DejaVu Sans" font-size="30" fill="#8b97a8">EasyMarket</text>
+  </svg>`;
+}
+
+export async function getComebackWheelPromoImage() {
+  if (promoImageBuffer) {
+    return promoImageBuffer;
+  }
+  const svg = buildComebackWheelPromoSvg();
+  promoImageBuffer = await sharp(Buffer.from(svg)).jpeg({ quality: 88, mozjpeg: true }).toBuffer();
+  return promoImageBuffer;
 }

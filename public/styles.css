@@ -3076,14 +3076,6 @@ code {
   visibility: hidden;
 }
 
-.comeback-wheel-hint {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12.5px;
-  text-align: center;
-  line-height: 1.4;
-}
-
 #comebackWheelSpinBtn {
   width: 100%;
 }
