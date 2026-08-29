@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>EasyMarket</title>
-    <link rel="stylesheet" href="/styles.css?v=20260828-02" />
+    <link rel="stylesheet" href="/styles.css?v=20260830-01" />
     <link rel="stylesheet" href="/lightning-motion.css?v=20260822-01" />
     <link rel="stylesheet" href="/kyivstoner-motion.css?v=20260714-02" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -392,6 +392,27 @@
             </button>
           </div>
           <button id="inactivityOkBtn" class="task-button" type="button">Понятно</button>
+        </div>
+      </section>
+
+      <section id="comebackWheelSheet" class="task-sheet hidden" aria-label="Колесо удачи">
+        <div class="task-panel comeback-wheel-panel">
+          <div class="task-head">
+            <div>
+              <p class="eyebrow">EasyMarket</p>
+              <h2>🎡 Колесо удачи</h2>
+            </div>
+            <button id="comebackWheelCloseBtn" class="icon-button" type="button" aria-label="Закрыть">×</button>
+          </div>
+          <div class="comeback-wheel-body">
+            <div class="comeback-wheel-canvas-wrap">
+              <div class="comeback-wheel-pointer"></div>
+              <canvas id="comebackWheelCanvas"></canvas>
+            </div>
+            <p id="comebackWheelResultText" class="comeback-wheel-result hidden"></p>
+            <button id="comebackWheelSpinBtn" class="task-button gold" type="button">Крутить бесплатно</button>
+            <p class="comeback-wheel-hint">Призы от 1⭐ до 5000⭐. Первая прокрутка бесплатно, дальше — 100⭐ за прокрутку.</p>
+          </div>
         </div>
       </section>
 
@@ -975,6 +996,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20260828-02" type="module"></script>
+    <script src="/app.js?v=20260830-01" type="module"></script>
   </body>
 </html>

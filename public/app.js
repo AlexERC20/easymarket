@@ -7406,10 +7406,208 @@ async function handleClanLaunchLink() {
   await joinClan({ clan_id: action.clanId }, null, "Ты вошёл в клан по ссылке.");
 }
 
+// Fixed-prize comeback wheel (the "you've been gone 3 days" bot DM). Values
+// must match COMEBACK_WHEEL_PRIZES in src/services/comebackWheelService.js
+// exactly, in the same order - this is purely the visual segment layout,
+// the actual prize is always rolled server-side.
+const COMEBACK_WHEEL_PRIZE_VALUES = [
+  23, 33, 43, 55, 70, 85, 110, 140, 170, 215, 270, 340,
+  430, 540, 700, 850, 1050, 1350, 1750, 2250, 2900, 3600, 4300, 5000,
+];
+let comebackWheelRotationDeg = 0;
+let comebackWheelSpinning = false;
+
+function drawComebackWheel() {
+  const canvas = $("comebackWheelCanvas");
+  if (!canvas) return;
+  const { dpr, width, height } = resizeCanvas(canvas);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const cx = width / 2;
+  const cy = height / 2;
+  const radius = Math.min(width, height) / 2 - 2 * dpr;
+  const segmentAngle = (Math.PI * 2) / COMEBACK_WHEEL_PRIZE_VALUES.length;
+
+  ctx.clearRect(0, 0, width, height);
+  COMEBACK_WHEEL_PRIZE_VALUES.forEach((value, i) => {
+    const startAngle = i * segmentAngle - Math.PI / 2;
+    const endAngle = startAngle + segmentAngle;
+    const isJackpot = i === COMEBACK_WHEEL_PRIZE_VALUES.length - 1;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, radius, startAngle, endAngle);
+    ctx.closePath();
+    ctx.fillStyle = isJackpot ? "#ffd54a" : (i % 2 === 0 ? "#1c2233" : "#262d44");
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+    ctx.lineWidth = dpr;
+    ctx.stroke();
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(startAngle + segmentAngle / 2);
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = isJackpot ? "#1a1200" : "#e7ecf5";
+    ctx.font = `${isJackpot ? "800" : "700"} ${Math.round(10 * dpr)}px sans-serif`;
+    ctx.fillText(String(value), radius - 6 * dpr, 0);
+    ctx.restore();
+  });
+}
+
+function animateComebackWheelToPrize(prizeAmount, onDone) {
+  const canvas = $("comebackWheelCanvas");
+  const idx = Math.max(0, COMEBACK_WHEEL_PRIZE_VALUES.indexOf(prizeAmount));
+  const segmentAngleDeg = 360 / COMEBACK_WHEEL_PRIZE_VALUES.length;
+  const targetCenterDeg = idx * segmentAngleDeg + segmentAngleDeg / 2;
+  const jitter = (Math.random() - 0.5) * (segmentAngleDeg * 0.5);
+  const extraSpins = 6;
+  const currentMod = ((comebackWheelRotationDeg % 360) + 360) % 360;
+  const neededOffset = ((360 - targetCenterDeg + jitter) - currentMod + 360) % 360;
+  comebackWheelRotationDeg += extraSpins * 360 + neededOffset;
+
+  if (canvas) {
+    canvas.style.transition = "transform 4200ms cubic-bezier(0.12, 0.72, 0.15, 1)";
+    canvas.style.transform = `rotate(${comebackWheelRotationDeg}deg)`;
+  }
+  window.setTimeout(() => onDone?.(), 4300);
+}
+
+function showComebackWheelResult(prizeAmount) {
+  const resultText = $("comebackWheelResultText");
+  if (resultText) {
+    resultText.textContent = `+${formatFireDecimal(prizeAmount)}⭐`;
+    resultText.classList.remove("hidden");
+  }
+  triggerHaptic(prizeAmount >= 1000 ? "win" : "success");
+}
+
+function updateComebackWheelSpinButton(freeAvailable) {
+  const btn = $("comebackWheelSpinBtn");
+  if (!btn) return;
+  btn.textContent = freeAvailable ? "Крутить бесплатно" : "Крутить за 100⭐";
+  btn.disabled = false;
+}
+
+async function openComebackWheel() {
+  openSheet("comebackWheelSheet");
+  drawComebackWheel();
+  const resultText = $("comebackWheelResultText");
+  if (resultText) {
+    resultText.classList.add("hidden");
+    resultText.textContent = "";
+  }
+  try {
+    const status = await api(`/api/wheel/comeback/status?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
+    updateComebackWheelSpinButton(status.free_spin_available);
+  } catch {
+    updateComebackWheelSpinButton(false);
+  }
+}
+
+async function pollComebackWheelPaidResult(attempt = 0) {
+  try {
+    const data = await api(`/api/wheel/comeback/latest-spin?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
+    if (data.spin) {
+      animateComebackWheelToPrize(data.spin.prize_amount, () => {
+        showComebackWheelResult(data.spin.prize_amount);
+        comebackWheelSpinning = false;
+        updateComebackWheelSpinButton(false);
+        void loadMe();
+      });
+      return;
+    }
+  } catch {
+    // network hiccup mid-poll - just retry below rather than giving up early.
+  }
+  if (attempt >= 10) {
+    comebackWheelSpinning = false;
+    const btn = $("comebackWheelSpinBtn");
+    if (btn) btn.disabled = false;
+    showToast("Оплата прошла, но результат задерживается. Проверь баланс чуть позже.");
+    return;
+  }
+  window.setTimeout(() => pollComebackWheelPaidResult(attempt + 1), 1_500);
+}
+
+async function handleComebackWheelSpinClick() {
+  if (comebackWheelSpinning) return;
+  triggerHaptic("selection");
+
+  let status;
+  try {
+    status = await api(`/api/wheel/comeback/status?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
+  } catch {
+    showToast("Не получилось загрузить колесо. Попробуй ещё раз.");
+    return;
+  }
+
+  const btn = $("comebackWheelSpinBtn");
+  comebackWheelSpinning = true;
+  if (btn) btn.disabled = true;
+  $("comebackWheelResultText")?.classList.add("hidden");
+
+  if (status.free_spin_available) {
+    try {
+      const result = await api("/api/wheel/comeback/spin-free", {
+        method: "POST",
+        body: JSON.stringify({ telegram_id: state.user.telegram_id }),
+      });
+      animateComebackWheelToPrize(result.prize_amount, () => {
+        showComebackWheelResult(result.prize_amount);
+        comebackWheelSpinning = false;
+        updateComebackWheelSpinButton(false);
+        void loadMe();
+      });
+    } catch (error) {
+      comebackWheelSpinning = false;
+      if (btn) btn.disabled = false;
+      showToast(
+        error?.message === "free_spin_already_used"
+          ? "Бесплатная прокрутка уже использована."
+          : "Не получилось прокрутить. Попробуй ещё раз.",
+      );
+    }
+    return;
+  }
+
+  try {
+    const invoiceResult = await api("/api/stars/invoice", {
+      method: "POST",
+      body: JSON.stringify({ telegram_id: state.user.telegram_id, purpose: "comeback_wheel" }),
+    });
+    const tg = window.Telegram?.WebApp;
+    if (!tg?.openInvoice) {
+      window.open(invoiceResult.invoice_url, "_blank", "noopener,noreferrer");
+      comebackWheelSpinning = false;
+      if (btn) btn.disabled = false;
+      return;
+    }
+    tg.openInvoice(invoiceResult.invoice_url, (paymentStatus) => {
+      if (paymentStatus !== "paid") {
+        comebackWheelSpinning = false;
+        if (btn) btn.disabled = false;
+        if (paymentStatus === "cancelled") showToast("Оплата отменена.");
+        return;
+      }
+      void pollComebackWheelPaidResult();
+    });
+  } catch {
+    comebackWheelSpinning = false;
+    if (btn) btn.disabled = false;
+    showToast("Не получилось открыть оплату. Попробуй ещё раз.");
+  }
+}
+
 async function handleAppLaunchLink() {
   const launchValue = String(getLaunchRefValue() || "").trim();
   if (/^tasks?$/i.test(launchValue)) {
     setTasksSheetOpen(true);
+    return;
+  }
+  if (/^comeback_wheel$/i.test(launchValue)) {
+    await openComebackWheel();
     return;
   }
   await handleClanLaunchLink();
@@ -11877,6 +12075,15 @@ $("inactivityOkBtn")?.addEventListener("click", () => {
 
 $("inactivityRecoveryBtn")?.addEventListener("click", () => {
   void handleInactivityRecoveryClick();
+});
+
+$("comebackWheelCloseBtn")?.addEventListener("click", () => {
+  triggerHaptic("selection");
+  closeSheet("comebackWheelSheet");
+});
+
+$("comebackWheelSpinBtn")?.addEventListener("click", () => {
+  void handleComebackWheelSpinClick();
 });
 
 $("taskSettingsToggleBtn")?.addEventListener("click", () => {

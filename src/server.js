@@ -117,6 +117,7 @@ import {
   getComebackWheelStatus,
   spinComebackWheelFree,
   spinComebackWheelPaid,
+  claimLatestComebackWheelSpin,
   getComebackWheelReminderTargets,
   markComebackWheelRemindersSent,
 } from "./services/comebackWheelService.js";
@@ -930,6 +931,19 @@ app.post("/api/wheel/comeback/spin-free", async (req, res) => {
     }
     const result = await spinComebackWheelFree(telegramId);
     res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/wheel/comeback/latest-spin", async (req, res) => {
+  try {
+    const telegramId = getTelegramId(req);
+    if (!telegramId) {
+      throw new Error("telegram_id_missing");
+    }
+    const spin = await claimLatestComebackWheelSpin(telegramId);
+    res.status(200).json({ ok: true, spin });
   } catch (error) {
     sendApiError(res, error);
   }

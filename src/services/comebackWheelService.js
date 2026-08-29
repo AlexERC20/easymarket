@@ -136,11 +136,15 @@ export async function spinComebackWheelPaid(input) {
 
   const prizeAmount = pickComebackWheelPrize();
   await withTransaction(async (client) => {
+    // shown_at stays NULL here on purpose - the paid result reaches the
+    // frontend asynchronously (bot confirms payment, calls this, THEN the
+    // Mini App polls claimLatestComebackWheelSpin), unlike the free spin
+    // which returns its prize directly in the same response.
     await client.query(
       `
         INSERT INTO comeback_wheel_spins
-          (user_id, is_free, stars_paid, prize_amount, telegram_payment_charge_id, shown_at)
-        VALUES ($1, FALSE, $2, $3, $4, now())
+          (user_id, is_free, stars_paid, prize_amount, telegram_payment_charge_id)
+        VALUES ($1, FALSE, $2, $3, $4)
         ON CONFLICT (telegram_payment_charge_id) DO NOTHING
       `,
       [user.id, starsAmount, prizeAmount, chargeId],
@@ -156,6 +160,36 @@ export async function spinComebackWheelPaid(input) {
   });
 
   return { prize_amount: prizeAmount, already_credited: false };
+}
+
+// Polled by the Mini App right after Telegram reports the invoice as paid -
+// the actual prize isn't known client-side until the bot confirms payment
+// and calls spinComebackWheelPaid above, so this is the pickup point.
+export async function claimLatestComebackWheelSpin(telegramId) {
+  const user = await getUserByTelegramId(telegramId);
+  if (!user) {
+    return null;
+  }
+  const result = await query(
+    `
+      UPDATE comeback_wheel_spins
+      SET shown_at = now()
+      WHERE id = (
+        SELECT id
+        FROM comeback_wheel_spins
+        WHERE user_id = $1
+          AND is_free = FALSE
+          AND shown_at IS NULL
+        ORDER BY created_at ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING prize_amount
+    `,
+    [user.id],
+  );
+  const row = result.rows[0];
+  return row ? { prize_amount: toNumber(row.prize_amount) } : null;
 }
 
 const COMEBACK_WHEEL_REMINDER_MIN_DAYS = 3;

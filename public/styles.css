@@ -3022,6 +3022,77 @@ code {
   50% { box-shadow: 0 0 18px rgba(255, 200, 60, 0.45); }
 }
 
+#comebackWheelSheet {
+  z-index: 60;
+}
+
+.comeback-wheel-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 4px 4px;
+}
+
+.comeback-wheel-canvas-wrap {
+  position: relative;
+  width: min(280px, 78vw);
+  height: min(280px, 78vw);
+  margin: 4px auto 0;
+}
+
+.comeback-wheel-canvas-wrap canvas {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.06), 0 14px 40px rgba(0, 0, 0, 0.5);
+  transform: rotate(0deg);
+}
+
+.comeback-wheel-pointer {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 11px solid transparent;
+  border-right: 11px solid transparent;
+  border-top: 18px solid #ffd54a;
+  z-index: 2;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+}
+
+.comeback-wheel-result {
+  margin: 0;
+  min-height: 22px;
+  font-size: 20px;
+  font-weight: 800;
+  color: #ffd54a;
+  text-align: center;
+}
+
+.comeback-wheel-result.hidden {
+  visibility: hidden;
+}
+
+.comeback-wheel-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
+  line-height: 1.4;
+}
+
+#comebackWheelSpinBtn {
+  width: 100%;
+}
+
+#comebackWheelSpinBtn:disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 .task-panel {
   width: min(100%, 430px);
   max-height: calc(100dvh - max(54px, env(safe-area-inset-top)) - max(18px, env(safe-area-inset-bottom)));
