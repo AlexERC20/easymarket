@@ -112,6 +112,14 @@ import {
 } from "./services/bonusEconomyService.js";
 import { getTreasurySnapshot } from "./services/treasuryService.js";
 import { ensureRouletteSchema, getRouletteState, placeRouletteBet, rouletteTick } from "./services/rouletteService.js";
+import {
+  COMEBACK_WHEEL_SPIN_STARS,
+  getComebackWheelStatus,
+  spinComebackWheelFree,
+  spinComebackWheelPaid,
+  getComebackWheelReminderTargets,
+  markComebackWheelRemindersSent,
+} from "./services/comebackWheelService.js";
 import { PriceUnavailableError, startBtcPriceStream } from "./services/priceService.js";
 import { runDatabaseCleanup, runStartupDatabaseRescue } from "./services/databaseCleanupService.js";
 import {
@@ -282,6 +290,7 @@ function sendApiError(res, error, fallbackStatus = 500) {
     "invalid_limit_order_id",
     "invalid_limit_order_side",
     "user_not_found",
+    "free_spin_already_used",
     "market_not_found",
     "market_not_open",
     "market_closed",
@@ -573,6 +582,11 @@ function buildStarsTopupPayload(input) {
   return ["fire_topup", input.telegramId, input.amount, input.amount, nonce].join(":");
 }
 
+function buildComebackWheelSpinPayload(input) {
+  const nonce = randomBytes(4).toString("hex");
+  return ["comeback_wheel_spin", input.telegramId, input.amount, nonce].join(":");
+}
+
 app.post("/api/stars/invoice", async (req, res) => {
   try {
     if (!config.telegramBotToken) {
@@ -580,27 +594,37 @@ app.post("/api/stars/invoice", async (req, res) => {
     }
 
     const telegramId = String(req.body?.telegram_id || "").trim();
-    const amount = Math.round(Number(req.body?.amount || 0));
     if (!telegramId) {
       throw new Error("telegram_id_missing");
     }
+
+    // The comeback-wheel spin price is fixed server-side - never trust a
+    // client-supplied amount for something that pays out a random prize.
+    const isComebackWheel = req.body?.purpose === "comeback_wheel";
+    const amount = isComebackWheel
+      ? COMEBACK_WHEEL_SPIN_STARS
+      : Math.round(Number(req.body?.amount || 0));
     if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 100_000) {
       throw new Error("amount_must_be_positive");
     }
 
-    const payload = buildStarsTopupPayload({ telegramId, amount });
+    const payload = isComebackWheel
+      ? buildComebackWheelSpinPayload({ telegramId, amount })
+      : buildStarsTopupPayload({ telegramId, amount });
     const response = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/createInvoiceLink`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        title: `${amount.toLocaleString("ru-RU")} звезд`,
-        description: `Пополнение баланса EasyMarket: ${amount.toLocaleString("ru-RU")}⭐`,
+        title: isComebackWheel ? "Крутить колесо" : `${amount.toLocaleString("ru-RU")} звезд`,
+        description: isComebackWheel
+          ? `Ещё одна прокрутка колеса удачи за ${amount.toLocaleString("ru-RU")} Telegram Stars`
+          : `Пополнение баланса EasyMarket: ${amount.toLocaleString("ru-RU")}⭐`,
         payload,
         provider_token: "",
         currency: "XTR",
         prices: [
           {
-            label: `${amount.toLocaleString("ru-RU")}⭐`,
+            label: isComebackWheel ? "Прокрутка колеса" : `${amount.toLocaleString("ru-RU")}⭐`,
             amount,
           },
         ],
@@ -880,6 +904,32 @@ app.get("/api/me", async (req, res) => {
       ...snapshot,
       pending_inactivity_notice: pendingInactivityNotice,
     });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/wheel/comeback/status", async (req, res) => {
+  try {
+    const telegramId = getTelegramId(req);
+    if (!telegramId) {
+      throw new Error("telegram_id_missing");
+    }
+    const status = await getComebackWheelStatus(telegramId);
+    res.status(200).json({ ok: true, ...status });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/wheel/comeback/spin-free", async (req, res) => {
+  try {
+    const telegramId = getTelegramId(req);
+    if (!telegramId) {
+      throw new Error("telegram_id_missing");
+    }
+    const result = await spinComebackWheelFree(telegramId);
+    res.status(200).json({ ok: true, ...result });
   } catch (error) {
     sendApiError(res, error);
   }
@@ -1307,6 +1357,39 @@ app.post("/api/bridge/star-conversion/reminders/mark", requireBridgeSecret, asyn
       ok: true,
       ...result,
     });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/comeback-wheel/reminder-targets", requireBridgeSecret, async (req, res) => {
+  try {
+    const targets = await getComebackWheelReminderTargets({ limit: req.query.limit });
+    res.status(200).json({ ok: true, targets });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/comeback-wheel/reminders/mark", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await markComebackWheelRemindersSent(
+      Array.isArray(req.body?.telegram_ids) ? req.body.telegram_ids : [],
+    );
+    res.status(200).json({ ok: true, ...result });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/wheel/comeback/spin-paid", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await spinComebackWheelPaid({
+      telegram_id: req.body?.telegram_id,
+      stars_amount: req.body?.stars_amount,
+      telegram_payment_charge_id: req.body?.telegram_payment_charge_id,
+    });
+    res.status(200).json({ ok: true, ...result });
   } catch (error) {
     sendApiError(res, error);
   }

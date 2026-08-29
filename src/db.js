@@ -825,6 +825,37 @@ export async function runMigrations() {
       sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- "Comeback wheel" win-back hook: users idle ~3 days get a bot DM with a
+    -- deep link into a fixed-prize wheel (unlike the player-funded roulette
+    -- pot, this pays real STAR out of the house). One free spin ever per
+    -- user, tracked here rather than a dedicated table since it's a single
+    -- one-time flag; paid spins go through comeback_wheel_spins below.
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS comeback_wheel_free_spin_used_at TIMESTAMPTZ;
+
+    CREATE TABLE IF NOT EXISTS comeback_wheel_spins (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      is_free BOOLEAN NOT NULL DEFAULT FALSE,
+      stars_paid INT NOT NULL DEFAULT 0,
+      prize_amount NUMERIC(20, 8) NOT NULL,
+      telegram_payment_charge_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      shown_at TIMESTAMPTZ
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_comeback_wheel_spins_charge
+      ON comeback_wheel_spins(telegram_payment_charge_id)
+      WHERE telegram_payment_charge_id IS NOT NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_comeback_wheel_spins_user
+      ON comeback_wheel_spins(user_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS comeback_wheel_reminders (
+      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      sent_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS usdt_balance_reclassifications (
       batch_key TEXT NOT NULL,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
