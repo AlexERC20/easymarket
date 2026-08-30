@@ -366,3 +366,35 @@ export async function getComebackWheelPromoImage(wheelType) {
   promoImageBuffers[currency] = buffer;
   return buffer;
 }
+
+// A/B read: how many of each currency's spins actually happened since a
+// given moment (e.g. a broadcast's send time), split free vs paid so
+// "opened it" and "paid to keep going" don't get blended into one number.
+export async function getComebackWheelStats(sinceIso) {
+  const since = sinceIso ? new Date(sinceIso) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const result = await query(
+    `
+      SELECT
+        currency,
+        is_free,
+        COUNT(*) AS spin_count,
+        COUNT(DISTINCT user_id) AS unique_users,
+        COALESCE(SUM(prize_amount), 0) AS total_paid_out
+      FROM comeback_wheel_spins
+      WHERE created_at >= $1
+      GROUP BY currency, is_free
+      ORDER BY currency, is_free
+    `,
+    [since.toISOString()],
+  );
+  return {
+    since: since.toISOString(),
+    breakdown: result.rows.map((row) => ({
+      currency: row.currency,
+      is_free: Boolean(row.is_free),
+      spin_count: Number(row.spin_count),
+      unique_users: Number(row.unique_users),
+      total_paid_out: toNumber(row.total_paid_out),
+    })),
+  };
+}

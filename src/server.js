@@ -122,6 +122,7 @@ import {
   getComebackWheelReminderTargets,
   markComebackWheelRemindersSent,
   getComebackWheelPromoImage,
+  getComebackWheelStats,
 } from "./services/comebackWheelService.js";
 import { PriceUnavailableError, startBtcPriceStream } from "./services/priceService.js";
 import { runDatabaseCleanup, runStartupDatabaseRescue } from "./services/databaseCleanupService.js";
@@ -2378,6 +2379,15 @@ app.post("/api/bridge/wheel/comeback/reset-free-spin", requireBridgeSecret, asyn
   try {
     const result = await resetComebackWheelFreeSpin(req.body?.telegram_id, req.body?.wheel_type);
     res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.get("/api/bridge/wheel/comeback/stats", requireBridgeSecret, async (req, res) => {
+  try {
+    const stats = await getComebackWheelStats(req.query?.since);
+    res.status(200).json({ ok: true, ...stats });
   } catch (error) {
     sendApiError(res, error);
   }
