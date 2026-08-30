@@ -2,7 +2,17 @@ import { randomInt } from "node:crypto";
 import sharp from "sharp";
 
 import { query, toNumber, withTransaction } from "../db.js";
-import { getUserByTelegramId, touchUserActivity, addFireToUser } from "./marketService.js";
+import { getUserByTelegramId, touchUserActivity, addFireToUser, addUsdtBonusToUser } from "./marketService.js";
+
+// Star and dollar wheels share the exact same prize table/odds (see below) -
+// only the payout currency differs. Dollar prizes land on the bonus USDT
+// balance, which has no direct withdrawal path (createUsdtWithdrawalRequest
+// only ever reads usdt_balances, the cash ledger) - it can only ever convert
+// to real balance through the existing, separately rate-capped bonus-unlock
+// mechanic, so this is not the same risk as awarding cash.
+function resolveWheelCurrency(wheelType) {
+  return wheelType === "usd" ? "usd" : "star";
+}
 
 // Fixed-prize wheel for the "you've been gone 3 days" win-back DM -
 // unlike the player-funded roulette pot (rouletteService.js), this pays
@@ -50,9 +60,11 @@ function pickComebackWheelPrize() {
   return COMEBACK_WHEEL_PRIZES[0].amount;
 }
 
-export async function getComebackWheelStatus(telegramId) {
+export async function getComebackWheelStatus(telegramId, wheelType) {
+  const currency = resolveWheelCurrency(wheelType);
+  const column = currency === "usd" ? "comeback_wheel_usd_free_spin_used_at" : "comeback_wheel_free_spin_used_at";
   const result = await query(
-    "SELECT comeback_wheel_free_spin_used_at FROM users WHERE telegram_id = $1 LIMIT 1",
+    `SELECT ${column} AS used_at FROM users WHERE telegram_id = $1 LIMIT 1`,
     [String(telegramId)],
   );
   const row = result.rows[0];
@@ -60,24 +72,29 @@ export async function getComebackWheelStatus(telegramId) {
     throw new Error("user_not_found");
   }
   return {
-    free_spin_available: !row.comeback_wheel_free_spin_used_at,
+    free_spin_available: !row.used_at,
     spin_stars_cost: COMEBACK_WHEEL_SPIN_STARS,
+    currency,
     prizes: COMEBACK_WHEEL_PRIZES.map((tier) => tier.amount),
   };
 }
 
 // Test-only helper so a free spin can be re-tested without waiting for a
 // real 3-day-inactive cycle.
-export async function resetComebackWheelFreeSpin(telegramId) {
+export async function resetComebackWheelFreeSpin(telegramId, wheelType) {
+  const currency = resolveWheelCurrency(wheelType);
+  const column = currency === "usd" ? "comeback_wheel_usd_free_spin_used_at" : "comeback_wheel_free_spin_used_at";
   const user = await getUserByTelegramId(telegramId);
   if (!user) {
     throw new Error("user_not_found");
   }
-  await query("UPDATE users SET comeback_wheel_free_spin_used_at = NULL WHERE id = $1", [user.id]);
+  await query(`UPDATE users SET ${column} = NULL WHERE id = $1`, [user.id]);
   return { ok: true };
 }
 
-export async function spinComebackWheelFree(telegramId) {
+export async function spinComebackWheelFree(telegramId, wheelType) {
+  const currency = resolveWheelCurrency(wheelType);
+  const column = currency === "usd" ? "comeback_wheel_usd_free_spin_used_at" : "comeback_wheel_free_spin_used_at";
   const user = await getUserByTelegramId(telegramId);
   if (!user) {
     throw new Error("user_not_found");
@@ -88,9 +105,9 @@ export async function spinComebackWheelFree(telegramId) {
     const result = await client.query(
       `
         UPDATE users
-        SET comeback_wheel_free_spin_used_at = now()
+        SET ${column} = now()
         WHERE id = $1
-          AND comeback_wheel_free_spin_used_at IS NULL
+          AND ${column} IS NULL
       `,
       [user.id],
     );
@@ -99,10 +116,10 @@ export async function spinComebackWheelFree(telegramId) {
     }
     await client.query(
       `
-        INSERT INTO comeback_wheel_spins (user_id, is_free, stars_paid, prize_amount, shown_at)
-        VALUES ($1, TRUE, 0, $2, now())
+        INSERT INTO comeback_wheel_spins (user_id, currency, is_free, stars_paid, prize_amount, shown_at)
+        VALUES ($1, $2, TRUE, 0, $3, now())
       `,
-      [user.id, prizeAmount],
+      [user.id, currency, prizeAmount],
     );
     await touchUserActivity(user.id, client);
     return true;
@@ -111,20 +128,30 @@ export async function spinComebackWheelFree(telegramId) {
     throw new Error("free_spin_already_used");
   }
 
-  await addFireToUser({
-    telegram_id: telegramId,
-    amount: prizeAmount,
-    reason: "comeback_wheel_free",
-    source: "api",
-  });
+  if (currency === "usd") {
+    await addUsdtBonusToUser({
+      telegram_id: telegramId,
+      amount: prizeAmount,
+      reason: "comeback_wheel_usd_free",
+      source: "api",
+    });
+  } else {
+    await addFireToUser({
+      telegram_id: telegramId,
+      amount: prizeAmount,
+      reason: "comeback_wheel_free",
+      source: "api",
+    });
+  }
 
-  return { prize_amount: prizeAmount };
+  return { prize_amount: prizeAmount, currency };
 }
 
 // Called by the bot once a real 100-star payment is confirmed. The prize is
 // rolled and recorded here, server-side, at payout time - never trust a
 // client-supplied result for something that pays real balance.
 export async function spinComebackWheelPaid(input) {
+  const currency = resolveWheelCurrency(input.wheel_type);
   const starsAmount = Math.round(Number(input.stars_amount) || 0);
   if (starsAmount !== COMEBACK_WHEEL_SPIN_STARS) {
     throw new Error("invalid_spin_price");
@@ -139,11 +166,15 @@ export async function spinComebackWheelPaid(input) {
   }
 
   const existing = await query(
-    "SELECT prize_amount FROM comeback_wheel_spins WHERE telegram_payment_charge_id = $1 LIMIT 1",
+    "SELECT prize_amount, currency FROM comeback_wheel_spins WHERE telegram_payment_charge_id = $1 LIMIT 1",
     [chargeId],
   );
   if (existing.rows[0]) {
-    return { prize_amount: toNumber(existing.rows[0].prize_amount), already_credited: true };
+    return {
+      prize_amount: toNumber(existing.rows[0].prize_amount),
+      currency: existing.rows[0].currency,
+      already_credited: true,
+    };
   }
 
   const prizeAmount = pickComebackWheelPrize();
@@ -155,29 +186,39 @@ export async function spinComebackWheelPaid(input) {
     await client.query(
       `
         INSERT INTO comeback_wheel_spins
-          (user_id, is_free, stars_paid, prize_amount, telegram_payment_charge_id)
-        VALUES ($1, FALSE, $2, $3, $4)
+          (user_id, currency, is_free, stars_paid, prize_amount, telegram_payment_charge_id)
+        VALUES ($1, $2, FALSE, $3, $4, $5)
         ON CONFLICT (telegram_payment_charge_id) DO NOTHING
       `,
-      [user.id, starsAmount, prizeAmount, chargeId],
+      [user.id, currency, starsAmount, prizeAmount, chargeId],
     );
     await touchUserActivity(user.id, client);
   });
 
-  await addFireToUser({
-    telegram_id: input.telegram_id,
-    amount: prizeAmount,
-    reason: "comeback_wheel_paid",
-    source: "bridge",
-  });
+  if (currency === "usd") {
+    await addUsdtBonusToUser({
+      telegram_id: input.telegram_id,
+      amount: prizeAmount,
+      reason: "comeback_wheel_usd_paid",
+      source: "bridge",
+    });
+  } else {
+    await addFireToUser({
+      telegram_id: input.telegram_id,
+      amount: prizeAmount,
+      reason: "comeback_wheel_paid",
+      source: "bridge",
+    });
+  }
 
-  return { prize_amount: prizeAmount, already_credited: false };
+  return { prize_amount: prizeAmount, currency, already_credited: false };
 }
 
 // Polled by the Mini App right after Telegram reports the invoice as paid -
 // the actual prize isn't known client-side until the bot confirms payment
 // and calls spinComebackWheelPaid above, so this is the pickup point.
-export async function claimLatestComebackWheelSpin(telegramId) {
+export async function claimLatestComebackWheelSpin(telegramId, wheelType) {
+  const currency = resolveWheelCurrency(wheelType);
   const user = await getUserByTelegramId(telegramId);
   if (!user) {
     return null;
@@ -190,6 +231,7 @@ export async function claimLatestComebackWheelSpin(telegramId) {
         SELECT id
         FROM comeback_wheel_spins
         WHERE user_id = $1
+          AND currency = $2
           AND is_free = FALSE
           AND shown_at IS NULL
         ORDER BY created_at ASC
@@ -198,7 +240,7 @@ export async function claimLatestComebackWheelSpin(telegramId) {
       )
       RETURNING prize_amount
     `,
-    [user.id],
+    [user.id, currency],
   );
   const row = result.rows[0];
   return row ? { prize_amount: toNumber(row.prize_amount) } : null;
@@ -262,19 +304,23 @@ export async function markComebackWheelRemindersSent(telegramIds = []) {
 
 // Static promo photo for the win-back DM (sendPhoto needs a raster image, not
 // an emoji) - same SVG-to-JPEG approach as shareCardService's story cards.
-// Content is fixed (no per-user data baked in), so it's rendered once and
-// the buffer is kept forever instead of a bounded cache.
+// One per currency; content has no per-user data, so each is rendered once
+// and the buffer kept forever instead of a bounded cache.
 const PROMO_IMAGE_WIDTH = 1200;
 const PROMO_IMAGE_HEIGHT = 630;
-let promoImageBuffer = null;
+const promoImageBuffers = { star: null, usd: null };
 
-function buildComebackWheelPromoSvg() {
+// ~1/3 of segments are "big" on the real wheel (8 of 24 tiers are >=1000) -
+// mirror that ratio here so the promo doesn't undersell how often a real
+// wheel shows gold, instead of just the single top wedge.
+function buildComebackWheelPromoSvg(currency) {
   const cx = 860;
   const cy = 315;
   const outerRadius = 260;
   const segments = 16;
   const segmentAngle = (Math.PI * 2) / segments;
-  const jackpotIndex = 0;
+  const bigPrizeIndexes = new Set([0, 3, 6, 9, 12]);
+  const unit = currency === "usd" ? "$" : "⭐";
 
   const wedges = Array.from({ length: segments }, (_, i) => {
     const start = i * segmentAngle - Math.PI / 2;
@@ -283,7 +329,7 @@ function buildComebackWheelPromoSvg() {
     const y1 = cy + outerRadius * Math.sin(start);
     const x2 = cx + outerRadius * Math.cos(end);
     const y2 = cy + outerRadius * Math.sin(end);
-    const fill = i === jackpotIndex ? "#ffd54a" : (i % 2 === 0 ? "#2a3350" : "#1c2233");
+    const fill = bigPrizeIndexes.has(i) ? "#ffd54a" : (i % 2 === 0 ? "#2a3350" : "#1c2233");
     return `<path d="M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${outerRadius},${outerRadius} 0 0,1 ${x2.toFixed(2)},${y2.toFixed(2)} Z" fill="${fill}" stroke="rgba(255,255,255,0.10)" stroke-width="2"/>`;
   }).join("");
 
@@ -305,16 +351,18 @@ function buildComebackWheelPromoSvg() {
     <circle cx="${cx}" cy="${cy}" r="26" fill="#0a0e16" stroke="#ffd54a" stroke-width="4"/>
     <text x="70" y="270" font-family="DejaVu Sans" font-weight="bold" font-size="64" fill="#e7ecf5">WHEEL OF</text>
     <text x="70" y="345" font-family="DejaVu Sans" font-weight="bold" font-size="86" fill="#ffd54a">FORTUNE</text>
-    <text x="70" y="420" font-family="DejaVu Sans" font-weight="bold" font-size="52" fill="#7dffb0">UP TO $5000</text>
+    <text x="70" y="420" font-family="DejaVu Sans" font-weight="bold" font-size="52" fill="#7dffb0">UP TO 5000${unit}</text>
     <text x="70" y="480" font-family="DejaVu Sans" font-size="30" fill="#8b97a8">EasyMarket</text>
   </svg>`;
 }
 
-export async function getComebackWheelPromoImage() {
-  if (promoImageBuffer) {
-    return promoImageBuffer;
+export async function getComebackWheelPromoImage(wheelType) {
+  const currency = resolveWheelCurrency(wheelType);
+  if (promoImageBuffers[currency]) {
+    return promoImageBuffers[currency];
   }
-  const svg = buildComebackWheelPromoSvg();
-  promoImageBuffer = await sharp(Buffer.from(svg)).jpeg({ quality: 88, mozjpeg: true }).toBuffer();
-  return promoImageBuffer;
+  const svg = buildComebackWheelPromoSvg(currency);
+  const buffer = await sharp(Buffer.from(svg)).jpeg({ quality: 88, mozjpeg: true }).toBuffer();
+  promoImageBuffers[currency] = buffer;
+  return buffer;
 }

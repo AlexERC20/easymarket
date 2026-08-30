@@ -827,15 +827,20 @@ export async function runMigrations() {
 
     -- "Comeback wheel" win-back hook: users idle ~3 days get a bot DM with a
     -- deep link into a fixed-prize wheel (unlike the player-funded roulette
-    -- pot, this pays real STAR out of the house). One free spin ever per
-    -- user, tracked here rather than a dedicated table since it's a single
-    -- one-time flag; paid spins go through comeback_wheel_spins below.
+    -- pot, this pays real balance out of the house). One free spin ever per
+    -- user PER CURRENCY (star and dollar wheels are independent), tracked
+    -- here rather than a dedicated table since it's a single one-time flag;
+    -- paid spins go through comeback_wheel_spins below.
     ALTER TABLE users
       ADD COLUMN IF NOT EXISTS comeback_wheel_free_spin_used_at TIMESTAMPTZ;
+
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS comeback_wheel_usd_free_spin_used_at TIMESTAMPTZ;
 
     CREATE TABLE IF NOT EXISTS comeback_wheel_spins (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      currency TEXT NOT NULL DEFAULT 'star',
       is_free BOOLEAN NOT NULL DEFAULT FALSE,
       stars_paid INT NOT NULL DEFAULT 0,
       prize_amount NUMERIC(20, 8) NOT NULL,
@@ -843,6 +848,9 @@ export async function runMigrations() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       shown_at TIMESTAMPTZ
     );
+
+    ALTER TABLE comeback_wheel_spins
+      ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'star';
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_comeback_wheel_spins_charge
       ON comeback_wheel_spins(telegram_payment_charge_id)

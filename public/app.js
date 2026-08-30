@@ -7409,13 +7409,26 @@ async function handleClanLaunchLink() {
 // Fixed-prize comeback wheel (the "you've been gone 3 days" bot DM). Values
 // must match COMEBACK_WHEEL_PRIZES in src/services/comebackWheelService.js
 // exactly, in the same order - this is purely the visual segment layout,
-// the actual prize is always rolled server-side.
+// the actual prize is always rolled server-side. Star and dollar wheels
+// share this exact same table (same odds), just paid out in different
+// currencies - see comebackWheelType.
 const COMEBACK_WHEEL_PRIZE_VALUES = [
   23, 33, 43, 55, 70, 85, 110, 140, 170, 215, 270, 340,
   430, 540, 700, 850, 1050, 1350, 1750, 2250, 2900, 3600, 4300, 5000,
 ];
+const COMEBACK_WHEEL_BIG_PRIZE_THRESHOLD = 1000;
 let comebackWheelRotationDeg = 0;
 let comebackWheelSpinning = false;
+let comebackWheelType = "star";
+
+function comebackWheelCurrencySuffix() {
+  return comebackWheelType === "usd" ? "$" : "⭐";
+}
+
+function formatComebackWheelPrize(amount) {
+  const formatted = formatFireDecimal(amount);
+  return comebackWheelType === "usd" ? `$${formatted}` : `${formatted}⭐`;
+}
 
 function drawComebackWheel() {
   const canvas = $("comebackWheelCanvas");
@@ -7432,13 +7445,13 @@ function drawComebackWheel() {
   COMEBACK_WHEEL_PRIZE_VALUES.forEach((value, i) => {
     const startAngle = i * segmentAngle - Math.PI / 2;
     const endAngle = startAngle + segmentAngle;
-    const isJackpot = i === COMEBACK_WHEEL_PRIZE_VALUES.length - 1;
+    const isBigPrize = value >= COMEBACK_WHEEL_BIG_PRIZE_THRESHOLD;
 
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, radius, startAngle, endAngle);
     ctx.closePath();
-    ctx.fillStyle = isJackpot ? "#ffd54a" : (i % 2 === 0 ? "#1c2233" : "#262d44");
+    ctx.fillStyle = isBigPrize ? "#ffd54a" : (i % 2 === 0 ? "#1c2233" : "#262d44");
     ctx.fill();
     ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
     ctx.lineWidth = dpr;
@@ -7449,8 +7462,8 @@ function drawComebackWheel() {
     ctx.rotate(startAngle + segmentAngle / 2);
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-    ctx.fillStyle = isJackpot ? "#1a1200" : "#e7ecf5";
-    ctx.font = `${isJackpot ? "800" : "700"} ${Math.round(10 * dpr)}px sans-serif`;
+    ctx.fillStyle = isBigPrize ? "#1a1200" : "#e7ecf5";
+    ctx.font = `${isBigPrize ? "800" : "700"} ${Math.round(10 * dpr)}px sans-serif`;
     ctx.fillText(String(value), radius - 6 * dpr, 0);
     ctx.restore();
   });
@@ -7477,10 +7490,10 @@ function animateComebackWheelToPrize(prizeAmount, onDone) {
 function showComebackWheelResult(prizeAmount) {
   const resultText = $("comebackWheelResultText");
   if (resultText) {
-    resultText.textContent = `+${formatFireDecimal(prizeAmount)}⭐`;
+    resultText.textContent = `+${formatComebackWheelPrize(prizeAmount)}`;
     resultText.classList.remove("hidden");
   }
-  triggerHaptic(prizeAmount >= 1000 ? "win" : "success");
+  triggerHaptic(prizeAmount >= COMEBACK_WHEEL_BIG_PRIZE_THRESHOLD ? "win" : "success");
 }
 
 function updateComebackWheelSpinButton(freeAvailable) {
@@ -7490,7 +7503,12 @@ function updateComebackWheelSpinButton(freeAvailable) {
   btn.disabled = false;
 }
 
-async function openComebackWheel() {
+async function openComebackWheel(wheelType = "star") {
+  comebackWheelType = wheelType === "usd" ? "usd" : "star";
+  const eyebrow = $("comebackWheelEyebrow");
+  if (eyebrow) {
+    eyebrow.textContent = comebackWheelType === "usd" ? "EasyMarket · приз в $" : "EasyMarket · приз в ⭐";
+  }
   openSheet("comebackWheelSheet");
   drawComebackWheel();
   const resultText = $("comebackWheelResultText");
@@ -7499,7 +7517,7 @@ async function openComebackWheel() {
     resultText.textContent = "";
   }
   try {
-    const status = await api(`/api/wheel/comeback/status?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
+    const status = await api(`/api/wheel/comeback/status?telegram_id=${encodeURIComponent(state.user.telegram_id)}&wheel_type=${comebackWheelType}`);
     updateComebackWheelSpinButton(status.free_spin_available);
   } catch {
     updateComebackWheelSpinButton(false);
@@ -7508,7 +7526,7 @@ async function openComebackWheel() {
 
 async function pollComebackWheelPaidResult(attempt = 0) {
   try {
-    const data = await api(`/api/wheel/comeback/latest-spin?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
+    const data = await api(`/api/wheel/comeback/latest-spin?telegram_id=${encodeURIComponent(state.user.telegram_id)}&wheel_type=${comebackWheelType}`);
     if (data.spin) {
       animateComebackWheelToPrize(data.spin.prize_amount, () => {
         showComebackWheelResult(data.spin.prize_amount);
@@ -7537,7 +7555,7 @@ async function handleComebackWheelSpinClick() {
 
   let status;
   try {
-    status = await api(`/api/wheel/comeback/status?telegram_id=${encodeURIComponent(state.user.telegram_id)}`);
+    status = await api(`/api/wheel/comeback/status?telegram_id=${encodeURIComponent(state.user.telegram_id)}&wheel_type=${comebackWheelType}`);
   } catch {
     showToast("Не получилось загрузить колесо. Попробуй ещё раз.");
     return;
@@ -7552,7 +7570,7 @@ async function handleComebackWheelSpinClick() {
     try {
       const result = await api("/api/wheel/comeback/spin-free", {
         method: "POST",
-        body: JSON.stringify({ telegram_id: state.user.telegram_id }),
+        body: JSON.stringify({ telegram_id: state.user.telegram_id, wheel_type: comebackWheelType }),
       });
       animateComebackWheelToPrize(result.prize_amount, () => {
         showComebackWheelResult(result.prize_amount);
@@ -7575,7 +7593,11 @@ async function handleComebackWheelSpinClick() {
   try {
     const invoiceResult = await api("/api/stars/invoice", {
       method: "POST",
-      body: JSON.stringify({ telegram_id: state.user.telegram_id, purpose: "comeback_wheel" }),
+      body: JSON.stringify({
+        telegram_id: state.user.telegram_id,
+        purpose: "comeback_wheel",
+        wheel_type: comebackWheelType,
+      }),
     });
     const tg = window.Telegram?.WebApp;
     if (!tg?.openInvoice) {
@@ -7607,7 +7629,11 @@ async function handleAppLaunchLink() {
     return;
   }
   if (/^comeback_wheel$/i.test(launchValue)) {
-    await openComebackWheel();
+    await openComebackWheel("star");
+    return;
+  }
+  if (/^comeback_wheel_usd$/i.test(launchValue)) {
+    await openComebackWheel("usd");
     return;
   }
   await handleClanLaunchLink();

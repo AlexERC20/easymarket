@@ -587,7 +587,7 @@ function buildStarsTopupPayload(input) {
 
 function buildComebackWheelSpinPayload(input) {
   const nonce = randomBytes(4).toString("hex");
-  return ["comeback_wheel_spin", input.telegramId, input.amount, nonce].join(":");
+  return ["comeback_wheel_spin", input.telegramId, input.amount, input.wheelType, nonce].join(":");
 }
 
 app.post("/api/stars/invoice", async (req, res) => {
@@ -604,6 +604,7 @@ app.post("/api/stars/invoice", async (req, res) => {
     // The comeback-wheel spin price is fixed server-side - never trust a
     // client-supplied amount for something that pays out a random prize.
     const isComebackWheel = req.body?.purpose === "comeback_wheel";
+    const wheelType = req.body?.wheel_type === "usd" ? "usd" : "star";
     const amount = isComebackWheel
       ? COMEBACK_WHEEL_SPIN_STARS
       : Math.round(Number(req.body?.amount || 0));
@@ -612,7 +613,7 @@ app.post("/api/stars/invoice", async (req, res) => {
     }
 
     const payload = isComebackWheel
-      ? buildComebackWheelSpinPayload({ telegramId, amount })
+      ? buildComebackWheelSpinPayload({ telegramId, amount, wheelType })
       : buildStarsTopupPayload({ telegramId, amount });
     const response = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/createInvoiceLink`, {
       method: "POST",
@@ -914,9 +915,9 @@ app.get("/api/me", async (req, res) => {
 
 // Public/unauthenticated on purpose - Telegram's own servers fetch this URL
 // directly when rendering sendPhoto, they don't carry a user's initData.
-app.get("/api/wheel/comeback/promo-image.jpg", async (_req, res) => {
+app.get("/api/wheel/comeback/promo-image.jpg", async (req, res) => {
   try {
-    const jpeg = await getComebackWheelPromoImage();
+    const jpeg = await getComebackWheelPromoImage(req.query?.wheel_type);
     res.setHeader("Content-Type", "image/jpeg");
     res.setHeader("Cache-Control", "public, max-age=86400, immutable");
     res.status(200).end(jpeg);
@@ -931,7 +932,7 @@ app.get("/api/wheel/comeback/status", async (req, res) => {
     if (!telegramId) {
       throw new Error("telegram_id_missing");
     }
-    const status = await getComebackWheelStatus(telegramId);
+    const status = await getComebackWheelStatus(telegramId, req.query?.wheel_type);
     res.status(200).json({ ok: true, ...status });
   } catch (error) {
     sendApiError(res, error);
@@ -944,7 +945,7 @@ app.post("/api/wheel/comeback/spin-free", async (req, res) => {
     if (!telegramId) {
       throw new Error("telegram_id_missing");
     }
-    const result = await spinComebackWheelFree(telegramId);
+    const result = await spinComebackWheelFree(telegramId, req.body?.wheel_type);
     res.status(200).json({ ok: true, ...result });
   } catch (error) {
     sendApiError(res, error);
@@ -957,7 +958,7 @@ app.get("/api/wheel/comeback/latest-spin", async (req, res) => {
     if (!telegramId) {
       throw new Error("telegram_id_missing");
     }
-    const spin = await claimLatestComebackWheelSpin(telegramId);
+    const spin = await claimLatestComebackWheelSpin(telegramId, req.query?.wheel_type);
     res.status(200).json({ ok: true, spin });
   } catch (error) {
     sendApiError(res, error);
@@ -1417,6 +1418,7 @@ app.post("/api/bridge/wheel/comeback/spin-paid", requireBridgeSecret, async (req
       telegram_id: req.body?.telegram_id,
       stars_amount: req.body?.stars_amount,
       telegram_payment_charge_id: req.body?.telegram_payment_charge_id,
+      wheel_type: req.body?.wheel_type,
     });
     res.status(200).json({ ok: true, ...result });
   } catch (error) {
@@ -2374,7 +2376,7 @@ app.post("/api/bridge/economy/inactivity-notice/test", requireBridgeSecret, asyn
 
 app.post("/api/bridge/wheel/comeback/reset-free-spin", requireBridgeSecret, async (req, res) => {
   try {
-    const result = await resetComebackWheelFreeSpin(req.body?.telegram_id);
+    const result = await resetComebackWheelFreeSpin(req.body?.telegram_id, req.body?.wheel_type);
     res.status(200).json(result);
   } catch (error) {
     sendApiError(res, error);
