@@ -3768,6 +3768,7 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
           OR EXISTS (SELECT 1 FROM usdt_bonus_balances bb WHERE bb.user_id = u.id AND bb.balance > 0)
           OR EXISTS (SELECT 1 FROM clan_members cm WHERE cm.user_id = u.id AND cm.contribution_score > 0)
         )
+      ORDER BY u.last_meaningful_activity_at ASC
       LIMIT $1
     `,
     [Math.max(1, Math.min(2_000, Number(limit) || 500))],
