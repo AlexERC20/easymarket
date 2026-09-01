@@ -12,6 +12,7 @@ import {
   addFireToUser,
   addUsdtBonusToUser,
   addUsdtCashToUser,
+  creditPromoContestPrizes,
   addMarketComment,
   buyOutcome,
   cancelLimitOrder,
@@ -102,6 +103,7 @@ import {
 import {
   creditTelegramStarsPromoPointPurchase,
   resetTelegramPromoPointPurchaseDay,
+  startPromoContestSeason,
 } from "./services/promoContestService.js";
 import {
   getBonusEconomyAudit,
@@ -1881,6 +1883,30 @@ app.post("/api/bridge/usdt/add", requireBridgeSecret, async (req, res) => {
       ok: true,
       ...result,
     });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/promo/contest/prizes", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await creditPromoContestPrizes({
+      campaign_key: req.body?.campaign_key,
+      awards: req.body?.awards,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+app.post("/api/bridge/promo/season/start", requireBridgeSecret, async (req, res) => {
+  try {
+    const result = await startPromoContestSeason({
+      season_key: req.body?.season_key,
+      started_at: req.body?.started_at,
+    });
+    res.status(200).json(result);
   } catch (error) {
     sendApiError(res, error);
   }

@@ -167,12 +167,33 @@ export async function runMigrations() {
 
     CREATE TABLE IF NOT EXISTS promo_contest_config (
       singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
-      started_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      season_key TEXT NOT NULL DEFAULT 'legacy'
     );
+
+    ALTER TABLE promo_contest_config
+      ADD COLUMN IF NOT EXISTS season_key TEXT NOT NULL DEFAULT 'legacy';
 
     INSERT INTO promo_contest_config (singleton)
     VALUES (TRUE)
     ON CONFLICT (singleton) DO NOTHING;
+
+    CREATE TABLE IF NOT EXISTS promo_contest_prize_awards (
+      id BIGSERIAL PRIMARY KEY,
+      campaign_key TEXT NOT NULL,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      telegram_id TEXT NOT NULL,
+      rank INTEGER NOT NULL CHECK (rank BETWEEN 1 AND 100),
+      points INTEGER NOT NULL CHECK (points >= 0),
+      amount NUMERIC(20, 8) NOT NULL CHECK (amount > 0),
+      credited_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(campaign_key, user_id),
+      UNIQUE(campaign_key, rank)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_promo_contest_prize_awards_campaign
+      ON promo_contest_prize_awards(campaign_key, rank);
 
     CREATE TABLE IF NOT EXISTS promo_point_purchases (
       id BIGSERIAL PRIMARY KEY,

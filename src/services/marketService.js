@@ -6078,6 +6078,118 @@ export async function addUsdtBonusToUser(input) {
   };
 }
 
+export async function creditPromoContestPrizes(input) {
+  const campaignKey = String(input?.campaign_key || input?.campaignKey || "").trim();
+  if (!/^[a-zA-Z0-9:_-]{6,160}$/.test(campaignKey)) {
+    throw new Error("invalid_promo_campaign_key");
+  }
+  if (!Array.isArray(input?.awards) || input.awards.length < 1 || input.awards.length > 100) {
+    throw new Error("invalid_promo_prize_awards");
+  }
+
+  const seenUsers = new Set();
+  const seenRanks = new Set();
+  const awards = input.awards.map((award) => {
+    const telegramId = String(award?.telegram_id || "").trim();
+    const rank = Number(award?.rank);
+    const points = Number(award?.points);
+    const amount = roundMoney(Number(award?.amount));
+    if (!/^\d{1,24}$/.test(telegramId)) throw new Error("invalid_promo_prize_telegram_id");
+    if (!Number.isInteger(rank) || rank < 1 || rank > 100) throw new Error("invalid_promo_prize_rank");
+    if (!Number.isInteger(points) || points < 0) throw new Error("invalid_promo_prize_points");
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("invalid_promo_prize_amount");
+    if (seenUsers.has(telegramId) || seenRanks.has(rank)) throw new Error("duplicate_promo_prize_award");
+    seenUsers.add(telegramId);
+    seenRanks.add(rank);
+    return {
+      telegramId,
+      username: award?.username ? String(award.username).replace(/^@/, "").slice(0, 64) : null,
+      firstName: award?.first_name ? String(award.first_name).slice(0, 128) : null,
+      rank,
+      points,
+      amount,
+    };
+  });
+
+  const results = [];
+  for (const award of awards) {
+    const user = await upsertUser({
+      telegram_id: award.telegramId,
+      username: award.username,
+      first_name: award.firstName,
+    });
+    const credited = await withTransaction(async (client) => {
+      const inserted = await client.query(
+        `
+          INSERT INTO promo_contest_prize_awards (
+            campaign_key, user_id, telegram_id, rank, points, amount
+          )
+          VALUES ($1, $2::bigint, $3, $4::integer, $5::integer, $6::numeric)
+          ON CONFLICT (campaign_key, user_id) DO NOTHING
+          RETURNING id, rank, points, amount, credited_at
+        `,
+        [campaignKey, user.id, award.telegramId, award.rank, award.points, award.amount],
+      );
+      if (inserted.rows[0]) {
+        await client.query(
+          `
+            UPDATE usdt_bonus_balances
+            SET balance = balance + $2::numeric,
+                updated_at = now()
+            WHERE user_id = $1::bigint
+          `,
+          [user.id, award.amount],
+        );
+        await client.query(
+          `
+            INSERT INTO usdt_bonus_ledger (user_id, amount, reason, source)
+            VALUES ($1::bigint, $2::numeric, 'promo_contest_prize', $3)
+          `,
+          [user.id, award.amount, `promo_contest:${campaignKey}:rank:${award.rank}`],
+        );
+        return { row: inserted.rows[0], already_credited: false };
+      }
+
+      const existing = await client.query(
+        `
+          SELECT id, rank, points, amount, credited_at
+          FROM promo_contest_prize_awards
+          WHERE campaign_key = $1 AND user_id = $2::bigint
+          LIMIT 1
+        `,
+        [campaignKey, user.id],
+      );
+      const row = existing.rows[0];
+      if (
+        !row
+        || Number(row.rank) !== award.rank
+        || Number(row.points) !== award.points
+        || Math.abs(toNumber(row.amount) - award.amount) > 0.000001
+      ) {
+        throw new Error("promo_prize_idempotency_conflict");
+      }
+      return { row, already_credited: true };
+    });
+    results.push({
+      telegram_id: award.telegramId,
+      rank: award.rank,
+      points: award.points,
+      amount: award.amount,
+      already_credited: credited.already_credited,
+      credited_at: credited.row.credited_at,
+    });
+  }
+
+  return {
+    ok: true,
+    campaign_key: campaignKey,
+    awards: results,
+    credited_count: results.filter((award) => !award.already_credited).length,
+    already_credited_count: results.filter((award) => award.already_credited).length,
+    total_amount: roundMoney(results.reduce((sum, award) => sum + award.amount, 0)),
+  };
+}
+
 export async function addUsdtCashToUser(input) {
   const amount = ensurePositiveAmount(input.amount);
   const reason = String(input.reason || "admin_usdt_cash_adjustment").slice(0, 120);

@@ -137,6 +137,35 @@ async function getContestStartedAt(client = { query }) {
   return result.rows[0]?.started_at ?? new Date().toISOString();
 }
 
+export async function startPromoContestSeason(input) {
+  const seasonKey = String(input?.season_key || input?.seasonKey || "").trim();
+  if (!/^[a-zA-Z0-9:_-]{6,160}$/.test(seasonKey)) {
+    throw new Error("invalid_promo_season_key");
+  }
+  const startedAt = new Date(input?.started_at || input?.startedAt || Date.now());
+  if (!Number.isFinite(startedAt.getTime())) {
+    throw new Error("invalid_promo_season_start");
+  }
+
+  return withTransaction(async (client) => {
+    const result = await client.query(
+      `
+        UPDATE promo_contest_config
+        SET started_at = $1::timestamptz,
+            season_key = $2
+        WHERE singleton = TRUE
+        RETURNING started_at, season_key
+      `,
+      [startedAt.toISOString(), seasonKey],
+    );
+    return {
+      ok: true,
+      started_at: result.rows[0]?.started_at ?? startedAt.toISOString(),
+      season_key: result.rows[0]?.season_key ?? seasonKey,
+    };
+  });
+}
+
 async function loadPromoRows(client, whereSql, params) {
   return client.query(
     `
