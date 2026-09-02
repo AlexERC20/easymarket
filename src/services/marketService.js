@@ -3686,12 +3686,10 @@ export async function distributeDueClanRewardFunds() {
   });
 }
 
-// Marks "real" engagement (a bet, a claimed task) as opposed to just opening
-// the app - users.updated_at already moves on a bare app open via
-// upsertUser, so the 24h inactivity-expiry sweep needs its own clock that
-// only advances on something that shows the account is actually being used.
-// Accepts an optional client so callers already inside a transaction don't
-// pay for a second round trip / connection.
+// Starts a fresh inactivity cycle after an explicit user action. The Mini App
+// entry route calls this directly; background bridge upserts do not. Accepts
+// an optional client so callers already inside a transaction don't pay for a
+// second round trip / connection.
 export async function touchUserActivity(userId, client = null) {
   const runner = client ?? { query };
   await runner.query(

@@ -93,6 +93,7 @@ import {
   syncSportsMarkets,
   syncFireBalanceByUsername,
   syncFireBalance,
+  touchUserActivity,
   updateProjectEconomySettings,
   updateMarketMakerBookSettings,
   updateMarketMakerSettings,
@@ -870,6 +871,9 @@ app.post("/api/me/upsert", async (req, res) => {
       first_name: req.body?.first_name,
       referred_by_telegram_id: req.body?.referred_by_telegram_id,
     });
+    // This route is called by the Mini App on entry. Bridge upserts use their
+    // own routes, so only a real app visit starts a fresh inactivity cycle.
+    await touchUserActivity(user.id);
     const campaignCode = String(req.body?.campaign_code || "").trim();
     const promoReward = campaignCode
       ? await claimPromoCampaignReward({
