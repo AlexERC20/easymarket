@@ -26,6 +26,7 @@ import {
   calculateNextAmmAllocation,
 } from "./ammMath.js";
 import { getPromoContestStateForUser } from "./promoContestService.js";
+import { getInactivityBurnTransition } from "./inactivityMath.js";
 
 const MARKET_SYMBOL = "BTCUSDT";
 const WORLD_CUP_EVENT_SLUG = "world-cup-winner";
@@ -3763,6 +3764,7 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
       SELECT u.id
       FROM users u
       WHERE u.last_meaningful_activity_at < now() - interval '24 hours'
+        AND u.inactivity_burn_stage < 3
         AND (
           EXISTS (SELECT 1 FROM fire_balances fb WHERE fb.user_id = u.id AND fb.balance > 0)
           OR EXISTS (SELECT 1 FROM usdt_bonus_balances bb WHERE bb.user_id = u.id AND bb.balance > 0)
@@ -3800,13 +3802,14 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
       if (!user) {
         return null;
       }
-      const currentStage = Number(user.inactivity_burn_stage || 0);
-      const daysInactive = Number(user.days_inactive);
-      const isFinal = daysInactive >= 3;
-      const targetStage = isFinal ? 3 : Math.min(daysInactive, 2);
-      if (targetStage <= currentStage) {
+      const transition = getInactivityBurnTransition(
+        user.inactivity_burn_stage,
+        user.days_inactive,
+      );
+      if (!transition) {
         return null;
       }
+      const { targetStage, isFinal } = transition;
 
       const starResult = await client.query(
         "SELECT balance FROM fire_balances WHERE user_id = $1 FOR UPDATE",
@@ -3885,7 +3888,7 @@ export async function expireInactiveBalances({ limit = 500 } = {}) {
 
       await client.query(
         "UPDATE users SET inactivity_burn_stage = $2 WHERE id = $1",
-        [userId, isFinal ? 0 : targetStage],
+        [userId, targetStage],
       );
 
       if (starBurn <= 0 && bonusBurn <= 0 && clanPointsBurn <= 0) {

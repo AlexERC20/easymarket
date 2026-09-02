@@ -140,6 +140,21 @@ export async function runMigrations() {
       ON inactivity_burn_notices(user_id, created_at)
       WHERE shown_at IS NULL;
 
+    -- A final inactivity wipe used to reset the stage back to zero. That made
+    -- any later bonus credit eligible for another wipe without the user ever
+    -- returning. Preserve the terminal stage until touchUserActivity starts a
+    -- genuinely new activity cycle.
+    UPDATE users AS inactive_user
+    SET inactivity_burn_stage = 3
+    WHERE inactivity_burn_stage < 3
+      AND EXISTS (
+        SELECT 1
+        FROM inactivity_burn_notices notice
+        WHERE notice.user_id = inactive_user.id
+          AND notice.is_final = TRUE
+          AND notice.created_at >= inactive_user.last_meaningful_activity_at
+      );
+
     CREATE TABLE IF NOT EXISTS fire_balances (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       balance NUMERIC(20, 8) NOT NULL DEFAULT 0,
